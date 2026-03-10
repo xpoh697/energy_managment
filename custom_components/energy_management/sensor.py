@@ -784,7 +784,11 @@ class EnergyProfileManager:
             "forecast_hist_coefficient": hist_coeff,
             "forecast_today_coefficient": today_coeff,
             "batt_energy_val": batt_energy_val,
-            "expected_consumption": expected_consumption
+            "expected_consumption": expected_consumption,
+            "debug_actual_today": actual_today,
+            "debug_expected_today_total": expected_today_total,
+            "debug_expected_today_so_far": expected_today_so_far,
+            "debug_fraction_so_far": fraction_so_far
         }
         
     def get_market_strategy(self, mode="buy"):
@@ -2056,7 +2060,11 @@ class EnergyBudgetSensor(SensorEntity):
             "forecast_hist_coefficient": round(res.get("forecast_hist_coefficient", 1.0), 3),
             "forecast_today_coefficient": round(res.get("forecast_today_coefficient", 1.0), 3),
             "battery_energy_kwh": round(res["batt_energy_val"], 3),
-            "expected_consumption_until_0800_kwh": round(res["expected_consumption"], 3)
+            "expected_consumption_until_0800_kwh": round(res["expected_consumption"], 3),
+            "debug_actual_today": round(res.get("debug_actual_today", 0), 3),
+            "debug_expected_today_total": round(res.get("debug_expected_today_total", 0), 3),
+            "debug_expected_today_so_far": round(res.get("debug_expected_today_so_far", 0), 3),
+            "debug_fraction_so_far": round(res.get("debug_fraction_so_far", 0), 3)
         }
 
 class MarketStrategySensor(SensorEntity):
