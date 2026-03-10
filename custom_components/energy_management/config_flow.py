@@ -52,14 +52,10 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._user_input.update(user_input)
             deduct_sensors = user_input.get(CONF_DEDUCT_SENSORS, [])
             
-            # If user selected controllable loads, ask for their priorities and capacities
             if deduct_sensors:
                 return await self.async_step_deduct_settings()
 
-            # Otherwise, just finish
-            return self.async_create_entry(
-                title=self._user_input.get("name", "Energy Management"), data=self._user_input
-            )
+            return await self.async_step_investment_settings()
 
         schema = vol.Schema(
             {
@@ -124,9 +120,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if idx >= len(deduct_sensors):
             # Clean up temporary index
             self._user_input.pop("deduct_settings_index", None)
-            return self.async_create_entry(
-                title=self._user_input.get("name", "Energy Management"), data=self._user_input
-            )
+            return await self.async_step_investment_settings()
 
         current_sensor = deduct_sensors[idx]
 
@@ -158,6 +152,26 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(schema_dict),
             errors=errors,
             description_placeholders={"sensor_name": sensor_display}
+        )
+
+    async def async_step_investment_settings(self, user_input=None):
+        """Handle investment and ROI settings."""
+        if user_input is not None:
+            self._user_input.update(user_input)
+            return self.async_create_entry(
+                title=self._user_input.get("name", "Energy Management"), data=self._user_input
+            )
+
+        schema = vol.Schema({
+            vol.Optional(CONF_TOTAL_SYSTEM_COST, default=self._user_input.get(CONF_TOTAL_SYSTEM_COST, 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+            vol.Optional(CONF_BATTERY_COST, default=self._user_input.get(CONF_BATTERY_COST, 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+            vol.Optional(CONF_BATTERY_RATED_CYCLES, default=self._user_input.get(CONF_BATTERY_RATED_CYCLES, 6000)): vol.All(vol.Coerce(int), vol.Range(min=1)),
+            vol.Optional(CONF_ANOMALY_THRESHOLD, default=self._user_input.get(CONF_ANOMALY_THRESHOLD, 2.0)): vol.All(vol.Coerce(float), vol.Range(min=1.1, max=10.0)),
+        })
+
+        return self.async_show_form(
+            step_id="investment_settings",
+            data_schema=schema,
         )
 
 class EnergyManagementOptionsFlow(config_entries.OptionsFlow):

@@ -32,6 +32,16 @@
           "required_kw": "Мощность устройства (кВт)",
           "only_solar_or_negative_price": "Включать ТОЛЬКО от солнца или если цена электричества = 0 или меньше"
         }
+      },
+      "investment_settings": {
+        "title": "Инвестиции и Системные Настройки",
+        "description": "Настройте стоимость системы для расчета окупаемости и пороги срабатывания аномалий.",
+        "data": {
+          "total_system_cost": "Полная стоимость системы",
+          "battery_cost": "Стоимость АКБ",
+          "battery_rated_cycles": "Заявленное кол-во циклов АКБ",
+          "anomaly_threshold": "Порог срабатывания аномалии (множитель)"
+        }
       }
     },
     "error": {
@@ -72,6 +82,64 @@
           "required_kwh": "2. Дневная норма энергии (кВт*ч)",
           "required_kw": "3. Пиковая Мощность (кВт)",
           "only_solar_or_negative_price": "4. ТОЛЬКО от солнца (устройство резервирует 60% своей Мощности от свободной генерации по приоритету) или при цене <= 0"
+        }
+      },
+      "investment_settings": {
+        "title": "Инвестиции и Системные Настройки",
+        "description": "Обновите стоимость системы и пороги аномалий.",
+        "data": {
+          "total_system_cost": "Полная стоимость системы",
+          "battery_cost": "Стоимость АКБ",
+          "battery_rated_cycles": "Заявленное кол-во циклов АКБ",
+          "anomaly_threshold": "Порог срабатывания аномалии (множитель)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_degradation": {
+        "state_attributes": {
+          "wear_cost_per_kwh_throughput": { "name": "Стоимость износа за 1 кВт·ч оборота" },
+          "arbitrage_profit_threshold": { "name": "Порог выгоды арбитража" },
+          "battery_investment": { "name": "Инвестиции в АКБ" },
+          "rated_cycles": { "name": "Заявленные циклы" },
+          "note": {
+            "name": "Примечание",
+            "state": {
+              "arbitrage_note": "Арбитраж выгоден, ТОЛЬКО если разница цен покупки и продажи выше порога."
+            }
+          }
+        }
+      },
+      "payback": {
+        "state_attributes": {
+          "total_investment": { "name": "Суммарные инвестиции" },
+          "cumulative_savings": { "name": "Накопленная экономия" },
+          "remaining_amount": { "name": "Оставшаяся сумма" },
+          "average_daily_saving": { "name": "Среднесуточная экономия" },
+          "estimated_payback_days": { "name": "Осталось дней до окупаемости" },
+          "estimated_payback_date": {
+            "name": "Дата полной окупаемости",
+            "state": {
+              "never": "Никогда"
+            }
+          }
+        }
+      },
+      "anomaly_detection": {
+        "state_attributes": {
+          "status": {
+            "name": "Статус",
+            "state": {
+              "normal": "Норма",
+              "anomaly_high_consumption": "Аномалия: Высокое потребление"
+            }
+          },
+          "expected_kw": { "name": "Ожидаемая нагрузка (кВт)" },
+          "actual_kw": { "name": "Фактическая нагрузка (кВт)" },
+          "threshold_multiplier": { "name": "Множитель порога" },
+          "anomaly_detected": { "name": "Аномалия обнаружена" }
         }
       }
     }

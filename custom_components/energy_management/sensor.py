@@ -621,13 +621,17 @@ class EnergyProfileManager:
         """Cost of battery wear per kWh (Cycle Cost)."""
         batt_cost = self.get_setting(CONF_BATTERY_COST, 0.0)
         cycles = self.get_setting(CONF_BATTERY_RATED_CYCLES, 6000)
-        capacity = self.get_setting(CONF_BATTERY_CAPACITY, 10.0) # kWh
         
-        if cycles <= 0 or capacity <= 0 or batt_cost <= 0:
+        # Get capacity from sensor if available, otherwise fallback to 10kWh
+        _, cap, _ = self.get_battery_state()
+        if cap <= 0:
+            cap = 10.0
+        
+        if cycles <= 0 or batt_cost <= 0:
             return 0.0
             
-        # Cost per 1 full cycle discharged
-        return batt_cost / (cycles * capacity)
+        # Cost per 1 kWh of throughput (Charge + Discharge wear)
+        return batt_cost / (cycles * cap)
 
     def get_expected_consumption(self):
         """Helper to get the expected consumption value for the current hour."""
@@ -831,13 +835,26 @@ class EnergyProfileManager:
         return res
 
     def get_setting(self, key, default=None):
-        val = self.settings.get(key, default)
+        """Get setting from internal storage or config entry."""
+        # 1. Try internal storage (persisted across reinstalls/reboots)
+        val = self.settings.get(key)
+        
+        # 2. Try entry options (from Options Flow)
+        if val is None:
+            val = self.entry.options.get(key)
+            
+        # 3. Try entry data (from initial config)
+        if val is None:
+            val = self.entry.data.get(key)
+            
         if val is None:
             return default
+            
         if isinstance(default, float):
             try:
+                # Handle both numeric and string values from UI
                 return float(str(val).replace(',', '.'))
-            except ValueError:
+            except (ValueError, TypeError):
                 return default
         return val
 
@@ -2601,6 +2618,7 @@ class AnomalyDetectionSensor(SensorEntity):
     def __init__(self, manager, name):
         self.manager = manager
         self._attr_name = name
+        self._attr_translation_key = "anomaly_detection"
         self._attr_unique_id = f"{manager.entry.unique_id}_anomaly_detector"
         self._attr_icon = "mdi:alert-decagram-outline"
         self._attr_native_unit_of_measurement = "score"
@@ -2636,9 +2654,9 @@ class AnomalyDetectionSensor(SensorEntity):
         actual_kw = self.manager.power_history[-1]["load_kw"] if self.manager.power_history else 0.0
         threshold = self.manager.get_setting(CONF_ANOMALY_THRESHOLD, 2.0)
         
-        status = "Норма"
+        status = "normal"
         if actual_kw / expected > threshold if expected > 0.05 else False:
-            status = "Аномалия: Высокое потребление"
+            status = "anomaly_high_consumption"
             self._attr_icon = "mdi:alert-decagram"
         else:
             self._attr_icon = "mdi:alert-decagram-outline"
@@ -2656,6 +2674,7 @@ class PaybackSensor(SensorEntity):
     def __init__(self, manager, name):
         self.manager = manager
         self._attr_name = name
+        self._attr_translation_key = "payback"
         self._attr_unique_id = f"{manager.entry.entry_id}_roi_payback"
         self._attr_icon = "mdi:finance"
         self._attr_native_unit_of_measurement = "%"
@@ -2693,26 +2712,28 @@ class PaybackSensor(SensorEntity):
         savings_store = self.manager.data.get("savings", {})
         now = dt_util.now()
         savings_30d = 0.0
+        days_found = 0
         for d, v in savings_store.items():
             try:
                 dt_d = dt_util.parse_datetime(d + "T12:00:00Z") # Midday to avoid edge cases
                 if dt_d and (now - dt_d).days <= 30:
                     savings_30d += v.get("total", 0.0)
+                    days_found += 1
             except Exception:
                 continue
                 
-        avg_daily = savings_30d / 30.0 if savings_30d > 0 else 0.0
+        avg_daily = savings_30d / days_found if days_found > 0 else 0.0
         
         days_rem = int(remaining / avg_daily) if avg_daily > 0 else 9999
-        payback_date = (dt_util.now() + timedelta(days=days_rem)).strftime("%Y-%m-%d") if avg_daily > 0 else "Никогда"
+        payback_date = (dt_util.now() + timedelta(days=days_rem)).strftime("%Y-%m-%d") if avg_daily > 0 else "never"
 
         return {
             "total_investment": f"{total_cost} {self._currency}",
             "cumulative_savings": f"{round(total_saved, 2)} {self._currency}",
             "remaining_amount": f"{round(remaining, 2)} {self._currency}",
             "average_daily_saving": f"{round(avg_daily, 2)} {self._currency}",
-            "estimated_payback_days": days_rem,
-            "estimated_payback_date": payback_date
+            "estimated_payback_days": days_rem if total_cost > 0 else "N/A",
+            "estimated_payback_date": payback_date if total_cost > 0 else "N/A"
         }
 
 class BatteryDegradationSensor(SensorEntity):
@@ -2720,6 +2741,7 @@ class BatteryDegradationSensor(SensorEntity):
     def __init__(self, manager, name):
         self.manager = manager
         self._attr_name = name
+        self._attr_translation_key = "battery_degradation"
         self._attr_unique_id = f"{manager.entry.entry_id}_battery_degradation_cost"
         self._attr_icon = "mdi:battery-alert"
         self._attr_device_info = DeviceInfo(
@@ -2752,5 +2774,5 @@ class BatteryDegradationSensor(SensorEntity):
             "arbitrage_profit_threshold": round(cost_per_kwh * 2, 4),
             "battery_investment": batt_cost,
             "rated_cycles": cycles,
-            "note": "Арбитраж выгоден, только если разница цен покупки и продажи выше порога."
+            "note": "arbitrage_note"
         }

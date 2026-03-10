@@ -30,6 +30,16 @@
           "required_kwh": "Required Energy per day (kWh)",
           "required_kw": "Device Power (kW)"
         }
+      },
+      "investment_settings": {
+        "title": "Investment & System Settings",
+        "description": "Configure system costs for ROI tracking and anomaly detection thresholds.",
+        "data": {
+          "total_system_cost": "Total System Cost",
+          "battery_cost": "Total Battery Cost",
+          "battery_rated_cycles": "Battery Rated Cycles",
+          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)"
+        }
       }
     },
     "error": {
@@ -69,6 +79,64 @@
           "required_kwh": "2. Required Energy per day (kWh)",
           "required_kw": "3. Peak Device Power (kW)",
           "only_solar_or_negative_price": "4. ONLY from solar (reserves 60% of device Power from free gen by priority) or price <= 0"
+        }
+      },
+      "investment_settings": {
+        "title": "Investment & System Settings",
+        "description": "Update system costs and anomaly thresholds.",
+        "data": {
+          "total_system_cost": "Total System Cost",
+          "battery_cost": "Total Battery Cost",
+          "battery_rated_cycles": "Battery Rated Cycles",
+          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_degradation": {
+        "state_attributes": {
+          "wear_cost_per_kwh_throughput": { "name": "Wear cost per kWh (throughput)" },
+          "arbitrage_profit_threshold": { "name": "Arbitrage profit threshold" },
+          "battery_investment": { "name": "Battery investment" },
+          "rated_cycles": { "name": "Rated cycles" },
+          "note": {
+            "name": "Note",
+            "state": {
+              "arbitrage_note": "Arbitrage is profitable ONLY if the buy/sell price difference exceeds the threshold."
+            }
+          }
+        }
+      },
+      "payback": {
+        "state_attributes": {
+          "total_investment": { "name": "Total investment" },
+          "cumulative_savings": { "name": "Cumulative savings" },
+          "remaining_amount": { "name": "Remaining amount" },
+          "average_daily_saving": { "name": "Average daily saving" },
+          "estimated_payback_days": { "name": "Estimated payback days" },
+          "estimated_payback_date": {
+            "name": "Estimated payback date",
+            "state": {
+              "never": "Never"
+            }
+          }
+        }
+      },
+      "anomaly_detection": {
+        "state_attributes": {
+          "status": {
+            "name": "Status",
+            "state": {
+              "normal": "Normal",
+              "anomaly_high_consumption": "Anomaly: High Consumption"
+            }
+          },
+          "expected_kw": { "name": "Expected load (kW)" },
+          "actual_kw": { "name": "Actual load (kW)" },
+          "threshold_multiplier": { "name": "Threshold multiplier" },
+          "anomaly_detected": { "name": "Anomaly detected" }
         }
       }
     }
