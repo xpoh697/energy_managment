@@ -1584,14 +1584,19 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             # If we are charging, apply CC/CV boundaries
             elif net_solar_kw > 0.0:
                 max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-                if simulated_soc < 80.0:
-                    accepted_power_kw = max_batt_power
-                elif simulated_soc < 90.0:
-                    accepted_power_kw = max_batt_power * 0.5
-                elif simulated_soc < 95.0:
-                    accepted_power_kw = max_batt_power * 0.25
+                if simulated_soc <= 85.0:
+                    ratio = 1.0
+                elif simulated_soc <= 92.0:
+                    ratio = 1.0 - ((simulated_soc - 85.0) / 7.0) * 0.3
+                elif simulated_soc <= 97.0:
+                    ratio = 0.7 - ((simulated_soc - 92.0) / 5.0) * 0.5
+                elif simulated_soc <= 98.0:
+                    ratio = 0.2 - ((simulated_soc - 97.0) / 1.0) * 0.1
                 else:
-                    accepted_power_kw = max_batt_power * 0.1
+                    ratio = 0.1 - ((simulated_soc - 98.0) / 2.0) * 0.08
+                    
+                ratio = max(0.02, min(1.0, ratio))
+                accepted_power_kw = max_batt_power * ratio
                     
                 actual_charge_kw = min(net_solar_kw, accepted_power_kw)
                 soc_gained = (actual_charge_kw / batt_cap) * 100.0
