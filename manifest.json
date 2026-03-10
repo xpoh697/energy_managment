@@ -1,0 +1,12 @@
+{
+  "domain": "energy_management",
+  "name": "Energy Management",
+  "codeowners": ["@antigravity"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/...",
+  "integration_type": "device",
+  "iot_class": "calculated",
+  "requirements": [],
+  "version": "1.0.0"
+}

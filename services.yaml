@@ -1,0 +1,28 @@
+reset_data:
+  name: Сбросить статистику Energy Management
+  description: Полностью очищает накопленную историю профиля потребления и генерации, обнуляя алгоритмы прогнозирования.
+  fields: {}
+
+export_data:
+  name: Экспорт профиля Energy Management
+  description: Выгружает все текущие исторические данные и настройки энергопрофиля в отдельный JSON файл. Вы можете использовать этот файл для бэкапа или переноса профиля.
+  fields:
+    file_path:
+      name: Путь к файлу
+      description: Абсолютный путь, куда нужно сохранить файл (например, /config/energy_management_backup.json). По умолчанию используется папка /config/.
+      required: false
+      example: "/config/energy_management_backup.json"
+      selector:
+        text:
+
+import_data:
+  name: Импорт профиля Energy Management
+  description: Загружает историю профиля из ранее сохраненного JSON файла бэкапа. Система мгновенно переключится на загруженные исторические данные. Внимание - это перезапишет ваши текущие накопленные данные за сегодня!
+  fields:
+    file_path:
+      name: Путь к файлу
+      description: Абсолютный путь к файлу бэкапа для загрузки. По умолчанию ищет в папке /config/.
+      required: false
+      example: "/config/energy_management_backup.json"
+      selector:
+        text:

@@ -1,0 +1,75 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Energy Management Settings",
+        "description": "Select the sensors to form your energy management profile.",
+        "data": {
+          "name": "Name",
+          "consumption_sensors": "Total Consumption Sensors",
+          "generation_sensors": "Solar Generation Sensors",
+          "deduct_sensors": "Sensors to Deduct (Controllable Load)",
+          "power_load_sensors": "Instant Power Load Sensors (W or kW)",
+          "power_gen_sensors": "Instant Power Gen Sensors (W or kW)",
+          "forecast_today_remaining": "Forecast Remaining Today",
+          "forecast_tomorrow": "Forecast Tomorrow",
+          "battery_soc": "Battery SOC (%)",
+          "battery_capacity": "Battery Capacity",
+          "price_buy": "Tariff: Grid Buying Price",
+          "price_sell": "Tariff: Grid Selling Price",
+          "custom_period": "Custom Calculation Period (Days)"
+        }
+      },
+      "deduct_settings": {
+        "title": "Settings for: {sensor_name}",
+        "description": "Set parameters for this manageable load device (sensor).\n\n**Hint:** Set Required Energy to '0' if the device absorbs ANY available surplus energy without a fixed daily quota.\n**Power (kW)** is used to strictly limit the device from running if current solar generation is less than consumption (preventing battery drain. 0 = ignore).",
+        "data": {
+          "name": "Friendly Name (for Permission Sensor)",
+          "priority": "Priority (1 = highest)",
+          "required_kwh": "Required Energy per day (kWh)",
+          "required_kw": "Device Power (kW)",
+          "only_solar_or_negative_price": "ONLY allow when solar is generating or price is <= 0"
+        }
+      }
+    },
+    "error": {
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Energy Management Settings",
+        "description": "Select the sensors to form your energy management profile. If you add new controllable loads, you will be prompted to configure them on the next step.",
+        "data": {
+          "consumption_sensors": "Total Consumption Sensors",
+          "generation_sensors": "Solar Generation Sensors",
+          "deduct_sensors": "Sensors to Deduct (Controllable Load)",
+          "power_load_sensors": "Instant Power Load Sensors (W or kW)",
+          "power_gen_sensors": "Instant Power Gen Sensors (W or kW)",
+          "forecast_today_remaining": "Forecast Remaining Today",
+          "forecast_tomorrow": "Forecast Tomorrow",
+          "battery_soc": "Battery SOC (%)",
+          "battery_capacity": "Battery Capacity",
+          "price_buy": "Tariff: Grid Buying Price",
+          "price_sell": "Tariff: Grid Selling Price",
+          "custom_period": "Custom Calculation Period (Days)"
+        }
+      },
+      "deduct_settings": {
+        "title": "Settings for: {sensor_name}",
+        "description": "Set parameters for this manageable load device (sensor).\n\n**Hint 1:** Set Required Energy to '0' if the device absorbs ANY available surplus energy without a fixed daily quota.\n**Hint 2:** Power (kW) is used to strictly limit the device from running if current solar generation is less than consumption (preventing battery drain. 0 = ignore).",
+        "data": {
+          "name": "Friendly Name (for Permission Sensor)",
+          "priority": "1. Priority (lower = higher priority)",
+          "required_kwh": "2. Required Energy per day (kWh)",
+          "required_kw": "3. Peak Device Power (kW)",
+          "only_solar_or_negative_price": "4. ONLY from solar (reserves 60% of device Power from free gen by priority) or price <= 0"
+        }
+      }
+    }
+  }
+}
