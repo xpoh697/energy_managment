@@ -9,6 +9,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.core import callback
 from homeassistant.const import UnitOfEnergy
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -308,7 +309,7 @@ class EnergyProfileManager:
                 self.hass, self._poll_instant_power, timedelta(minutes=1)
             )
             # Perform initial poll
-            self._poll_instant_power(datetime.now())
+            self._poll_instant_power(dt_util.utcnow())
 
     @callback
     def _poll_instant_power(self, now):
@@ -619,7 +620,7 @@ class EnergyProfileManager:
         if not res:
             try:
                 val = float(state_obj.state)
-                now = datetime.now()
+                now = dt_util.now()
                 d_str = now.strftime("%Y-%m-%d")
                 h_str = str(now.hour)
                 res = {d_str: {h_str: val}}
@@ -808,7 +809,7 @@ class EnergyProfileManager:
 
     def get_todays_profile(self, profile_type):
         """Returns the actual hourly profile for the current day up to the current hour."""
-        now = datetime.now()
+        now = dt_util.now()
         cur_hour = now.hour
         res = {}
         for h in range(24):
@@ -910,7 +911,7 @@ class EnergyProfileManager:
         return 1.0
 
     def get_budget_and_permissions(self, days_for_profile=14, skip_strategy_check=False):
-        now = datetime.now()
+        now = dt_util.now()
         cur_hour = now.hour
         
         # 1. Get Forecast Remaining
@@ -1144,7 +1145,7 @@ class EnergyProfileManager:
             "multi_cycle": "Не предвидится"
         }
         
-        now = datetime.now()
+        now = dt_util.now()
         cur_hour = now.hour
         today_str = now.strftime("%Y-%m-%d")
         tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -1683,7 +1684,7 @@ class BatteryDepletionTimeSensor(SensorEntity):
 
     @property
     def native_value(self):
-        now = datetime.now()
+        now = dt_util.now()
         
         min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
         
@@ -1805,7 +1806,7 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
 
     @property
     def native_value(self):
-        now = datetime.now()
+        now = dt_util.now()
         
         batt_soc, batt_cap, _ = self.manager.get_battery_state(soc_default=100.0)
                 
@@ -1924,7 +1925,7 @@ class InverterOperationModeSensor(SensorEntity):
     def _calculate_mode(self):
         mode = "sale_pv" # default
         
-        now = datetime.now()
+        now = dt_util.now()
         cur_hour = str(now.hour)
         today_str = now.strftime("%Y-%m-%d")
         
@@ -2338,7 +2339,7 @@ class MarketStrategySensor(SensorEntity):
     def extra_state_attributes(self):
         res = self.manager.get_market_strategy(self.mode)
         
-        now = datetime.now()
+        now = dt_util.now()
         cur_hour = now.hour
         
         def safe_round(val):
@@ -2496,7 +2497,7 @@ class SavingsSensor(SensorEntity):
         self.manager.register_listener(self.async_write_ha_state)
 
     def _get_summary(self):
-        now = datetime.now()
+        now = dt_util.now()
         savings = self.manager.data.get("savings", {})
         cat = self.category
 
