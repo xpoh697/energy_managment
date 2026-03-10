@@ -2159,7 +2159,8 @@ class EnergyBudgetSensor(SensorEntity):
             "debug_expected_today_total": round(res.get("debug_expected_today_total", 0), 3),
             "debug_expected_today_so_far": round(res.get("debug_expected_today_so_far", 0), 3),
             "debug_fraction_so_far": round(res.get("debug_fraction_so_far", 0), 3),
-            "occupancy_coefficient": round(res.get("occupancy_coefficient", 1.0), 3)
+            "occupancy_coefficient": round(res.get("occupancy_coefficient", 1.0), 3),
+            "efficiency_coefficient": round(res.get("efficiency_coefficient", 1.0), 3)
         }
 
 class MarketStrategySensor(SensorEntity):
