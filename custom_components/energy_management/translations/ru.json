@@ -18,7 +18,8 @@
           "price_buy": "Тариф: Покупка из сети (Биржа, с атрибутами price_today)",
           "price_sell": "Тариф: Продажа в сеть (Биржа, с атрибутами price_today)",
           "custom_period": "Настраиваемый период расчета (дней)",
-          "presence_sensors": "Датчики присутствия (person.* / binary_sensor.* / zone.home)"
+          "presence_sensors": "Датчики присутствия (person.* / binary_sensor.* / zone.home)",
+          "inverter_losses_sensor": "Сенсор потерь инвертора (дневной счётчик кВт·ч, необязательно)"
         }
       },
       "deduct_settings": {
@@ -58,7 +59,8 @@
           "price_buy": "Тариф: Покупка из сети",
           "price_sell": "Тариф: Продажа в сеть",
           "custom_period": "Настраиваемый период расчета (дней)",
-          "presence_sensors": "Датчики присутствия (person.* / binary_sensor.* / zone.home)"
+          "presence_sensors": "Датчики присутствия (person.* / binary_sensor.* / zone.home)",
+          "inverter_losses_sensor": "Сенсор потерь инвертора (дневной счётчик кВт·ч, необязательно)"
         }
       },
       "deduct_settings": {

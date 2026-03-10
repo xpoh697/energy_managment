@@ -39,6 +39,7 @@ from .const import (
     CONF_POWER_GEN_SENSORS,
     CONF_SALE_PV_NO_BAT_MAX_HOUR,
     CONF_PRESENCE_SENSORS,
+    CONF_INVERTER_LOSSES_SENSOR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -173,6 +174,13 @@ class EnergyProfileManager:
         self._unsub_state = None
         self._unsub_time = None
         self._unsub_power_poll = None
+        
+        # Inverter losses sensor (daily kWh counter that resets at midnight)
+        losses_raw = config_data.get(CONF_INVERTER_LOSSES_SENSOR)
+        self.inverter_losses_sensor = losses_raw if losses_raw else None
+        self.current_losses = 0.0  # kWh accumulated this hour
+        if self.inverter_losses_sensor:
+            self.all_sensors = self.all_sensors | {self.inverter_losses_sensor}
         
         # Track historical power samples for 5-10 minute average smoothing
         self.power_history = []
@@ -364,6 +372,11 @@ class EnergyProfileManager:
             if entity_id not in self.daily_deduct_consumption:
                 self.daily_deduct_consumption[entity_id] = 0.0
             self.daily_deduct_consumption[entity_id] += delta
+        if self.inverter_losses_sensor and entity_id == self.inverter_losses_sensor:
+            # This sensor is a daily counter — it resets at midnight.
+            # delta may be negative at midnight reset, which we skip.
+            if delta > 0:
+                self.current_losses += delta
             
         if self.current_consumption_base < 0:
             self.current_consumption_base = 0.0
@@ -386,6 +399,13 @@ class EnergyProfileManager:
         self.data["consumption_total"][str(past_hour)].append({"v": self.current_consumption_total, "wd": today_wd, "occ": occ_count})
         self.data["generation"][str(past_hour)].append({"v": self.current_generation, "wd": today_wd})
         
+        # Store losses alongside generation for efficiency calculation
+        if "losses" not in self.data:
+            self.data["losses"] = {str(i): [] for i in range(24)}
+        self.data["losses"][str(past_hour)].append({"v": self.current_losses, "gen": self.current_generation})
+        if len(self.data["losses"][str(past_hour)]) > self.max_days:
+            self.data["losses"][str(past_hour)] = self.data["losses"][str(past_hour)][-self.max_days:]
+        
         # Trim history arrays to ensure we don't leak memory and only keep required `max_days`
         for h in range(24):
             sh = str(h)
@@ -406,6 +426,7 @@ class EnergyProfileManager:
         self.current_consumption_base = 0.0
         self.current_consumption_total = 0.0
         self.current_generation = 0.0
+        self.current_losses = 0.0
         
         # Reset daily deduct consumption at midnight
         if now.hour == 0:
@@ -625,6 +646,44 @@ class EnergyProfileManager:
         # Everyone is home — no adjustment needed
         return 1.0
 
+    def get_efficiency_coefficient(self):
+        """Calculate inverter efficiency coefficient from historical losses data.
+        
+        Returns a multiplier in [0.70, 1.0] representing the fraction of energy
+        that actually makes it through the inverter (1 - losses/generation).
+        
+        If no losses sensor is configured, returns 1.0 (no correction applied).
+        Requires at least 5 hourly samples with non-zero generation to activate.
+        """
+        if not self.inverter_losses_sensor:
+            return 1.0
+        
+        days = self.custom_period
+        total_gen = 0.0
+        total_losses = 0.0
+        sample_count = 0
+        
+        losses_data = self.data.get("losses", {})
+        for h in range(24):
+            records = losses_data.get(str(h), [])
+            relevant = records[-days:] if days > 0 else records
+            for rec in relevant:
+                if not isinstance(rec, dict):
+                    continue
+                gen = float(str(rec.get("gen", 0.0)).replace(",", "."))
+                loss = float(str(rec.get("v", 0.0)).replace(",", "."))
+                if gen > 0.01:   # Only count hours with real generation
+                    total_gen += gen
+                    total_losses += loss
+                    sample_count += 1
+        
+        if sample_count < 5 or total_gen < 0.1:
+            return 1.0
+        
+        efficiency = (total_gen - total_losses) / total_gen
+        # Clamp: don't let it go below 0.70 (30% losses is physically impossible for a good inverter)
+        return max(0.70, min(1.0, efficiency))
+
     def get_todays_profile(self, profile_type):
         """Returns the actual hourly profile for the current day up to the current hour."""
         now = datetime.now()
@@ -790,6 +849,11 @@ class EnergyProfileManager:
         # Apply occupancy coefficient to scale consumption when nobody is home
         occ_coeff = self.get_occupancy_coefficient()
         expected_consumption *= occ_coeff
+        
+        # Apply inverter efficiency coefficient to both forecast and battery energy
+        eff_coeff = self.get_efficiency_coefficient()
+        forecast_val_adjusted *= eff_coeff
+        batt_energy_val *= eff_coeff
             
         initial_budget = (forecast_val_adjusted + batt_energy_val) - expected_consumption
         available_budget = initial_budget
@@ -941,7 +1005,8 @@ class EnergyProfileManager:
             "debug_expected_today_total": expected_today_total,
             "debug_expected_today_so_far": expected_today_so_far,
             "debug_fraction_so_far": fraction_so_far,
-            "occupancy_coefficient": occ_coeff
+            "occupancy_coefficient": occ_coeff,
+            "efficiency_coefficient": eff_coeff
         }
         
     def get_market_strategy(self, mode="buy"):

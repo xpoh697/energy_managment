@@ -20,6 +20,7 @@ from .const import (
     CONF_POWER_LOAD_SENSORS,
     CONF_POWER_GEN_SENSORS,
     CONF_PRESENCE_SENSORS,
+    CONF_INVERTER_LOSSES_SENSOR,
 )
 
 
@@ -214,6 +215,17 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
         schema_dict[vol.Optional(CONF_PRESENCE_SENSORS, default=presence_val)] = selector.EntitySelector(
             selector.EntitySelectorConfig(multiple=True, domain=["person", "binary_sensor", "zone"])
         )
+        
+        # Inverter losses sensor (optional)
+        losses_val = get_str(CONF_INVERTER_LOSSES_SENSOR)
+        if losses_val:
+            schema_dict[vol.Optional(CONF_INVERTER_LOSSES_SENSOR, default=losses_val)] = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            )
+        else:
+            schema_dict[vol.Optional(CONF_INVERTER_LOSSES_SENSOR)] = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            )
 
         for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_PRICE_BUY, CONF_PRICE_SELL]:
             val = get_str(key)
