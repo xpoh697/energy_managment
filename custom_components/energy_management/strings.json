@@ -17,7 +17,8 @@
           "battery_capacity": "Battery Capacity",
           "price_buy": "Tariff: Grid Buying Price",
           "price_sell": "Tariff: Grid Selling Price",
-          "custom_period": "Custom Calculation Period (Days)"
+          "custom_period": "Custom Calculation Period (Days)",
+          "presence_sensors": "Presence Sensors (person / occupancy)"
         }
       },
       "deduct_settings": {
@@ -54,7 +55,8 @@
           "battery_capacity": "Battery Capacity",
           "price_buy": "Tariff: Grid Buying Price",
           "price_sell": "Tariff: Grid Selling Price",
-          "custom_period": "Custom Calculation Period (Days)"
+          "custom_period": "Custom Calculation Period (Days)",
+          "presence_sensors": "Presence Sensors (person / occupancy)"
         }
       },
       "deduct_settings": {

@@ -19,6 +19,7 @@ from .const import (
     CONF_DEDUCT_SETTINGS,
     CONF_POWER_LOAD_SENSORS,
     CONF_POWER_GEN_SENSORS,
+    CONF_PRESENCE_SENSORS,
 )
 
 
@@ -78,6 +79,9 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_POWER_GEN_SENSORS, default=[]): selector.EntitySelector(
                     selector.EntitySelectorConfig(multiple=True, domain="sensor")
+                ),
+                vol.Optional(CONF_PRESENCE_SENSORS, default=[]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(multiple=True, domain=["person", "binary_sensor"])
                 ),
                 vol.Optional(CONF_BATTERY_SOC): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
@@ -204,6 +208,12 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             schema_dict[vol.Optional(key, default=val)] = selector.EntitySelector(
                 selector.EntitySelectorConfig(multiple=True, domain="sensor")
             )
+        
+        # Presence sensors (person / binary_sensor domains)
+        presence_val = get_list(CONF_PRESENCE_SENSORS)
+        schema_dict[vol.Optional(CONF_PRESENCE_SENSORS, default=presence_val)] = selector.EntitySelector(
+            selector.EntitySelectorConfig(multiple=True, domain=["person", "binary_sensor"])
+        )
 
         for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_PRICE_BUY, CONF_PRICE_SELL]:
             val = get_str(key)
