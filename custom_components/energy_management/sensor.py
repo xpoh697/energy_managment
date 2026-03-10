@@ -97,7 +97,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Occupancy-aware consumption coefficient (only if presence sensors configured)
     if manager.presence_sensors:
         entities.append(OccupancySensor(manager, "Occupancy Consumption Coefficient"))
-        
+
+    # Savings / revenue tracking sensors
+    if has_generation and config_data.get(CONF_PRICE_BUY):
+        entities.append(SavingsSensor(manager, "solar", "Экономия: Солнечная генерация"))
+    if config_data.get(CONF_PRICE_BUY):
+        entities.append(SavingsSensor(manager, "arbitrage", "Экономия: Ценовой арбитраж"))
+    if config_data.get(CONF_PRICE_SELL):
+        entities.append(SavingsSensor(manager, "sell", "Доход: Продажа электроэнергии"))
+
     async_add_entities(entities)
 
 def _get_kwh_val(state_obj):
@@ -230,6 +238,9 @@ class EnergyProfileManager:
             
         if "prices_sell" not in self.data:
             self.data["prices_sell"] = {}
+
+        if "savings" not in self.data:
+            self.data["savings"] = {}  # {"YYYY-MM-DD": {"solar": x, "arbitrage": x, "sell": x}}
             
         self.sensor_last_values = self.data.get("sensor_last_values", {})
 
@@ -418,7 +429,118 @@ class EnergyProfileManager:
                 
         # Save exact sensor limits at the top of the hour to disk for reboot recovery
         self.data["sensor_last_values"] = self.sensor_last_values
-                
+
+        # ── Hourly Savings Tracking ────────────────────────────────────────────
+        if self.price_buy_sensors or self.price_sell_sensors:
+            past_dt = now - timedelta(hours=1)
+            past_date_str = past_dt.strftime("%Y-%m-%d")
+
+            def _get_stored_price(store, date_str, hour):
+                try:
+                    v = store.get(date_str, {}).get(str(hour))
+                    return float(str(v).replace(",", ".")) if v is not None else None
+                except (ValueError, TypeError):
+                    return None
+
+            p_buy  = _get_stored_price(self.data.get("prices_buy",  {}), past_date_str, past_hour)
+            p_sell = _get_stored_price(self.data.get("prices_sell", {}), past_date_str, past_hour)
+
+            gen_h  = self.current_generation
+            cons_h = self.current_consumption_total
+
+            # Battery SOC delta across this hour
+            batt_cap_h = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
+            soc_now    = self.get_sensor_float(self.battery_soc_sensor, 0.0)
+            last_soc_v = self.data.get("last_soc_savings", soc_now)
+            soc_delta  = soc_now - last_soc_v
+            kwh_delta  = batt_cap_h * soc_delta / 100.0 if batt_cap_h > 0 else 0.0
+            self.data["last_soc_savings"] = soc_now
+
+            batt_charged    = max(0.0,  kwh_delta)
+            batt_discharged = max(0.0, -kwh_delta)
+
+            # 1. Solar self-consumption savings (avoided grid purchase)
+            solar_self = min(gen_h, cons_h)
+            solar_sav  = round(solar_self * p_buy, 4) if (solar_self > 0.001 and p_buy and p_buy > 0) else 0.0
+
+            # 2. Sell revenue (solar surplus + battery discharged during high-price hours)
+            sell_limit_v = self.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
+            sell_rev     = 0.0
+            solar_surplus = max(0.0, gen_h - cons_h)
+            if p_sell is not None and p_sell > 0 and p_sell >= sell_limit_v:
+                if solar_surplus   > 0.001: sell_rev += solar_surplus   * p_sell
+                if batt_discharged > 0.001: sell_rev += batt_discharged * p_sell
+            sell_rev = round(sell_rev, 4)
+
+            # 3. Arbitrage savings: weighted average future buy price vs charge price
+            #    Logic: charged kWh (after efficiency losses) are "spread" over the next
+            #    consumption hours proportionally to the hourly profile. The weighted avg
+            #    buy price over that window is the reference — i.e. what we would have
+            #    paid if we bought hour-by-hour instead of pre-charging cheaply.
+            #    Saving = net_kwh × (weighted_avg_future_price − p_buy)
+            arbitrage_sav = 0.0
+            if batt_charged > 0.001 and p_buy is not None and p_buy >= 0:
+                buy_limit_v = self.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
+                if p_buy <= buy_limit_v:
+                    eff_coeff_arb = self.get_efficiency_coefficient()
+                    net_kwh = batt_charged * eff_coeff_arb  # usable kWh after DC→AC losses
+
+                    buy_store = self.data.get("prices_buy", {})
+                    tomorrow_date_str = (past_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+
+                    # Use consumption profile for the day type of the charging day
+                    day_type_ch = "weekend" if past_dt.weekday() >= 5 else "weekday"
+                    cons_prof = self.get_average_profile(
+                        "consumption_total", self.custom_period, day_type_ch)
+
+                    remaining       = net_kwh
+                    weighted_p_sum  = 0.0
+                    consumed_total  = 0.0
+
+                    for offset in range(1, 49):  # look ahead up to 48 h
+                        h_abs  = past_hour + offset
+                        h_mod  = h_abs % 24
+                        h_date = past_date_str if h_abs < 24 else tomorrow_date_str
+
+                        p_ref_raw = buy_store.get(h_date, {}).get(str(h_mod))
+                        if p_ref_raw is None:
+                            continue  # no price for this hour — skip
+                        try:
+                            p_ref = float(str(p_ref_raw).replace(",", "."))
+                        except (ValueError, TypeError):
+                            continue
+
+                        cons_h_prof = float(cons_prof.get(str(h_mod), 0.0))
+                        if cons_h_prof < 0.001:
+                            continue  # no significant consumption expected
+
+                        use = min(cons_h_prof, remaining)
+                        weighted_p_sum += use * p_ref
+                        consumed_total += use
+                        remaining      -= use
+
+                        if remaining < 0.001:
+                            break  # all charged energy accounted for
+
+                    if consumed_total > 0.001:
+                        p_avg_future  = weighted_p_sum / consumed_total
+                        sav_per_kwh   = max(0.0, p_avg_future - p_buy)
+                        arbitrage_sav = round(net_kwh * sav_per_kwh, 4)
+
+            # Persist
+            if "savings" not in self.data:
+                self.data["savings"] = {}
+            day_entry = self.data["savings"].setdefault(
+                past_date_str, {"solar": 0.0, "arbitrage": 0.0, "sell": 0.0})
+            day_entry["solar"]     = round(day_entry.get("solar",     0.0) + solar_sav,     4)
+            day_entry["arbitrage"] = round(day_entry.get("arbitrage", 0.0) + arbitrage_sav, 4)
+            day_entry["sell"]      = round(day_entry.get("sell",      0.0) + sell_rev,      4)
+
+            # Keep at most 400 days
+            if len(self.data["savings"]) > 400:
+                del self.data["savings"][sorted(self.data["savings"].keys())[0]]
+        # ── End savings tracking ───────────────────────────────────────────────
+
         # Save to internal filesystem
         await self.async_save()
         
@@ -1439,28 +1561,55 @@ class EnergyProfileManager:
                     # Smart AI calculation
                     budget_data = self.get_budget_and_permissions(self.custom_period, skip_strategy_check=True)
                     expected_night = budget_data.get("expected_consumption", 0.0)
-                    # We absolutely must keep `expected_night` energy in battery!
-                    ai_soc_reserve = (expected_night / batt_cap) * 100.0
-                    target_soc = max(base_target, ai_soc_reserve) # Users setting acts as absolute minimum floor
+                    eff_coeff = budget_data.get("efficiency_coefficient", 1.0)
+                    min_soc_reserve = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
+
+                    # Correction 1: account for inverter losses.
+                    # expected_night is AC-side consumption. To deliver that from the battery
+                    # we need more raw DC energy: expected_night / eff_coeff.
+                    # Only apply when eff_coeff < 1 (i.e. a losses sensor is configured).
+                    expected_night_from_batt = expected_night / eff_coeff if eff_coeff > 0 else expected_night
+
+                    # Correction 2: add min_soc as a hard non-reducible reserve ON TOP of the
+                    # consumption reserve (they are independent: one is energy needed, the
+                    # other is the absolute floor the battery must never go below).
+                    ai_soc_reserve = (expected_night_from_batt / batt_cap) * 100.0 + min_soc_reserve
+
+                    # User's CONF_TARGET_SOC_SELL acts as absolute minimum floor only
+                    target_soc = max(base_target, ai_soc_reserve)
                 else:
                     target_soc = base_target
-                    
+
                 target_soc = min(100.0, target_soc)
-                
+
+                # Store debug info for sell mode
+                if self.get_setting(CONF_DYNAMIC_SOC_SELL, True) and batt_cap > 0:
+                    res["sell_target_soc_debug"] = {
+                        "expected_consumption_kwh": round(expected_night, 3),
+                        "efficiency_coefficient": round(eff_coeff, 3),
+                        "expected_from_battery_kwh": round(expected_night_from_batt, 3),
+                        "min_soc_reserve_pct": round(min_soc_reserve, 1),
+                        "ai_soc_reserve_pct": round(ai_soc_reserve, 1),
+                        "base_target_soc_pct": round(base_target, 1),
+                        "final_target_soc_pct": round(target_soc, 1),
+                        "current_soc_pct": round(batt_soc, 1),
+                        "battery_capacity_kwh": round(batt_cap, 2),
+                    }
+
                 if batt_soc > target_soc:
                     energy_available = batt_cap * ((batt_soc - target_soc) / 100.0)
                     power_needed = energy_available / hours_count if hours_count > 0 else 0.0
-                
+
         if max_power > 0 and power_needed > max_power:
             power_needed = max_power
-            
+
         res["recommended_power_kw"] = round(power_needed, 3)
-        
+
         if round(power_needed, 3) <= 0.0:
             res["state"] = "idle"
         else:
             res["state"] = "active" if cur_hour in target_hours else "idle"
-        
+
         return res
 
 class ProfileAveragedSensor(SensorEntity):
@@ -2307,4 +2456,98 @@ class OccupancySensor(SensorEntity):
             "savings_ratio": round(1.0 - (avg_away / avg_home), 2) if avg_home > 0.01 else 0.0,
             "hourly_coefficients": hourly_coefficients,
             "tracked_entities": tracked,
+        }
+
+
+class SavingsSensor(SensorEntity):
+    """Tracks financial savings / revenue from solar, arbitrage, or grid sales."""
+
+    _CATEGORY_META = {
+        "solar":     ("mdi:solar-panel",      "Самопотребление солнечной энергии: стоимость кВт·ч, которые не пришлось покупать у сети."),
+        "arbitrage": ("mdi:swap-horizontal",   "Ценовой арбитраж: разница между пиковой ценой продажи и ценой дешёвой закупки."),
+        "sell":      ("mdi:cash-plus",          "Выручка от продажи электроэнергии в сеть."),
+    }
+
+    def __init__(self, manager, category, name):
+        self.manager  = manager
+        self.category = category
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.entry_id}_savings_{category}"
+        icon, _ = self._CATEGORY_META.get(category, ("mdi:currency-eur", ""))
+        self._attr_icon = icon
+        self._attr_native_unit_of_measurement = "EUR"
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    def _get_summary(self):
+        now = datetime.now()
+        savings = self.manager.data.get("savings", {})
+        cat = self.category
+
+        def _day(d_str):
+            return savings.get(d_str, {}).get(cat, 0.0)
+
+        today_str     = now.strftime("%Y-%m-%d")
+        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        today_val     = _day(today_str)
+        yesterday_val = _day(yesterday_str)
+        last7   = sum(_day((now - timedelta(days=i)).strftime("%Y-%m-%d")) for i in range(7))
+        last30  = sum(_day((now - timedelta(days=i)).strftime("%Y-%m-%d")) for i in range(30))
+
+        this_month_pfx = now.strftime("%Y-%m")
+        last_month_dt  = now.replace(day=1) - timedelta(days=1)
+        last_month_pfx = last_month_dt.strftime("%Y-%m")
+
+        this_month  = sum(v.get(cat, 0.0) for d, v in savings.items() if d.startswith(this_month_pfx))
+        last_month  = sum(v.get(cat, 0.0) for d, v in savings.items() if d.startswith(last_month_pfx))
+
+        monthly = {}
+        for d, v in savings.items():
+            m = d[:7]
+            monthly[m] = round(monthly.get(m, 0.0) + v.get(cat, 0.0), 4)
+
+        daily = {}
+        for i in range(30):
+            d_str = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+            val = _day(d_str)
+            if val > 0 or d_str == today_str:
+                daily[d_str] = round(val, 4)
+
+        return {
+            "today":          round(today_val,     4),
+            "yesterday":      round(yesterday_val, 4),
+            "last_7_days":    round(last7,   4),
+            "last_30_days":   round(last30,  4),
+            "this_month":     round(this_month, 4),
+            "last_month":     round(last_month, 4),
+            "monthly_totals": {k: round(v, 2) for k, v in sorted(monthly.items())[-13:]},
+            "daily_history":  dict(sorted(daily.items())),
+        }
+
+    @property
+    def native_value(self):
+        return round(self._get_summary().get("last_30_days", 0.0), 2)
+
+    @property
+    def extra_state_attributes(self):
+        s = self._get_summary()
+        _, description = self._CATEGORY_META.get(self.category, ("mdi:currency-eur", ""))
+        return {
+            "description":    description,
+            "today":          s["today"],
+            "yesterday":      s["yesterday"],
+            "last_7_days":    s["last_7_days"],
+            "this_month":     s["this_month"],
+            "last_month":     s["last_month"],
+            "monthly_totals": s["monthly_totals"],
+            "daily_history":  s["daily_history"],
         }
