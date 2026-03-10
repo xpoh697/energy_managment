@@ -1556,6 +1556,9 @@ class BatteryDepletionTimeSensor(SensorEntity):
             
         simulated_soc = batt_soc
         
+        # Inverter efficiency: discharging (DC->AC) loses energy too
+        eff_coeff = self.manager.get_efficiency_coefficient()
+        
         # 1. Look up forecast today remaining
         forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
             
@@ -1600,16 +1603,16 @@ class BatteryDepletionTimeSensor(SensorEntity):
             net_solar_kw = max(0.0, expected_gen - expected_cons)
             net_cons_kw = max(0.0, expected_cons - expected_gen)
             
-            # If we are discharging
+            # If we are discharging — need more battery energy to deliver net_cons to AC loads
             if net_cons_kw > 0.0:
-                soc_delta = (net_cons_kw / batt_cap) * 100.0
+                soc_delta = ((net_cons_kw / eff_coeff) / batt_cap) * 100.0
                 simulated_soc -= soc_delta
-            # If we are charging, apply CC/CV boundaries
+            # If we are charging — not all solar makes it into battery due to AC->DC losses
             elif net_solar_kw > 0.0:
                 max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
                 accepted_power_kw = max_batt_power * EnergyProfileManager.get_cc_cv_ratio(simulated_soc)
                     
-                actual_charge_kw = min(net_solar_kw, accepted_power_kw)
+                actual_charge_kw = min(net_solar_kw * eff_coeff, accepted_power_kw)
                 soc_gained = (actual_charge_kw / batt_cap) * 100.0
                 simulated_soc = min(100.0, simulated_soc + soc_gained)
 
@@ -1668,6 +1671,9 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             
         simulated_soc = batt_soc
         
+        # Inverter efficiency: AC<->DC conversion losses in both directions
+        eff_coeff = self.manager.get_efficiency_coefficient()
+        
         # 1. Look up forecast today remaining
         forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
             
@@ -1709,16 +1715,16 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             net_solar_kw = max(0.0, expected_gen - expected_cons)
             net_cons_kw = max(0.0, expected_cons - expected_gen)
             
-            # If we are discharging
+            # If we are discharging — need more battery energy to deliver net_cons to AC loads
             if net_cons_kw > 0.0:
-                soc_delta = (net_cons_kw / batt_cap) * 100.0
+                soc_delta = ((net_cons_kw / eff_coeff) / batt_cap) * 100.0
                 simulated_soc -= soc_delta
-            # If we are charging, apply CC/CV boundaries
+            # If we are charging — AC->DC conversion reduces what enters the battery
             elif net_solar_kw > 0.0:
                 max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
                 accepted_power_kw = max_batt_power * EnergyProfileManager.get_cc_cv_ratio(simulated_soc)
                     
-                actual_charge_kw = min(net_solar_kw, accepted_power_kw)
+                actual_charge_kw = min(net_solar_kw * eff_coeff, accepted_power_kw)
                 soc_gained = (actual_charge_kw / batt_cap) * 100.0
                 simulated_soc = min(100.0, simulated_soc + soc_gained)
                 
