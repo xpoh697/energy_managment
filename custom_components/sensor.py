@@ -88,6 +88,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         
     entities.append(InverterOperationModeSensor(manager, "Inverter Mode Command"))
     entities.append(BatteryDepletionTimeSensor(manager, "Battery Depletion Forecast"))
+    
+    if has_generation:
+        entities.append(BatteryEndOfDaySOCSensor(manager, "Прогноз заряда к закату"))
         
     async_add_entities(entities)
 
@@ -1442,6 +1445,141 @@ class BatteryDepletionTimeSensor(SensorEntity):
         if not hasattr(self, "_attr_extra_state_attributes"):
             return {}
         return self._attr_extra_state_attributes
+
+
+class BatteryEndOfDaySOCSensor(SensorEntity):
+    """Predicts battery SOC at the end of today's charging cycle (sunset)."""
+    def __init__(self, manager, name):
+        self.manager = manager
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.entry_id}_battery_end_of_day_soc"
+        self._attr_icon = "mdi:battery-arrow-up"
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_device_class = SensorDeviceClass.BATTERY
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        now = datetime.now()
+        
+        batt_soc = 100.0
+        batt_cap = 0.0
+        if self.manager.battery_soc_sensor:
+            st = self.manager.hass.states.get(self.manager.battery_soc_sensor)
+            if st and st.state not in ("unknown", "unavailable"):
+                try: batt_soc = float(str(st.state).replace(',', '.'))
+                except ValueError: pass
+                
+        if self.manager.battery_capacity_sensor:
+            st = self.manager.hass.states.get(self.manager.battery_capacity_sensor)
+            if st and st.state not in ("unknown", "unavailable"):
+                try: batt_cap = float(str(st.state).replace(',', '.'))
+                except ValueError: pass
+                
+        if batt_cap <= 0.0:
+            self._attr_extra_state_attributes = {"error": "Нет емкости батареи"}
+            return None
+            
+        self._attr_extra_state_attributes = {
+            "initial_soc": batt_soc,
+            "battery_capacity": batt_cap
+        }
+            
+        simulated_soc = batt_soc
+        
+        # 1. Look up forecast today remaining
+        forecast_today_val = None
+        if self.manager.forecast_today_sensor:
+            val_sum = 0.0
+            for fsensor in self.manager.forecast_today_sensor:
+                st = self.manager.hass.states.get(fsensor)
+                v = _get_kwh_val(st)
+                if v is not None: val_sum += v
+            if val_sum > 0: forecast_today_val = val_sum
+            
+        # Get generation profile to find the last hour of generation today
+        prof_gen_today = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
+        
+        # Determine the sunset hour (last hour with significant expected generation > 0.05 kWh)
+        sunset_hour = 23
+        for h in range(23, -1, -1):
+            if float(prof_gen_today.get(str(h), 0.0)) > 0.05:
+                sunset_hour = h
+                break
+                
+        if now.hour >= sunset_hour:
+            self._attr_extra_state_attributes["status"] = "Генерация завершена"
+            self._attr_extra_state_attributes["sunset_hour"] = sunset_hour
+            return round(simulated_soc, 1)
+
+        hist_today_rem = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(now.hour + 1, 24))
+        day_type = "weekend" if now.weekday() >= 5 else "weekday"
+        prof_cons = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type)
+        
+        charge_log = {}
+
+        # Simulate until the sunset hour
+        for h_step in range(now.hour + 1, sunset_hour + 1):
+            h_str = str(h_step)
+            
+            expected_cons = float(prof_cons.get(h_str, 0.0))
+            hist_hour_gen = float(prof_gen_today.get(h_str, 0.0))
+            
+            expected_gen = hist_hour_gen
+            if forecast_today_val is not None:
+                if hist_today_rem > 0:
+                    expected_gen = (hist_hour_gen / hist_today_rem) * forecast_today_val
+                else:
+                    expected_gen = 0.0
+            
+            net_solar_kw = max(0.0, expected_gen - expected_cons)
+            net_cons_kw = max(0.0, expected_cons - expected_gen)
+            
+            # If we are discharging
+            if net_cons_kw > 0.0:
+                soc_delta = (net_cons_kw / batt_cap) * 100.0
+                simulated_soc -= soc_delta
+            # If we are charging, apply CC/CV boundaries
+            elif net_solar_kw > 0.0:
+                max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+                if simulated_soc < 80.0:
+                    accepted_power_kw = max_batt_power
+                elif simulated_soc < 90.0:
+                    accepted_power_kw = max_batt_power * 0.5
+                elif simulated_soc < 95.0:
+                    accepted_power_kw = max_batt_power * 0.25
+                else:
+                    accepted_power_kw = max_batt_power * 0.1
+                    
+                actual_charge_kw = min(net_solar_kw, accepted_power_kw)
+                soc_gained = (actual_charge_kw / batt_cap) * 100.0
+                simulated_soc = min(100.0, simulated_soc + soc_gained)
+                
+            # Prevent going below 0 in simulation
+            simulated_soc = max(0.0, simulated_soc)
+            
+            charge_log[f"{h_step:02d}:00"] = round(simulated_soc, 1)
+
+        self._attr_extra_state_attributes["sunset_hour"] = f"{sunset_hour:02d}:00"
+        self._attr_extra_state_attributes["expected_remaining_gen"] = round(forecast_today_val if forecast_today_val is not None else hist_today_rem, 2)
+        self._attr_extra_state_attributes["hourly_simulation"] = charge_log
+
+        return round(simulated_soc, 1)
+
+    @property
+    def extra_state_attributes(self):
+        if not hasattr(self, "_attr_extra_state_attributes"):
+            return {}
+        return self._attr_extra_state_attributes
+
 
 class InverterOperationModeSensor(SensorEntity):
     """Outputs the specific inverter command state based on logic."""
