@@ -211,10 +211,10 @@ class EnergyProfileManager:
         if "temp_max_forecast" not in self.data:
             self.data["temp_max_forecast"] = 0.0
             
-        if "prices_buy" not in self.data:
-            self.data["prices_buy"] = {}
         if "prices_sell" not in self.data:
             self.data["prices_sell"] = {}
+            
+        self.sensor_last_values = self.data.get("sensor_last_values", {})
 
     async def async_save(self):
         await self.store.async_save(self.data)
@@ -249,17 +249,22 @@ class EnergyProfileManager:
         return False
 
     async def async_start(self):
-        for entity_id in self.all_sensors:
-            state_obj = self.hass.states.get(entity_id)
-            val = _get_kwh_val(state_obj)
-            if val is not None:
-                self.sensor_last_values[entity_id] = val
-                
         # Parse prices immediately on load
         for p_sensor in self.all_price_sensors:
             state_obj = self.hass.states.get(p_sensor)
             if state_obj:
                 self._update_prices_from_sensor(p_sensor, state_obj)
+                
+        # Recover missed energy deltas between the last save (hour top) and now
+        class MockEvent:
+            def __init__(self, data):
+                self.data = data
+                
+        for entity_id in self.all_sensors:
+            state_obj = self.hass.states.get(entity_id)
+            if state_obj:
+                ev = MockEvent({"entity_id": entity_id, "new_state": state_obj})
+                self._async_state_changed(ev)
                     
         self._unsub_state = async_track_state_change_event(
             self.hass, list(self.all_sensors | self.all_price_sensors), self._async_state_changed
@@ -378,6 +383,9 @@ class EnergyProfileManager:
                 self.data["consumption_total"][sh] = self.data["consumption_total"][sh][-self.max_days:]
             if len(self.data["generation"][sh]) > self.max_days:
                 self.data["generation"][sh] = self.data["generation"][sh][-self.max_days:]
+                
+        # Save exact sensor limits at the top of the hour to disk for reboot recovery
+        self.data["sensor_last_values"] = self.sensor_last_values
                 
         # Save to internal filesystem
         await self.async_save()
