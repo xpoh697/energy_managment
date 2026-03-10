@@ -99,13 +99,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if manager.presence_sensors:
         entities.append(OccupancySensor(manager, "Occupancy Consumption Coefficient"))
 
-    # Savings / revenue tracking sensors
-    if has_generation and config_data.get(CONF_PRICE_BUY):
-        entities.append(SavingsSensor(manager, "solar", "Экономия: Солнечная генерация"))
-    if config_data.get(CONF_PRICE_BUY):
-        entities.append(SavingsSensor(manager, "arbitrage", "Экономия: Ценовой арбитраж"))
-    if config_data.get(CONF_PRICE_SELL):
-        entities.append(SavingsSensor(manager, "sell", "Доход: Продажа электроэнергии"))
+    # Combined Savings / revenue tracking sensor
+    if has_consumption and config_data.get(CONF_PRICE_BUY):
+        entities.append(SavingsSensor(manager, "total", "Экономия: Итоговая выгода"))
 
     async_add_entities(entities)
 
@@ -460,82 +456,40 @@ class EnergyProfileManager:
             batt_charged    = max(0.0,  kwh_delta)
             batt_discharged = max(0.0, -kwh_delta)
 
-            # 1. Solar self-consumption savings (avoided grid purchase)
-            solar_self = min(gen_h, cons_h)
-            solar_sav  = round(solar_self * p_buy, 4) if (solar_self > 0.001 and p_buy and p_buy > 0) else 0.0
+            # ── Unified Savings Logic ───────────────────────────────────────────
+            # Formula: (Consumption * p_buy) - (Grid_Buy * p_buy) + (Grid_Sell * p_sell)
+            # This accounts for solar self-consumption, arbitrage, and sales in one go.
 
-            # 2. Sell revenue (solar surplus + battery discharged during high-price hours)
-            sell_limit_v = self.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
-            sell_rev     = 0.0
-            solar_surplus = max(0.0, gen_h - cons_h)
-            if p_sell is not None and p_sell > 0 and p_sell >= sell_limit_v:
-                if solar_surplus   > 0.001: sell_rev += solar_surplus   * p_sell
-                if batt_discharged > 0.001: sell_rev += batt_discharged * p_sell
-            sell_rev = round(sell_rev, 4)
+            # We need grid_buy_h and grid_sell_h. 
+            # Since we don't have direct flow sensors for all, we derive them:
+            # grid_flow = cons_h + batt_charged - gen_h - batt_discharged
+            grid_flow = cons_h + batt_charged - gen_h - batt_discharged
+            
+            h_buy_kwh  = max(0.0,  grid_flow)
+            h_sell_kwh = max(0.0, -grid_flow)
+            
+            # 1. Total Benefit Component
+            # Value of not having the system (Baseline)
+            baseline_cost = cons_h * (p_buy or 0.0)
+            # Actual cost now
+            actual_net_cost = (h_buy_kwh * (p_buy or 0.0)) - (h_sell_kwh * (p_sell or 0.0))
+            
+            total_profit_h = round(baseline_cost - actual_net_cost, 4)
 
-            # 3. Arbitrage savings: weighted average future buy price vs charge price
-            #    Logic: charged kWh (after efficiency losses) are "spread" over the next
-            #    consumption hours proportionally to the hourly profile. The weighted avg
-            #    buy price over that window is the reference — i.e. what we would have
-            #    paid if we bought hour-by-hour instead of pre-charging cheaply.
-            #    Saving = net_kwh × (weighted_avg_future_price − p_buy)
-            arbitrage_sav = 0.0
-            if batt_charged > 0.001 and p_buy is not None and p_buy >= 0:
-                buy_limit_v = self.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
-                if p_buy <= buy_limit_v:
-                    eff_coeff_arb = self.get_efficiency_coefficient()
-                    net_kwh = batt_charged * eff_coeff_arb  # usable kWh after DC→AC losses
-
-                    buy_store = self.data.get("prices_buy", {})
-                    tomorrow_date_str = (past_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-
-                    # Use consumption profile for the day type of the charging day
-                    day_type_ch = "weekend" if past_dt.weekday() >= 5 else "weekday"
-                    cons_prof = self.get_average_profile(
-                        "consumption_total", self.custom_period, day_type_ch)
-
-                    remaining       = net_kwh
-                    weighted_p_sum  = 0.0
-                    consumed_total  = 0.0
-
-                    for offset in range(1, 49):  # look ahead up to 48 h
-                        h_abs  = past_hour + offset
-                        h_mod  = h_abs % 24
-                        h_date = past_date_str if h_abs < 24 else tomorrow_date_str
-
-                        p_ref_raw = buy_store.get(h_date, {}).get(str(h_mod))
-                        if p_ref_raw is None:
-                            continue  # no price for this hour — skip
-                        try:
-                            p_ref = float(str(p_ref_raw).replace(",", "."))
-                        except (ValueError, TypeError):
-                            continue
-
-                        cons_h_prof = float(cons_prof.get(str(h_mod), 0.0))
-                        if cons_h_prof < 0.001:
-                            continue  # no significant consumption expected
-
-                        use = min(cons_h_prof, remaining)
-                        weighted_p_sum += use * p_ref
-                        consumed_total += use
-                        remaining      -= use
-
-                        if remaining < 0.001:
-                            break  # all charged energy accounted for
-
-                    if consumed_total > 0.001:
-                        p_avg_future  = weighted_p_sum / consumed_total
-                        sav_per_kwh   = max(0.0, p_avg_future - p_buy)
-                        arbitrage_sav = round(net_kwh * sav_per_kwh, 4)
-
-            # Persist
+            # Persist to "total" category
             if "savings" not in self.data:
                 self.data["savings"] = {}
             day_entry = self.data["savings"].setdefault(
-                past_date_str, {"solar": 0.0, "arbitrage": 0.0, "sell": 0.0})
-            day_entry["solar"]     = round(day_entry.get("solar",     0.0) + solar_sav,     4)
-            day_entry["arbitrage"] = round(day_entry.get("arbitrage", 0.0) + arbitrage_sav, 4)
-            day_entry["sell"]      = round(day_entry.get("sell",      0.0) + sell_rev,      4)
+                past_date_str, {"total": 0.0, "solar": 0.0, "arbitrage": 0.0, "sell": 0.0})
+            
+            day_entry["total"] = round(day_entry.get("total", 0.0) + total_profit_h, 4)
+            
+            # Also keep old components as breakdown (for attributes)
+            solar_self = min(gen_h, cons_h)
+            day_entry["solar"]     = round(day_entry.get("solar",     0.0) + (solar_self * (p_buy or 0.0)), 4)
+            day_entry["sell"]      = round(day_entry.get("sell",      0.0) + (h_sell_kwh * (p_sell or 0.0)), 4)
+            # Arbitrage is the remainder
+            day_entry["arbitrage"] = round(day_entry["total"] - day_entry["solar"] - day_entry["sell"], 4)
 
             # Keep at most 400 days
             if len(self.data["savings"]) > 400:
