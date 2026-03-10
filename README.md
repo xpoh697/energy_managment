@@ -37,7 +37,14 @@ The inner Universal Extractor supports 99% of cloud vendor formats (Nordpool, EN
 ### 6. Battery Survival Mode & Depletion Forecast
 It features a built-in time machine simulation that reads your battery SOC, solar forecast, and historical consumption. It projects your battery level up to +48 hours into the future, hour by hour. If the battery is predicted to hit a critical threshold (`Min Survival SOC`) before a scheduled cheap charging window, the AI automatically bypasses your Buy Price Limits and identifies a "Bridge Window" (the cheapest available contiguous hour) to inject a survival charge and prevent grid reliance during peak prices.
 
-### 7. Inverter Operation State Machine
+### 7. Financial Analytics & ROI Tracking
+The integration now includes a dedicated financial suite to track your return on investment:
+- **Solar Economy**: Calculates savings from direct self-consumption.
+- **Price Arbitrage**: Evaluates profit from shifting loads/charging to cheap hours, using a weighted-average future price projection (taking battery efficiency into account).
+- **Sell Revenue**: Tracks gross income from electricity exports.
+- **Dynamic Currency Support**: Automatically inherits currency settings and symbols from your Home Assistant global configuration.
+
+### 8. Inverter Operation State Machine
 A master orchestration sensor (`Inverter Mode Command`) outputs explicit action states based on a strict priority ladder:
 1. `bat_emergency`: Absolute priority. Battery is drained below `Min Survival SOC`. Forces a charge from the Grid/PV.
 2. `stop_sale`: Price of energy crashed below `Stop Sell Threshold`. Halts export to grid.
@@ -56,6 +63,7 @@ Once configured, the integration automatically produces the following main entit
 6. `sensor.market_strategy_buy` & `sensor.market_strategy_sell` (Active AI Load balancing targets)
 7. `sensor.inverter_mode_command` (Master state machine for automations)
 8. `sensor.battery_depletion_forecast` (String prediction of the exact limit hit hour)
+9. `sensor.savings_solar_generation`, `sensor.savings_price_arbitrage`, `sensor.savings_sell_revenue` (Financial metrics)
 
 ## Configuration UI Entities
 You don't need to create any Helpers (`input_number`, `input_boolean`) yourself! The integration automatically generates them for you to tweak directly on your dashboard:
