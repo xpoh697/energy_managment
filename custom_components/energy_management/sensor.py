@@ -773,6 +773,8 @@ class EnergyProfileManager:
             "forecast_val": forecast_val_adjusted,
             "forecast_raw": forecast_val,
             "forecast_coefficient": blended_coeff,
+            "forecast_hist_coefficient": hist_coeff,
+            "forecast_today_coefficient": today_coeff,
             "batt_energy_val": batt_energy_val,
             "expected_consumption": expected_consumption
         }
@@ -2043,6 +2045,8 @@ class EnergyBudgetSensor(SensorEntity):
             "forecast_remaining_kwh": round(res["forecast_val"], 3),
             "forecast_raw_kwh": round(res.get("forecast_raw", 0.0), 3),
             "forecast_correction_coefficient": round(res.get("forecast_coefficient", 1.0), 3),
+            "forecast_hist_coefficient": round(res.get("forecast_hist_coefficient", 1.0), 3),
+            "forecast_today_coefficient": round(res.get("forecast_today_coefficient", 1.0), 3),
             "battery_energy_kwh": round(res["batt_energy_val"], 3),
             "expected_consumption_until_0800_kwh": round(res["expected_consumption"], 3)
         }
