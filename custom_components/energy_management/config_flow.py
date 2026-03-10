@@ -209,10 +209,10 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(multiple=True, domain="sensor")
             )
         
-        # Presence sensors (person / binary_sensor domains)
+        # Presence sensors (person / binary_sensor / zone domains)
         presence_val = get_list(CONF_PRESENCE_SENSORS)
         schema_dict[vol.Optional(CONF_PRESENCE_SENSORS, default=presence_val)] = selector.EntitySelector(
-            selector.EntitySelectorConfig(multiple=True, domain=["person", "binary_sensor"])
+            selector.EntitySelectorConfig(multiple=True, domain=["person", "binary_sensor", "zone"])
         )
 
         for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_PRICE_BUY, CONF_PRICE_SELL]:

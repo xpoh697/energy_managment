@@ -541,13 +541,28 @@ class EnergyProfileManager:
         return profile
 
     def get_current_occupancy(self):
-        """Returns number of persons/entities currently 'home'."""
+        """Returns number of persons/entities currently 'home'.
+        
+        Supported entity types:
+        - person.*:          state == 'home' → counts as 1 person
+        - binary_sensor.*:  state == 'on'   → counts as 1 person
+        - zone.*:           state is numeric count (e.g. zone.home returns '2') → used directly
+        """
         if not self.presence_sensors:
             return -1  # -1 means "occupancy tracking not configured"
         count = 0
         for entity_id in self.presence_sensors:
             state = self.hass.states.get(entity_id)
-            if state and state.state in ("home", "on"):
+            if not state or state.state in ("unknown", "unavailable"):
+                continue
+            # zone.* — state is the number of people in the zone
+            if entity_id.startswith("zone."):
+                try:
+                    count += int(float(state.state))
+                except (ValueError, TypeError):
+                    pass
+            # person.* or binary_sensor.*
+            elif state.state in ("home", "on"):
                 count += 1
         return count
     
