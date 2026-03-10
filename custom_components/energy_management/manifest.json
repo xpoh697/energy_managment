@@ -1,7 +1,9 @@
 {
   "domain": "energy_management",
   "name": "Energy Management",
-  "codeowners": ["@antigravity"],
+  "codeowners": [
+    "@xpoh697"
+  ],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/xpoh697/energy_management#readme",
@@ -9,5 +11,5 @@
   "integration_type": "device",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "1.1.0"
+  "version": "1.1.1"
 }
