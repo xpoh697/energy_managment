@@ -21,6 +21,10 @@ from .const import (
     CONF_POWER_GEN_SENSORS,
     CONF_PRESENCE_SENSORS,
     CONF_INVERTER_LOSSES_SENSOR,
+    CONF_TOTAL_SYSTEM_COST,
+    CONF_BATTERY_COST,
+    CONF_BATTERY_RATED_CYCLES,
+    CONF_ANOMALY_THRESHOLD,
 )
 
 
@@ -176,7 +180,27 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             if deduct_sensors:
                 return await self.async_step_deduct_settings()
 
+            return await self.async_step_investment_settings()
+
+        return await self.async_step_init()
+
+    async def async_step_investment_settings(self, user_input=None):
+        """Handle investment and ROI settings."""
+        if user_input is not None:
+            self._user_input.update(user_input)
             return self.async_create_entry(title="", data=self._user_input)
+
+        schema = vol.Schema({
+            vol.Optional(CONF_TOTAL_SYSTEM_COST, default=self._user_input.get(CONF_TOTAL_SYSTEM_COST, 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+            vol.Optional(CONF_BATTERY_COST, default=self._user_input.get(CONF_BATTERY_COST, 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+            vol.Optional(CONF_BATTERY_RATED_CYCLES, default=self._user_input.get(CONF_BATTERY_RATED_CYCLES, 6000)): vol.All(vol.Coerce(int), vol.Range(min=1)),
+            vol.Optional(CONF_ANOMALY_THRESHOLD, default=self._user_input.get(CONF_ANOMALY_THRESHOLD, 2.0)): vol.All(vol.Coerce(float), vol.Range(min=1.1, max=10.0)),
+        })
+
+        return self.async_show_form(
+            step_id="investment_settings",
+            data_schema=schema,
+        )
 
         schema_dict = {}
         

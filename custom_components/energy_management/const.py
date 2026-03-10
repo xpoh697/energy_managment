@@ -31,3 +31,9 @@ CONF_SALE_PV_NO_BAT_MAX_HOUR = "sale_pv_no_bat_max_hour"
 
 CONF_PRESENCE_SENSORS = "presence_sensors"
 CONF_INVERTER_LOSSES_SENSOR = "inverter_losses_sensor"
+
+# Investment and ROI settings
+CONF_TOTAL_SYSTEM_COST = "total_system_cost"
+CONF_BATTERY_COST = "battery_cost"
+CONF_BATTERY_RATED_CYCLES = "battery_rated_cycles"
+CONF_ANOMALY_THRESHOLD = "anomaly_threshold"

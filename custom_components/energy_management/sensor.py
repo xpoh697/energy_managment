@@ -10,7 +10,6 @@ from homeassistant.core import callback
 from homeassistant.const import UnitOfEnergy
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
-
 from .const import (
     DOMAIN,
     CONF_CONSUMPTION_SENSORS,
@@ -32,15 +31,19 @@ from .const import (
     CONF_BATTERY_MAX_POWER,
     CONF_TARGET_SOC_BUY,
     CONF_TARGET_SOC_SELL,
+    CONF_MIN_SOC_BUY,
     CONF_DYNAMIC_SOC_BUY,
     CONF_DYNAMIC_SOC_SELL,
-    CONF_MIN_SOC_BUY,
     CONF_DEDUCT_SETTINGS,
     CONF_POWER_LOAD_SENSORS,
     CONF_POWER_GEN_SENSORS,
     CONF_SALE_PV_NO_BAT_MAX_HOUR,
     CONF_PRESENCE_SENSORS,
     CONF_INVERTER_LOSSES_SENSOR,
+    CONF_TOTAL_SYSTEM_COST,
+    CONF_BATTERY_COST,
+    CONF_BATTERY_RATED_CYCLES,
+    CONF_ANOMALY_THRESHOLD,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -102,6 +105,16 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Combined Savings / revenue tracking sensor
     if has_consumption and config_data.get(CONF_PRICE_BUY):
         entities.append(SavingsSensor(manager, "total", "Экономия: Итоговая выгода"))
+
+    # Advanced Analysis Sensors
+    if has_consumption:
+        entities.append(AnomalyDetectionSensor(manager, "Детектор аномалий потребления"))
+        
+    if config_data.get(CONF_TOTAL_SYSTEM_COST):
+        entities.append(PaybackSensor(manager, "Окупаемость системы (ROI)"))
+        
+    if config_data.get(CONF_BATTERY_COST):
+        entities.append(BatteryDegradationSensor(manager, "Стоимость износа батареи"))
 
     async_add_entities(entities)
 
@@ -595,6 +608,33 @@ class EnergyProfileManager:
                     target[p_date] = {}
                 for h, price in hours.items():
                     target[p_date][h] = price
+
+    def get_total_savings(self):
+        """Calculate cumulative savings since tracking began."""
+        savings = self.data.get("savings", {})
+        total = 0.0
+        for day in savings.values():
+            total += day.get("total", 0.0)
+        return total
+
+    def get_battery_degradation_cost(self):
+        """Cost of battery wear per kWh (Cycle Cost)."""
+        batt_cost = self.get_setting(CONF_BATTERY_COST, 0.0)
+        cycles = self.get_setting(CONF_BATTERY_RATED_CYCLES, 6000)
+        capacity = self.get_setting(CONF_BATTERY_CAPACITY, 10.0) # kWh
+        
+        if cycles <= 0 or capacity <= 0 or batt_cost <= 0:
+            return 0.0
+            
+        # Cost per 1 full cycle discharged
+        return batt_cost / (cycles * capacity)
+
+    def get_expected_consumption(self):
+        """Helper to get the expected consumption value for the current hour."""
+        now = dt_util.now()
+        day_type = "weekend" if now.weekday() >= 5 else "weekday"
+        prof = self.get_average_profile("consumption_total", self.custom_period, day_type)
+        return float(prof.get(str(now.hour), 0.0))
 
     def get_average_profile(self, profile_type, days, day_type="all", occupancy_filter=None):
         """Returns a dict with 24 keys ("0" to "23") representing average values.
@@ -1182,9 +1222,28 @@ class EnergyProfileManager:
                 res["state"] = "price_limit_not_met"
                 return res
             
-            peaks_today = get_peaks(window_today, True, limit, tolerance)
-            peaks_tom = get_peaks(window_tomorrow, True, limit, tolerance)
+            # Profitability check against degradation cost
+            deg_cost = self.get_battery_degradation_cost()
+            eff = self.get_efficiency_coefficient()
+            # Requirement: (SellPrice - BuyPrice) * Efficiency > 2 * deg_cost
+            # We don't always know the exact buy price we used, but we can assume the Buy Limit or current min price 
+            min_buy_limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
             
+            # Filter peaks that aren't actually profitable
+            def is_profitable(price):
+                if deg_cost <= 0: return True
+                # (Price - BuyLimit) * Eff > wear_of_cycle
+                profit_per_kwh = (price - min_buy_limit) * eff
+                return profit_per_kwh > (2 * deg_cost)
+
+            peaks_today = [(h, p) for h, p in get_peaks(window_today, True, limit, tolerance) if is_profitable(p)]
+            peaks_tom = [(h, p) for h, p in get_peaks(window_tomorrow, True, limit, tolerance) if is_profitable(p)]
+            
+            if not peaks_today and not peaks_tom:
+                res["state"] = "unprofitable_arbitrage"
+                res["multi_cycle"] = "Деградация АКБ > Выгоды"
+                return res
+
             if peaks_today and peaks_tom:
                 # We have peaks on both days. Check if we can recharge between them.
                 max_h_today = max(h for h, p in peaks_today)
@@ -2536,3 +2595,162 @@ class SavingsSensor(SensorEntity):
             })
             
         return attrs
+
+class AnomalyDetectionSensor(SensorEntity):
+    """Detects unusual consumption spikes compared to average profile."""
+    def __init__(self, manager, name):
+        self.manager = manager
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.unique_id}_anomaly_detector"
+        self._attr_icon = "mdi:alert-decagram-outline"
+        self._attr_native_unit_of_measurement = "score"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        expected = self.manager.get_expected_consumption()
+        
+        # Get actual power (kW)
+        actual_kw = 0.0
+        if self.manager.power_history:
+            # Last minute average
+            actual_kw = self.manager.power_history[-1]["load_kw"]
+        
+        if expected <= 0.05 or actual_kw <= 0.05:
+            return 1.0 # Normal
+            
+        score = actual_kw / expected
+        return round(score, 2)
+
+    @property
+    def extra_state_attributes(self):
+        expected = self.manager.get_expected_consumption()
+        actual_kw = self.manager.power_history[-1]["load_kw"] if self.manager.power_history else 0.0
+        threshold = self.manager.get_setting(CONF_ANOMALY_THRESHOLD, 2.0)
+        
+        status = "Норма"
+        if actual_kw / expected > threshold if expected > 0.05 else False:
+            status = "Аномалия: Высокое потребление"
+            self._attr_icon = "mdi:alert-decagram"
+        else:
+            self._attr_icon = "mdi:alert-decagram-outline"
+            
+        return {
+            "status": status,
+            "expected_kw": round(expected, 3),
+            "actual_kw": round(actual_kw, 3),
+            "threshold_multiplier": threshold,
+            "anomaly_detected": actual_kw / expected > threshold if expected > 0.05 else False
+        }
+
+class PaybackSensor(SensorEntity):
+    """Calculates ROI and Payback progress."""
+    def __init__(self, manager, name):
+        self.manager = manager
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.entry_id}_roi_payback"
+        self._attr_icon = "mdi:finance"
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        try:
+            currency = self.hass.config.currency
+            self._currency = currency or "EUR"
+        except Exception:
+            self._currency = "EUR"
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        total_cost = self.manager.get_setting(CONF_TOTAL_SYSTEM_COST, 0.0)
+        if total_cost <= 0: return None
+        
+        total_saved = self.manager.get_total_savings()
+        roi = (total_saved / total_cost) * 100.0
+        return round(roi, 2)
+
+    @property
+    def extra_state_attributes(self):
+        total_cost = self.manager.get_setting(CONF_TOTAL_SYSTEM_COST, 0.0)
+        total_saved = self.manager.get_total_savings()
+        remaining = max(0.0, total_cost - total_saved)
+        
+        # Estimate days remaining
+        savings_store = self.manager.data.get("savings", {})
+        now = dt_util.now()
+        savings_30d = 0.0
+        for d, v in savings_store.items():
+            try:
+                dt_d = dt_util.parse_datetime(d + "T12:00:00Z") # Midday to avoid edge cases
+                if dt_d and (now - dt_d).days <= 30:
+                    savings_30d += v.get("total", 0.0)
+            except Exception:
+                continue
+                
+        avg_daily = savings_30d / 30.0 if savings_30d > 0 else 0.0
+        
+        days_rem = int(remaining / avg_daily) if avg_daily > 0 else 9999
+        payback_date = (dt_util.now() + timedelta(days=days_rem)).strftime("%Y-%m-%d") if avg_daily > 0 else "Никогда"
+
+        return {
+            "total_investment": f"{total_cost} {self._currency}",
+            "cumulative_savings": f"{round(total_saved, 2)} {self._currency}",
+            "remaining_amount": f"{round(remaining, 2)} {self._currency}",
+            "average_daily_saving": f"{round(avg_daily, 2)} {self._currency}",
+            "estimated_payback_days": days_rem,
+            "estimated_payback_date": payback_date
+        }
+
+class BatteryDegradationSensor(SensorEntity):
+    """Shows the cost of 1kWh battery throughput in terms of wear."""
+    def __init__(self, manager, name):
+        self.manager = manager
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.entry_id}_battery_degradation_cost"
+        self._attr_icon = "mdi:battery-alert"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        try:
+            self._attr_native_unit_of_measurement = f"{self.hass.config.currency}/kWh"
+        except Exception:
+            self._attr_native_unit_of_measurement = "/kWh"
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        # We show the ARBITRAGE threshold cost (2x degradation because 1 cycle = charge + discharge)
+        return round(self.manager.get_battery_degradation_cost() * 2, 4)
+
+    @property
+    def extra_state_attributes(self):
+        cost_per_kwh = self.manager.get_battery_degradation_cost()
+        batt_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
+        cycles = self.manager.get_setting(CONF_BATTERY_RATED_CYCLES, 6000)
+        
+        return {
+            "wear_cost_per_kwh_throughput": round(cost_per_kwh, 4),
+            "arbitrage_profit_threshold": round(cost_per_kwh * 2, 4),
+            "battery_investment": batt_cost,
+            "rated_cycles": cycles,
+            "note": "Арбитраж выгоден, только если разница цен покупки и продажи выше порога."
+        }
