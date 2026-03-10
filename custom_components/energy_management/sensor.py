@@ -2473,9 +2473,10 @@ class SavingsSensor(SensorEntity):
         self.category = category
         self._attr_name = name
         self._attr_unique_id = f"{manager.entry.entry_id}_savings_{category}"
-        icon, _ = self._CATEGORY_META.get(category, ("mdi:currency-eur", ""))
+        icon, _ = self._CATEGORY_META.get(category, ("mdi:cash", ""))
         self._attr_icon = icon
-        self._attr_native_unit_of_measurement = "EUR"
+        # Unit will be set in async_added_to_hass from hass.config.currency
+        self._attr_native_unit_of_measurement = "EUR"  # fallback until HA sets it
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
@@ -2485,6 +2486,13 @@ class SavingsSensor(SensorEntity):
         )
 
     async def async_added_to_hass(self):
+        # Use the currency configured in HA Settings → System → General
+        try:
+            currency = self.hass.config.currency
+            if currency:
+                self._attr_native_unit_of_measurement = currency
+        except Exception:
+            pass  # keep EUR fallback
         self.manager.register_listener(self.async_write_ha_state)
 
     def _get_summary(self):
