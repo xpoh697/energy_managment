@@ -37,6 +37,8 @@ EnergyProfileManager  (менеджер — ядро интеграции)
 │   ├── get_forecast_value()      — сумма значений прогноза генерации
 │   ├── get_current_occupancy()   — текущий подсчёт людей дома
 │   ├── get_occupancy_coefficient() — коэффициент присутствия для коррекции прогноза
+│   ├── get_occupancy_coefficient() — коэффициент присутствия для коррекции прогноза
+│   ├── get_efficiency_coefficient() — коэффициент КПД инвертора (потери DC↔AC конвертации)
 │   └── get_gen_forecast_coefficient() — масштабирование генерации по прогнозу
 │
 └── Вспомогательные
@@ -68,6 +70,7 @@ EnergyProfileManager  (менеджер — ядро интеграции)
 | `power_load_sensors` | `list[str]` | Сенсоры мгновенной нагрузки (кВт) |
 | `power_gen_sensors` | `list[str]` | Сенсоры мгновенной генерации (кВт) |
 | `presence_sensors` | `list[str]` | Датчики присутствия (`person.*`, `binary_sensor.*`) |
+| `inverter_losses_sensor` | `str` | Сенсор суммарных тепловых потерь инвертора за день (кВт·ч). Необязательно. |
 | `custom_period` | `int` | Пользовательский период усреднения (дней) |
 
 ### Настройки через сервис `number`/`switch` (хранятся в `data["settings"]`)
@@ -316,6 +319,7 @@ budget = (прогноз_генерации_скорр + энергия_бата
 | `battery_energy_kwh` | `float` | Текущая энергия батареи = SOC/100 × ёмкость |
 | `expected_consumption_until_0800_kwh` | `float` | Ожидаемое потребление с текущего часа до 08:00 следующего дня (с учётом коэффициента присутствия) |
 | `occupancy_coefficient` | `float` | Применённый коэффициент присутствия (`1.0` если никто не ушёл или нет данных) |
+| `efficiency_coefficient` | `float` | КПД инвертора — отношение (Генерация − Потери) / Генерация за period. `1.0` = сенсор не настроен или недостаточно данных. Зажат в [0.70, 1.0] |
 | `debug_actual_today` | `float` | Фактическая генерация сегодня (для отладки) |
 | `debug_expected_today_total` | `float` | Максимальный прогноз за сегодня (`temp_max_forecast`) |
 | `debug_expected_today_so_far` | `float` | Сколько из прогноза ожидалось к этому часу |
@@ -400,7 +404,8 @@ budget = (прогноз_генерации_скорр + энергия_бата
 2. Симулируется почасовое изменение SOC на 48 часов вперёд:
    - Потребление берётся из усреднённого профиля (с учётом дня недели)
    - Генерация корректируется прогнозом (`forecast_today`, `forecast_tomorrow`)
-   - При зарядке применяется кривая CC/CV
+   - При зарядке применяется кривая CC/CV: `actual_charge = min(net_solar × eff_coeff, accepted_power)`
+   - При разряде применяется учёт КПД: `soc_delta = (net_cons / eff_coeff) / capacity × 100`
 3. Возвращается час, когда SOC впервые опускается ≤ `min_soc`
 
 **Атрибуты:**
@@ -427,8 +432,8 @@ budget = (прогноз_генерации_скорр + энергия_бата
 1. Определяется час заката — последний час профиля генерации с > 0.05 кВт·ч
 2. Симулируется SOC с текущего часа до заката:
    - Прогноз генерации масштабируется по `forecast_today_remaining`
-   - Зарядка через CC/CV кривую
-   - Потребление из профиля (с учётом дня недели)
+   - Зарядка через CC/CV кривую: `actual_charge = min(net_solar × eff_coeff, accepted_power)`
+   - Потребление из профиля (с учётом дня недели): `soc_delta = (net_cons / eff_coeff) / capacity × 100`
 3. Возвращается финальный SOC в процентах
 
 **Атрибуты:**
@@ -544,8 +549,10 @@ forecast_adjusted = forecast_raw × blended
 ### Шаг 2 — Энергия батареи
 
 ```
-batt_energy = battery_capacity × (soc / 100)
+batt_energy = battery_capacity × (soc / 100) × eff_coeff
 ```
+
+Где `eff_coeff = get_efficiency_coefficient()` — коэффициент DC→AC потерь. Если не настроен — `1.0`.
 
 ### Шаг 3 — Ожидаемое потребление до 08:00
 
@@ -563,8 +570,12 @@ expected_consumption × = occupancy_coefficient
 ### Шаг 4 — Итоговый бюджет
 
 ```
-budget = forecast_adjusted + batt_energy − expected_consumption
+budget = (forecast_adjusted × eff_coeff) + batt_energy − expected_consumption
 ```
+
+Где:
+- `forecast_adjusted` — скорректированный прогноз генерации
+- `eff_coeff` — дополнительное умножение на потери инвертора (note: `batt_energy` уже умножена на `eff_coeff` на шаге 2)
 
 ### Шаг 5 — Разрешения нагрузок
 
@@ -671,4 +682,41 @@ expected_consumption *= get_occupancy_coefficient()
 
 ---
 
-*Документация актуальна для версии с коммитом `71aeddd` (10 марта 2026)*
+## Алгоритм расчёта КПД инвертора
+
+**Функция:** `get_efficiency_coefficient()`
+
+### Требования
+
+- Настроен `inverter_losses_sensor` в config
+- Накоплено ≥ 5 часов с `current_generation > 0.01` кВт·ч
+
+### Алгоритм
+
+```python
+# За custom_period дней по каждому часу:
+total_gen   = Сумма generation за период (> 0.01 кВт·ч любой час)
+total_loss  = Сумма losses за те же часы
+
+# Если меньше 5 часов с данными:
+return 1.0
+
+# Иначе:
+eff = (total_gen - total_loss) / total_gen
+return clamp(eff, 0.70, 1.0)
+```
+
+### Применение
+
+| Место | Формула |
+|------|--------|
+| `get_budget_and_permissions()` — прогноз | `forecast_adjusted × eff_coeff` |
+| `get_budget_and_permissions()` — батарея | `batt_energy = soc/100 × capacity × eff_coeff` |
+| `BatteryDepletionTimeSensor` — разряд | `soc_delta = (net_cons / eff_coeff) / capacity × 100` |
+| `BatteryDepletionTimeSensor` — заряд | `actual_charge = min(net_solar × eff_coeff, accepted_power)` |
+| `BatteryEndOfDaySOCSensor` — разряд | Аналогично Depletion |
+| `BatteryEndOfDaySOCSensor` — заряд | Аналогично Depletion |
+
+---
+
+*Документация актуальна для версии с коммитом `4375232` (10 марта 2026)*
