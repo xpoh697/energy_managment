@@ -599,7 +599,7 @@ class EnergyProfileManager:
             hist_gen_so_far = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(cur_hour))
             fraction_so_far = hist_gen_so_far / total_hist_gen
             
-        actual_today = self.data.get("temp_daily_gen", 0.0)
+        actual_today = sum(self.get_todays_profile("generation").values())
         expected_today_total = self.data.get("temp_max_forecast", 0.0)
         expected_today_so_far = expected_today_total * fraction_so_far
         
