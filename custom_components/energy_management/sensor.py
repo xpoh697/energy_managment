@@ -1775,14 +1775,19 @@ class InverterOperationModeSensor(SensorEntity):
                     net_gen_kw = max(0.0, expected_gen - expected_cons)
                     
                     # Compute max accepted charge power based on simulated SOC (CC/CV phases)
-                    if sim_soc < 80.0:
-                        accepted_power_kw = max_batt_power             # CC Phase: Full power
-                    elif sim_soc < 90.0:
-                        accepted_power_kw = max_batt_power * 0.5       # CV Phase 1
-                    elif sim_soc < 95.0:
-                        accepted_power_kw = max_batt_power * 0.25      # CV Phase 2
+                    if sim_soc <= 85.0:
+                        ratio = 1.0
+                    elif sim_soc <= 92.0:
+                        ratio = 1.0 - ((sim_soc - 85.0) / 7.0) * 0.3
+                    elif sim_soc <= 97.0:
+                        ratio = 0.7 - ((sim_soc - 92.0) / 5.0) * 0.5
+                    elif sim_soc <= 98.0:
+                        ratio = 0.2 - ((sim_soc - 97.0) / 1.0) * 0.1
                     else:
-                        accepted_power_kw = max_batt_power * 0.1       # Final trickle
+                        ratio = 0.1 - ((sim_soc - 98.0) / 2.0) * 0.08
+                        
+                    ratio = max(0.02, min(1.0, ratio))
+                    accepted_power_kw = max_batt_power * ratio
                         
                     # How much energy can we physically push in this hour?
                     actual_charge_kw = min(net_gen_kw, accepted_power_kw)
