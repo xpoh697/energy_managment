@@ -2504,7 +2504,7 @@ class SavingsSensor(SensorEntity):
     def extra_state_attributes(self):
         s = self._get_summary()
         _, description = self._CATEGORY_META.get(self.category, ("mdi:currency-eur", ""))
-        return {
+        attrs = {
             "description":    description,
             "today":          s["today"],
             "yesterday":      s["yesterday"],
@@ -2514,3 +2514,25 @@ class SavingsSensor(SensorEntity):
             "monthly_totals": s["monthly_totals"],
             "daily_history":  s["daily_history"],
         }
+        
+        # If this is the unified sensor, show the component breakdown for today/yesterday
+        if self.category == "total":
+            now = dt_util.now()
+            today_str = now.strftime("%Y-%m-%d")
+            yest_str  = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+            
+            savings_store = self.manager.data.get("savings", {})
+            t_data = savings_store.get(today_str, {})
+            y_data = savings_store.get(yest_str,  {})
+            
+            attrs.update({
+                "solar_benefit_today":     round(t_data.get("solar", 0.0), 4),
+                "arbitrage_benefit_today": round(t_data.get("arbitrage", 0.0), 4),
+                "sell_benefit_today":      round(t_data.get("sell", 0.0), 4),
+                
+                "solar_benefit_yesterday":     round(y_data.get("solar", 0.0), 4),
+                "arbitrage_benefit_yesterday": round(y_data.get("arbitrage", 0.0), 4),
+                "sell_benefit_yesterday":      round(y_data.get("sell", 0.0), 4),
+            })
+            
+        return attrs
