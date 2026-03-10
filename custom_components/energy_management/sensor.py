@@ -572,17 +572,37 @@ class EnergyProfileManager:
                     forecast_val += val
             self.data["temp_max_forecast"] = max(self.data.get("temp_max_forecast", 0.0), forecast_val)
                 
-        # Calculate Reliability Coefficient
-        coeff = 1.0
+        # Calculate Historical Reliability Coefficient
+        hist_coeff = 1.0
         history = self.data.get("forecast_history", [])
         if history:
             tot_actual = sum(h["actual"] for h in history)
             tot_expected = sum(h["forecast"] for h in history)
             if tot_expected > 0.1:
-                coeff = tot_actual / tot_expected
-                coeff = max(0.2, min(coeff, 2.0)) # Clamp coefficient manually between 0.2 and 2.0
+                hist_coeff = tot_actual / tot_expected
+                hist_coeff = max(0.2, min(hist_coeff, 2.0)) # Clamp coefficient manually between 0.2 and 2.0
                 
-        forecast_val_adjusted = forecast_val * coeff
+        # Calculate Intra-day Dynamic Coefficient (Blended)
+        prof_gen_today = self.get_average_profile("generation", days_for_profile, "all")
+        total_hist_gen = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(24))
+        
+        fraction_so_far = 0.0
+        if total_hist_gen > 0.1:
+            hist_gen_so_far = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(cur_hour))
+            fraction_so_far = hist_gen_so_far / total_hist_gen
+            
+        actual_today = self.data.get("temp_daily_gen", 0.0)
+        expected_today_total = self.data.get("temp_max_forecast", 0.0)
+        expected_today_so_far = expected_today_total * fraction_so_far
+        
+        today_coeff = hist_coeff
+        if expected_today_so_far > 0.1:
+            today_coeff = actual_today / expected_today_so_far
+            today_coeff = max(0.2, min(today_coeff, 2.0))
+            
+        blended_coeff = (today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far))
+                
+        forecast_val_adjusted = forecast_val * blended_coeff
                 
         # 2. Get Battery Energy Available
         batt_energy_val = 0.0
@@ -650,7 +670,7 @@ class EnergyProfileManager:
             except ValueError:
                 cur_price_sell = None
             
-        prof_gen_today = self.get_average_profile("generation", days_for_profile, "all")
+        # prof_gen_today is already calculated above for the coefficient blending
         cur_expected_gen = float(prof_gen_today.get(str(cur_hour), 0.0))
         sun_state = self.hass.states.get("sun.sun")
         is_sun_up = sun_state and sun_state.state == "above_horizon"
@@ -752,7 +772,7 @@ class EnergyProfileManager:
             "permissions_reasons": permissions_reasons,
             "forecast_val": forecast_val_adjusted,
             "forecast_raw": forecast_val,
-            "forecast_coefficient": coeff,
+            "forecast_coefficient": blended_coeff,
             "batt_energy_val": batt_energy_val,
             "expected_consumption": expected_consumption
         }
