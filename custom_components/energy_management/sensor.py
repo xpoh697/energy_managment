@@ -920,7 +920,7 @@ class EnergyProfileManager:
     async def async_set_setting(self, key, value):
         self.settings[key] = value
         self.data["settings"] = self.settings
-        await self.store.async_save(self.data)
+        await self.async_save()
         self._notify_update()
 
     def _is_currently_pulling_power(self, sensor_id: str) -> bool:
