@@ -219,7 +219,8 @@ class EnergyProfileManager:
         self.learned_real_power = {}      # sensor_id -> watts
         self.learned_avg_cycle_power = {} # sensor_id -> watts (smoothed over entire cycle)
         self.learned_cycle_total_kwh = {} # sensor_id -> kWh total per cycle
-        self.cycle_start_time = {}        # sensor_id -> timestamp (when it last exceeded standby)
+        self.cycle_start_time = {}        # sensor_id -> timestamp (when it was LAST seen active)
+        self.cycle_actual_start_time = {} # sensor_id -> timestamp (when current cycle REALLY started)
         self.cycle_energy_start = {}      # sensor_id -> kWh consumed at cycle start
         self.last_known_power = {}        # sensor_id -> watts (for fallback)
         # Sensors that need to re-establish a baseline on first read after restart
@@ -397,6 +398,59 @@ class EnergyProfileManager:
         # Prune older than 10 minutes
         cutoff = now - timedelta(minutes=10)
         self.power_history = [x for x in self.power_history if x["time"] >= cutoff]
+
+        # --- Power Learning & Cycle Tracking ---
+        for sensor_id, settings in self.deduct_settings.items():
+            if not isinstance(settings, dict): continue
+            p_entity = settings.get(CONF_POWER_SENSOR)
+            if not p_entity: continue
+            
+            p_state = self.hass.states.get(p_entity)
+            if not p_state or p_state.state in ("unknown", "unavailable"): continue
+            
+            try:
+                cur_p = float(str(p_state.state).replace(',', '.'))
+                if p_state.attributes.get("unit_of_measurement") == "kW":
+                    cur_p *= 1000.0
+                self.last_known_power[sensor_id] = cur_p
+            except ValueError: continue
+
+            standby = self.learned_standby_power.get(sensor_id, 15.0)
+            is_active = cur_p > (standby + 10.0)
+
+            if is_active:
+                # Still active -> push forward the "last seen active" time for grace period
+                self.cycle_start_time[sensor_id] = now
+                
+                # If this is the start of a new cycle
+                if sensor_id not in self.cycle_actual_start_time:
+                    self.cycle_actual_start_time[sensor_id] = now
+                    self.cycle_energy_start[sensor_id] = self.daily_deduct_consumption.get(sensor_id, 0.0)
+                
+                # Active Power Learning (EMA)
+                old_real = self.learned_real_power.get(sensor_id, cur_p)
+                self.learned_real_power[sensor_id] = round(old_real * 0.9 + cur_p * 0.1, 1)
+            else:
+                # Standby Power Learning (Slow EMA)
+                if 0.1 < cur_p < (standby + 5.0):
+                    old_s = self.learned_standby_power.get(sensor_id, cur_p)
+                    self.learned_standby_power[sensor_id] = round(old_s * 0.95 + cur_p * 0.05, 2)
+                    
+                # If we just finished a cycle
+                if sensor_id in self.cycle_actual_start_time:
+                    duration = (now - self.cycle_actual_start_time[sensor_id]).total_seconds() / 3600.0
+                    energy = self.daily_deduct_consumption.get(sensor_id, 0.0) - self.cycle_energy_start.get(sensor_id, 0.0)
+                    
+                    if energy > 0.02 and duration > (1/60.0): # At least 20Wh and 1 minute
+                        avg_p_w = (energy * 1000.0) / duration
+                        self.learned_real_power[sensor_id] = round(avg_p_w, 1)
+                        if settings.get(CONF_IS_CYCLIC):
+                            self.learned_cycle_total_kwh[sensor_id] = round(energy, 3)
+                            self.learned_avg_cycle_power[sensor_id] = round(avg_p_w, 1)
+                    
+                    self.cycle_actual_start_time.pop(sensor_id, None)
+                    self.cycle_energy_start.pop(sensor_id, None)
+
         self._notify_update()
 
     @property
@@ -1291,56 +1345,13 @@ class EnergyProfileManager:
                 else:
                     cur_p_watts = self.last_known_power.get(sensor_id, 0.0)
 
-            # 1. Update Standby Learning (only if not running)
-            if sensor_id in permissions and not permissions[sensor_id]:
-                if 0.1 < cur_p_watts < 100.0:
-                    old_standby = self.learned_standby_power.get(sensor_id, 15.0)
-                    self.learned_standby_power[sensor_id] = (old_standby * 0.99) + (cur_p_watts * 0.01)
-
-            # 2. Cycle Detection (start/update peak)
-            standby_threshold = self.learned_standby_power.get(sensor_id, 15.0)
-            is_currently_pulling_power = cur_p_watts > (standby_threshold + 10.0)
-            
-            if is_currently_pulling_power:
-                if sensor_id not in self.cycle_start_time:
-                    self.cycle_start_time[sensor_id] = now
-                    if p_sensor:
-                        st = self.hass.states.get(p_sensor)
-                        if st and st.state not in ("unknown", "unavailable"):
-                            try: self.cycle_energy_start[sensor_id] = float(st.state)
-                            except ValueError: pass
-
-                if cur_p_watts > self.learned_real_power.get(sensor_id, 0.0):
-                    old_peak = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0)
-                    self.learned_real_power[sensor_id] = (old_peak * 0.9) + (cur_p_watts * 0.1)
-            
-            elif sensor_id in self.cycle_start_time:
-                # Device stopped check
-                diff_sec = (now - self.cycle_start_time[sensor_id]).total_seconds()
-                if diff_sec > (float(hold_time_min) * 60):
-                    start_t = self.cycle_start_time.pop(sensor_id)
-                    dur_h = (now - start_t).total_seconds() / 3600.0
-                    e_start = self.cycle_energy_start.pop(sensor_id, None)
-                    if e_start is not None and p_sensor:
-                        st = self.hass.states.get(p_sensor)
-                        if st and st.state not in ("unknown", "unavailable"):
-                            try:
-                                kwh_tot = max(0.0, float(st.state) - e_start)
-                                if kwh_tot > 0.01:
-                                    self.learned_cycle_total_kwh[sensor_id] = (self.learned_cycle_total_kwh.get(sensor_id, kwh_tot) * 0.7) + (kwh_tot * 0.3)
-                                    if dur_h > 0.05:
-                                        avg_p = (kwh_tot / dur_h) * 1000.0
-                                        peak = self.learned_real_power.get(sensor_id, avg_p)
-                                        avg_p = min(avg_p, peak)
-                                        self.learned_avg_cycle_power[sensor_id] = (self.learned_avg_cycle_power.get(sensor_id, avg_p) * 0.7) + (avg_p * 0.3)
-                            except ValueError: pass
-
             req_kwh = settings.get("required_kwh", 2.5)
             req_kw = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
             consumed = self.daily_deduct_consumption.get(sensor_id, 0.0)
             
             # is_idle = NOT in active cycle (it's a candidate to START)
-            is_idle = not is_currently_pulling_power
+            is_currently_pulling_now = self._is_currently_pulling_power(sensor_id)
+            is_idle = not is_currently_pulling_now
             
             power_bottleneck = False
             gen_bottleneck = False
