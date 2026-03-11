@@ -1129,9 +1129,11 @@ class EnergyProfileManager:
             avg_gen_kw = sum(x["gen_kw"] for x in self.power_history) / len(self.power_history)
 
         available_gen_kw = avg_gen_kw
-        # available_power_kw tracks remaining power capacity in kW (same units as req_kw)
-        # Initialize from avg generation; clamped to a minimum to allow non-solar devices to work
-        available_power_kw = max(avg_gen_kw, float(available_budget))  # budget in kWh used as rough kW proxy
+        # available_power_kw starts at avg solar gen.
+        # Active devices will deduct from it using their ACTUAL current power draw.
+        # Other devices check against what's left.
+        available_power_kw = avg_gen_kw
+        initial_power_kw = avg_gen_kw
 
         for sensor_id, settings in sorted_sensors:
             if is_export_peak:
@@ -1234,44 +1236,51 @@ class EnergyProfileManager:
                             is_in_grace_period = False
 
             req_kwh = settings.get("required_kwh", 2.5)
-            # Use learned power if available, otherwise user setting
+            # Use learned peak power if available, otherwise user setting
             req_kw = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
-            
+
             consumed = self.daily_deduct_consumption.get(sensor_id, 0.0)
-            
-            # If device is NOT pulling power and NOT in grace period, it's effectively "Idle"
-            # It still takes Energy budget (kWh) but doesn't block other devices by Power (kW)
+
+            # is_idle = device is NOT currently running and NOT in grace period
+            # (it's a candidate TO START, not exempt from checks)
             is_idle = not is_currently_pulling_power and not is_in_grace_period
-            
+
             power_bottleneck = False
             gen_bottleneck = False
             is_free_price = cur_price_buy is not None and cur_price_buy <= 0.0
-            
-            if req_kw > 0.0 and not is_idle:
-                # Power bottleneck: check against available_power_kw (kW vs kW — correct units)
-                if available_power_kw < req_kw:
-                    power_bottleneck = True
-                # Gen bottleneck: only for solar-only devices
-                if only_solar_free and not is_free_price:
-                    if available_gen_kw < (req_kw * 0.6):
-                        gen_bottleneck = True
-            
+
+            # Power bottleneck logic:
+            # - Grace period / active devices: already running, we track their actual power
+            # - Idle devices wanting to START: check if there's room for req_kw
+            if not is_in_grace_period:
+                if req_kw > 0.0:
+                    if available_power_kw < req_kw:
+                        power_bottleneck = True
+                    if only_solar_free and not is_free_price:
+                        if available_gen_kw < (req_kw * 0.6):
+                            gen_bottleneck = True
+                else:
+                    # req_kw unknown: block if gen pool is clearly depleted
+                    if initial_power_kw > 0.5 and available_power_kw < 0:
+                        power_bottleneck = True
+
             # ------------------------------
 
             if is_in_grace_period:
                 permissions[sensor_id] = True
                 permissions_reasons[sensor_id] = "Разрешено: Удержание активного цикла (Grace Period)"
-                # IMPORTANT: Device is actively consuming — deduct from ALL power pools
-                if req_kw > 0.0:
-                    available_power_kw -= req_kw  # Reduce available power for others
-                    available_gen_kw -= req_kw    # Reduce available solar for solar-only devices
-                    available_budget -= req_kw    # Reduce energy budget (approximation)
+                # Use ACTUAL current watts for deduction (more accurate than learned req_kw)
+                active_kw = (cur_p_watts / 1000.0) if cur_p_watts > 0 else req_kw
+                if active_kw > 0.0:
+                    available_power_kw -= active_kw
+                    available_gen_kw -= active_kw
+                    available_budget -= active_kw
                 continue
 
+            # Idle device: goes through full budget + power checks (NOT auto-approved)
             if is_idle:
-                permissions[sensor_id] = True
-                permissions_reasons[sensor_id] = "Разрешено: Режим ожидания (нагрузка не обнаружена)"
-                continue
+                # Fall through to req_kwh / req_kw checks below
+                pass
 
             if req_kwh == 0:
                 if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
