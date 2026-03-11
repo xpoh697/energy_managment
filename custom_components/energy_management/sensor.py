@@ -122,14 +122,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(InstantPowerAveragedSensor(manager, "load"))
         entities.append(InstantPowerAveragedSensor(manager, "gen"))
 
-    # Create individual Permission sensors for each managed load device
-    deduct_settings = config_data.get(CONF_DEDUCT_SETTINGS) or {}
-    if isinstance(deduct_settings, dict):
-        for s_id, s_settings in deduct_settings.items():
-            if isinstance(s_settings, dict):
-                device_name = s_settings.get("name") or s_id.split(".")[-1].replace("_", " ").title()
-                entities.append(AppliancePermissionSensor(manager, s_id, device_name, custom_period))
-
     async_add_entities(entities)
 
 def _get_kwh_val(state_obj):
@@ -1264,6 +1256,11 @@ class EnergyProfileManager:
             if is_in_grace_period:
                 permissions[sensor_id] = True
                 permissions_reasons[sensor_id] = "Разрешено: Удержание активного цикла (Grace Period)"
+                # IMPORTANT: Device is actively consuming power — deduct from shared budget
+                if req_kw > 0.0:
+                    available_budget -= req_kw
+                    if only_solar_free and not is_free_price:
+                        available_gen_kw -= (req_kw * 0.6)
                 continue
 
             if is_idle:
