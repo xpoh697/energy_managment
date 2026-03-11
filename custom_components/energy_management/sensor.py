@@ -614,10 +614,9 @@ class EnergyProfileManager:
                 del self.data["savings"][sorted(self.data["savings"].keys())[0]]
         # ── End savings tracking ───────────────────────────────────────────────
 
-        # Save to internal filesystem
-        await self.async_save()
-        
-        # Reset counters
+        # Reset counters BEFORE saving, so that the saved accumulators reflect
+        # the NEW hour (zeroed out). This prevents double-counting if HA restarts:
+        # the old hour's data is already committed to the profile history above.
         self.current_consumption_base = 0.0
         self.current_consumption_total = 0.0
         self.current_generation = 0.0
@@ -650,6 +649,11 @@ class EnergyProfileManager:
             # Reset day temps
             self.data["temp_daily_gen"] = 0.0
             self.data["temp_max_forecast"] = 0.0
+
+        # Save to internal filesystem AFTER all resets
+        # This ensures that saved accumulators = 0, saved daily_deduct is fresh,
+        # and sensor_last_values reflect the latest readings at the hour boundary.
+        await self.async_save()
         
         self._notify_update()
 
