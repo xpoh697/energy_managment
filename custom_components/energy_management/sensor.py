@@ -402,22 +402,36 @@ class EnergyProfileManager:
             return
             
         old_val = self.sensor_last_values.get(entity_id)
+        is_restarting = entity_id in self._sensors_need_baseline
+        self._sensors_need_baseline.discard(entity_id)
         
         # Protective logic:
-        # On first read (new sensor), or first read after restart (need_baseline set),
-        # just establish a baseline. DO NOT count accumulated offline delta.
-        if old_val is None or entity_id in self._sensors_need_baseline:
+        # On first read ever (new sensor), just establish a baseline. 
+        if old_val is None:
             self.sensor_last_values[entity_id] = new_val
-            self._sensors_need_baseline.discard(entity_id)
             return
             
         delta = new_val - old_val
         
         if delta < 0:
             # The sensor reset its internal counter (e.g. daily/monthly reset on the device).
-            # Usually the new delta is just the new value. BUT if new_val is massive out of nowhere,
-            # that means the old_val was somehow 0 or broken.
+            # Usually the new delta is just the new value. 
             delta = new_val
+
+        # If it is the first read after restart, the delta might be large (accumulated while HA was down).
+        # We count it towards the DAILY TOTAL (for budget and forecast) but NOT towards the HOURLY PROFILE
+        # to avoid massive visual spikes in the charts (satisfying both data accuracy and UI aesthetics).
+        if is_restarting:
+            if delta > 0 and delta < 50.0:
+                if entity_id in self.generation_sensors:
+                    self.data["temp_daily_gen"] = self.data.get("temp_daily_gen", 0.0) + delta
+                if entity_id in self.deduct_sensors:
+                    if entity_id not in self.daily_deduct_consumption:
+                        self.daily_deduct_consumption[entity_id] = 0.0
+                    self.daily_deduct_consumption[entity_id] += delta
+            # We updated the daily totals, but we skip the hourly accumulators (current_generation etc.)
+            self.sensor_last_values[entity_id] = new_val
+            return
             
         if delta > 100.0:
             # If the calculated delta is impossible for a 1-minute HA tick (100 kWh = 6000 kW power),
@@ -1030,7 +1044,8 @@ class EnergyProfileManager:
             hist_gen_so_far = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(cur_hour))
             fraction_so_far = hist_gen_so_far / total_hist_gen
             
-        actual_today = sum(self.get_todays_profile("generation").values())
+        # Today's actual is taken from the daily accumulator (resilient to restart gaps)
+        actual_today = self.data.get("temp_daily_gen", 0.0)
         expected_today_total = self.data.get("temp_max_forecast", 0.0)
         expected_today_so_far = expected_today_total * fraction_so_far
         
