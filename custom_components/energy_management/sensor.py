@@ -122,6 +122,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(InstantPowerAveragedSensor(manager, "load"))
         entities.append(InstantPowerAveragedSensor(manager, "gen"))
 
+    # Create individual Permission sensors for each managed load device
+    deduct_settings = config_data.get(CONF_DEDUCT_SETTINGS) or {}
+    if isinstance(deduct_settings, dict):
+        for s_id, s_settings in deduct_settings.items():
+            if isinstance(s_settings, dict):
+                device_name = s_settings.get("name") or s_id.split(".")[-1].replace("_", " ").title()
+                entities.append(AppliancePermissionSensor(manager, s_id, device_name, custom_period))
+
     async_add_entities(entities)
 
 def _get_kwh_val(state_obj):
@@ -912,6 +920,27 @@ class EnergyProfileManager:
         self.data["settings"] = self.settings
         await self.store.async_save(self.data)
         self._notify_update()
+
+    def _is_currently_pulling_power(self, sensor_id: str) -> bool:
+        """Return True if the device currently has an active cycle (pulling power above standby)."""
+        if sensor_id not in self.cycle_start_time:
+            return False
+        settings = self.deduct_settings.get(sensor_id, {})
+        p_sensor = settings.get(CONF_POWER_SENSOR) if isinstance(settings, dict) else None
+        if not p_sensor:
+            # No power sensor configured — assume active if in cycle_start_time
+            return True
+        p_state = self.hass.states.get(p_sensor)
+        if not p_state or p_state.state in ("unknown", "unavailable"):
+            return True  # Keep as active if sensor unavailable (use last known state)
+        try:
+            cur_p = float(str(p_state.state).replace(',', '.'))
+            if p_state.attributes.get("unit_of_measurement") == "kW":
+                cur_p *= 1000.0
+        except ValueError:
+            return True
+        standby = self.learned_standby_power.get(sensor_id, 15.0)
+        return cur_p > (standby + 10.0)
 
     def get_sensor_float(self, entity_id, default=0.0):
         """Read a float value from a sensor entity."""
@@ -2950,4 +2979,68 @@ class BatteryDegradationSensor(SensorEntity):
             "battery_investment": batt_cost,
             "rated_cycles": cycles,
             "note": "arbitrage_note"
+        }
+
+
+class AppliancePermissionSensor(SensorEntity):
+    """Binary-style sensor showing allowed/blocked state for a single managed device."""
+
+    def __init__(self, manager, sensor_id: str, device_name: str, days_for_profile: int):
+        self.manager = manager
+        self._sensor_id = sensor_id
+        self._device_name = device_name
+        self._days_for_profile = days_for_profile
+        self._attr_name = f"Разрешение: {device_name}"
+        safe_id = sensor_id.replace(".", "_")
+        self._attr_unique_id = f"{manager.entry.entry_id}_permission_{safe_id}"
+        self._attr_icon = "mdi:check-circle-outline"
+        self._state = "Неизвестно"
+        self._attrs = {}
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        self._update()
+        return self._state
+
+    @property
+    def extra_state_attributes(self):
+        return self._attrs
+
+    def _update(self):
+        res = self.manager.get_budget_and_permissions(self._days_for_profile)
+        permissions = res.get("permissions", {})
+        reasons = res.get("permissions_reasons", {})
+        settings = self.manager.deduct_settings.get(self._sensor_id, {})
+
+        allowed = permissions.get(self._sensor_id, False)
+        self._state = "Разрешено" if allowed else "Блокировка"
+        self._attr_icon = "mdi:check-circle" if allowed else "mdi:cancel"
+
+        self._attrs = {
+            "controlled_entity_id": self._sensor_id,
+            "priority": settings.get("priority", "?"),
+            "target_required_kwh": settings.get("required_kwh", 0.0),
+            "already_consumed_today_kwh": round(
+                self.manager.daily_deduct_consumption.get(self._sensor_id, 0.0), 3
+            ),
+            "estimated_initial_budget_kwh": round(res.get("initial_budget", 0.0), 3),
+            "forecast_correction_coefficient": round(res.get("forecast_coefficient", 1.0), 3),
+            "is_cyclic": settings.get("is_cyclic", False),
+            "learned_avg_cycle_power_w": round(
+                self.manager.learned_avg_cycle_power.get(self._sensor_id, 0.0), 1
+            ),
+            "learned_cycle_total_kwh": round(
+                self.manager.learned_cycle_total_kwh.get(self._sensor_id, 0.0), 3
+            ),
+            "reason": reasons.get(self._sensor_id, "Нет данных"),
         }
