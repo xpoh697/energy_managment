@@ -221,6 +221,9 @@ class EnergyProfileManager:
         self.cycle_start_time = {}        # sensor_id -> timestamp (when it last exceeded standby)
         self.cycle_energy_start = {}      # sensor_id -> kWh consumed at cycle start
         self.last_known_power = {}        # sensor_id -> watts (for fallback)
+        # Sensors that need to re-establish a baseline on first read after restart
+        # (prevents large accumulated deltas from being counted as generation/consumption)
+        self._sensors_need_baseline: set = set()
 
     def set_max_days(self, days):
         self.max_days = days
@@ -276,6 +279,9 @@ class EnergyProfileManager:
             self.data["savings"] = {}  # {"YYYY-MM-DD": {"solar": x, "arbitrage": x, "sell": x}}
             
         self.sensor_last_values = self.data.get("sensor_last_values", {})
+        # Mark ALL known sensors as needing a fresh baseline on first reading.
+        # This prevents restart delta spikes when HA was offline while sensors accumulated data.
+        self._sensors_need_baseline = set(self.sensor_last_values.keys())
 
     async def async_save(self):
         self.data["learned_standby_power"] = self.learned_standby_power
@@ -397,10 +403,11 @@ class EnergyProfileManager:
         old_val = self.sensor_last_values.get(entity_id)
         
         # Protective logic:
-        # If this is the absolute FIRST time we see a value, we just record it 
-        # as the baseline and exit. DO NOT ADD it to delta.
-        if old_val is None:
+        # On first read (new sensor), or first read after restart (need_baseline set),
+        # just establish a baseline. DO NOT count accumulated offline delta.
+        if old_val is None or entity_id in self._sensors_need_baseline:
             self.sensor_last_values[entity_id] = new_val
+            self._sensors_need_baseline.discard(entity_id)
             return
             
         delta = new_val - old_val
