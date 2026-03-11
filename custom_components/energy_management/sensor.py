@@ -1249,11 +1249,12 @@ class EnergyProfileManager:
 
         if mode == "buy":
             limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
-            limit_used = limit
+            res["limit_used"] = limit
             if negative_hours:
                 # Carte blanche: we buy whenever price is negative, ignore windows
                 target_hours = negative_hours
                 target_price = min([all_prices[h] for h in negative_hours])
+                res["target_price"] = target_price
                 carte_blanche = True
             else:
                 peaks_today = get_peaks(window_today, False, limit, tolerance)
@@ -1262,10 +1263,11 @@ class EnergyProfileManager:
                 if combined:
                     target_hours = [h for h, p in combined]
                     target_price = min(p for h, p in combined)
+                    res["target_price"] = target_price
 
         else: # sell
             limit = self.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
-            limit_used = limit
+            res["limit_used"] = limit
             if negative_hours and cur_hour in negative_hours:
                 # If price is negative today, we PAY to sell to the grid. NEVER SELL.
                 res["state"] = "price_limit_not_met"
@@ -1352,6 +1354,8 @@ class EnergyProfileManager:
             elif peaks_tom:
                 target_hours = [h for h, p in peaks_tom]
                 target_price = max(p for h, p in peaks_tom)
+            
+            res["target_price"] = target_price
 
         # Update target_price to reflect only the upcoming peak block (so we don't show tomorrow's price while today's peak is still expected)
         future_hours = [h for h in target_hours if h >= cur_hour]
@@ -1365,6 +1369,7 @@ class EnergyProfileManager:
                 target_price = min(all_prices[h] for h in rel_hours)
             else:
                 target_price = max(all_prices[h] for h in rel_hours)
+            res["target_price"] = target_price
 
         # Filter out past hours ONLY from the final execution command, so we don't return past periods
         target_hours = future_hours
