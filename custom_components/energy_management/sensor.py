@@ -736,6 +736,16 @@ class EnergyProfileManager:
             self.data["temp_daily_gen"] = 0.0
             self.data["temp_max_forecast"] = 0.0
 
+            # Prune historical prices to keep storage file small
+            # We keep only yesterday, today, and any future forecasts
+            yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+            for p_key in ["prices_buy", "prices_sell"]:
+                if p_key in self.data:
+                    store = self.data[p_key]
+                    to_delete = [d for d in store.keys() if d < yesterday_str]
+                    for d in to_delete:
+                        del store[d]
+
         # Save to internal filesystem AFTER all resets
         # This ensures that saved accumulators = 0, saved daily_deduct is fresh,
         # and sensor_last_values reflect the latest readings at the hour boundary.
