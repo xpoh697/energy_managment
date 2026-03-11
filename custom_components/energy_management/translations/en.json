@@ -97,10 +97,18 @@
     "sensor": {
       "battery_degradation": {
         "state_attributes": {
-          "wear_cost_per_kwh_throughput": { "name": "Wear cost per kWh (throughput)" },
-          "arbitrage_profit_threshold": { "name": "Arbitrage profit threshold" },
-          "battery_investment": { "name": "Battery investment" },
-          "rated_cycles": { "name": "Rated cycles" },
+          "wear_cost_per_kwh_throughput": {
+            "name": "Wear cost per kWh (throughput)"
+          },
+          "arbitrage_profit_threshold": {
+            "name": "Arbitrage profit threshold"
+          },
+          "battery_investment": {
+            "name": "Battery investment"
+          },
+          "rated_cycles": {
+            "name": "Rated cycles"
+          },
           "note": {
             "name": "Note",
             "state": {
@@ -111,11 +119,21 @@
       },
       "payback": {
         "state_attributes": {
-          "total_investment": { "name": "Total investment" },
-          "cumulative_savings": { "name": "Cumulative savings" },
-          "remaining_amount": { "name": "Remaining amount" },
-          "average_daily_saving": { "name": "Average daily saving" },
-          "estimated_payback_days": { "name": "Estimated payback days" },
+          "total_investment": {
+            "name": "Total investment"
+          },
+          "cumulative_savings": {
+            "name": "Cumulative savings"
+          },
+          "remaining_amount": {
+            "name": "Remaining amount"
+          },
+          "average_daily_saving": {
+            "name": "Average daily saving"
+          },
+          "estimated_payback_days": {
+            "name": "Estimated payback days"
+          },
           "estimated_payback_date": {
             "name": "Estimated payback date",
             "state": {
@@ -133,10 +151,18 @@
               "anomaly_high_consumption": "Anomaly: High Consumption"
             }
           },
-          "expected_kw": { "name": "Expected load (kW)" },
-          "actual_kw": { "name": "Actual load (kW)" },
-          "threshold_multiplier": { "name": "Threshold multiplier" },
-          "anomaly_detected": { "name": "Anomaly detected" }
+          "expected_kw": {
+            "name": "Expected load (kW)"
+          },
+          "actual_kw": {
+            "name": "Actual load (kW)"
+          },
+          "threshold_multiplier": {
+            "name": "Threshold multiplier"
+          },
+          "anomaly_detected": {
+            "name": "Anomaly detected"
+          }
         }
       }
     }

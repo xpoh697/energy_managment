@@ -1139,12 +1139,63 @@ class EnergyProfileManager:
             avg_gen_kw = sum(x["gen_kw"] for x in self.power_history) / len(self.power_history)
 
         available_gen_kw = avg_gen_kw
-        # available_power_kw starts at avg solar gen.
-        # Active devices will deduct from it using their ACTUAL current power draw.
-        # Other devices check against what's left.
         available_power_kw = avg_gen_kw
         initial_power_kw = avg_gen_kw
 
+        # Pass 1: Pre-detect and commit resources for active cycles (Grace Period)
+        committed_sensors = {}
+        
+        for sensor_id, settings in sorted_sensors:
+            # We need to perform the same cycle/grace detection as in the main loop
+            p_sensor = settings.get(CONF_POWER_SENSOR)
+            hold_time_min = settings.get(CONF_ACTIVE_HOLD_TIME, 15)
+            
+            cur_p_watts = 0.0
+            if p_sensor:
+                p_state = self.hass.states.get(p_sensor)
+                if p_state and p_state.state not in ("unknown", "unavailable"):
+                    try:
+                        cur_p_watts = float(str(p_state.state).replace(',', '.'))
+                        if p_state.attributes.get("unit_of_measurement") == "kW":
+                            cur_p_watts *= 1000.0
+                    except ValueError: pass
+
+            standby_threshold = self.learned_standby_power.get(sensor_id, 15.0)
+            is_currently_pulling_power = cur_p_watts > (standby_threshold + 10.0)
+            
+            is_cyclic = settings.get(CONF_IS_CYCLIC, False)
+            curr_cycle_kwh = 0.0
+            if sensor_id in self.cycle_energy_start and p_sensor:
+                st = self.hass.states.get(p_sensor)
+                if st and st.state not in ("unknown", "unavailable"):
+                    try: curr_cycle_kwh = max(0.0, float(st.state) - self.cycle_energy_start[sensor_id])
+                    except ValueError: pass
+
+            is_in_grace_period = False
+            if sensor_id in self.cycle_start_time:
+                diff = (now - self.cycle_start_time[sensor_id]).total_seconds()
+                if diff < (float(hold_time_min) * 60):
+                    is_in_grace_period = True
+                    if is_cyclic and sensor_id in self.learned_cycle_total_kwh:
+                        if curr_cycle_kwh >= (self.learned_cycle_total_kwh[sensor_id] * 1.05):
+                            is_in_grace_period = False
+
+            if is_in_grace_period:
+                req_kw = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
+                active_kw = (cur_p_watts / 1000.0) if cur_p_watts > 10.0 else req_kw
+                
+                # Commit resources
+                available_power_kw -= active_kw
+                available_gen_kw -= active_kw
+                available_budget -= active_kw
+                
+                committed_sensors[sensor_id] = {
+                    "is_in_grace_period": True,
+                    "active_kw": active_kw,
+                    "cur_p_watts": cur_p_watts
+                }
+
+        # Pass 2: Evaluate candidate loads in priority order
         for sensor_id, settings in sorted_sensors:
             if is_export_peak:
                 permissions[sensor_id] = False
@@ -1157,7 +1208,13 @@ class EnergyProfileManager:
                 permissions_reasons[sensor_id] = "Блокировка: Ограничение 'Только от солнца или Цена <= 0'"
                 continue
                 
-            # --- New Power Sensor Logic ---
+            # If already committed in Pass 1
+            if sensor_id in committed_sensors:
+                permissions[sensor_id] = True
+                permissions_reasons[sensor_id] = "Разрешено: Удержание активного цикла (Grace Period)"
+                continue
+
+            # Full evaluation for all other (idle or non-grace) sensors
             p_sensor = settings.get(CONF_POWER_SENSOR)
             hold_time_min = settings.get(CONF_ACTIVE_HOLD_TIME, 15)
             
@@ -1167,7 +1224,6 @@ class EnergyProfileManager:
                 if p_state and p_state.state not in ("unknown", "unavailable"):
                     try:
                         cur_p_watts = float(str(p_state.state).replace(',', '.'))
-                        # Normalize to Watts if it's in kW
                         if p_state.attributes.get("unit_of_measurement") == "kW":
                             cur_p_watts *= 1000.0
                         self.last_known_power[sensor_id] = cur_p_watts
@@ -1176,23 +1232,19 @@ class EnergyProfileManager:
                 else:
                     cur_p_watts = self.last_known_power.get(sensor_id, 0.0)
 
-            # 1. Update Standby Learning
-            # If we know the device was supposed to be OFF (no permission from last cycle),
-            # we use current power to learn its standby floor.
+            # 1. Update Standby Learning (only if not running)
             if sensor_id in permissions and not permissions[sensor_id]:
-                if 0.1 < cur_p_watts < 100.0: # Standby usually isn't 0, but shouldn't be high
+                if 0.1 < cur_p_watts < 100.0:
                     old_standby = self.learned_standby_power.get(sensor_id, 15.0)
-                    # Very slow filter for standby (1% adjustment) to ignore short spikes
                     self.learned_standby_power[sensor_id] = (old_standby * 0.99) + (cur_p_watts * 0.01)
 
-            # 2. Cycle Detection
+            # 2. Cycle Detection (start/update peak)
             standby_threshold = self.learned_standby_power.get(sensor_id, 15.0)
             is_currently_pulling_power = cur_p_watts > (standby_threshold + 10.0)
             
             if is_currently_pulling_power:
                 if sensor_id not in self.cycle_start_time:
                     self.cycle_start_time[sensor_id] = now
-                    # Record energy start for avg cycle calc
                     if p_sensor:
                         st = self.hass.states.get(p_sensor)
                         if st and st.state not in ("unknown", "unavailable"):
@@ -1200,15 +1252,13 @@ class EnergyProfileManager:
                             except ValueError: pass
 
                 if cur_p_watts > self.learned_real_power.get(sensor_id, 0.0):
-                    # Auto-learn peak power (slow filter: 10% adjustment)
                     old_peak = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0)
                     self.learned_real_power[sensor_id] = (old_peak * 0.9) + (cur_p_watts * 0.1)
             
             elif sensor_id in self.cycle_start_time:
-                # Device stopped. Check if we should finalize the cycle learning
+                # Device stopped check
                 diff_sec = (now - self.cycle_start_time[sensor_id]).total_seconds()
                 if diff_sec > (float(hold_time_min) * 60):
-                    # Cycle finished definitively. Learn avg and total.
                     start_t = self.cycle_start_time.pop(sensor_id)
                     dur_h = (now - start_t).total_seconds() / 3600.0
                     e_start = self.cycle_energy_start.pop(sensor_id, None)
@@ -1226,98 +1276,53 @@ class EnergyProfileManager:
                                         self.learned_avg_cycle_power[sensor_id] = (self.learned_avg_cycle_power.get(sensor_id, avg_p) * 0.7) + (avg_p * 0.3)
                             except ValueError: pass
 
-            is_in_grace_period = False
-            # Early release detection based on energy budget
-            is_cyclic = settings.get(CONF_IS_CYCLIC, False)
-            curr_cycle_kwh = 0.0
-            if sensor_id in self.cycle_energy_start and p_sensor:
-                st = self.hass.states.get(p_sensor)
-                if st and st.state not in ("unknown", "unavailable"):
-                    try: curr_cycle_kwh = max(0.0, float(st.state) - self.cycle_energy_start[sensor_id])
-                    except ValueError: pass
-
-            if sensor_id in self.cycle_start_time:
-                diff = (now - self.cycle_start_time[sensor_id]).total_seconds()
-                if diff < (float(hold_time_min) * 60):
-                    is_in_grace_period = True
-                    # If device already consumed its typical cycle energy, we don't need to 'hold' it anymore
-                    if is_cyclic and sensor_id in self.learned_cycle_total_kwh:
-                        if curr_cycle_kwh >= (self.learned_cycle_total_kwh[sensor_id] * 1.05): # 5% margin
-                            is_in_grace_period = False
-
             req_kwh = settings.get("required_kwh", 2.5)
-            # Use learned peak power if available, otherwise user setting
             req_kw = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
-
             consumed = self.daily_deduct_consumption.get(sensor_id, 0.0)
-
-            # is_idle = device is NOT currently running and NOT in grace period
-            # (it's a candidate TO START, not exempt from checks)
-            is_idle = not is_currently_pulling_power and not is_in_grace_period
-
+            
+            # is_idle = NOT in active cycle (it's a candidate to START)
+            is_idle = not is_currently_pulling_power
+            
             power_bottleneck = False
             gen_bottleneck = False
             is_free_price = cur_price_buy is not None and cur_price_buy <= 0.0
 
-            # Power bottleneck logic:
-            # - Grace period / active devices: already running, we track their actual power
-            # - Idle devices wanting to START: check if there's room for req_kw
-            if not is_in_grace_period:
-                if req_kw > 0.0:
-                    if available_power_kw < req_kw:
-                        power_bottleneck = True
-                    if only_solar_free and not is_free_price:
-                        if available_gen_kw < (req_kw * 0.6):
-                            gen_bottleneck = True
-                else:
-                    # req_kw unknown: block if gen pool is clearly depleted
-                    if initial_power_kw > 0.5 and available_power_kw < 0:
-                        power_bottleneck = True
-
-            # ------------------------------
-
-            if is_in_grace_period:
-                permissions[sensor_id] = True
-                permissions_reasons[sensor_id] = "Разрешено: Удержание активного цикла (Grace Period)"
-                # Use ACTUAL current watts for deduction (more accurate than learned req_kw)
-                active_kw = (cur_p_watts / 1000.0) if cur_p_watts > 0 else req_kw
-                if active_kw > 0.0:
-                    available_power_kw -= active_kw
-                    available_gen_kw -= active_kw
-                    available_budget -= active_kw
-                continue
-
-            # Idle device: goes through full budget + power checks (NOT auto-approved)
-            if is_idle:
-                # Fall through to req_kwh / req_kw checks below
-                pass
+            if req_kw > 0.0:
+                if available_power_kw < req_kw:
+                    power_bottleneck = True
+                if only_solar_free and not is_free_price:
+                    if available_gen_kw < (req_kw * 0.6):
+                        gen_bottleneck = True
+            elif initial_power_kw > 0.5 and available_power_kw < 0:
+                power_bottleneck = True
 
             if req_kwh == 0:
+                # Dynamic load logic
                 if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
                     permissions[sensor_id] = True
-                    # Deduct from all pools
                     if req_kw > 0.0:
                         available_power_kw -= req_kw
                         if only_solar_free and not is_free_price:
                             available_gen_kw -= (float(req_kw) * 0.6)
-
-                    b_val = int(float(available_budget) * 100) / 100.0
-                    g_val = int(float(available_power_kw) * 100) / 100.0
-                    permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профиц. {b_val} кВт*ч, Доступно {g_val} кВт)"
+                    
+                    b_val = round(max(0.0, float(available_budget)), 2)
+                    g_val = round(max(0.0, float(available_power_kw)), 2)
+                    permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профицит {b_val} кВт*ч, Доступно {g_val} кВт)"
                 else:
                     permissions[sensor_id] = False
-                    b_val = int(float(available_budget) * 100) / 100.0
-                    g_val = int(float(available_gen_kw) * 100) / 100.0
+                    g_val = round(float(available_power_kw), 2)
+                    g_gen = round(float(available_gen_kw), 2)
                     if gen_bottleneck:
-                        permissions_reasons[sensor_id] = f"Блокировка: Ост. генерация {g_val} кВт < 60% от Мощности {req_kw} кВт"
+                        permissions_reasons[sensor_id] = f"Блокировка: Доступная генер. {g_gen} кВт < 60% от {req_kw} кВт"
                     elif power_bottleneck:
-                        permissions_reasons[sensor_id] = f"Блокировка: Профицит {b_val} кВт*ч < Мощность {req_kw} кВт"
+                        permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Мощность {req_kw} кВт"
+                    elif available_budget <= 0:
+                        permissions_reasons[sensor_id] = f"Блокировка: Нет профицита энергии ({round(float(available_budget), 2)} кВт*ч)"
                     else:
-                        permissions_reasons[sensor_id] = "Блокировка: Нет профицита энергии"
+                        permissions_reasons[sensor_id] = "Блокировка: Ограничения по мощности"
                 continue
 
             needed = req_kwh - consumed
-            
             if needed <= 0:
                 permissions[sensor_id] = True
                 permissions_reasons[sensor_id] = "Разрешено: Дневная норма выполнена (или перерасход)"
@@ -1327,16 +1332,16 @@ class EnergyProfileManager:
                 if only_solar_free and not is_free_price and req_kw > 0.0:
                     available_gen_kw -= (float(req_kw) * 0.6)
                 
-                n_val = int(float(needed) * 100) / 100.0
+                n_val = round(float(needed), 2)
                 permissions_reasons[sensor_id] = f"Разрешено: Зарезервировано {n_val} кВт*ч из профицита"
             else:
                 permissions[sensor_id] = False
                 if gen_bottleneck:
-                    permissions_reasons[sensor_id] = f"Блокировка: Ост. генерация {round(available_gen_kw, 2)} кВт < 60% от Мощности {req_kw} кВт"
+                    permissions_reasons[sensor_id] = f"Блокировка: Доступная генерация {round(float(available_gen_kw), 2)} кВт < 60% от {req_kw} кВт"
                 elif power_bottleneck:
-                    permissions_reasons[sensor_id] = f"Блокировка: Профицит {round(available_budget, 2)} кВт*ч < Мощность {req_kw} кВт"
+                    permissions_reasons[sensor_id] = f"Блокировка: Доступно {round(float(available_power_kw), 2)} кВт < Мощность {req_kw} кВт"
                 else:
-                    permissions_reasons[sensor_id] = f"Блокировка: Не хватает энергии (нужно {round(needed, 2)} кВт*ч, доступно {round(available_budget, 2)} кВт*ч)"
+                    permissions_reasons[sensor_id] = f"Блокировка: Не хватает энергии (нужно {round(float(needed), 2)} кВт*ч, доступно {round(float(available_budget), 2)} кВт*ч)"
                 
                 
         return {
