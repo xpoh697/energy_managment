@@ -3065,6 +3065,12 @@ class AppliancePermissionSensor(SensorEntity):
             "estimated_initial_budget_kwh": round(res.get("initial_budget", 0.0), 3),
             "forecast_correction_coefficient": round(res.get("forecast_coefficient", 1.0), 3),
             "is_cyclic": settings.get("is_cyclic", False),
+            "learned_peak_power_w": round(
+                self.manager.learned_real_power.get(self._sensor_id, 0.0), 1
+            ),
+            "learned_standby_power_w": round(
+                self.manager.learned_standby_power.get(self._sensor_id, 0.0), 1
+            ),
             "learned_avg_cycle_power_w": round(
                 self.manager.learned_avg_cycle_power.get(self._sensor_id, 0.0), 1
             ),
@@ -3073,3 +3079,9 @@ class AppliancePermissionSensor(SensorEntity):
             ),
             "reason": reasons.get(self._sensor_id, "Нет данных"),
         }
+
+        # Add current power only if configured
+        if settings.get(CONF_POWER_SENSOR):
+            self._attrs["current_power_w"] = round(
+                self.manager.last_known_power.get(self._sensor_id, 0.0), 1
+            )
