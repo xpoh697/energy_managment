@@ -27,6 +27,8 @@ from .const import (
     CONF_ANOMALY_THRESHOLD,
     CONF_GRID_IMPORT_SENSORS,
     CONF_GRID_EXPORT_SENSORS,
+    CONF_POWER_SENSOR,
+    CONF_ACTIVE_HOLD_TIME,
 )
 
 
@@ -139,6 +141,8 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "required_kwh": user_input.get("required_kwh", 0.0),
                 "required_kw": user_input.get("required_kw", 0.0),
                 "only_solar_or_negative_price": user_input.get("only_solar_or_negative_price", False),
+                CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
+                CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
             }
             self._user_input["deduct_settings_index"] += 1
             return await self.async_step_deduct_settings()
@@ -150,6 +154,10 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required("required_kwh", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
             vol.Required("required_kw", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
             vol.Optional("only_solar_or_negative_price", default=False): bool,
+            vol.Optional(CONF_POWER_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(CONF_ACTIVE_HOLD_TIME, default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
         }
 
         # Nice clean name for display
@@ -322,6 +330,8 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 "required_kwh": user_input.get("required_kwh", 0.0),
                 "required_kw": user_input.get("required_kw", 0.0),
                 "only_solar_or_negative_price": user_input.get("only_solar_or_negative_price", False),
+                CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
+                CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
             }
             self._user_input["deduct_settings_index"] += 1
             return await self.async_step_deduct_settings()
@@ -334,6 +344,10 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Required("required_kwh", default=existing.get("required_kwh", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
             vol.Required("required_kw", default=existing.get("required_kw", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
             vol.Optional("only_solar_or_negative_price", default=existing.get("only_solar_or_negative_price", False)): bool,
+            vol.Optional(CONF_POWER_SENSOR, default=existing.get(CONF_POWER_SENSOR)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15)): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
         }
 
         sensor_display = current_sensor.replace("sensor.", "").replace("_", " ").title()

@@ -30,7 +30,9 @@
         "data": {
           "priority": "Priority (1 = highest)",
           "required_kwh": "Required Energy per day (kWh)",
-          "required_kw": "Device Power (kW)"
+          "required_kw": "Device Power (kW)",
+          "power_sensor": "Instant Power Sensor (W or kW)",
+          "active_hold_time": "Cycle Hold Time (min)"
         }
       },
       "investment_settings": {
@@ -82,7 +84,9 @@
           "priority": "1. Priority (lower = higher priority)",
           "required_kwh": "2. Required Energy per day (kWh)",
           "required_kw": "3. Peak Device Power (kW)",
-          "only_solar_or_negative_price": "4. ONLY from solar (reserves 60% of device Power from free gen by priority) or price <= 0"
+          "only_solar_or_negative_price": "4. ONLY from solar (reserves 60% of device Power from free gen by priority) or price <= 0",
+          "power_sensor": "5. Instant Power Sensor (W or kW)",
+          "active_hold_time": "6. Cycle Hold Time (min)"
         }
       },
       "investment_settings": {

@@ -46,6 +46,8 @@ from .const import (
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
     CONF_ANOMALY_THRESHOLD,
+    CONF_POWER_SENSOR,
+    CONF_ACTIVE_HOLD_TIME,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -100,9 +102,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if has_generation:
         entities.append(BatteryEndOfDaySOCSensor(manager, "Прогноз заряда к закату"))
     
-    # Occupancy-aware consumption coefficient (only if presence sensors configured)
-    if manager.presence_sensors:
-        entities.append(OccupancySensor(manager, "Occupancy Consumption Coefficient"))
 
     # Combined Savings / revenue tracking sensor
     if has_consumption and config_data.get(CONF_PRICE_BUY):
@@ -212,6 +211,12 @@ class EnergyProfileManager:
         
         # Track historical power samples for 5-10 minute average smoothing
         self.power_history = []
+        
+        # Power sensor runtime tracking
+        self.learned_standby_power = {}   # sensor_id -> watts
+        self.learned_real_power = {}      # sensor_id -> watts
+        self.cycle_start_time = {}        # sensor_id -> timestamp (when it last exceeded standby)
+        self.last_known_power = {}        # sensor_id -> watts (for fallback)
 
     def set_max_days(self, days):
         self.max_days = days
@@ -238,6 +243,8 @@ class EnergyProfileManager:
                         self.data[ptype][h_key] = clean_list
         
         self.settings = self.data.get("settings", {})
+        self.learned_standby_power = self.data.get("learned_standby_power", {})
+        self.learned_real_power = self.data.get("learned_real_power", {})
             
         if "generation" not in self.data:
             self.data["generation"] = {str(i): [] for i in range(24)}
@@ -265,6 +272,8 @@ class EnergyProfileManager:
         self.sensor_last_values = self.data.get("sensor_last_values", {})
 
     async def async_save(self):
+        self.data["learned_standby_power"] = self.learned_standby_power
+        self.data["learned_real_power"] = self.learned_real_power
         await self.store.async_save(self.data)
 
     def export_data(self, file_path):
@@ -352,13 +361,15 @@ class EnergyProfileManager:
     def avg_load_kw(self):
         if not self.power_history:
             return 0.0
-        return round(sum(x["load_kw"] for x in self.power_history) / len(self.power_history), 3)
+        val = sum(x["load_kw"] for x in self.power_history) / len(self.power_history)
+        return round(float(val), 3)
 
     @property
     def avg_gen_kw(self):
         if not self.power_history:
             return 0.0
-        return round(sum(x["gen_kw"] for x in self.power_history) / len(self.power_history), 3)
+        val = sum(x["gen_kw"] for x in self.power_history) / len(self.power_history)
+        return round(float(val), 3)
 
     @callback
     def _async_state_changed(self, event):
@@ -1104,33 +1115,101 @@ class EnergyProfileManager:
                 permissions_reasons[sensor_id] = "Блокировка: Ограничение 'Только от солнца или Цена <= 0'"
                 continue
                 
+            # --- New Power Sensor Logic ---
+            p_sensor = settings.get(CONF_POWER_SENSOR)
+            hold_time_min = settings.get(CONF_ACTIVE_HOLD_TIME, 15)
+            
+            cur_p_watts = 0.0
+            if p_sensor:
+                p_state = self.hass.states.get(p_sensor)
+                if p_state and p_state.state not in ("unknown", "unavailable"):
+                    try:
+                        cur_p_watts = float(str(p_state.state).replace(',', '.'))
+                        # Normalize to Watts if it's in kW
+                        if p_state.attributes.get("unit_of_measurement") == "kW":
+                            cur_p_watts *= 1000.0
+                        self.last_known_power[sensor_id] = cur_p_watts
+                    except ValueError:
+                        cur_p_watts = self.last_known_power.get(sensor_id, 0.0)
+                else:
+                    cur_p_watts = self.last_known_power.get(sensor_id, 0.0)
+
+            # 1. Update Standby Learning
+            # If we know the device was supposed to be OFF (no permission from last cycle),
+            # we use current power to learn its standby floor.
+            if sensor_id in permissions and not permissions[sensor_id]:
+                if 0.1 < cur_p_watts < 100.0: # Standby usually isn't 0, but shouldn't be high
+                    old_standby = self.learned_standby_power.get(sensor_id, 15.0)
+                    # Very slow filter for standby (1% adjustment) to ignore short spikes
+                    self.learned_standby_power[sensor_id] = (old_standby * 0.99) + (cur_p_watts * 0.01)
+
+            # 2. Cycle Detection
+            standby_threshold = self.learned_standby_power.get(sensor_id, 15.0)
+            is_currently_pulling_power = cur_p_watts > (standby_threshold + 10.0)
+            
+            if is_currently_pulling_power:
+                self.cycle_start_time[sensor_id] = now
+                if cur_p_watts > self.learned_real_power.get(sensor_id, 0.0):
+                    # Auto-learn peak power (slow filter: 10% adjustment)
+                    old_peak = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0)
+                    self.learned_real_power[sensor_id] = (old_peak * 0.9) + (cur_p_watts * 0.1)
+
+            is_in_grace_period = False
+            if sensor_id in self.cycle_start_time:
+                diff = (now - self.cycle_start_time[sensor_id]).total_seconds()
+                if diff < (float(hold_time_min) * 60):
+                    is_in_grace_period = True
+
             req_kwh = settings.get("required_kwh", 2.5)
-            req_kw = settings.get("required_kw", 0.0)
+            # Use learned power if available, otherwise user setting
+            req_kw = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
+            
             consumed = self.daily_deduct_consumption.get(sensor_id, 0.0)
+            
+            # If device is NOT pulling power and NOT in grace period, it's effectively "Idle"
+            # It still takes Energy budget (kWh) but doesn't block other devices by Power (kW)
+            is_idle = not is_currently_pulling_power and not is_in_grace_period
             
             power_bottleneck = False
             gen_bottleneck = False
             is_free_price = cur_price_buy is not None and cur_price_buy <= 0.0
             
-            if req_kw > 0.0:
+            if req_kw > 0.0 and not is_idle:
                 if available_budget < req_kw:
                     power_bottleneck = True
                 if only_solar_free and not is_free_price:
                     if available_gen_kw < (req_kw * 0.6):
                         gen_bottleneck = True
             
+            # ------------------------------
+
+            if is_in_grace_period:
+                permissions[sensor_id] = True
+                permissions_reasons[sensor_id] = "Разрешено: Удержание активного цикла (Grace Period)"
+                continue
+
+            if is_idle:
+                permissions[sensor_id] = True
+                permissions_reasons[sensor_id] = "Разрешено: Режим ожидания (нагрузка не обнаружена)"
+                continue
+
             if req_kwh == 0:
                 if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
                     permissions[sensor_id] = True
                     if only_solar_free and not is_free_price and req_kw > 0.0:
-                        available_gen_kw -= (req_kw * 0.6)
-                    permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профиц. {round(available_budget, 2)} кВт*ч, Ген. доступно {round(available_gen_kw, 2)} кВт)"
+                        available_gen_kw -= (float(req_kw) * 0.6)
+                    
+                    b_val = int(float(available_budget) * 100) / 100.0
+                    g_val = int(float(available_gen_kw) * 100) / 100.0
+                    permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профиц. {b_val} кВт*ч, Ген. доступно {g_val} кВт)"
                 else:
                     permissions[sensor_id] = False
+                    b_val = int(float(available_budget) * 100) / 100.0
+                    g_val = int(float(available_gen_kw) * 100) / 100.0
                     if gen_bottleneck:
-                        permissions_reasons[sensor_id] = f"Блокировка: Ост. генерация {round(available_gen_kw, 2)} кВт < 60% от Мощности {req_kw} кВт"
+                        permissions_reasons[sensor_id] = f"Блокировка: Ост. генерация {g_val} кВт < 60% от Мощности {req_kw} кВт"
                     elif power_bottleneck:
-                        permissions_reasons[sensor_id] = f"Блокировка: Профицит {round(available_budget, 2)} кВт*ч < Мощность {req_kw} кВт"
+                        permissions_reasons[sensor_id] = f"Блокировка: Профицит {b_val} кВт*ч < Мощность {req_kw} кВт"
                     else:
                         permissions_reasons[sensor_id] = "Блокировка: Нет профицита энергии"
                 continue
@@ -1142,10 +1221,12 @@ class EnergyProfileManager:
                 permissions_reasons[sensor_id] = "Разрешено: Дневная норма выполнена (или перерасход)"
             elif available_budget >= needed and not power_bottleneck and not gen_bottleneck:
                 permissions[sensor_id] = True
-                available_budget -= needed
+                available_budget -= float(needed)
                 if only_solar_free and not is_free_price and req_kw > 0.0:
-                    available_gen_kw -= (req_kw * 0.6)
-                permissions_reasons[sensor_id] = f"Разрешено: Зарезервировано {round(needed, 2)} кВт*ч из профицита"
+                    available_gen_kw -= (float(req_kw) * 0.6)
+                
+                n_val = int(float(needed) * 100) / 100.0
+                permissions_reasons[sensor_id] = f"Разрешено: Зарезервировано {n_val} кВт*ч из профицита"
             else:
                 permissions[sensor_id] = False
                 if gen_bottleneck:
@@ -2416,6 +2497,7 @@ class EnergyBudgetSensor(SensorEntity):
             "debug_expected_today_so_far": round(res.get("debug_expected_today_so_far", 0), 3),
             "debug_fraction_so_far": round(res.get("debug_fraction_so_far", 0), 3),
             "occupancy_coefficient": round(res.get("occupancy_coefficient", 1.0), 3),
+            "occupancy_persons_home": self.manager.get_current_occupancy() if self.manager.presence_sensors else "N/A",
             "efficiency_coefficient": round(res.get("efficiency_coefficient", 1.0), 3)
         }
 
@@ -2474,97 +2556,6 @@ class MarketStrategySensor(SensorEntity):
         self.manager.register_listener(self.async_write_ha_state)
 
 
-class OccupancySensor(SensorEntity):
-    """Sensor that shows the occupancy-based consumption coefficient.
-    
-    State: current coefficient (float, 0.1 to 1.0+)
-    Attributes: persons_home count, home/away average consumption, 
-                tracked entities, data readiness status.
-    """
-    
-    def __init__(self, manager, name):
-        self.manager = manager
-        self._attr_name = name
-        self._attr_unique_id = f"{manager.entry.entry_id}_occupancy_coefficient"
-        self._attr_icon = "mdi:account-group"
-        self._attr_native_unit_of_measurement = None
-        
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(manager.entry.entry_id))},
-            name=manager.entry.data.get("name", "Energy Management"),
-            manufacturer="Energy AI",
-            model="Energy Trader System",
-        )
-    
-    async def async_added_to_hass(self):
-        self.manager.register_listener(self.async_write_ha_state)
-    
-    @property
-    def native_value(self):
-        coeff = self.manager.get_occupancy_coefficient()
-        return round(coeff, 3)
-    
-    @property
-    def extra_state_attributes(self):
-        occ = self.manager.get_current_occupancy()
-        coeff = self.manager.get_occupancy_coefficient()
-        
-        # Gather per-hour coefficients
-        hourly_coefficients = {}
-        for h in range(24):
-            c = self.manager.get_occupancy_coefficient(hour=h)
-            hourly_coefficients[f"{h:02d}:00"] = round(c, 3)
-        
-        # Calculate analytics
-        days = self.manager.custom_period
-        home_hours = 0
-        away_hours = 0
-        home_kwh = 0.0
-        away_kwh = 0.0
-        
-        for h in range(24):
-            sh = str(h)
-            history = self.manager.data.get("consumption_total", {}).get(sh, [])
-            relevant = history[-days:] if days > 0 else history
-            for item in relevant:
-                if not isinstance(item, dict):
-                    continue
-                v = float(str(item.get("v", 0.0)).replace(',', '.'))
-                o = item.get("occ")
-                if o is None:
-                    continue
-                if o > 0:
-                    home_hours += 1
-                    home_kwh += v
-                else:
-                    away_hours += 1
-                    away_kwh += v
-        
-        avg_home = round(home_kwh / home_hours, 3) if home_hours > 0 else 0.0
-        avg_away = round(away_kwh / away_hours, 3) if away_hours > 0 else 0.0
-        
-        # Tracked entities status
-        tracked = []
-        for entity_id in self.manager.presence_sensors:
-            state = self.manager.hass.states.get(entity_id)
-            tracked.append({
-                "entity": entity_id,
-                "state": state.state if state else "unknown",
-                "is_home": state.state in ("home", "on") if state else False
-            })
-        
-        return {
-            "persons_home": occ if occ >= 0 else "N/A",
-            "coefficient": round(coeff, 3),
-            "data_ready": home_hours >= 5 and away_hours >= 3,
-            "home_data_points": home_hours,
-            "away_data_points": away_hours,
-            "avg_consumption_home_kwh": avg_home,
-            "avg_consumption_away_kwh": avg_away,
-            "savings_ratio": round(1.0 - (avg_away / avg_home), 2) if avg_home > 0.01 else 0.0,
-            "hourly_coefficients": hourly_coefficients,
-            "tracked_entities": tracked,
-        }
 
 
 class SavingsSensor(SensorEntity):

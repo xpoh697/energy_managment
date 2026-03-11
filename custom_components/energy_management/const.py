@@ -39,3 +39,7 @@ CONF_TOTAL_SYSTEM_COST = "total_system_cost"
 CONF_BATTERY_COST = "battery_cost"
 CONF_BATTERY_RATED_CYCLES = "battery_rated_cycles"
 CONF_ANOMALY_THRESHOLD = "anomaly_threshold"
+
+# Deduct/Load specific settings
+CONF_POWER_SENSOR = "power_sensor"
+CONF_ACTIVE_HOLD_TIME = "active_hold_time"
