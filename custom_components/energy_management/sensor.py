@@ -203,6 +203,7 @@ class EnergyProfileManager:
         self._unsub_state = None
         self._unsub_time = None
         self._unsub_power_poll = None
+        self._unsub_periodic_save = None
         
         # Inverter losses sensor (daily kWh counter that resets at midnight)
         losses_raw = config_data.get(CONF_INVERTER_LOSSES_SENSOR)
@@ -348,6 +349,22 @@ class EnergyProfileManager:
             
         return False
 
+    async def async_stop(self):
+        """Cleanup all listeners and tasks."""
+        if self._unsub_state:
+            self._unsub_state()
+        if self._unsub_time:
+            self._unsub_time()
+        if self._unsub_power_poll:
+            self._unsub_power_poll()
+        if self._unsub_periodic_save:
+            self._unsub_periodic_save()
+
+        self._unsub_state = None
+        self._unsub_time = None
+        self._unsub_power_poll = None
+        self._unsub_periodic_save = None
+
     async def async_start(self):
         # Parse prices immediately on load
         for p_sensor in self.all_price_sensors:
@@ -381,6 +398,11 @@ class EnergyProfileManager:
             )
             # Perform initial poll
             self._poll_instant_power(dt_util.utcnow())
+
+        # Periodic save to disk every 5 minutes to prevent data loss on frequent restarts
+        self._unsub_periodic_save = async_track_time_interval(
+            self.hass, self._async_periodic_save, timedelta(minutes=5)
+        )
 
     @callback
     def _poll_instant_power(self, now):
@@ -466,6 +488,10 @@ class EnergyProfileManager:
             return 0.0
         val = sum(x["gen_kw"] for x in self.power_history) / len(self.power_history)
         return round(float(val), 3)
+
+    async def _async_periodic_save(self, _now):
+        """Periodically persist data to disk between hour-top resets."""
+        await self.async_save()
 
     @callback
     def _async_state_changed(self, event):
