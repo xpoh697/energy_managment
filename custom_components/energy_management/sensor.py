@@ -194,6 +194,7 @@ class EnergyProfileManager:
         self.current_generation = 0.0
         self.current_grid_import = 0.0
         self.current_grid_export = 0.0
+        self.current_hourly_deduct = 0.0  # Accumulator for all deduct sensors this hour
         self.sensor_last_values = {}
         
         self.daily_deduct_consumption = {s: 0.0 for s in self.deduct_sensors}
@@ -290,12 +291,15 @@ class EnergyProfileManager:
         
         # Restore hourly accumulators (energy accumulated since the last hour-top save)
         accum = self.data.get("hourly_accumulators", {})
-        self.current_consumption_base = accum.get("consumption_base", 0.0)
         self.current_consumption_total = accum.get("consumption_total", 0.0)
         self.current_generation = accum.get("generation", 0.0)
         self.current_grid_import = accum.get("grid_import", 0.0)
         self.current_grid_export = accum.get("grid_export", 0.0)
         self.current_losses = accum.get("losses", 0.0)
+        self.current_hourly_deduct = accum.get("hourly_deduct", 0.0)
+        
+        # Recalculate base from total and deduct
+        self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
 
     async def async_save(self):
         self.data["learned_standby_power"] = self.learned_standby_power
@@ -305,12 +309,12 @@ class EnergyProfileManager:
         self.data["sensor_last_values"] = self.sensor_last_values
         self.data["daily_deduct_consumption"] = dict(self.daily_deduct_consumption)
         self.data["hourly_accumulators"] = {
-            "consumption_base": self.current_consumption_base,
             "consumption_total": self.current_consumption_total,
             "generation": self.current_generation,
             "grid_import": self.current_grid_import,
             "grid_export": self.current_grid_export,
             "losses": self.current_losses,
+            "hourly_deduct": self.current_hourly_deduct,
         }
         await self.store.async_save(self.data)
 
@@ -623,9 +627,11 @@ class EnergyProfileManager:
         self.current_grid_import = 0.0
         self.current_grid_export = 0.0
         self.current_losses = 0.0
+        self.current_hourly_deduct = 0.0
         
         # Reset daily deduct consumption at midnight
         if now.hour == 0:
+            self.data["last_reset_date"] = now.strftime("%Y-%m-%d")
             for s in self.daily_deduct_consumption:
                 self.daily_deduct_consumption[s] = 0.0
                 
