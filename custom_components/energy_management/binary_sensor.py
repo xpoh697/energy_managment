@@ -117,6 +117,12 @@ class EnergyPermissionSensor(BinarySensorEntity):
 
         self._attrs = attrs
 
+        # Add current power only if configured
+        if settings.get(CONF_POWER_SENSOR):
+            self._attrs["current_power_w"] = round(
+                self.manager.last_known_power.get(self.target_sensor_id, 0.0), 1
+            )
+
     @property
     def extra_state_attributes(self) -> dict:
         """Return attributes."""
