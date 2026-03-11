@@ -282,6 +282,20 @@ class EnergyProfileManager:
         # Mark ALL known sensors as needing a fresh baseline on first reading.
         # This prevents restart delta spikes when HA was offline while sensors accumulated data.
         self._sensors_need_baseline = set(self.sensor_last_values.keys())
+        
+        # Restore daily deduct consumption (how much each managed load already consumed today)
+        saved_deduct = self.data.get("daily_deduct_consumption", {})
+        for s in self.deduct_sensors:
+            self.daily_deduct_consumption[s] = saved_deduct.get(s, 0.0)
+        
+        # Restore hourly accumulators (energy accumulated since the last hour-top save)
+        accum = self.data.get("hourly_accumulators", {})
+        self.current_consumption_base = accum.get("consumption_base", 0.0)
+        self.current_consumption_total = accum.get("consumption_total", 0.0)
+        self.current_generation = accum.get("generation", 0.0)
+        self.current_grid_import = accum.get("grid_import", 0.0)
+        self.current_grid_export = accum.get("grid_export", 0.0)
+        self.current_losses = accum.get("losses", 0.0)
 
     async def async_save(self):
         self.data["learned_standby_power"] = self.learned_standby_power
@@ -289,6 +303,15 @@ class EnergyProfileManager:
         self.data["learned_avg_cycle_power"] = self.learned_avg_cycle_power
         self.data["learned_cycle_total_kwh"] = self.learned_cycle_total_kwh
         self.data["sensor_last_values"] = self.sensor_last_values
+        self.data["daily_deduct_consumption"] = dict(self.daily_deduct_consumption)
+        self.data["hourly_accumulators"] = {
+            "consumption_base": self.current_consumption_base,
+            "consumption_total": self.current_consumption_total,
+            "generation": self.current_generation,
+            "grid_import": self.current_grid_import,
+            "grid_export": self.current_grid_export,
+            "losses": self.current_losses,
+        }
         await self.store.async_save(self.data)
 
     def export_data(self, file_path):
@@ -419,17 +442,28 @@ class EnergyProfileManager:
             delta = new_val
 
         # If it is the first read after restart, the delta might be large (accumulated while HA was down).
-        # We count it towards the DAILY TOTAL (for budget and forecast) but NOT towards the HOURLY PROFILE
-        # to avoid massive visual spikes in the charts (satisfying both data accuracy and UI aesthetics).
+        # We count it towards the DAILY TOTAL and HOURLY ACCUMULATORS (for budget, forecast, and savings)
+        # but NOT towards the HOURLY PROFILE HISTORY to avoid massive visual spikes in the charts.
         if is_restarting:
             if delta > 0 and delta < 50.0:
                 if entity_id in self.generation_sensors:
                     self.data["temp_daily_gen"] = self.data.get("temp_daily_gen", 0.0) + delta
+                    self.current_generation += delta
+                if entity_id in self.consumption_sensors:
+                    self.current_consumption_base += delta
+                    self.current_consumption_total += delta
                 if entity_id in self.deduct_sensors:
                     if entity_id not in self.daily_deduct_consumption:
                         self.daily_deduct_consumption[entity_id] = 0.0
                     self.daily_deduct_consumption[entity_id] += delta
-            # We updated the daily totals, but we skip the hourly accumulators (current_generation etc.)
+                    # Deduct sensors subtract from base consumption
+                    self.current_consumption_base -= delta
+                if entity_id in self.grid_import_sensors:
+                    self.current_grid_import += delta
+                if entity_id in self.grid_export_sensors:
+                    self.current_grid_export += delta
+                if self.inverter_losses_sensor and entity_id == self.inverter_losses_sensor:
+                    self.current_losses += delta
             self.sensor_last_values[entity_id] = new_val
             return
             
