@@ -280,6 +280,8 @@ class EnergyProfileManager:
     async def async_save(self):
         self.data["learned_standby_power"] = self.learned_standby_power
         self.data["learned_real_power"] = self.learned_real_power
+        self.data["learned_avg_cycle_power"] = self.learned_avg_cycle_power
+        self.data["learned_cycle_total_kwh"] = self.learned_cycle_total_kwh
         await self.store.async_save(self.data)
 
     def export_data(self, file_path):
