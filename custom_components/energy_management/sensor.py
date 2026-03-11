@@ -40,6 +40,8 @@ from .const import (
     CONF_SALE_PV_NO_BAT_MAX_HOUR,
     CONF_PRESENCE_SENSORS,
     CONF_INVERTER_LOSSES_SENSOR,
+    CONF_GRID_IMPORT_SENSORS,
+    CONF_GRID_EXPORT_SENSORS,
     CONF_TOTAL_SYSTEM_COST,
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
@@ -116,6 +118,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if config_data.get(CONF_BATTERY_COST):
         entities.append(BatteryDegradationSensor(manager, "Стоимость износа батареи"))
 
+    if has_consumption and has_generation:
+        entities.append(InstantPowerAveragedSensor(manager, "load"))
+        entities.append(InstantPowerAveragedSensor(manager, "gen"))
+
     async_add_entities(entities)
 
 def _get_kwh_val(state_obj):
@@ -147,8 +153,10 @@ class EnergyProfileManager:
         self.consumption_sensors = set(config_data.get(CONF_CONSUMPTION_SENSORS, []))
         self.generation_sensors = set(config_data.get(CONF_GENERATION_SENSORS, []))
         self.deduct_sensors = set(config_data.get(CONF_DEDUCT_SENSORS, []))
+        self.grid_import_sensors = set(config_data.get(CONF_GRID_IMPORT_SENSORS, []))
+        self.grid_export_sensors = set(config_data.get(CONF_GRID_EXPORT_SENSORS, []))
         self.deduct_settings = config_data.get(CONF_DEDUCT_SETTINGS, {})
-        self.all_sensors = self.consumption_sensors | self.generation_sensors | self.deduct_sensors
+        self.all_sensors = self.consumption_sensors | self.generation_sensors | self.deduct_sensors | self.grid_import_sensors | self.grid_export_sensors
         
         self.power_load_sensors = config_data.get(CONF_POWER_LOAD_SENSORS, [])
         self.power_gen_sensors = config_data.get(CONF_POWER_GEN_SENSORS, [])
@@ -184,6 +192,8 @@ class EnergyProfileManager:
         self.current_consumption_base = 0.0
         self.current_consumption_total = 0.0
         self.current_generation = 0.0
+        self.current_grid_import = 0.0
+        self.current_grid_export = 0.0
         self.sensor_last_values = {}
         
         self.daily_deduct_consumption = {s: 0.0 for s in self.deduct_sensors}
@@ -336,6 +346,19 @@ class EnergyProfileManager:
         # Prune older than 10 minutes
         cutoff = now - timedelta(minutes=10)
         self.power_history = [x for x in self.power_history if x["time"] >= cutoff]
+        self._notify_update()
+
+    @property
+    def avg_load_kw(self):
+        if not self.power_history:
+            return 0.0
+        return round(sum(x["load_kw"] for x in self.power_history) / len(self.power_history), 3)
+
+    @property
+    def avg_gen_kw(self):
+        if not self.power_history:
+            return 0.0
+        return round(sum(x["gen_kw"] for x in self.power_history) / len(self.power_history), 3)
 
     @callback
     def _async_state_changed(self, event):
@@ -398,6 +421,10 @@ class EnergyProfileManager:
             # delta may be negative at midnight reset, which we skip.
             if delta > 0:
                 self.current_losses += delta
+        if entity_id in self.grid_import_sensors:
+            self.current_grid_import += delta
+        if entity_id in self.grid_export_sensors:
+            self.current_grid_export += delta
             
         if self.current_consumption_base < 0:
             self.current_consumption_base = 0.0
@@ -474,12 +501,15 @@ class EnergyProfileManager:
             # This accounts for solar self-consumption, arbitrage, and sales in one go.
 
             # We need grid_buy_h and grid_sell_h. 
-            # Since we don't have direct flow sensors for all, we derive them:
-            # grid_flow = cons_h + batt_charged - gen_h - batt_discharged
-            grid_flow = cons_h + batt_charged - gen_h - batt_discharged
-            
-            h_buy_kwh  = max(0.0,  grid_flow)
-            h_sell_kwh = max(0.0, -grid_flow)
+            # If we have direct import/export sensors, use them. 
+            # Otherwise derive from mathematical balance (which can have errors due to КПД/SOC drift).
+            if self.grid_import_sensors or self.grid_export_sensors:
+                h_buy_kwh = self.current_grid_import
+                h_sell_kwh = self.current_grid_export
+            else:
+                grid_flow = cons_h + batt_charged - gen_h - batt_discharged
+                h_buy_kwh  = max(0.0,  grid_flow)
+                h_sell_kwh = max(0.0, -grid_flow)
             
             # 1. Total Benefit Component
             # Value of not having the system (Baseline)
@@ -516,6 +546,8 @@ class EnergyProfileManager:
         self.current_consumption_base = 0.0
         self.current_consumption_total = 0.0
         self.current_generation = 0.0
+        self.current_grid_import = 0.0
+        self.current_grid_export = 0.0
         self.current_losses = 0.0
         
         # Reset daily deduct consumption at midnight
@@ -2146,9 +2178,9 @@ class InverterOperationModeSensor(SensorEntity):
             if int(cur_hour) < sale_pv_no_bat_max_hour:
                 instant_ok = True
                 if self.manager.power_history:
-                    # Calculate average load/gen over the recent history (~10 mins)
-                    avg_load_kw = sum(x["load_kw"] for x in self.manager.power_history) / len(self.manager.power_history)
-                    avg_gen_kw = sum(x["gen_kw"] for x in self.manager.power_history) / len(self.manager.power_history)
+                    # Use properties for average load/gen over the recent history (~10 mins)
+                    avg_load_kw = self.manager.avg_load_kw
+                    avg_gen_kw = self.manager.avg_gen_kw
                     
                     if getattr(self.manager, "power_load_sensors", []) and getattr(self.manager, "power_gen_sensors", []):
                         if avg_gen_kw <= avg_load_kw + 0.1: # Require at least 100W of actual surplus average to flip to sell mode
@@ -2191,11 +2223,41 @@ class InverterOperationModeSensor(SensorEntity):
 
         return mode
 
+class InstantPowerAveragedSensor(SensorEntity):
+    """Displays the averaged instantaneous power (W/kW sensors) over the last 10 minutes."""
+    _attr_has_entity_name = True
+    def __init__(self, manager, ptype):
+        self.manager = manager
+        self.ptype = ptype
+        self._attr_translation_key = f"avg_power_{ptype}"
+        self._attr_unique_id = f"{manager.entry.entry_id}_avg_power_{ptype}"
+        self._attr_native_unit_of_measurement = "kW"
+        self._attr_device_class = SensorDeviceClass.POWER
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_icon = "mdi:chart-bell-curve"
+        
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        if self.ptype == "load":
+            return self.manager.avg_load_kw
+        return self.manager.avg_gen_kw
+
     @property
     def extra_state_attributes(self):
-        if not hasattr(self, "_attr_extra_state_attributes"):
-            return {}
-        return self._attr_extra_state_attributes
+        return {
+            "samples_count": len(self.manager.power_history),
+            "window_minutes": 10
+        }
 
 class LiveHourlySensor(RestoreEntity, SensorEntity):
     """Keeps the original live hourly behavior, for reference and diagnostics."""
@@ -2352,6 +2414,7 @@ class MarketStrategySensor(SensorEntity):
         self._state = "idle"
         self._attrs = {}
         self._attr_icon = "mdi:lightning-bolt"
+        self._attr_translation_key = "market_strategy"
         
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},

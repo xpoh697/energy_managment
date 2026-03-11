@@ -25,6 +25,8 @@ from .const import (
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
     CONF_ANOMALY_THRESHOLD,
+    CONF_GRID_IMPORT_SENSORS,
+    CONF_GRID_EXPORT_SENSORS,
 )
 
 
@@ -95,6 +97,12 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(CONF_PRICE_SELL): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_GRID_IMPORT_SENSORS, default=[]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(multiple=True, domain="sensor")
+                ),
+                vol.Optional(CONF_GRID_EXPORT_SENSORS, default=[]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(multiple=True, domain="sensor")
                 ),
                 vol.Optional(CONF_CUSTOM_PERIOD, default=14): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
             }
@@ -222,7 +230,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             selector.EntitySelectorConfig(multiple=True, domain="sensor")
         )
         
-        for key in [CONF_GENERATION_SENSORS, CONF_DEDUCT_SENSORS, CONF_FORECAST_TODAY_REMAINING, CONF_FORECAST_TOMORROW, CONF_POWER_LOAD_SENSORS, CONF_POWER_GEN_SENSORS]:
+        for key in [CONF_GENERATION_SENSORS, CONF_DEDUCT_SENSORS, CONF_FORECAST_TODAY_REMAINING, CONF_FORECAST_TOMORROW, CONF_POWER_LOAD_SENSORS, CONF_POWER_GEN_SENSORS, CONF_GRID_IMPORT_SENSORS, CONF_GRID_EXPORT_SENSORS]:
             val = get_list(key)
             schema_dict[vol.Optional(key, default=val)] = selector.EntitySelector(
                 selector.EntitySelectorConfig(multiple=True, domain="sensor")

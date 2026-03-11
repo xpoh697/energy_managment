@@ -19,7 +19,9 @@
           "price_sell": "Тариф: Продажа в сеть (Биржа, с атрибутами price_today)",
           "custom_period": "Настраиваемый период расчета (дней)",
           "presence_sensors": "Датчики присутствия (person.* / binary_sensor.* / zone.home)",
-          "inverter_losses_sensor": "Сенсор потерь инвертора (дневной счётчик кВт·ч, необязательно)"
+          "inverter_losses_sensor": "Сенсор потерь инвертора (дневной счётчик кВт·ч, необязательно)",
+          "grid_import_sensors": "Сенсоры Импорта из сети (кВт·ч, суммарные)",
+          "grid_export_sensors": "Сенсоры Экспорта в сеть (кВт·ч, суммарные)"
         }
       },
       "deduct_settings": {
@@ -70,7 +72,9 @@
           "price_sell": "Тариф: Продажа в сеть",
           "custom_period": "Настраиваемый период расчета (дней)",
           "presence_sensors": "Датчики присутствия (person.* / binary_sensor.* / zone.home)",
-          "inverter_losses_sensor": "Сенсор потерь инвертора (дневной счётчик кВт·ч, необязательно)"
+          "inverter_losses_sensor": "Сенсор потерь инвертора (дневной счётчик кВт·ч, необязательно)",
+          "grid_import_sensors": "Сенсоры Импорта из сети (кВт·ч, суммарные)",
+          "grid_export_sensors": "Сенсоры Экспорта в сеть (кВт·ч, суммарные)"
         }
       },
       "deduct_settings": {
@@ -141,6 +145,22 @@
           "threshold_multiplier": { "name": "Множитель порога" },
           "anomaly_detected": { "name": "Аномалия обнаружена" }
         }
+      },
+      "market_strategy": {
+        "state": {
+          "idle": "Ожидание",
+          "price_limit_not_met": "Цена вне лимитов",
+          "unprofitable_arbitrage": "Арбитраж невыгоден",
+          "charging": "Зарядка (Сеть)",
+          "discharging": "Разрядка (Продажа)",
+          "survival_mode": "Режим выживания (Подзарядка)"
+        }
+      },
+      "avg_power_load": {
+        "name": "Усредненная нагрузка (10 мин)"
+      },
+      "avg_power_gen": {
+        "name": "Усредненная генерация (10 мин)"
       }
     }
   }

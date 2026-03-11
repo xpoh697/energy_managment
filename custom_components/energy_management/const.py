@@ -31,6 +31,8 @@ CONF_SALE_PV_NO_BAT_MAX_HOUR = "sale_pv_no_bat_max_hour"
 
 CONF_PRESENCE_SENSORS = "presence_sensors"
 CONF_INVERTER_LOSSES_SENSOR = "inverter_losses_sensor"
+CONF_GRID_IMPORT_SENSORS = "grid_import_sensors"
+CONF_GRID_EXPORT_SENSORS = "grid_export_sensors"
 
 # Investment and ROI settings
 CONF_TOTAL_SYSTEM_COST = "total_system_cost"

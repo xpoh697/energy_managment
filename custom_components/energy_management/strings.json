@@ -19,7 +19,9 @@
           "price_sell": "Tariff: Grid Selling Price",
           "custom_period": "Custom Calculation Period (Days)",
           "presence_sensors": "Presence Sensors (person.* / binary_sensor.* / zone.home)",
-          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)"
+          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
+          "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
+          "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)"
         }
       },
       "deduct_settings": {
@@ -68,7 +70,9 @@
           "price_sell": "Tariff: Grid Selling Price",
           "custom_period": "Custom Calculation Period (Days)",
           "presence_sensors": "Presence Sensors (person.* / binary_sensor.* / zone.home)",
-          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)"
+          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
+          "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
+          "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)"
         }
       },
       "deduct_settings": {
@@ -138,6 +142,22 @@
           "threshold_multiplier": { "name": "Threshold multiplier" },
           "anomaly_detected": { "name": "Anomaly detected" }
         }
+      },
+      "market_strategy": {
+        "state": {
+          "idle": "Idle",
+          "price_limit_not_met": "Price limit not met",
+          "unprofitable_arbitrage": "Unprofitable arbitrage",
+          "charging": "Charging",
+          "discharging": "Discharging",
+          "survival_mode": "Survival mode"
+        }
+      },
+      "avg_power_load": {
+        "name": "Averaged load power (10 min)"
+      },
+      "avg_power_gen": {
+        "name": "Averaged generation power (10 min)"
       }
     }
   }
