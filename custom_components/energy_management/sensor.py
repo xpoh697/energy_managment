@@ -1264,6 +1264,7 @@ class EnergyProfileManager:
                     target_hours = [h for h, p in combined]
                     target_price = min(p for h, p in combined)
                     res["target_price"] = target_price
+                    res["limit_used"] = limit
 
         else: # sell
             limit = self.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
@@ -1357,22 +1358,8 @@ class EnergyProfileManager:
             
             res["target_price"] = target_price
 
-        # Update target_price to reflect only the upcoming peak block (so we don't show tomorrow's price while today's peak is still expected)
-        future_hours = [h for h in target_hours if h >= cur_hour]
-        if future_hours:
-            upcoming_h = future_hours[0]
-            if upcoming_h < 24:
-                rel_hours = [h for h in future_hours if h < 24]
-            else:
-                rel_hours = [h for h in future_hours if h >= 24]
-            if mode == "buy":
-                target_price = min(all_prices[h] for h in rel_hours)
-            else:
-                target_price = max(all_prices[h] for h in rel_hours)
-            res["target_price"] = target_price
-
         # Filter out past hours ONLY from the final execution command, so we don't return past periods
-        target_hours = future_hours
+        target_hours = [h for h in target_hours if h >= cur_hour]
 
         # Survival Logic (Bridge the gap if battery risks hitting min_soc before next charge)
         # Note: This deliberately ignores the Buy Price Limit, safely prioritizing survival over price rules!
@@ -1458,8 +1445,23 @@ class EnergyProfileManager:
                     
             target_hours = list(survival_hours)
 
-        res["limit_used"] = limit_used
-        res["target_price"] = target_price
+        # Final attribute population after all logic (including survival bridge)
+        res["limit_used"] = limit
+        
+        future_active = [h for h in target_hours if h >= cur_hour]
+        if future_active:
+            upcoming_h = future_active[0]
+            if upcoming_h < 24:
+                rel_hours = [h for h in future_active if h < 24]
+            else:
+                rel_hours = [h for h in future_active if h >= 24]
+            
+            p_list = [all_prices.get(h, 0.0) for h in rel_hours]
+            if p_list:
+                if mode == "buy":
+                    res["target_price"] = min(p_list)
+                else:
+                    res["target_price"] = max(p_list)
 
         if not target_hours:
             res["state"] = "price_limit_not_met"
