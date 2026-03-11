@@ -48,6 +48,7 @@ from .const import (
     CONF_ANOMALY_THRESHOLD,
     CONF_POWER_SENSOR,
     CONF_ACTIVE_HOLD_TIME,
+    CONF_IS_CYCLIC,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -215,7 +216,10 @@ class EnergyProfileManager:
         # Power sensor runtime tracking
         self.learned_standby_power = {}   # sensor_id -> watts
         self.learned_real_power = {}      # sensor_id -> watts
+        self.learned_avg_cycle_power = {} # sensor_id -> watts (smoothed over entire cycle)
+        self.learned_cycle_total_kwh = {} # sensor_id -> kWh total per cycle
         self.cycle_start_time = {}        # sensor_id -> timestamp (when it last exceeded standby)
+        self.cycle_energy_start = {}      # sensor_id -> kWh consumed at cycle start
         self.last_known_power = {}        # sensor_id -> watts (for fallback)
 
     def set_max_days(self, days):
@@ -245,6 +249,8 @@ class EnergyProfileManager:
         self.settings = self.data.get("settings", {})
         self.learned_standby_power = self.data.get("learned_standby_power", {})
         self.learned_real_power = self.data.get("learned_real_power", {})
+        self.learned_avg_cycle_power = self.data.get("learned_avg_cycle_power", {})
+        self.learned_cycle_total_kwh = self.data.get("learned_cycle_total_kwh", {})
             
         if "generation" not in self.data:
             self.data["generation"] = {str(i): [] for i in range(24)}
@@ -1148,17 +1154,60 @@ class EnergyProfileManager:
             is_currently_pulling_power = cur_p_watts > (standby_threshold + 10.0)
             
             if is_currently_pulling_power:
-                self.cycle_start_time[sensor_id] = now
+                if sensor_id not in self.cycle_start_time:
+                    self.cycle_start_time[sensor_id] = now
+                    # Record energy start for avg cycle calc
+                    if p_sensor:
+                        st = self.hass.states.get(p_sensor)
+                        if st and st.state not in ("unknown", "unavailable"):
+                            try: self.cycle_energy_start[sensor_id] = float(st.state)
+                            except ValueError: pass
+
                 if cur_p_watts > self.learned_real_power.get(sensor_id, 0.0):
                     # Auto-learn peak power (slow filter: 10% adjustment)
                     old_peak = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0)
                     self.learned_real_power[sensor_id] = (old_peak * 0.9) + (cur_p_watts * 0.1)
+            
+            elif sensor_id in self.cycle_start_time:
+                # Device stopped. Check if we should finalize the cycle learning
+                diff_sec = (now - self.cycle_start_time[sensor_id]).total_seconds()
+                if diff_sec > (float(hold_time_min) * 60):
+                    # Cycle finished definitively. Learn avg and total.
+                    start_t = self.cycle_start_time.pop(sensor_id)
+                    dur_h = (now - start_t).total_seconds() / 3600.0
+                    e_start = self.cycle_energy_start.pop(sensor_id, None)
+                    if e_start is not None and p_sensor:
+                        st = self.hass.states.get(p_sensor)
+                        if st and st.state not in ("unknown", "unavailable"):
+                            try:
+                                kwh_tot = max(0.0, float(st.state) - e_start)
+                                if kwh_tot > 0.01:
+                                    self.learned_cycle_total_kwh[sensor_id] = (self.learned_cycle_total_kwh.get(sensor_id, kwh_tot) * 0.7) + (kwh_tot * 0.3)
+                                    if dur_h > 0.05:
+                                        avg_p = (kwh_tot / dur_h) * 1000.0
+                                        peak = self.learned_real_power.get(sensor_id, avg_p)
+                                        avg_p = min(avg_p, peak)
+                                        self.learned_avg_cycle_power[sensor_id] = (self.learned_avg_cycle_power.get(sensor_id, avg_p) * 0.7) + (avg_p * 0.3)
+                            except ValueError: pass
 
             is_in_grace_period = False
+            # Early release detection based on energy budget
+            is_cyclic = settings.get(CONF_IS_CYCLIC, False)
+            curr_cycle_kwh = 0.0
+            if sensor_id in self.cycle_energy_start and p_sensor:
+                st = self.hass.states.get(p_sensor)
+                if st and st.state not in ("unknown", "unavailable"):
+                    try: curr_cycle_kwh = max(0.0, float(st.state) - self.cycle_energy_start[sensor_id])
+                    except ValueError: pass
+
             if sensor_id in self.cycle_start_time:
                 diff = (now - self.cycle_start_time[sensor_id]).total_seconds()
                 if diff < (float(hold_time_min) * 60):
                     is_in_grace_period = True
+                    # If device already consumed its typical cycle energy, we don't need to 'hold' it anymore
+                    if is_cyclic and sensor_id in self.learned_cycle_total_kwh:
+                        if curr_cycle_kwh >= (self.learned_cycle_total_kwh[sensor_id] * 1.05): # 5% margin
+                            is_in_grace_period = False
 
             req_kwh = settings.get("required_kwh", 2.5)
             # Use learned power if available, otherwise user setting
@@ -2019,6 +2068,42 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
                 else:
                     expected_gen = 0.0
             
+            # --- Dynamic: Add Active Loads to Simulation ---
+            active_load_add_kw = 0.0
+            for s_id, settings in self.manager.get_setting(CONF_DEDUCT_SETTINGS, {}).items():
+                # Check if device is active NOW
+                is_pulling = self.manager._is_currently_pulling_power(s_id)
+                
+                # If active, we simulate its real power impact
+                if is_pulling:
+                    # Decide which power to use for simulation
+                    is_cyclic = settings.get(CONF_IS_CYCLIC, False)
+                    if is_cyclic and s_id in self.manager.learned_avg_cycle_power:
+                        p_kw = self.manager.learned_avg_cycle_power[s_id] / 1000.0
+                    else:
+                        p_kw = self.manager.learned_real_power.get(s_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
+                    
+                    # For devices with daily norm (required_kwh > 0)
+                    req_kwh = settings.get("required_kwh", 0.0)
+                    if req_kwh > 0:
+                        consumed = self.manager.daily_deduct_consumption.get(s_id, 0.0)
+                        remaining_kwh = max(0.0, req_kwh - consumed)
+                        
+                        # How many hours from 'now' this device will continue to run?
+                        if p_kw > 0:
+                            hours_to_finish = remaining_kwh / p_kw
+                            # If we are within the simulated window for this device
+                            if (h_step - now.hour) <= hours_to_finish:
+                                active_load_add_kw += p_kw
+                    else:
+                        # For devices without norm (e.g. Boiler), add power only to current/immediate simulation steps
+                        # We don't know when it stops, so we are conservative
+                        if h_step == (now.hour + 1):
+                            active_load_add_kw += p_kw
+            
+            expected_cons += active_load_add_kw
+            # -----------------------------------------------
+
             net_solar_kw = max(0.0, expected_gen - expected_cons)
             net_cons_kw = max(0.0, expected_cons - expected_gen)
             
@@ -2180,6 +2265,28 @@ class InverterOperationModeSensor(SensorEntity):
                         expected_cons = float(prof_cons_tom.get(str(h_mod), 0.0))
                         expected_gen = float(prof_gen.get(str(h_mod), 0.0)) * coeff_tom
                         
+                    # --- Dynamic: Add Active Loads to BMS Peak Simulation ---
+                    active_load_kw = 0.0
+                    for s_id, s_settings in self.manager.get_setting(CONF_DEDUCT_SETTINGS, {}).items():
+                        if self.manager._is_currently_pulling_power(s_id):
+                            is_cyclic = s_settings.get(CONF_IS_CYCLIC, False)
+                            if is_cyclic and s_id in self.manager.learned_avg_cycle_power:
+                                p_kw = self.manager.learned_avg_cycle_power[s_id] / 1000.0
+                            else:
+                                p_kw = self.manager.learned_real_power.get(s_id, s_settings.get("required_kw", 0.0) * 1000.0) / 1000.0
+                            
+                            req_kwh = s_settings.get("required_kwh", 0.0)
+                            if req_kwh > 0:
+                                remaining = max(0.0, req_kwh - self.manager.daily_deduct_consumption.get(s_id, 0.0))
+                                if p_kw > 0 and (h_offset + 1) <= (remaining / p_kw):
+                                    active_load_kw += p_kw
+                            elif h_offset == 0:
+                                # For boiler-type loads, only count in current hour of simulation
+                                active_load_kw += p_kw
+                    
+                    expected_cons += active_load_kw
+                    # --------------------------------------------------------
+
                     net_gen_kw = max(0.0, expected_gen - expected_cons)
                     
                     # Compute max accepted charge power based on simulated SOC (CC/CV phases)

@@ -29,6 +29,7 @@ from .const import (
     CONF_GRID_EXPORT_SENSORS,
     CONF_POWER_SENSOR,
     CONF_ACTIVE_HOLD_TIME,
+    CONF_IS_CYCLIC,
 )
 
 
@@ -143,6 +144,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "only_solar_or_negative_price": user_input.get("only_solar_or_negative_price", False),
                 CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
                 CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
+                CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
             }
             self._user_input["deduct_settings_index"] += 1
             return await self.async_step_deduct_settings()
@@ -158,6 +160,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(CONF_ACTIVE_HOLD_TIME, default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+            vol.Optional(CONF_IS_CYCLIC, default=False): bool,
         }
 
         # Nice clean name for display
@@ -285,6 +288,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=schema,
             errors=errors,
+            last_step=False,
         )
 
     async def async_step_investment_settings(self, user_input=None):
@@ -332,6 +336,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 "only_solar_or_negative_price": user_input.get("only_solar_or_negative_price", False),
                 CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
                 CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
+                CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
             }
             self._user_input["deduct_settings_index"] += 1
             return await self.async_step_deduct_settings()
@@ -348,6 +353,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15)): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+            vol.Optional(CONF_IS_CYCLIC, default=existing.get(CONF_IS_CYCLIC, False)): bool,
         }
 
         sensor_display = current_sensor.replace("sensor.", "").replace("_", " ").title()

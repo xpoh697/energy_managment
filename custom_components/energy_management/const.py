@@ -43,3 +43,4 @@ CONF_ANOMALY_THRESHOLD = "anomaly_threshold"
 # Deduct/Load specific settings
 CONF_POWER_SENSOR = "power_sensor"
 CONF_ACTIVE_HOLD_TIME = "active_hold_time"
+CONF_IS_CYCLIC = "is_cyclic"
