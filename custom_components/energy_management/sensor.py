@@ -1285,8 +1285,15 @@ class EnergyProfileManager:
                 profit_per_kwh = (price - min_buy_limit) * eff
                 return profit_per_kwh > (2 * deg_cost)
 
-            peaks_today = [(h, p) for h, p in get_peaks(window_today, True, limit, tolerance) if is_profitable(p)]
-            peaks_tom = [(h, p) for h, p in get_peaks(window_tomorrow, True, limit, tolerance) if is_profitable(p)]
+            raw_peaks_today = get_peaks(window_today, True, limit, tolerance)
+            raw_peaks_tom = get_peaks(window_tomorrow, True, limit, tolerance)
+            
+            if not raw_peaks_today and not raw_peaks_tom:
+                res["state"] = "price_limit_not_met"
+                return res
+
+            peaks_today = [(h, p) for h, p in raw_peaks_today if is_profitable(p)]
+            peaks_tom = [(h, p) for h, p in raw_peaks_tom if is_profitable(p)]
             
             if not peaks_today and not peaks_tom:
                 res["state"] = "unprofitable_arbitrage"
