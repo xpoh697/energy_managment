@@ -1127,9 +1127,12 @@ class EnergyProfileManager:
         avg_gen_kw = 0.0
         if self.power_history:
             avg_gen_kw = sum(x["gen_kw"] for x in self.power_history) / len(self.power_history)
-            
+
         available_gen_kw = avg_gen_kw
-        
+        # available_power_kw tracks remaining power capacity in kW (same units as req_kw)
+        # Initialize from avg generation; clamped to a minimum to allow non-solar devices to work
+        available_power_kw = max(avg_gen_kw, float(available_budget))  # budget in kWh used as rough kW proxy
+
         for sensor_id, settings in sorted_sensors:
             if is_export_peak:
                 permissions[sensor_id] = False
@@ -1245,8 +1248,10 @@ class EnergyProfileManager:
             is_free_price = cur_price_buy is not None and cur_price_buy <= 0.0
             
             if req_kw > 0.0 and not is_idle:
-                if available_budget < req_kw:
+                # Power bottleneck: check against available_power_kw (kW vs kW — correct units)
+                if available_power_kw < req_kw:
                     power_bottleneck = True
+                # Gen bottleneck: only for solar-only devices
                 if only_solar_free and not is_free_price:
                     if available_gen_kw < (req_kw * 0.6):
                         gen_bottleneck = True
@@ -1256,11 +1261,11 @@ class EnergyProfileManager:
             if is_in_grace_period:
                 permissions[sensor_id] = True
                 permissions_reasons[sensor_id] = "Разрешено: Удержание активного цикла (Grace Period)"
-                # IMPORTANT: Device is actively consuming power — deduct from shared budget
+                # IMPORTANT: Device is actively consuming — deduct from ALL power pools
                 if req_kw > 0.0:
-                    available_budget -= req_kw
-                    if only_solar_free and not is_free_price:
-                        available_gen_kw -= (req_kw * 0.6)
+                    available_power_kw -= req_kw  # Reduce available power for others
+                    available_gen_kw -= req_kw    # Reduce available solar for solar-only devices
+                    available_budget -= req_kw    # Reduce energy budget (approximation)
                 continue
 
             if is_idle:
@@ -1271,12 +1276,15 @@ class EnergyProfileManager:
             if req_kwh == 0:
                 if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
                     permissions[sensor_id] = True
-                    if only_solar_free and not is_free_price and req_kw > 0.0:
-                        available_gen_kw -= (float(req_kw) * 0.6)
-                    
+                    # Deduct from all pools
+                    if req_kw > 0.0:
+                        available_power_kw -= req_kw
+                        if only_solar_free and not is_free_price:
+                            available_gen_kw -= (float(req_kw) * 0.6)
+
                     b_val = int(float(available_budget) * 100) / 100.0
-                    g_val = int(float(available_gen_kw) * 100) / 100.0
-                    permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профиц. {b_val} кВт*ч, Ген. доступно {g_val} кВт)"
+                    g_val = int(float(available_power_kw) * 100) / 100.0
+                    permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профиц. {b_val} кВт*ч, Доступно {g_val} кВт)"
                 else:
                     permissions[sensor_id] = False
                     b_val = int(float(available_budget) * 100) / 100.0
