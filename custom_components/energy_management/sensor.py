@@ -101,7 +101,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(MarketStrategySensor(manager, "sell", "Market SELL Strategy (Discharge)"))
         
     entities.append(InverterOperationModeSensor(manager, "Inverter Mode Command"))
-    entities.append(BatteryDepletionTimeSensor(manager, "Battery Depletion Forecast"))
     
     if has_generation:
         entities.append(BatteryEndOfDaySOCSensor(manager, "Прогноз заряда к закату"))
@@ -2444,124 +2443,6 @@ class ProfileAveragedSensor(SensorEntity):
                 "profile": profile
             }
 
-class BatteryDepletionTimeSensor(SensorEntity):
-    """Predicts when the battery will hit the min_soc limit."""
-    def __init__(self, manager, name):
-        self.manager = manager
-        self._attr_name = name
-        self._attr_unique_id = f"{manager.entry.entry_id}_battery_depletion"
-        self._attr_icon = "mdi:battery-clock"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(manager.entry.entry_id))},
-            name=manager.entry.data.get("name", "Energy Management"),
-            manufacturer="Energy AI",
-            model="Energy Trader System",
-        )
-
-    async def async_added_to_hass(self):
-        self.manager.register_listener(self.async_write_ha_state)
-
-    @property
-    def native_value(self):
-        now = dt_util.now()
-        
-        min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
-        
-        batt_soc, batt_cap, _ = self.manager.get_battery_state(soc_default=100.0)
-                
-        if batt_cap <= 0.0:
-            self._attr_extra_state_attributes = {}
-            return "Нет батареи"
-            
-        if batt_soc <= min_soc:
-            self._attr_extra_state_attributes = {}
-            return "Уже разряжена"
-            
-        self._attr_extra_state_attributes = {
-            "initial_soc": batt_soc,
-            "battery_capacity": batt_cap,
-            "min_soc_target": min_soc
-        }
-            
-        simulated_soc = batt_soc
-        
-        # Inverter efficiency: discharging (DC->AC) loses energy too
-        eff_coeff = self.manager.get_efficiency_coefficient()
-        
-        # 1. Look up forecast today remaining
-        forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
-            
-        # 2. Look up forecast tomorrow
-        forecast_tom_val = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor)
-            
-        # Pre-calculate historical sums
-        today_type = "weekend" if now.weekday() >= 5 else "weekday"
-        tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
-        
-        prof_gen_today = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-        prof_gen_tom = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-        
-        hist_today_rem = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(now.hour + 1, 24))
-        hist_tom_total = sum(float(prof_gen_tom.get(str(h), 0.0)) for h in range(0, 24))
-        
-        # Simulate over next 48 hours to find the hour it dips below min_soc
-        for hour_offset in range(1, 49):
-            sim_time = now + timedelta(hours=hour_offset)
-            h_str = str(sim_time.hour)
-            
-            day_type = "weekend" if sim_time.weekday() >= 5 else "weekday"
-            
-            prof_cons = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type)
-            expected_cons = float(prof_cons.get(h_str, 0.0))
-            
-            prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-            hist_hour_gen = float(prof_gen.get(h_str, 0.0))
-            
-            expected_gen = hist_hour_gen
-            if sim_time.date() == now.date() and forecast_today_val is not None:
-                if hist_today_rem > 0:
-                    expected_gen = (hist_hour_gen / hist_today_rem) * forecast_today_val
-                else:
-                    expected_gen = 0.0
-            elif sim_time.date() == (now + timedelta(days=1)).date() and forecast_tom_val is not None:
-                if hist_tom_total > 0:
-                    expected_gen = (hist_hour_gen / hist_tom_total) * forecast_tom_val
-                else:
-                    expected_gen = 0.0
-            
-            net_solar_kw = max(0.0, expected_gen - expected_cons)
-            net_cons_kw = max(0.0, expected_cons - expected_gen)
-            
-            # If we are discharging — need more battery energy to deliver net_cons to AC loads
-            if net_cons_kw > 0.0:
-                soc_delta = ((net_cons_kw / eff_coeff) / batt_cap) * 100.0
-                simulated_soc -= soc_delta
-            # If we are charging — not all solar makes it into battery due to AC->DC losses
-            elif net_solar_kw > 0.0:
-                max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-                accepted_power_kw = max_batt_power * EnergyProfileManager.get_cc_cv_ratio(simulated_soc)
-                    
-                actual_charge_kw = min(net_solar_kw * eff_coeff, accepted_power_kw)
-                soc_gained = (actual_charge_kw / batt_cap) * 100.0
-                simulated_soc = min(100.0, simulated_soc + soc_gained)
-
-            if simulated_soc <= min_soc:
-                self._attr_extra_state_attributes["hours_to_depletion"] = hour_offset
-                if sim_time.date() == now.date():
-                    return f"Сегодня в {sim_time.hour:02d}:00"
-                elif sim_time.date() == (now + timedelta(days=1)).date():
-                    return f"Завтра в {sim_time.hour:02d}:00"
-                else:
-                    return f"Послезавтра в {sim_time.hour:02d}:00"
-                    
-        self._attr_extra_state_attributes["final_simulated_soc_48h"] = round(simulated_soc, 1)
-        return "> 48 часов"
-
-    @property
-    def extra_state_attributes(self):
-        if not hasattr(self, "_attr_extra_state_attributes"):
-            return {}
-        return self._attr_extra_state_attributes
 
 
 class BatteryEndOfDaySOCSensor(SensorEntity):
@@ -2929,8 +2810,7 @@ class InverterOperationModeSensor(SensorEntity):
                 
         self._attr_extra_state_attributes = {
             "is_preparing_for_peak": is_preparing_for_peak,
-            "next_peak_start_hour": formatted_peak,
-            "bms_forecast": bms_debug
+            "next_peak_start_hour": formatted_peak
         }
                     
         # State Machine Logic
