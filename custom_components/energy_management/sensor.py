@@ -3098,6 +3098,26 @@ class MarketStrategySensor(SensorEntity):
         today_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["today_prices"].items(), key=lambda item: int(item[0])) if int(k) >= cur_hour}
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
         
+        # Determine the user-friendly mode string
+        current_mode = "Ожидание"
+        state = res.get("state", "idle")
+        
+        if state == "active":
+            if self.mode == "buy":
+                reason = res.get("charge_reason", "price")
+                if reason == "survival":
+                    current_mode = "Зарядка (Экстренно)"
+                else:
+                    current_mode = "Зарядка (Дешевая цена)"
+            else:
+                current_mode = "Активная продажа"
+        elif state == "price_limit_not_met":
+            current_mode = "Цена выше лимита" if self.mode == "buy" else "Цена ниже лимита"
+        elif state == "unprofitable_arbitrage":
+            current_mode = "Арбитраж невыгоден"
+        elif state == "idle":
+            current_mode = "Ожидание"
+            
         attrs = {
             "analyzed_window": res.get("analyzed_window", "Неизвестно"),
             "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
@@ -3106,7 +3126,7 @@ class MarketStrategySensor(SensorEntity):
             "target_price": round(res["target_price"], 3),
             "limit_used": round(res["limit_used"], 3),
             "recommended_power_kw": res["recommended_power_kw"],
-            "current_mode": res.get("charge_reason", "Ожидание"),
+            "current_mode": current_mode,
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt
         }
