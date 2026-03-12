@@ -1274,21 +1274,25 @@ class EnergyProfileManager:
         sell_price_limit = self.get_setting(CONF_PRICE_SELL_LIMIT, 999.0)
 
         is_export_peak = False
+        peak_reason = ""
         
-        # 1. Daytime "Sell from PV" threshold
-        if int(cur_hour) < sale_pv_no_bat_max_hour:
+        # 1. Absolute "Sell from Battery/PV" (Arbitrage) threshold - Alway applies
+        if cur_price_sell is not None and cur_price_sell >= sell_price_limit:
+            is_export_peak = True
+            peak_reason = f"Блокировка: Арбитражный пик (Цена {cur_price_sell} >= Sell Price Limit {sell_price_limit})"
+        
+        # 2. Daytime "Sell from PV" threshold - Only until max hour
+        if not is_export_peak and int(cur_hour) < sale_pv_no_bat_max_hour:
             if cur_price_sell is not None and cur_price_sell >= sell_only_pv_threshold:
                 is_export_peak = True
+                peak_reason = f"Блокировка: Дорогой день PV (Цена {cur_price_sell} >= Sell Only PV {sell_only_pv_threshold})"
                 
-        # 2. Absolute "Sell from Battery" arbitrage threshold
-        if not is_export_peak and cur_price_sell is not None and cur_price_sell >= sell_price_limit:
-            is_export_peak = True
-
         # 3. Dynamic Market Strategy "Sell" state
         if not is_export_peak and not skip_strategy_check:
             sell_stat = self.get_market_strategy("sell")
             if sell_stat.get("state") == "active":
                 is_export_peak = True
+                peak_reason = "Блокировка: Активна стратегия продажи в сеть"
         
         # 5. Filter and sort permissions
         permissions = {}
@@ -1360,7 +1364,7 @@ class EnergyProfileManager:
         for sensor_id, settings in sorted_sensors:
             if is_export_peak:
                 permissions[sensor_id] = False
-                permissions_reasons[sensor_id] = "Блокировка: Дорогой час (Выгоднее продавать в сеть PV / Батарею)"
+                permissions_reasons[sensor_id] = peak_reason
                 continue
                 
             only_solar_free = settings.get("only_solar_or_negative_price", False)
