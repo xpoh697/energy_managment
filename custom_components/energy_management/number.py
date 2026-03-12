@@ -25,6 +25,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = [
         EnergyProfileNumber(manager, CONF_PRICE_BUY_LIMIT, "Buy Price Limit", None, -99.0, 999.0, 0.001, "mdi:cash-minus", 99.0),
         EnergyProfileNumber(manager, CONF_PRICE_SELL_LIMIT, "Sell Price Limit", None, -99.0, 999.0, 0.001, "mdi:cash-plus", -99.0),
+        EnergyProfileNumber(manager, CONF_ARBITRAGE_MIN_PROFIT, "Arbitrage Price Limit", None, 0.0, 999.0, 0.05, "mdi:hand-coin", 0.1),
         EnergyProfileNumber(manager, CONF_PRICE_STOP_SELL, "Stop Sell Threshold", None, -99.0, 999.0, 0.001, "mdi:cash-remove", 0.0),
         EnergyProfileNumber(manager, CONF_PRICE_SELL_ONLY_PV, "Sell PV Only (Block Bat/Loads)", None, -99.0, 999.0, 0.001, "mdi:weather-sunny", 1.5),
         EnergyProfileNumber(manager, CONF_PRICE_TOLERANCE, "Buy Price Tolerance", None, 0.0, 999.0, 0.001, "mdi:tune", 0.0),
@@ -34,7 +35,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EnergyProfileNumber(manager, CONF_TARGET_SOC_SELL, "Target SOC Sell", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
         EnergyProfileNumber(manager, CONF_MIN_SOC_BUY, "Min Survival SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
         EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Max Hour for Sell PV Only", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
-        EnergyProfileNumber(manager, CONF_ARBITRAGE_MIN_PROFIT, "Arbitrage Min Profit", None, 0.0, 999.0, 0.1, "mdi:hand-coin", 0.1),
     ]
     
     async_add_entities(entities)

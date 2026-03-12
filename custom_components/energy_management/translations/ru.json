@@ -194,7 +194,7 @@
       "target_soc_sell": { "name": "Целевой SOC (Продажа)" },
       "min_soc_buy": { "name": "Минимальный SOC (Выживание)" },
       "sale_pv_no_bat_max_hour": { "name": "Макс. час для продажи только PV" },
-      "arbitrage_min_profit": { "name": "Мин. выгода арбитража" }
+      "arbitrage_min_profit": { "name": "Лимит цены для арбитража (разница)" }
     }
   }
 }

@@ -180,7 +180,7 @@
       "target_soc_sell": { "name": "Target SOC Sell" },
       "min_soc_buy": { "name": "Min Survival SOC" },
       "sale_pv_no_bat_max_hour": { "name": "Max Hour for Sell PV" },
-      "arbitrage_min_profit": { "name": "Arbitrage Min Profit" }
+      "arbitrage_min_profit": { "name": "Arbitrage Price Limit (Diff)" }
     }
   }
 }

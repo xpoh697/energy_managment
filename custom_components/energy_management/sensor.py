@@ -1,6 +1,7 @@
 import logging
 import json
 import os
+from typing import Any, cast
 from datetime import datetime, timedelta
 from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorDeviceClass
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -152,13 +153,14 @@ class EnergyProfileManager:
         # Initialize internal storage handler for preserving profiles across restarts
         self.store = Store(hass, STORAGE_VERSION, f"energy_management_{entry.entry_id}")
         
-        self.consumption_sensors = set(config_data.get(CONF_CONSUMPTION_SENSORS, []))
-        self.generation_sensors = set(config_data.get(CONF_GENERATION_SENSORS, []))
-        self.deduct_sensors = set(config_data.get(CONF_DEDUCT_SENSORS, []))
-        self.grid_import_sensors = set(config_data.get(CONF_GRID_IMPORT_SENSORS, []))
-        self.grid_export_sensors = set(config_data.get(CONF_GRID_EXPORT_SENSORS, []))
-        self.deduct_settings = config_data.get(CONF_DEDUCT_SETTINGS, {})
-        self.all_sensors = self.consumption_sensors | self.generation_sensors | self.deduct_sensors | self.grid_import_sensors | self.grid_export_sensors
+        self.consumption_sensors: set[str] = set(config_data.get(CONF_CONSUMPTION_SENSORS, []) or [])
+        self.generation_sensors: set[str] = set(config_data.get(CONF_GENERATION_SENSORS, []) or [])
+        self.deduct_sensors: set[str] = set(config_data.get(CONF_DEDUCT_SENSORS, []) or [])
+        self.grid_import_sensors: set[str] = set(config_data.get(CONF_GRID_IMPORT_SENSORS, []) or [])
+        self.grid_export_sensors: set[str] = set(config_data.get(CONF_GRID_EXPORT_SENSORS, []) or [])
+        raw_deduct = config_data.get(CONF_DEDUCT_SETTINGS, {})
+        self.deduct_settings: dict[str, Any] = raw_deduct if isinstance(raw_deduct, dict) else {}
+        self.all_sensors: set[str] = self.consumption_sensors | self.generation_sensors | self.deduct_sensors | self.grid_import_sensors | self.grid_export_sensors
         
         self.power_load_sensors = config_data.get(CONF_POWER_LOAD_SENSORS, [])
         self.power_gen_sensors = config_data.get(CONF_POWER_GEN_SENSORS, [])
@@ -177,19 +179,21 @@ class EnergyProfileManager:
         presence_raw = config_data.get(CONF_PRESENCE_SENSORS, [])
         self.presence_sensors = [presence_raw] if isinstance(presence_raw, str) else (presence_raw or [])
         
-        self.price_buy_sensors = [config_data.get(CONF_PRICE_BUY)] if config_data.get(CONF_PRICE_BUY) else []
-        self.price_sell_sensors = [config_data.get(CONF_PRICE_SELL)] if config_data.get(CONF_PRICE_SELL) else []
+        buy_p = config_data.get(CONF_PRICE_BUY)
+        sell_p = config_data.get(CONF_PRICE_SELL)
+        self.price_buy_sensors: list[str] = [str(buy_p)] if buy_p else []
+        self.price_sell_sensors: list[str] = [str(sell_p)] if sell_p else []
         
-        self.all_price_sensors = set([s for s in self.price_buy_sensors + self.price_sell_sensors if s])
+        self.all_price_sensors: set[str] = set([s for s in (self.price_buy_sensors + self.price_sell_sensors) if s])
         
         self.max_days = 365
         self.custom_period = config_data.get(CONF_CUSTOM_PERIOD, 14)
         
         # Internal configuration from UI (Number/Switch defaults handled by platform)
-        self.settings = {}
+        self.settings: dict[str, Any] = {}
         
         # Array to store history of consumption per hour. e.g. "13" -> [1.3, 1.2, 1.5...]
-        self.data = {}
+        self.data: dict[str, Any] = {}
         
         self.current_consumption_base = 0.0
         self.current_consumption_total = 0.0
@@ -197,9 +201,9 @@ class EnergyProfileManager:
         self.current_grid_import = 0.0
         self.current_grid_export = 0.0
         self.current_hourly_deduct = 0.0  # Accumulator for all deduct sensors this hour
-        self.sensor_last_values = {}
+        self.sensor_last_values: dict[str, float] = {}
         
-        self.daily_deduct_consumption = {s: 0.0 for s in self.deduct_sensors}
+        self.daily_deduct_consumption: dict[str, float] = {s: 0.0 for s in self.deduct_sensors}
         
         self.update_listeners = []
         self._unsub_state = None
@@ -212,20 +216,20 @@ class EnergyProfileManager:
         self.inverter_losses_sensor = losses_raw if losses_raw else None
         self.current_losses = 0.0  # kWh accumulated this hour
         if self.inverter_losses_sensor:
-            self.all_sensors = self.all_sensors | {self.inverter_losses_sensor}
+            self.all_sensors = self.all_sensors | {str(self.inverter_losses_sensor)}
         
         # Track historical power samples for 5-10 minute average smoothing
-        self.power_history = []
+        self.power_history: list[dict[str, Any]] = []
         
         # Power sensor runtime tracking
-        self.learned_standby_power = {}   # sensor_id -> watts
-        self.learned_real_power = {}      # sensor_id -> watts
-        self.learned_avg_cycle_power = {} # sensor_id -> watts (smoothed over entire cycle)
-        self.learned_cycle_total_kwh = {} # sensor_id -> kWh total per cycle
-        self.cycle_start_time = {}        # sensor_id -> timestamp (when it was LAST seen active)
-        self.cycle_actual_start_time = {} # sensor_id -> timestamp (when current cycle REALLY started)
-        self.cycle_energy_start = {}      # sensor_id -> kWh consumed at cycle start
-        self.last_known_power = {}        # sensor_id -> watts (for fallback)
+        self.learned_standby_power: dict[str, float] = {}
+        self.learned_real_power: dict[str, float] = {}
+        self.learned_avg_cycle_power: dict[str, float] = {}
+        self.learned_cycle_total_kwh: dict[str, float] = {}
+        self.cycle_start_time: dict[str, datetime] = {}
+        self.cycle_actual_start_time: dict[str, datetime] = {}
+        self.cycle_energy_start: dict[str, float] = {}
+        self.last_known_power: dict[str, float] = {}
         # Sensors that need to re-establish a baseline on first read after restart
         # (prevents large accumulated deltas from being counted as generation/consumption)
         self._sensors_need_baseline: set = set()
@@ -417,7 +421,7 @@ class EnergyProfileManager:
         if self.power_gen_sensors:
             gen_kw = sum((_get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors)
             
-        self.power_history.append({"time": now, "load_kw": load_kw, "gen_kw": gen_kw})
+        self.power_history.append({"time": now, "load_kw": float(load_kw), "gen_kw": float(gen_kw)})
         
         # Prune older than 10 minutes
         cutoff = now - timedelta(minutes=10)
@@ -452,13 +456,13 @@ class EnergyProfileManager:
                     self.cycle_energy_start[sensor_id] = self.daily_deduct_consumption.get(sensor_id, 0.0)
                 
                 # Active Power Learning (EMA)
-                old_real = self.learned_real_power.get(sensor_id, cur_p)
-                self.learned_real_power[sensor_id] = round(old_real * 0.9 + cur_p * 0.1, 1)
+                old_real = float(self.learned_real_power.get(sensor_id, cur_p))
+                self.learned_real_power[sensor_id] = round(old_real * 0.9 + float(cur_p) * 0.1, 1)
             else:
                 # Standby Power Learning (Slow EMA)
                 if 0.1 < cur_p < (standby + 5.0):
-                    old_s = self.learned_standby_power.get(sensor_id, cur_p)
-                    self.learned_standby_power[sensor_id] = round(old_s * 0.95 + cur_p * 0.05, 2)
+                    old_s = float(self.learned_standby_power.get(sensor_id, cur_p))
+                    self.learned_standby_power[sensor_id] = round(old_s * 0.95 + float(cur_p) * 0.05, 2)
                     
                 # If we just finished a cycle
                 if sensor_id in self.cycle_actual_start_time:
@@ -466,11 +470,11 @@ class EnergyProfileManager:
                     energy = self.daily_deduct_consumption.get(sensor_id, 0.0) - self.cycle_energy_start.get(sensor_id, 0.0)
                     
                     if energy > 0.02 and duration > (1/60.0): # At least 20Wh and 1 minute
-                        avg_p_w = (energy * 1000.0) / duration
-                        self.learned_real_power[sensor_id] = round(avg_p_w, 1)
+                        avg_p_w = (float(energy) * 1000.0) / float(duration)
+                        self.learned_real_power[sensor_id] = round(float(avg_p_w), 1)
                         if settings.get(CONF_IS_CYCLIC):
-                            self.learned_cycle_total_kwh[sensor_id] = round(energy, 3)
-                            self.learned_avg_cycle_power[sensor_id] = round(avg_p_w, 1)
+                            self.learned_cycle_total_kwh[sensor_id] = round(float(energy), 3)
+                            self.learned_avg_cycle_power[sensor_id] = round(float(avg_p_w), 1)
                     
                     self.cycle_actual_start_time.pop(sensor_id, None)
                     self.cycle_energy_start.pop(sensor_id, None)
@@ -1003,8 +1007,8 @@ class EnergyProfileManager:
                 gen = float(str(rec.get("gen", 0.0)).replace(",", "."))
                 loss = float(str(rec.get("v", 0.0)).replace(",", "."))
                 if gen > 0.01:   # Only count hours with real generation
-                    total_gen += gen
-                    total_losses += loss
+                    total_gen += float(gen)
+                    total_losses += float(loss)
                     sample_count += 1
         
         if sample_count < 5 or total_gen < 0.1:
@@ -1358,14 +1362,15 @@ class EnergyProfileManager:
                 active_kw = (cur_p_watts / 1000.0) if cur_p_watts > 10.0 else req_kw
                 
                 # Commit resources
-                available_power_kw -= active_kw
-                available_gen_kw -= active_kw
-                available_budget -= active_kw
+                active_kw_f = float(active_kw)
+                available_power_kw = float(available_power_kw) - active_kw_f
+                available_gen_kw = float(available_gen_kw) - active_kw_f
+                available_budget = float(available_budget) - active_kw_f
                 
                 committed_sensors[sensor_id] = {
                     "is_in_grace_period": True,
-                    "active_kw": active_kw,
-                    "cur_p_watts": cur_p_watts
+                    "active_kw": active_kw_f,
+                    "cur_p_watts": float(cur_p_watts)
                 }
 
         # Pass 2: Evaluate candidate loads in priority order
@@ -1431,9 +1436,9 @@ class EnergyProfileManager:
                 if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
                     permissions[sensor_id] = True
                     if req_kw > 0.0:
-                        available_power_kw -= req_kw
+                        available_power_kw = float(available_power_kw) - float(req_kw)
                         if only_solar_free and not is_free_price:
-                            available_gen_kw -= (float(req_kw) * 0.6)
+                            available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
                     
                     b_val = round(max(0.0, float(available_budget)), 2)
                     g_val = round(max(0.0, float(available_power_kw)), 2)
@@ -1624,7 +1629,7 @@ class EnergyProfileManager:
             
             if not raw_peaks_today and not raw_peaks_tom:
                 res["state"] = "price_limit_not_met"
-                return res
+                # Fall through to allow arbitrage buyback check
 
             peaks_today = [(h, p) for h, p in raw_peaks_today if is_profitable(p)]
             peaks_tom = [(h, p) for h, p in raw_peaks_tom if is_profitable(p)]
@@ -1632,7 +1637,7 @@ class EnergyProfileManager:
             if not peaks_today and not peaks_tom:
                 res["state"] = "unprofitable_arbitrage"
                 res["multi_cycle"] = "Деградация АКБ > Выгоды"
-                return res
+                # Fall through to allow arbitrage buyback check
 
             if peaks_today and peaks_tom:
                 # We have peaks on both days. Check if we can recharge between them.
@@ -1794,9 +1799,10 @@ class EnergyProfileManager:
                 else:
                     res["target_price"] = max(p_list)
 
-        if not target_hours:
+        if not target_hours and mode == "buy":
             res["state"] = "price_limit_not_met"
             return res
+        # For "sell" mode, we continue even with empty target_hours to check arbitrage
             
         target_hours_sorted = sorted(target_hours)
         found_periods = []
@@ -1822,9 +1828,7 @@ class EnergyProfileManager:
             d = "Завтра " if h >= 24 else "Сегодня "
             return f"{d}{h % 24:02d}:00"
             
-        res["active_hours"] = [h for h in target_hours_sorted]
-        res["active_hours_formatted"] = ", ".join([_format_hour_simple(h) for h in target_hours_sorted])
-        res["active_periods"] = ", ".join(found_periods)
+        # Deferred UI Population
             
         # SOC Target & Power Calculation
         hours_count = len(target_hours)
@@ -1960,9 +1964,7 @@ class EnergyProfileManager:
                             prev = curr_h
                     found_periods.append(_format_period(start, prev))
                     
-                res["active_hours"] = final_active_hours
-                res["active_hours_formatted"] = ", ".join([_format_hour_simple(x) for x in final_active_hours])
-                res["active_periods"] = ", ".join(found_periods)
+                res["active_hours_raw"] = final_active_hours
             else: # mode == "sell"
                 base_target = self.get_setting(CONF_TARGET_SOC_SELL, 20.0)
                 if self.get_setting(CONF_DYNAMIC_SOC_SELL, True):
@@ -1993,20 +1995,28 @@ class EnergyProfileManager:
                 # Store debug info for sell mode
                 if self.get_setting(CONF_DYNAMIC_SOC_SELL, True) and batt_cap > 0:
                     res["sell_target_soc_debug"] = {
-                        "expected_consumption_kwh": round(expected_night, 3),
-                        "efficiency_coefficient": round(eff_coeff, 3),
-                        "expected_from_battery_kwh": round(expected_night_from_batt, 3),
-                        "min_soc_reserve_pct": round(min_soc_reserve, 1),
-                        "ai_soc_reserve_pct": round(ai_soc_reserve, 1),
-                        "base_target_soc_pct": round(base_target, 1),
-                        "final_target_soc_pct": round(target_soc, 1),
-                        "current_soc_pct": round(batt_soc, 1),
-                        "battery_capacity_kwh": round(batt_cap, 2),
+                        "base": round(float(base_target), 1),
+                        "ai_reserve": round(float(ai_soc_reserve), 1),
+                        "expected_night": round(float(expected_night), 3),
+                        "batt_energy": round(float(batt_cap), 3), # Assuming batt_energy refers to batt_cap
+                        "min_soc_reserve": round(float(min_soc_reserve), 1),
+                        "target_final": round(float(target_soc), 1),
+                        "expected_consumption_kwh": round(float(expected_night), 3),
+                        "efficiency_coefficient": round(float(eff_coeff), 3),
+                        "expected_from_battery_kwh": round(float(expected_night_from_batt), 3),
+                        "min_soc_reserve_pct": round(float(min_soc_reserve), 1),
+                        "ai_soc_reserve_pct": round(float(ai_soc_reserve), 1),
+                        "base_target_soc_pct": round(float(base_target), 1),
+                        "final_target_soc_pct": round(float(target_soc), 1),
+                        "current_soc_pct": round(float(batt_soc), 1),
+                        "battery_capacity_kwh": round(float(batt_cap), 2),
                     }
 
-                if batt_soc > target_soc:
+                if batt_soc > target_soc and cur_hour in target_hours:
                     energy_available = batt_cap * ((batt_soc - target_soc) / 100.0)
                     power_needed = energy_available / hours_count if hours_count > 0 else 0.0
+                else:
+                    power_needed = 0.0
                     
                 # Arbitrage Buy-back / Solar Recharge opportunity check
                 buy_prices_store = self.data.get("prices_buy", {})
@@ -2086,11 +2096,13 @@ class EnergyProfileManager:
                     profit_margin = cur_sell_p
                     if profit_margin > min_profit_threshold:
                         safe_to_sell = max(0.0, available_kwh - reserve_kwh - energy_to_wait)
-                        if safe_to_sell > 0.05:
+                        if safe_to_sell > 0.01:
                             opportunities.append({
                                 "total_profit": safe_to_sell * profit_margin,
                                 "power_kw": min(safe_to_sell, max_power),
-                                "note": f"Выгодно продать сейчас: дотянем на остатке до избытка солнца в {_format_hour_simple(solar_replenish_h)}"
+                                "note": f"Выгодно продать сейчас: дотянем на остатке до избытка солнца в {_format_hour_simple(solar_replenish_h)}",
+                                "energy_to_wait_kwh": round(float(energy_to_wait), 3),
+                                "available_kwh_after_reserve": round(float(available_kwh - reserve_kwh), 3)
                             })
                 
                 # Method 2: Grid Arbitrage
@@ -2102,35 +2114,95 @@ class EnergyProfileManager:
                     
                     if profit_margin > min_profit_threshold:
                         energy_to_wait = get_energy_needed(cur_hour, min_buy_h)
-                        safe_to_sell = max(0.0, available_kwh - reserve_kwh - energy_to_wait)
-                        if safe_to_sell > 0.05:
+                        safe_to_sell = max(0.0, float(available_kwh) - float(reserve_kwh) - float(energy_to_wait))
+                        if safe_to_sell > 0.01:
                             opportunities.append({
-                                "total_profit": safe_to_sell * profit_margin,
-                                "power_kw": min(safe_to_sell, max_power),
-                                "note": f"Выгодно продать: откупим из сети в {_format_hour_simple(min_buy_h)} по {round(min_buy_p, 2)}"
+                                "total_profit": float(safe_to_sell) * float(profit_margin),
+                                "power_kw": min(float(safe_to_sell), float(max_power)),
+                                "note": f"Выгодно продать: откупим из сети в {_format_hour_simple(min_buy_h)} по {round(float(min_buy_p), 2)}",
+                                "energy_to_wait_kwh": round(float(energy_to_wait), 3),
+                                "available_kwh_after_reserve": round(float(available_kwh - reserve_kwh), 3)
                             })
 
+                best_opp = None
                 if opportunities:
-                    # Pick the one with the highest total profit
-                    best = max(opportunities, key=lambda x: x["total_profit"])
+                    best_opp = max(opportunities, key=lambda x: x["total_profit"])
                     res["arbitrage_buyback"] = {
                         "opportunity": True,
-                        "power_kw": round(best["power_kw"], 3),
-                        "note": best["note"]
+                        "power_kw": round(float(best_opp["power_kw"]), 3),
+                        "note": best_opp["note"]
                     }
+                    # ACTUAL FIX: Assign arbitrage power to recommended power if it's better than regular sell
+                    if float(best_opp["power_kw"]) > float(power_needed):
+                        power_needed = float(best_opp["power_kw"])
+                        if cur_hour not in target_hours:
+                            target_hours = list(target_hours) # Ensure it's a list before appending
+                            target_hours.append(cur_hour)
+                        # Ensure it stays in the final filtered list
+                        if cur_hour not in res.get("active_hours", []): # Use .get to avoid KeyError if not yet set
+                            if "active_hours" not in res:
+                                res["active_hours"] = []
+                            res["active_hours"].append(cur_hour)
                 else:
+                    # Logic for explaining why no arbitrage
+                    reasons = []
+                    if cur_hour in all_prices:
+                        if solar_replenish_h:
+                            p_margin = cur_sell_p
+                            needed_kwh = get_energy_needed(cur_hour, solar_replenish_h)
+                            rem_kwh = max(0.0, available_kwh - reserve_kwh)
+                            diff = round(rem_kwh - needed_kwh, 2)
+                            if p_margin <= min_profit_threshold:
+                                reasons.append(f"Солнце: выгода {round(float(p_margin), 2)} < порога {round(float(min_profit_threshold), 2)}")
+                            else:
+                                reasons.append(f"Солнце: дефицит {abs(diff)} kWh (надо {round(float(needed_kwh), 2)}, есть {round(float(rem_kwh), 2)})" if diff < 0 else f"Солнце: ок {diff}")
+                        
+                        if future_buy:
+                            m_buy_h = min(future_buy, key=future_buy.get)
+                            m_buy_p = future_buy[m_buy_h]
+                            r_buy_cost = m_buy_p / eff if eff > 0 else m_buy_p
+                            p_margin = cur_sell_p - r_buy_cost
+                            if p_margin <= min_profit_threshold:
+                                reasons.append(f"Сеть: выгода {round(float(p_margin), 2)} < порога {round(float(min_profit_threshold), 2)}")
+                            else:
+                                needed_kwh = get_energy_needed(cur_hour, m_buy_h)
+                                rem_kwh = max(0.0, available_kwh - reserve_kwh)
+                                diff = round(float(rem_kwh - needed_kwh), 2)
+                                reasons.append(f"Сеть: {'дефицит' if diff < 0 else 'ок'} {abs(diff)} kWh (надо {round(float(needed_kwh), 2)})")
+                    
                     res["arbitrage_buyback"] = {
                         "opportunity": False,
                         "power_kw": 0.0,
-                        "note": ""
+                        "note": "; ".join(reasons) if reasons else "Нет условий (текущая цена - минимум дня)",
+                        "available_kwh": round(float(available_kwh), 3),
+                        "reserve_kwh": round(float(reserve_kwh), 3)
                     }
 
         if max_power > 0 and power_needed > max_power:
             power_needed = max_power
 
-        res["recommended_power_kw"] = round(power_needed, 3)
+        res["recommended_power_kw"] = round(float(power_needed), 3)
 
-        if round(power_needed, 3) <= 0.0:
+        # Final UI Strings Compilation
+        target_hours_sorted = sorted(target_hours)
+        found_periods = []
+        if target_hours_sorted:
+            start = target_hours_sorted[0]
+            prev = target_hours_sorted[0]
+            for h in target_hours_sorted[1:]:
+                if h == prev + 1:
+                    prev = h
+                else:
+                    found_periods.append(_format_period(start, prev))
+                    start = h
+                    prev = h
+            found_periods.append(_format_period(start, prev))
+            
+        res["active_hours"] = list(target_hours_sorted)
+        res["active_hours_formatted"] = ", ".join([_format_hour_simple(int(h)) for h in target_hours_sorted])
+        res["active_periods"] = ", ".join(found_periods)
+
+        if round(float(power_needed), 3) <= 0.0:
             res["state"] = "idle"
         else:
             res["state"] = "active" if cur_hour in target_hours else "idle"
