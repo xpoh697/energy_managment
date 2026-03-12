@@ -2262,15 +2262,17 @@ class EnergyProfileManager:
                     # Potential calculation for UI even if blocked by energy safety
                     potential_p = 0.0
                     if cur_hour in all_prices:
-                        if solar_replenish_h:
+                        # If we already have a detailed simulation for this window, use its AC power limit
+                        if sim_data and sim_data.get("max_energy_to_sell_kwh") is not None:
+                            potential_p = min(float(max_power), float(sim_data["max_energy_to_sell_kwh"]))
+                        elif solar_replenish_h:
                             p_margin = float(cur_sell_p)
                             if p_margin > min_profit_threshold:
-                                # Show potential power accounting for house consumption even if blocked by energy safety
                                 energy_buffer_dc = max(0.0, available_kwh - reserve_kwh - get_energy_needed(cur_hour, solar_replenish_h))
                                 cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
                                 potential_ac = (energy_buffer_dc * eff) - cur_h_cons
                                 potential_p = max(potential_p, min(float(max_power), max(0.0, potential_ac)))
-                        if future_buy:
+                        if not potential_p and future_buy:
                             min_buy_h = min(future_buy, key=future_buy.get)
                             r_buy_cost = float(future_buy[min_buy_h]) / float(eff) if eff > 0 else float(future_buy[min_buy_h])
                             p_margin = float(cur_sell_p) - r_buy_cost
