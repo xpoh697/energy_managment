@@ -1293,29 +1293,42 @@ class EnergyProfileManager:
 
         is_export_peak = False
         peak_reason = ""
+        planned_sell_kwh = 0.0
         
-        # 0. Manual Force Sell Override
-        if force_sell:
+        # 0. Get Strategy and Reserve Sell Energy
+        if not skip_strategy_check:
+            sell_stat = self.get_market_strategy("sell")
+            # Account for planned sale energy in budget - it's no longer available for loads
+            sim_debug = sell_stat.get("sell_simulation_debug", {})
+            planned_sell_kwh = float(sim_debug.get("max_energy_to_sell_kwh", 0.0))
+            if planned_sell_kwh > 0:
+                available_budget = float(available_budget) - planned_sell_kwh
+            
+            if sell_stat.get("state") == "active":
+                is_export_peak = True
+                peak_reason = "Блокировка: Активен период продажи энергии в сеть"
+
+        # 1. Manual Force Sell Override
+        if not is_export_peak and force_sell:
             is_export_peak = True
             peak_reason = "Блокировка: Принудительная продажа (Force Market Sell ON)"
         
-        # 1. Absolute "Sell from Battery/PV" (Arbitrage) threshold - Alway applies
+        # 2. Absolute Price Limits (Fallback / Manual)
+        # Only treat as a "Hard Peak" if we are not waiting for something better or if strategy specifically decided so.
         if not is_export_peak and cur_price_sell is not None and cur_price_sell >= sell_price_limit:
-            is_export_peak = True
-            peak_reason = f"Блокировка: Арбитражный пик (Цена {cur_price_sell} >= Sell Price Limit {sell_price_limit})"
-        
-        # 2. Daytime "Sell from PV" threshold - Only until max hour
+            # If we are NOT in an active sell hour (maybe waiting?), we don't hard-block loads 
+            # based on price alone - we let the budget (after reservation) decide.
+            if skip_strategy_check or is_export_peak: # is_export_peak is already false here, so mostly skip_strategy_check
+                is_export_peak = True
+                peak_reason = f"Блокировка: Арбитражный пик (Цена {cur_price_sell} >= Лимит {sell_price_limit})"
+
+        # 3. Daytime "Sell from PV" threshold
         if not is_export_peak and int(cur_hour) < sale_pv_no_bat_max_hour:
             if cur_price_sell is not None and cur_price_sell >= sell_only_pv_threshold:
-                is_export_peak = True
-                peak_reason = f"Блокировка: Дорогой день PV (Цена {cur_price_sell} >= Sell Only PV {sell_only_pv_threshold})"
-                
-        # 3. Dynamic Market Strategy "Sell" state
-        if not is_export_peak and not skip_strategy_check:
-            sell_stat = self.get_market_strategy("sell")
-            if sell_stat.get("state") == "active":
-                is_export_peak = True
-                peak_reason = "Блокировка: Активна стратегия продажи в сеть"
+                # Same here: if it's not actually an active sale hour, don't hard-block
+                if skip_strategy_check or is_export_peak:
+                    is_export_peak = True
+                    peak_reason = f"Блокировка: Дорогой день PV (Цена {cur_price_sell} >= {sell_only_pv_threshold})"
         
         # 5. Filter and sort permissions
         permissions = {}
@@ -2049,6 +2062,13 @@ class EnergyProfileManager:
                         # Use average profile to see what happens before sale
                         h_gen = float(prof_gen.get(str(h_mod), 0.0)) * budget_data.get("forecast_coefficient", 1.0)
                         h_cons = float(prof_today.get(str(h_mod), 1.0)) * budget_data.get("occupancy_coefficient", 1.0)
+                        
+                        # Accuracy Fix: If we are in the current hour, only count the remaining time
+                        if h == cur_hour:
+                            fraction = max(0.0, (60 - now.minute) / 60.0)
+                            h_gen *= fraction
+                            h_cons *= fraction
+                            
                         # Losses
                         sim_energy = min(batt_cap, sim_energy + (h_gen - h_cons) * (eff if h_gen > h_cons else 1.0/eff if eff > 0 else 1.0))
 
