@@ -2279,20 +2279,29 @@ class EnergyProfileManager:
                             needed_kwh = get_energy_needed(cur_hour, solar_replenish_h)
                             rem_kwh = max(0.0, available_kwh - reserve_kwh)
                             diff = round(float(rem_kwh - needed_kwh), 2)
-                            reasons.append(f"Солнце ({_format_hour_simple(solar_replenish_h)}): {'дефицит' if diff < 0 else 'ок'} {abs(diff)}")
+                            time_label = _format_hour_simple(solar_replenish_h)
+                            if diff < 0:
+                                reasons.append(f"До солнца ({time_label}) дефицит {abs(diff)} кВт·ч")
+                            else:
+                                reasons.append(f"До солнца ({time_label}) избыток {diff} кВт·ч")
                         
                         if future_buy:
                             m_buy_h = min(future_buy, key=future_buy.get)
                             m_buy_p = future_buy[m_buy_h]
                             r_buy_cost = float(m_buy_p) / float(eff) if eff > 0 else float(m_buy_p)
                             p_margin = float(cur_sell_p) - r_buy_cost
+                            time_label = _format_hour_simple(m_buy_h)
+                            
                             if p_margin <= min_profit_threshold:
-                                reasons.append(f"Сеть ({_format_hour_simple(m_buy_h)} по {round(m_buy_p, 2)}): выгода {round(float(p_margin), 3)} < {round(float(min_profit_threshold), 2)}")
+                                reasons.append(f"Выгода {round(float(p_margin), 2)} < порога {round(float(min_profit_threshold), 2)} (откуп в {time_label} по {round(m_buy_p, 2)})")
                             else:
                                 needed_kwh = get_energy_needed(cur_hour, m_buy_h)
                                 rem_kwh = max(0.0, available_kwh - reserve_kwh)
                                 diff = round(float(rem_kwh - needed_kwh), 2)
-                                reasons.append(f"Сеть: {'дефицит' if diff < 0 else 'ок'} {abs(diff)} (надо {round(float(needed_kwh), 2)})")
+                                if diff < 0:
+                                    reasons.append(f"До откупа ({time_label}) дефицит {abs(diff)} кВт·ч")
+                                else:
+                                    reasons.append(f"До откупа ({time_label}) избыток {diff} кВт·ч")
 
                     full_note = " | ".join(reasons)
                     res["arbitrage_buyback"] = {
