@@ -2026,7 +2026,11 @@ class EnergyProfileManager:
 
                 plan_power = 0.0
                 if hours_count > 0:
-                    energy_available = batt_cap * ((batt_soc - target_soc) / 100.0)
+                    # Optimistic approach: use the total budget (battery + forecast - house)
+                    # instead of just (current battery - house reserve).
+                    budget_data = self.get_budget_and_permissions(self.custom_period, skip_strategy_check=True)
+                    energy_available = max(0.0, budget_data.get("initial_budget", 0.0))
+                    
                     power_needed = max(0.0, energy_available / hours_count)
                     plan_power = power_needed
                 else:
