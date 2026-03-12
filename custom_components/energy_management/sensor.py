@@ -2025,16 +2025,76 @@ class EnergyProfileManager:
                     }
 
                 plan_power = 0.0
+                sim_data = {}
                 if hours_count > 0:
-                    # Optimistic approach: use the total budget (battery + forecast - house)
-                    # instead of just (current battery - house reserve).
                     budget_data = self.get_budget_and_permissions(self.custom_period, skip_strategy_check=True)
-                    energy_available = max(0.0, budget_data.get("initial_budget", 0.0))
+                    eff = budget_data.get("efficiency_coefficient", 1.0)
                     
-                    power_needed = max(0.0, energy_available / hours_count)
+                    # Simulation: Start from NOW
+                    sim_energy = batt_energy_val
+                    
+                    # Phase 1: From NOW to Start of Sale
+                    first_sell_h = min(target_hours)
+                    for h in range(cur_hour, first_sell_h):
+                        h_mod = h % 24
+                        # Use average profile to see what happens before sale
+                        h_gen = float(prof_gen.get(str(h_mod), 0.0)) * budget_data.get("forecast_coefficient", 1.0)
+                        h_cons = float(prof_today.get(str(h_mod), 1.0)) * budget_data.get("occupancy_coefficient", 1.0)
+                        # Losses
+                        sim_energy = min(batt_cap, sim_energy + (h_gen - h_cons) * (eff if h_gen > h_cons else 1.0/eff if eff > 0 else 1.0))
+
+                    energy_at_start = sim_energy
+                    
+                    # Phase 2: From End of Sale to 08:00 tomorrow
+                    last_sell_h = max(target_hours)
+                    energy_needed_after_ac = 0.0
+                    for h in range(last_sell_h + 1, 48):
+                        h_mod = h % 24
+                        if h_mod == 8 and h >= 24: break
+                        h_cons = float(prof_today.get(str(h_mod), 1.0)) if h < 24 else float(prof_tom.get(str(h_mod), 1.0))
+                        energy_needed_after_ac += h_cons * budget_data.get("occupancy_coefficient", 1.0)
+                    
+                    min_soc_reserve_kwh = (self.get_setting(CONF_MIN_SOC_BUY, 10.0) / 100.0) * batt_cap
+                    # DC Energy needed to cover AC consumption + safety floor
+                    total_reserve_dc_at_end = (energy_needed_after_ac / eff if eff > 0 else energy_needed_after_ac) + min_soc_reserve_kwh
+                    
+                    # Phase 3: During Sale
+                    cons_during_sale_ac = 0.0
+                    for h in target_hours:
+                        h_mod = h % 24
+                        cons_during_sale_ac += float(prof_today.get(str(h_mod), 1.0)) * budget_data.get("occupancy_coefficient", 1.0)
+                    
+                    # Energy available for selling (AC side)
+                    # (Starting DC - Needed DC Reserve) * eff - House Cons during sale
+                    delta_dc_available = energy_at_start - total_reserve_dc_at_end
+                    available_to_dump_ac = (delta_dc_available * eff) - cons_during_sale_ac
+                    
+                    power_needed = max(0.0, available_to_dump_ac / hours_count)
                     plan_power = power_needed
+
+                    # Final SOC Projection After Sale
+                    # We subtract actual planned sale + actual house cons from starting DC
+                    actual_sale_ac = min(available_to_dump_ac, max_power * hours_count if max_power > 0 else 999.0)
+                    dc_spent_during_sale = (max(0.0, actual_sale_ac) + cons_during_sale_ac) / eff if eff > 0 else (actual_sale_ac + cons_during_sale_ac)
+                    energy_after_sale = max(0.0, energy_at_start - dc_spent_during_sale)
+                    
+                    # Final SOC Projection at 08:00 AM tomorrow
+                    # Subtracting the night consumption (converted to DC) from the state after sale
+                    dc_spent_at_night = energy_needed_after_ac / eff if eff > 0 else energy_needed_after_ac
+                    energy_morning = max(0.0, energy_after_sale - dc_spent_at_night)
+                    
+                    sim_data = {
+                        "projected_soc_at_start_pct": round(float(energy_at_start / batt_cap * 100.0), 1) if batt_cap > 0 else 0,
+                        "projected_soc_after_sale_pct": round(float(energy_after_sale / batt_cap * 100.0), 1) if batt_cap > 0 else 0,
+                        "projected_soc_morning_pct": round(float(energy_morning / batt_cap * 100.0), 1) if batt_cap > 0 else 0,
+                        "reserve_needed_after_sale_kwh": round(float(total_reserve_dc_at_end), 3),
+                        "max_energy_to_sell_kwh": round(float(available_to_dump_ac), 3),
+                        "available_energy_after_sale_kwh": round(float(energy_after_sale), 3)
+                    }
                 else:
                     power_needed = 0.0
+                    
+                res["sell_simulation_debug"] = sim_data
                     
                 # Arbitrage Buy-back / Solar Recharge opportunity check
                 buy_prices_store = self.data.get("prices_buy", {})
@@ -2225,6 +2285,8 @@ class EnergyProfileManager:
             display_p = float(plan_power)
             
         res["recommended_power_kw"] = round(float(display_p), 3)
+        if 'sim_data' in locals():
+            res["sell_simulation"] = sim_data
 
         # Final UI Strings Compilation
         target_hours_sorted = sorted(target_hours)
@@ -3086,6 +3148,10 @@ class MarketStrategySensor(SensorEntity):
             "target_price": round(res["target_price"], 3),
             "limit_used": round(res["limit_used"], 3),
             "recommended_power_kw": res["recommended_power_kw"],
+            "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_start_pct", 0.0),
+            "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
+            "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
+            "sell_simulation": res.get("sell_simulation", {}),
             "current_mode": res.get("charge_reason", "Ожидание"),
             "charge_plan": res.get("charge_plan", {}),
             "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
