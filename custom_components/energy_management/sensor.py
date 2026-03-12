@@ -542,24 +542,25 @@ class EnergyProfileManager:
         # but NOT towards the HOURLY PROFILE HISTORY to avoid massive visual spikes in the charts.
         if is_restarting:
             if delta > 0 and delta < 50.0:
-                if entity_id in self.generation_sensors:
-                    self.data["temp_daily_gen"] = self.data.get("temp_daily_gen", 0.0) + delta
-                    self.current_generation += delta
                 if entity_id in self.consumption_sensors:
-                    self.current_consumption_base += delta
                     self.current_consumption_total += delta
                 if entity_id in self.deduct_sensors:
+                    self.current_hourly_deduct += delta
                     if entity_id not in self.daily_deduct_consumption:
                         self.daily_deduct_consumption[entity_id] = 0.0
                     self.daily_deduct_consumption[entity_id] += delta
-                    # Deduct sensors subtract from base consumption
-                    self.current_consumption_base -= delta
+                if entity_id in self.generation_sensors:
+                    self.data["temp_daily_gen"] = self.data.get("temp_daily_gen", 0.0) + delta
+                    self.current_generation += delta
                 if entity_id in self.grid_import_sensors:
                     self.current_grid_import += delta
                 if entity_id in self.grid_export_sensors:
                     self.current_grid_export += delta
                 if self.inverter_losses_sensor and entity_id == self.inverter_losses_sensor:
                     self.current_losses += delta
+            
+            # Recalculate base from total and deduct
+            self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
             self.sensor_last_values[entity_id] = new_val
             return
             
@@ -577,25 +578,25 @@ class EnergyProfileManager:
             return
             
         if entity_id in self.consumption_sensors:
-            self.current_consumption_base += delta
             self.current_consumption_total += delta
-        if entity_id in self.generation_sensors:
-            self.current_generation += delta
-            self.data["temp_daily_gen"] = self.data.get("temp_daily_gen", 0.0) + delta
         if entity_id in self.deduct_sensors:
-            self.current_consumption_base -= delta
+            self.current_hourly_deduct += delta
             if entity_id not in self.daily_deduct_consumption:
                 self.daily_deduct_consumption[entity_id] = 0.0
             self.daily_deduct_consumption[entity_id] += delta
+        if entity_id in self.generation_sensors:
+            self.current_generation += delta
+            self.data["temp_daily_gen"] = self.data.get("temp_daily_gen", 0.0) + delta
         if self.inverter_losses_sensor and entity_id == self.inverter_losses_sensor:
-            # This sensor is a daily counter — it resets at midnight.
-            # delta may be negative at midnight reset, which we skip.
             if delta > 0:
                 self.current_losses += delta
         if entity_id in self.grid_import_sensors:
             self.current_grid_import += delta
         if entity_id in self.grid_export_sensors:
             self.current_grid_export += delta
+            
+        # Consolidate base consumption: total meter minus all managed loads
+        self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
             
         if self.current_consumption_base < 0:
             self.current_consumption_base = 0.0
