@@ -389,8 +389,14 @@ class EnergyProfileManager:
                 ev = MockEvent({"entity_id": entity_id, "new_state": state_obj})
                 self._async_state_changed(ev)
                     
+        monitored_sensors = self.all_sensors | self.all_price_sensors
+        if self.battery_soc_sensor: monitored_sensors.add(self.battery_soc_sensor)
+        if self.battery_capacity_sensor: monitored_sensors.add(self.battery_capacity_sensor)
+        if self.forecast_today_sensor: monitored_sensors.update(self.forecast_today_sensor)
+        if self.forecast_tomorrow_sensor: monitored_sensors.update(self.forecast_tomorrow_sensor)
+        
         self._unsub_state = async_track_state_change_event(
-            self.hass, list(self.all_sensors | self.all_price_sensors), self._async_state_changed
+            self.hass, list(monitored_sensors), self._async_state_changed
         )
         # Trigger at exactly minute=0, second=0 every hour
         self._unsub_time = async_track_time_change(
@@ -1099,15 +1105,20 @@ class EnergyProfileManager:
         return cur_p > (standby + 10.0)
 
     def get_sensor_float(self, entity_id, default=0.0):
-        """Read a float value from a sensor entity."""
+        """Read a float value from a sensor entity. Handles strings, lists, and comma decimals."""
         if not entity_id:
             return default
-        st = self.hass.states.get(entity_id)
+        # If passed as a list by mistake
+        if isinstance(entity_id, list):
+            if not entity_id: return default
+            entity_id = entity_id[0]
+            
+        st = self.hass.states.get(str(entity_id))
         if not st or st.state in ("unknown", "unavailable"):
             return default
         try:
             return float(str(st.state).replace(',', '.'))
-        except ValueError:
+        except (ValueError, TypeError):
             return default
 
     def get_battery_state(self, soc_default=0.0):
@@ -1906,13 +1917,13 @@ class EnergyProfileManager:
                         if p > 0.0:
                             charge_plan[_format_hour_simple(h)] = {"Режим": "Мост (Выживание)", "Мощность": round(float(p), 2)}
                             final_active_hours.append(h)
-                            if plan_power <= 0: plan_power = p
+                            if plan_power <= 0: plan_power = float(p)
                         
                         if h == cur_hour:
-                            power_needed = p
+                            power_needed = float(p)
                             res["charge_reason"] = "survival_bridge" if p > 0 else "idle"
                             
-                        sim_soc_plan = min(100.0, sim_soc_plan + (p / batt_cap * 100.0))
+                        sim_soc_plan = min(100.0, sim_soc_plan + (float(p) / batt_cap * 100.0))
                     else:
                         rem_n = [x for x in nh_set if x >= h]
                         n_count = len(rem_n) if rem_n else 1
@@ -2013,9 +2024,11 @@ class EnergyProfileManager:
                         "battery_capacity_kwh": round(float(batt_cap), 2),
                     }
 
-                if batt_soc > target_soc:
+                plan_power = 0.0
+                if hours_count > 0:
                     energy_available = batt_cap * ((batt_soc - target_soc) / 100.0)
-                    power_needed = energy_available / hours_count if hours_count > 0 else 0.0
+                    power_needed = max(0.0, energy_available / hours_count)
+                    plan_power = power_needed
                 else:
                     power_needed = 0.0
                     
@@ -2131,7 +2144,10 @@ class EnergyProfileManager:
                     res["arbitrage_buyback"] = {
                         "opportunity": True,
                         "power_kw": round(float(best_opp["power_kw"]), 3),
-                        "note": best_opp["note"]
+                        "note": best_opp["note"],
+                        "available_kwh": round(float(available_kwh), 3),
+                        "reserve_kwh": round(float(reserve_kwh), 3),
+                        "energy_to_wait_kwh": round(float(best_opp.get("energy_to_wait_kwh", 0.0)), 3)
                     }
                     if float(best_opp["power_kw"]) > float(power_needed):
                         # Use arbitrage power even in waiting, but limit to real sense
@@ -2159,43 +2175,52 @@ class EnergyProfileManager:
                     
                     # Logic for explaining why no arbitrage
                     reasons = []
-                    cur_p_str = f"{cur_hour:02d}:00 ({round(float(cur_sell_p), 2)})"
+                    cur_p_str = f"Тек.час {cur_hour:02d}:00 ({round(float(cur_sell_p), 2) if cur_hour in all_prices else '?'})"
+                    reasons.append(cur_p_str)
                     
                     if cur_hour in all_prices:
                         if solar_replenish_h:
                             p_margin = float(cur_sell_p)
                             needed_kwh = get_energy_needed(cur_hour, solar_replenish_h)
                             rem_kwh = max(0.0, available_kwh - reserve_kwh)
+                            diff = round(float(rem_kwh - needed_kwh), 2)
+                            reasons.append(f"Солнце ({_format_hour_simple(solar_replenish_h)}): {'дефицит' if diff < 0 else 'ок'} {abs(diff)}")
                         
                         if future_buy:
                             m_buy_h = min(future_buy, key=future_buy.get)
                             m_buy_p = future_buy[m_buy_h]
-                            r_buy_cost = m_buy_p / eff if eff > 0 else m_buy_p
-                            p_margin = cur_sell_p - r_buy_cost
+                            r_buy_cost = float(m_buy_p) / float(eff) if eff > 0 else float(m_buy_p)
+                            p_margin = float(cur_sell_p) - r_buy_cost
                             if p_margin <= min_profit_threshold:
-                                reasons.append(f"Сеть: выгода {round(float(p_margin), 2)} < порога {round(float(min_profit_threshold), 2)}")
+                                reasons.append(f"Сеть ({_format_hour_simple(m_buy_h)} по {round(m_buy_p, 2)}): выгода {round(float(p_margin), 3)} < {round(float(min_profit_threshold), 2)}")
                             else:
                                 needed_kwh = get_energy_needed(cur_hour, m_buy_h)
                                 rem_kwh = max(0.0, available_kwh - reserve_kwh)
                                 diff = round(float(rem_kwh - needed_kwh), 2)
-                                reasons.append(f"Сеть: {'дефицит' if diff < 0 else 'ок'} {abs(diff)} kWh (надо {round(float(needed_kwh), 2)})")
-                    
+                                reasons.append(f"Сеть: {'дефицит' if diff < 0 else 'ок'} {abs(diff)} (надо {round(float(needed_kwh), 2)})")
+
+                    full_note = " | ".join(reasons)
                     res["arbitrage_buyback"] = {
                         "opportunity": False,
-                        "power_kw": round(potential_p, 3),
+                        "power_kw": round(float(potential_p), 3),
                         "note": full_note,
                         "available_kwh": round(float(available_kwh), 3),
-                        "reserve_kwh": round(float(reserve_kwh), 3)
+                        "reserve_kwh": round(float(reserve_kwh), 3),
+                        "energy_to_wait_kwh": round(float(needed_kwh), 3) if 'needed_kwh' in locals() else 0.0
                     }
                 
                 # Protect recommended power from showing non-zero values if no plan exists at all
                 if not target_hours and not opportunities:
                     power_needed = 0.0
 
-        if max_power > 0 and power_needed > max_power:
-            power_needed = max_power
+        if max_power > 0 and float(power_needed) > float(max_power):
+            power_needed = float(max_power)
 
-        res["recommended_power_kw"] = round(float(power_needed), 3)
+        display_p = float(power_needed)
+        if display_p <= 0 and 'plan_power' in locals() and float(plan_power) > 0:
+            display_p = float(plan_power)
+            
+        res["recommended_power_kw"] = round(float(display_p), 3)
 
         # Final UI Strings Compilation
         target_hours_sorted = sorted(target_hours)
@@ -2996,20 +3021,20 @@ class EnergyBudgetSensor(SensorEntity):
         self._attrs = {
             "permissions": res.get("permissions", {}),
             "permissions_reasons": res.get("permissions_reasons", {}),
-            "forecast_remaining_kwh": round(res["forecast_val"], 3),
+            "forecast_remaining_kwh": round(res.get("forecast_val", 0.0), 3),
             "forecast_raw_kwh": round(res.get("forecast_raw", 0.0), 3),
-            "forecast_correction_coefficient": round(res.get("forecast_coefficient", 1.0), 3),
-            "forecast_hist_coefficient": round(res.get("forecast_hist_coefficient", 1.0), 3),
-            "forecast_today_coefficient": round(res.get("forecast_today_coefficient", 1.0), 3),
-            "battery_energy_kwh": round(res["batt_energy_val"], 3),
-            "expected_consumption_until_0800_kwh": round(res["expected_consumption"], 3),
+            "forecast_coefficient_blended": round(res.get("forecast_coefficient", 1.0), 3),
+            "forecast_coefficient_history": round(res.get("forecast_hist_coefficient", 1.0), 3),
+            "forecast_coefficient_today": round(res.get("forecast_today_coefficient", 1.0), 3),
+            "battery_energy_kwh": round(res.get("batt_energy_val", 0.0), 3),
+            "expected_consumption_kwh": round(res.get("expected_consumption", 0.0), 3),
+            "occupancy_coefficient": round(res.get("occupancy_coefficient", 1.0), 3),
+            "occupancy_persons_home": self.manager.get_current_occupancy() if self.manager.presence_sensors else "N/A",
+            "efficiency_coefficient": round(res.get("efficiency_coefficient", 1.0), 3),
             "debug_actual_today": round(res.get("debug_actual_today", 0), 3),
             "debug_expected_today_total": round(res.get("debug_expected_today_total", 0), 3),
             "debug_expected_today_so_far": round(res.get("debug_expected_today_so_far", 0), 3),
             "debug_fraction_so_far": round(res.get("debug_fraction_so_far", 0), 3),
-            "occupancy_coefficient": round(res.get("occupancy_coefficient", 1.0), 3),
-            "occupancy_persons_home": self.manager.get_current_occupancy() if self.manager.presence_sensors else "N/A",
-            "efficiency_coefficient": round(res.get("efficiency_coefficient", 1.0), 3)
         }
 
 class MarketStrategySensor(SensorEntity):
@@ -3063,7 +3088,7 @@ class MarketStrategySensor(SensorEntity):
             "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
             "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
             "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
-            "arbitrage_energy_to_wait": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
+            "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt
         }
