@@ -181,6 +181,20 @@
       "smart_sell_ai": {
         "name": "Smart Sell AI"
       }
+    },
+    "number": {
+      "price_buy_limit": { "name": "Лимит цены покупки" },
+      "price_sell_limit": { "name": "Лимит цены продажи" },
+      "price_stop_sell": { "name": "Порог остановки продажи" },
+      "price_sell_only_pv": { "name": "Лимит продажи только PV" },
+      "price_tolerance": { "name": "Допуск цены покупки" },
+      "price_sell_tolerance": { "name": "Допуск цены продажи" },
+      "battery_max_power": { "name": "Макс. мощность АКБ" },
+      "target_soc_buy": { "name": "Целевой SOC (Покупка)" },
+      "target_soc_sell": { "name": "Целевой SOC (Продажа)" },
+      "min_soc_buy": { "name": "Минимальный SOC (Выживание)" },
+      "sale_pv_no_bat_max_hour": { "name": "Макс. час для продажи только PV" },
+      "arbitrage_min_profit": { "name": "Мин. выгода арбитража" }
     }
   }
 }

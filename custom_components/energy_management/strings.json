@@ -167,6 +167,20 @@
       "avg_power_gen": {
         "name": "Averaged generation power (10 min)"
       }
+    },
+    "number": {
+      "price_buy_limit": { "name": "Buy Price Limit" },
+      "price_sell_limit": { "name": "Sell Price Limit" },
+      "price_stop_sell": { "name": "Stop Sell Threshold" },
+      "price_sell_only_pv": { "name": "Sell PV Only Limit" },
+      "price_tolerance": { "name": "Buy Price Tolerance" },
+      "price_sell_tolerance": { "name": "Sell Price Tolerance" },
+      "battery_max_power": { "name": "Battery Max Power" },
+      "target_soc_buy": { "name": "Target SOC Buy" },
+      "target_soc_sell": { "name": "Target SOC Sell" },
+      "min_soc_buy": { "name": "Min Survival SOC" },
+      "sale_pv_no_bat_max_hour": { "name": "Max Hour for Sell PV" },
+      "arbitrage_min_profit": { "name": "Arbitrage Min Profit" }
     }
   }
 }

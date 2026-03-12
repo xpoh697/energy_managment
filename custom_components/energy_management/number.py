@@ -14,7 +14,8 @@ from .const import (
     CONF_TARGET_SOC_BUY,
     CONF_TARGET_SOC_SELL,
     CONF_MIN_SOC_BUY,
-    CONF_SALE_PV_NO_BAT_MAX_HOUR
+    CONF_SALE_PV_NO_BAT_MAX_HOUR,
+    CONF_ARBITRAGE_MIN_PROFIT
 )
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -33,16 +34,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EnergyProfileNumber(manager, CONF_TARGET_SOC_SELL, "Target SOC Sell", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
         EnergyProfileNumber(manager, CONF_MIN_SOC_BUY, "Min Survival SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
         EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Max Hour for Sell PV Only", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
+        EnergyProfileNumber(manager, CONF_ARBITRAGE_MIN_PROFIT, "Arbitrage Min Profit", None, 0.0, 999.0, 0.1, "mdi:hand-coin", 0.1),
     ]
     
     async_add_entities(entities)
 
 
 class EnergyProfileNumber(NumberEntity):
+    _attr_has_entity_name = True
+
     def __init__(self, manager, key, name, unit, min_v, max_v, step, icon, default_value):
         self.manager = manager
         self.key = key
-        self._attr_name = name
+        self._attr_translation_key = key
         self._attr_unique_id = f"{manager.entry.entry_id}_{key}"
         
         self._attr_device_info = DeviceInfo(
