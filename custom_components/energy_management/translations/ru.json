@@ -186,6 +186,15 @@
           "usable_energy_ac_kwh": { "name": "Доступная энергия (AC)" },
           "reserve_soc_target": { "name": "Целевой порог резерва (%)" }
         }
+      },
+      "battery_end_of_day_soc": {
+        "state_attributes": {
+          "target_event": { "name": "Цель прогноза" },
+          "target_hour": { "name": "Час события" },
+          "initial_soc": { "name": "Текущий SOC (%)" },
+          "expected_remaining_gen": { "name": "Прогноз прихода (кВт*ч)" },
+          "hourly_simulation": { "name": "Почасовая симуляция" }
+        }
       }
     },
     "switch": {

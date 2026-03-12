@@ -103,7 +103,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities.append(InverterOperationModeSensor(manager, "Inverter Mode Command"))
     
     if has_generation:
-        entities.append(BatteryEndOfDaySOCSensor(manager, "Прогноз заряда к закату"))
+        entities.append(BatteryEndOfDaySOCSensor(manager, "Прогноз заряда (ближайший)"))
     
     if config_data.get(CONF_BATTERY_SOC) and config_data.get(CONF_BATTERY_CAPACITY):
         entities.append(BatteryAutonomySensor(manager, "Время автономной работы"))
@@ -2475,10 +2475,11 @@ class ProfileAveragedSensor(SensorEntity):
 
 
 class BatteryEndOfDaySOCSensor(SensorEntity):
-    """Predicts battery SOC at the end of today's charging cycle (sunset)."""
+    """Predicts battery SOC at the next major event (sunset or sunrise)."""
     def __init__(self, manager, name):
         self.manager = manager
         self._attr_name = name
+        self._attr_translation_key = "battery_end_of_day_soc"
         self._attr_unique_id = f"{manager.entry.entry_id}_battery_end_of_day_soc"
         self._attr_icon = "mdi:battery-arrow-up"
         self._attr_native_unit_of_measurement = "%"
@@ -2496,122 +2497,123 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
     @property
     def native_value(self):
         now = dt_util.now()
-        
         batt_soc, batt_cap, _ = self.manager.get_battery_state(soc_default=100.0)
-                
+        eff_coeff = self.manager.get_efficiency_coefficient()
+
         if batt_cap <= 0.0:
             self._attr_extra_state_attributes = {"error": "Нет емкости батареи"}
             return None
-            
-        self._attr_extra_state_attributes = {
-            "initial_soc": batt_soc,
-            "battery_capacity": batt_cap
-        }
-            
-        simulated_soc = batt_soc
+
+        prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
         
-        # Inverter efficiency: AC<->DC conversion losses in both directions
-        eff_coeff = self.manager.get_efficiency_coefficient()
-        
-        # 1. Look up forecast today remaining
-        forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
-            
-        # Get generation profile to find the last hour of generation today
-        prof_gen_today = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-        
-        # Determine the sunset hour (last hour with significant expected generation > 0.05 kWh)
-        sunset_hour = 23
-        for h in range(23, -1, -1):
-            if float(prof_gen_today.get(str(h), 0.0)) > 0.05:
+        # Detect sunrise/sunset hours based on history
+        sunrise_hour = 6
+        sunset_hour = 20
+        found_sun = False
+        for h in range(24):
+            if float(prof_gen.get(str(h), 0.0)) > 0.05:
+                if not found_sun:
+                    sunrise_hour = h
+                    found_sun = True
                 sunset_hour = h
-                break
-                
-        if now.hour >= sunset_hour:
-            self._attr_extra_state_attributes["status"] = "Генерация завершена"
-            self._attr_extra_state_attributes["sunset_hour"] = sunset_hour
-            return round(simulated_soc, 1)
 
-        hist_today_rem = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(now.hour + 1, 24))
-        day_type = "weekend" if now.weekday() >= 5 else "weekday"
-        prof_cons = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type)
-        
+        is_day = sunrise_hour <= now.hour < sunset_hour
+
+        if is_day:
+            target_hour = sunset_hour
+            target_label = "К закату"
+            self._attr_icon = "mdi:battery-arrow-up"
+            sim_hours = list(range(now.hour + 1, sunset_hour + 1))
+        else:
+            target_hour = sunrise_hour
+            target_label = "К восходу"
+            self._attr_icon = "mdi:battery-arrow-down"
+            if now.hour >= sunset_hour:
+                sim_hours = list(range(now.hour + 1, 24)) + list(range(0, sunrise_hour + 1))
+            else:
+                sim_hours = list(range(now.hour + 1, sunrise_hour + 1))
+
+        simulated_soc = batt_soc
         charge_log = {}
+        total_expected_gen = 0.0
 
-        # Simulate until the sunset hour
-        for h_step in range(now.hour + 1, sunset_hour + 1):
-            h_str = str(h_step)
+        # Forecast data
+        f_today = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
+        f_tomorrow = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor)
+        hist_gen_total = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
+
+        # Profile types
+        day_type_today = "weekend" if now.weekday() >= 5 else "weekday"
+        tomorrow_dt = now + timedelta(days=1)
+        day_type_tom = "weekend" if tomorrow_dt.weekday() >= 5 else "weekday"
+        prof_cons_today = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type_today)
+        prof_cons_tom = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type_tom)
+
+        for h_step in sim_hours:
+            real_h = h_step % 24
+            is_tom = (h_step >= 24) or (now.hour >= sunset_hour and real_h <= sunrise_hour)
             
-            expected_cons = float(prof_cons.get(h_str, 0.0))
-            hist_hour_gen = float(prof_gen_today.get(h_str, 0.0))
+            h_str = str(real_h)
+            p_cons = prof_cons_tom if is_tom else prof_cons_today
             
+            # 1. Gen Calculation
+            hist_hour_gen = float(prof_gen.get(h_str, 0.0))
             expected_gen = hist_hour_gen
-            if forecast_today_val is not None:
-                if hist_today_rem > 0:
-                    expected_gen = (hist_hour_gen / hist_today_rem) * forecast_today_val
-                else:
-                    expected_gen = 0.0
+            f_val = f_tomorrow if is_tom else f_today
+            if f_val is not None and hist_gen_total > 0:
+                expected_gen = (hist_hour_gen / hist_gen_total) * f_val
             
-            # --- Dynamic: Add Active Loads to Simulation ---
+            total_expected_gen += expected_gen
+
+            # 2. Consumption Calculation
+            expected_cons = float(p_cons.get(h_str, 0.0))
+            
+            # Dynamic Load support (Grace periods and active cycles)
             active_load_add_kw = 0.0
-            for s_id, settings in self.manager.get_setting(CONF_DEDUCT_SETTINGS, {}).items():
-                # Check if device is active NOW
-                is_pulling = self.manager._is_currently_pulling_power(s_id)
-                
-                # If active, we simulate its real power impact
-                if is_pulling:
-                    # Decide which power to use for simulation
-                    is_cyclic = settings.get(CONF_IS_CYCLIC, False)
-                    if is_cyclic and s_id in self.manager.learned_avg_cycle_power:
-                        p_kw = self.manager.learned_avg_cycle_power[s_id] / 1000.0
-                    else:
-                        p_kw = self.manager.learned_real_power.get(s_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
-                    
-                    # For devices with daily norm (required_kwh > 0)
-                    req_kwh = settings.get("required_kwh", 0.0)
-                    if req_kwh > 0:
-                        consumed = self.manager.daily_deduct_consumption.get(s_id, 0.0)
-                        remaining_kwh = max(0.0, req_kwh - consumed)
+            # We only count active loads for the next few simulated hours if they are active NOW
+            if not is_tom or (h_step - now.hour) < 8:
+                for s_id, settings in self.manager.get_setting(CONF_DEDUCT_SETTINGS, {}).items():
+                    if self.manager._is_currently_pulling_power(s_id):
+                        is_cyclic = settings.get(CONF_IS_CYCLIC, False)
+                        if is_cyclic and s_id in self.manager.learned_avg_cycle_power:
+                            p_kw = self.manager.learned_avg_cycle_power[s_id] / 1000.0
+                        else:
+                            p_kw = self.manager.learned_real_power.get(s_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
                         
-                        # How many hours from 'now' this device will continue to run?
-                        if p_kw > 0:
-                            hours_to_finish = remaining_kwh / p_kw
-                            # If we are within the simulated window for this device
-                            if (h_step - now.hour) <= hours_to_finish:
+                        req_kwh = settings.get("required_kwh", 0.0)
+                        if req_kwh > 0:
+                            consumed = self.manager.daily_deduct_consumption.get(s_id, 0.0)
+                            rem_kwh = max(0.0, req_kwh - consumed)
+                            if p_kw > 0 and (h_step - now.hour) <= (rem_kwh / p_kw):
                                 active_load_add_kw += p_kw
-                    else:
-                        # For devices without norm (e.g. Boiler), add power only to current/immediate simulation steps
-                        # We don't know when it stops, so we are conservative
-                        if h_step == (now.hour + 1):
+                        elif h_step == (now.hour + 1):
                             active_load_add_kw += p_kw
             
             expected_cons += active_load_add_kw
-            # -----------------------------------------------
 
+            # 3. Battery Delta
             net_solar_kw = max(0.0, expected_gen - expected_cons)
             net_cons_kw = max(0.0, expected_cons - expected_gen)
             
-            # If we are discharging — need more battery energy to deliver net_cons to AC loads
             if net_cons_kw > 0.0:
                 soc_delta = ((net_cons_kw / eff_coeff) / batt_cap) * 100.0
                 simulated_soc -= soc_delta
-            # If we are charging — AC->DC conversion reduces what enters the battery
             elif net_solar_kw > 0.0:
-                max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-                accepted_power_kw = max_batt_power * EnergyProfileManager.get_cc_cv_ratio(simulated_soc)
-                    
-                actual_charge_kw = min(net_solar_kw * eff_coeff, accepted_power_kw)
-                soc_gained = (actual_charge_kw / batt_cap) * 100.0
-                simulated_soc = min(100.0, simulated_soc + soc_gained)
-                
-            # Prevent going below 0 in simulation
-            simulated_soc = max(0.0, simulated_soc)
+                max_batt_p = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+                accepted_ratio = EnergyProfileManager.get_cc_cv_ratio(simulated_soc)
+                actual_charge = min(net_solar_kw * eff_coeff, max_batt_p * accepted_ratio)
+                simulated_soc = min(100.0, simulated_soc + (actual_charge / batt_cap) * 100.0)
             
-            charge_log[f"{h_step:02d}:00"] = round(simulated_soc, 1)
+            simulated_soc = max(0.0, simulated_soc)
+            charge_log[f"{h_str:0>2}:00" + (" (Завтра)" if is_tom else "")] = round(simulated_soc, 1)
 
-        self._attr_extra_state_attributes["sunset_hour"] = f"{sunset_hour:02d}:00"
-        self._attr_extra_state_attributes["expected_remaining_gen"] = round(forecast_today_val if forecast_today_val is not None else hist_today_rem, 2)
-        self._attr_extra_state_attributes["hourly_simulation"] = charge_log
-
+        self._attr_extra_state_attributes = {
+            "target_event": target_label,
+            "target_hour": f"{target_hour:02d}:00",
+            "initial_soc": round(batt_soc, 1),
+            "expected_remaining_gen": round(total_expected_gen, 2),
+            "hourly_simulation": charge_log
+        }
         return round(simulated_soc, 1)
 
     @property
