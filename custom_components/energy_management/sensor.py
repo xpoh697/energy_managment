@@ -2201,11 +2201,16 @@ class EnergyProfileManager:
                     energy_to_wait = get_energy_needed(cur_hour, solar_replenish_h)
                     profit_margin = cur_sell_p
                     if profit_margin > min_profit_threshold:
-                        safe_to_sell = max(0.0, available_kwh - reserve_kwh - energy_to_wait)
-                        if safe_to_sell > 0.01:
+                        # DC energy buffer
+                        safe_energy_dc = max(0.0, available_kwh - reserve_kwh - energy_to_wait)
+                        # AC energy available for grid (subtracting house consumption for the current hour)
+                        cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
+                        safe_to_sell_ac = (safe_energy_dc * eff) - cur_h_cons
+                        
+                        if safe_to_sell_ac > 0.01:
                             opportunities.append({
-                                "total_profit": safe_to_sell * profit_margin,
-                                "power_kw": min(safe_to_sell, max_power),
+                                "total_profit": safe_to_sell_ac * profit_margin,
+                                "power_kw": min(safe_to_sell_ac, max_power),
                                 "note": f"Выгодно продать сейчас: дотянем на остатке до избытка солнца в {_format_hour_simple(solar_replenish_h)}",
                                 "energy_to_wait_kwh": round(float(energy_to_wait), 3),
                                 "available_kwh_after_reserve": round(float(available_kwh - reserve_kwh), 3)
@@ -2220,11 +2225,14 @@ class EnergyProfileManager:
                     
                     if profit_margin > min_profit_threshold:
                         energy_to_wait = get_energy_needed(cur_hour, min_buy_h)
-                        safe_to_sell = max(0.0, float(available_kwh) - float(reserve_kwh) - float(energy_to_wait))
-                        if safe_to_sell > 0.01:
+                        safe_energy_dc = max(0.0, float(available_kwh) - float(reserve_kwh) - float(energy_to_wait))
+                        cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
+                        safe_to_sell_ac = (safe_energy_dc * eff) - cur_h_cons
+                        
+                        if safe_to_sell_ac > 0.01:
                             opportunities.append({
-                                "total_profit": float(safe_to_sell) * float(profit_margin),
-                                "power_kw": min(float(safe_to_sell), float(max_power)),
+                                "total_profit": float(safe_to_sell_ac) * float(profit_margin),
+                                "power_kw": min(float(safe_to_sell_ac), float(max_power)),
                                 "note": f"Выгодно продать: откупим из сети в {_format_hour_simple(min_buy_h)} по {round(float(min_buy_p), 2)}",
                                 "energy_to_wait_kwh": round(float(energy_to_wait), 3),
                                 "available_kwh_after_reserve": round(float(available_kwh - reserve_kwh), 3)
@@ -2257,13 +2265,20 @@ class EnergyProfileManager:
                         if solar_replenish_h:
                             p_margin = float(cur_sell_p)
                             if p_margin > min_profit_threshold:
-                                potential_p = max(potential_p, float(max_power))
+                                # Show potential power accounting for house consumption even if blocked by energy safety
+                                energy_buffer_dc = max(0.0, available_kwh - reserve_kwh - get_energy_needed(cur_hour, solar_replenish_h))
+                                cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
+                                potential_ac = (energy_buffer_dc * eff) - cur_h_cons
+                                potential_p = max(potential_p, min(float(max_power), max(0.0, potential_ac)))
                         if future_buy:
                             min_buy_h = min(future_buy, key=future_buy.get)
                             r_buy_cost = float(future_buy[min_buy_h]) / float(eff) if eff > 0 else float(future_buy[min_buy_h])
                             p_margin = float(cur_sell_p) - r_buy_cost
                             if p_margin > min_profit_threshold:
-                                potential_p = max(potential_p, float(max_power))
+                                energy_buffer_dc = max(0.0, available_kwh - reserve_kwh - get_energy_needed(cur_hour, min_buy_h))
+                                cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
+                                potential_ac = (energy_buffer_dc * eff) - cur_h_cons
+                                potential_p = max(potential_p, min(float(max_power), max(0.0, potential_ac)))
                     
                     # Logic for explaining why no arbitrage
                     reasons = []
