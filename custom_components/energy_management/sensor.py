@@ -1270,10 +1270,22 @@ class EnergyProfileManager:
             is_solar_or_free = True
             
         sell_only_pv_threshold = self.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0)
+        sale_pv_no_bat_max_hour = self.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
+        sell_price_limit = self.get_setting(CONF_PRICE_SELL_LIMIT, 999.0)
+
         is_export_peak = False
-        if cur_price_sell is not None and cur_price_sell >= sell_only_pv_threshold:
+        
+        # 1. Daytime "Sell from PV" threshold
+        if int(cur_hour) < sale_pv_no_bat_max_hour:
+            if cur_price_sell is not None and cur_price_sell >= sell_only_pv_threshold:
+                is_export_peak = True
+                
+        # 2. Absolute "Sell from Battery" arbitrage threshold
+        if not is_export_peak and cur_price_sell is not None and cur_price_sell >= sell_price_limit:
             is_export_peak = True
-        elif not skip_strategy_check:
+
+        # 3. Dynamic Market Strategy "Sell" state
+        if not is_export_peak and not skip_strategy_check:
             sell_stat = self.get_market_strategy("sell")
             if sell_stat.get("state") == "active":
                 is_export_peak = True
