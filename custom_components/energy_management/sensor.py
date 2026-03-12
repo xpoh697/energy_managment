@@ -1868,6 +1868,8 @@ class EnergyProfileManager:
                 
                 charge_plan = {}
                 sim_soc_plan = batt_soc
+                projected_start_soc = None
+                projected_end_soc = None
                 nh_set = natural_hours if 'natural_hours' in locals() else set(target_hours_sorted)
                 prof_today = self.get_average_profile("consumption_total", self.custom_period, "all")
                 min_soc = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
@@ -1912,6 +1914,8 @@ class EnergyProfileManager:
                             p = 0.0
                             
                         if p > 0.0:
+                            if projected_start_soc is None:
+                                projected_start_soc = sim_soc_plan
                             charge_plan[_format_hour_simple(h)] = {"Режим": "Мост (Выживание)", "Мощность": round(float(p), 2)}
                             final_active_hours.append(h)
                             if plan_power <= 0: plan_power = float(p)
@@ -1921,6 +1925,7 @@ class EnergyProfileManager:
                             res["charge_reason"] = "survival_bridge" if p > 0 else "idle"
                             
                         sim_soc_plan = min(100.0, sim_soc_plan + (float(p) / batt_cap * 100.0))
+                        projected_end_soc = sim_soc_plan
                     else:
                         rem_n = [x for x in nh_set if x >= h]
                         n_count = len(rem_n) if rem_n else 1
@@ -1932,6 +1937,8 @@ class EnergyProfileManager:
                             p = 0.0
                             
                         if p > 0.0:
+                            if projected_start_soc is None:
+                                projected_start_soc = sim_soc_plan
                             charge_plan[_format_hour_simple(h)] = {"Режим": "Штатный (Дешевая цена)", "Мощность": round(p, 2)}
                             final_active_hours.append(h)
                         
@@ -1940,6 +1947,7 @@ class EnergyProfileManager:
                             res["charge_reason"] = "price" if p > 0 else "idle"
                             
                         sim_soc_plan = min(100.0, sim_soc_plan + (p / batt_cap * 100.0))
+                        projected_end_soc = sim_soc_plan
                         
                     # Project SOC drop for current hour and subsequent idle hours
                     if h < target_hours_sorted[-1]:
@@ -1954,6 +1962,10 @@ class EnergyProfileManager:
                         sim_soc_plan = max(0.0, sim_soc_plan - (drop_kwh / batt_cap * 100.0))
                             
                 res["charge_plan"] = charge_plan
+                res["buy_simulation"] = {
+                    "projected_soc_at_start_pct": round(float(projected_start_soc), 1) if projected_start_soc is not None else round(float(batt_soc), 1),
+                    "projected_soc_at_end_pct": round(float(projected_end_soc), 1) if projected_end_soc is not None else round(float(sim_soc_plan), 1)
+                }
                 if cur_hour not in target_hours_sorted or power_needed <= 0:
                     res["charge_reason"] = "idle"
                     
@@ -2165,8 +2177,27 @@ class EnergyProfileManager:
                 
                 opportunities = []
                 
+                # Check for future better sell opportunities before refill
+                # This ensures we don't dump energy at a low price if we can get more 1-2 hours later.
+                refill_h_any = solar_replenish_h
+                if future_buy:
+                    m_buy_h = min(future_buy, key=future_buy.get)
+                    if refill_h_any is None or m_buy_h < refill_h_any:
+                        refill_h_any = m_buy_h
+                
+                wait_for_better_note = None
+                if refill_h_any:
+                    better_h_list = [h for h in range(cur_hour + 1, refill_h_any)
+                                    if all_prices.get(h, 0.0) > cur_sell_p + 0.01]
+                    if better_h_list:
+                        spare_kwh = available_kwh - reserve_kwh - get_energy_needed(cur_hour, refill_h_any)
+                        # We need energy to cover all better hours at max power
+                        if spare_kwh < (len(better_h_list) * max_power):
+                            best_future_h = max(better_h_list, key=lambda h: all_prices.get(h, 0.0))
+                            wait_for_better_note = f"Ожидаем пик цены в {_format_hour_simple(best_future_h)} ({round(all_prices.get(best_future_h), 2)})"
+
                 # Method 1: Solar (Cost = 0)
-                if solar_replenish_h:
+                if solar_replenish_h and not wait_for_better_note:
                     energy_to_wait = get_energy_needed(cur_hour, solar_replenish_h)
                     profit_margin = cur_sell_p
                     if profit_margin > min_profit_threshold:
@@ -2181,7 +2212,7 @@ class EnergyProfileManager:
                             })
                 
                 # Method 2: Grid Arbitrage
-                if future_buy:
+                if future_buy and not wait_for_better_note:
                     min_buy_h = min(future_buy, key=future_buy.get)
                     min_buy_p = future_buy[min_buy_h]
                     real_buy_cost = min_buy_p / eff if eff > 0 else min_buy_p
@@ -2238,6 +2269,9 @@ class EnergyProfileManager:
                     reasons = []
                     cur_p_str = f"Тек.час {cur_hour:02d}:00 ({round(float(cur_sell_p), 2) if cur_hour in all_prices else '?'})"
                     reasons.append(cur_p_str)
+                    
+                    if wait_for_better_note:
+                        reasons.append(wait_for_better_note)
                     
                     if cur_hour in all_prices:
                         if solar_replenish_h:
@@ -3137,7 +3171,7 @@ class MarketStrategySensor(SensorEntity):
         today_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["today_prices"].items(), key=lambda item: int(item[0])) if int(k) >= cur_hour}
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
         
-        return {
+        attrs = {
             "analyzed_window": res.get("analyzed_window", "Неизвестно"),
             "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
             "active_hours": res.get("active_hours_formatted", ""),
@@ -3145,20 +3179,32 @@ class MarketStrategySensor(SensorEntity):
             "target_price": round(res["target_price"], 3),
             "limit_used": round(res["limit_used"], 3),
             "recommended_power_kw": res["recommended_power_kw"],
-            "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_start_pct", 0.0),
-            "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
-            "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
-            "sell_simulation": res.get("sell_simulation", {}),
             "current_mode": res.get("charge_reason", "Ожидание"),
-            "charge_plan": res.get("charge_plan", {}),
-            "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
-            "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
-            "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
-            "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
-            "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt
         }
+        
+        if self.mode == "sell":
+            attrs.update({
+                "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_start_pct", 0.0),
+                "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
+                "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
+                "sell_simulation": res.get("sell_simulation", {}),
+                "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
+                "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
+                "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
+                "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
+                "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
+            })
+        else: # buy
+            attrs.update({
+                "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
+                "projected_soc_at_buy_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
+                "buy_simulation": res.get("buy_simulation", {}),
+                "charge_plan": res.get("charge_plan", {}),
+            })
+            
+        return attrs
 
     async def async_added_to_hass(self):
         self.manager.register_listener(self.async_write_ha_state)
