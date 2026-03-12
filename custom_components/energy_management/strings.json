@@ -43,7 +43,8 @@
           "total_system_cost": "Total System Cost",
           "battery_cost": "Total Battery Cost",
           "battery_rated_cycles": "Battery Rated Cycles",
-          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)"
+          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)",
+          "arbitrage_min_profit": "Min. Profit Margin for Arbitrage (Price Diff)"
         }
       }
     },
@@ -98,7 +99,8 @@
           "total_system_cost": "Total System Cost",
           "battery_cost": "Total Battery Cost",
           "battery_rated_cycles": "Battery Rated Cycles",
-          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)"
+          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)",
+          "arbitrage_min_profit": "Min. Profit Margin for Arbitrage (Price Diff)"
         }
       }
     }

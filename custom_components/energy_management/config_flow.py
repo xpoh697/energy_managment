@@ -30,6 +30,7 @@ from .const import (
     CONF_POWER_SENSOR,
     CONF_ACTIVE_HOLD_TIME,
     CONF_IS_CYCLIC,
+    CONF_ARBITRAGE_MIN_PROFIT,
 )
 
 
@@ -186,6 +187,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_BATTERY_COST, default=self._user_input.get(CONF_BATTERY_COST, 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(CONF_BATTERY_RATED_CYCLES, default=self._user_input.get(CONF_BATTERY_RATED_CYCLES, 6000)): vol.All(vol.Coerce(int), vol.Range(min=1)),
             vol.Optional(CONF_ANOMALY_THRESHOLD, default=self._user_input.get(CONF_ANOMALY_THRESHOLD, 2.0)): vol.All(vol.Coerce(float), vol.Range(min=1.1, max=10.0)),
+            vol.Optional(CONF_ARBITRAGE_MIN_PROFIT, default=self._user_input.get(CONF_ARBITRAGE_MIN_PROFIT, 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
         })
 
         return self.async_show_form(
@@ -302,6 +304,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_BATTERY_COST, default=self._user_input.get(CONF_BATTERY_COST, 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(CONF_BATTERY_RATED_CYCLES, default=self._user_input.get(CONF_BATTERY_RATED_CYCLES, 6000)): vol.All(vol.Coerce(int), vol.Range(min=1)),
             vol.Optional(CONF_ANOMALY_THRESHOLD, default=self._user_input.get(CONF_ANOMALY_THRESHOLD, 2.0)): vol.All(vol.Coerce(float), vol.Range(min=1.1, max=10.0)),
+            vol.Optional(CONF_ARBITRAGE_MIN_PROFIT, default=self._user_input.get(CONF_ARBITRAGE_MIN_PROFIT, 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
         })
 
         return self.async_show_form(

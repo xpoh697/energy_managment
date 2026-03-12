@@ -50,6 +50,7 @@ from .const import (
     CONF_POWER_SENSOR,
     CONF_ACTIVE_HOLD_TIME,
     CONF_IS_CYCLIC,
+    CONF_ARBITRAGE_MIN_PROFIT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1502,7 +1503,8 @@ class EnergyProfileManager:
             "limit_used": 0.0,
             "today_prices": {},
             "tomorrow_prices": {},
-            "multi_cycle": "Не предвидится"
+            "multi_cycle": "Не предвидится",
+            "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
         
         now = dt_util.now()
@@ -1548,9 +1550,13 @@ class EnergyProfileManager:
             
         negative_hours = [h for h, p in all_prices.items() if p < 0 and h >= cur_hour]
 
-        # Evaluate the entire 48-hour horizon continuously without blind spots
-        active_window = (0, 47)
-        res["analyzed_window"] = "Сегодня 00:00 - Завтра 23:59"
+        # Evaluate the entire available horizon
+        if tomorrow_prices:
+            active_window = (0, 47)
+            res["analyzed_window"] = "Сегодня 00:00 - Завтра 23:59"
+        else:
+            active_window = (0, 23)
+            res["analyzed_window"] = "Сегодня 00:00 - Сегодня 23:59"
                 
         target_hours = []
         target_price = 0.0
@@ -2001,6 +2007,123 @@ class EnergyProfileManager:
                 if batt_soc > target_soc:
                     energy_available = batt_cap * ((batt_soc - target_soc) / 100.0)
                     power_needed = energy_available / hours_count if hours_count > 0 else 0.0
+                    
+                # Arbitrage Buy-back / Solar Recharge opportunity check
+                buy_prices_store = self.data.get("prices_buy", {})
+                today_buy = buy_prices_store.get(today_str, {})
+                tom_buy = buy_prices_store.get(tomorrow_str, {})
+                all_buy_prices = {}
+                for h_str, p in today_buy.items():
+                    try: all_buy_prices[int(h_str)] = float(str(p).replace(',', '.'))
+                    except ValueError: all_buy_prices[int(h_str)] = 0.0
+                for h_str, p in tom_buy.items():
+                    try: all_buy_prices[int(h_str) + 24] = float(str(p).replace(',', '.'))
+                    except ValueError: all_buy_prices[int(h_str) + 24] = 0.0
+                
+                window_end = 47 if tomorrow_prices else 23
+                future_buy = {h: p for h, p in all_buy_prices.items() if cur_hour < h <= window_end}
+                
+                # 1. Prepare data for consumption simulation
+                today_type = "weekend" if now.weekday() >= 5 else "weekday"
+                tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
+                prof_cons_today = self.get_average_profile("consumption_total", self.custom_period, today_type)
+                prof_cons_tom = self.get_average_profile("consumption_total", self.custom_period, tom_type)
+                prof_gen = self.get_average_profile("generation", self.custom_period, "all")
+                
+                forecast_today = self.get_forecast_value(self.forecast_today_sensor)
+                forecast_tom = self.get_forecast_value(self.forecast_tomorrow_sensor)
+                coeff_today = self.get_gen_forecast_coefficient(forecast_today, prof_gen, cur_hour + 1, 24)
+                coeff_tom = self.get_gen_forecast_coefficient(forecast_tom, prof_gen, 0, 24)
+
+                def get_energy_needed(start_h, end_h):
+                    needed = 0.0
+                    for h in range(start_h, end_h):
+                        h_mod = h % 24
+                        if h < 24:
+                            c = float(prof_cons_today.get(str(h_mod), 0.0))
+                            g = float(prof_gen.get(str(h_mod), 0.0)) * coeff_today
+                        else:
+                            c = float(prof_cons_tom.get(str(h_mod), 0.0))
+                            g = float(prof_gen.get(str(h_mod), 0.0)) * coeff_tom
+                        
+                        hour_val = max(0.0, c - g)
+                        if h == cur_hour:
+                            # Account for remaining fraction of the current hour
+                            fraction = max(0.0, (60 - now.minute) / 60.0)
+                            needed += hour_val * fraction
+                        else:
+                            needed += hour_val
+                    return needed
+
+                # Find first hour with solar surplus (starting from next hour)
+                solar_replenish_h = None
+                for h in range(cur_hour + 1, 48):
+                    h_mod = h % 24
+                    if h < 24:
+                        c = float(prof_cons_today.get(str(h_mod), 0.0))
+                        g = float(prof_gen.get(str(h_mod), 0.0)) * coeff_today
+                    else:
+                        c = float(prof_cons_tom.get(str(h_mod), 0.0))
+                        g = float(prof_gen.get(str(h_mod), 0.0)) * coeff_tom
+                    
+                    if g > (c + 0.5): # Significant surplus
+                        solar_replenish_h = h
+                        break
+                
+                cur_sell_p = all_prices.get(cur_hour, 0.0)
+                eff = self.get_efficiency_coefficient()
+                min_profit_threshold = self.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
+                min_soc_reserve = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
+                
+                available_kwh = (batt_soc / 100.0) * batt_cap
+                reserve_kwh = (min_soc_reserve / 100.0) * batt_cap
+                
+                opportunities = []
+                
+                # Method 1: Solar (Cost = 0)
+                if solar_replenish_h:
+                    energy_to_wait = get_energy_needed(cur_hour, solar_replenish_h)
+                    profit_margin = cur_sell_p
+                    if profit_margin > min_profit_threshold:
+                        safe_to_sell = max(0.0, available_kwh - reserve_kwh - energy_to_wait)
+                        if safe_to_sell > 0.05:
+                            opportunities.append({
+                                "total_profit": safe_to_sell * profit_margin,
+                                "power_kw": min(safe_to_sell, max_power),
+                                "note": f"Выгодно продать сейчас: дотянем на остатке до избытка солнца в {_format_hour_simple(solar_replenish_h)}"
+                            })
+                
+                # Method 2: Grid Arbitrage
+                if future_buy:
+                    min_buy_h = min(future_buy, key=future_buy.get)
+                    min_buy_p = future_buy[min_buy_h]
+                    real_buy_cost = min_buy_p / eff if eff > 0 else min_buy_p
+                    profit_margin = cur_sell_p - real_buy_cost
+                    
+                    if profit_margin > min_profit_threshold:
+                        energy_to_wait = get_energy_needed(cur_hour, min_buy_h)
+                        safe_to_sell = max(0.0, available_kwh - reserve_kwh - energy_to_wait)
+                        if safe_to_sell > 0.05:
+                            opportunities.append({
+                                "total_profit": safe_to_sell * profit_margin,
+                                "power_kw": min(safe_to_sell, max_power),
+                                "note": f"Выгодно продать: откупим из сети в {_format_hour_simple(min_buy_h)} по {round(min_buy_p, 2)}"
+                            })
+
+                if opportunities:
+                    # Pick the one with the highest total profit
+                    best = max(opportunities, key=lambda x: x["total_profit"])
+                    res["arbitrage_buyback"] = {
+                        "opportunity": True,
+                        "power_kw": round(best["power_kw"], 3),
+                        "note": best["note"]
+                    }
+                else:
+                    res["arbitrage_buyback"] = {
+                        "opportunity": False,
+                        "power_kw": 0.0,
+                        "note": ""
+                    }
 
         if max_power > 0 and power_needed > max_power:
             power_needed = max_power
@@ -2850,6 +2973,8 @@ class MarketStrategySensor(SensorEntity):
             "recommended_power_kw": res["recommended_power_kw"],
             "current_mode": res.get("charge_reason", "Ожидание"),
             "charge_plan": res.get("charge_plan", {}),
+            "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
+            "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt
         }
