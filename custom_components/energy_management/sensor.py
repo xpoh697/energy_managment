@@ -1865,6 +1865,7 @@ class EnergyProfileManager:
                 min_soc = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
                 
                 final_active_hours = []
+                plan_power = 0.0
                 
                 for h in target_hours_sorted:
                     if h < cur_hour:
@@ -1878,7 +1879,7 @@ class EnergyProfileManager:
                             if f_h > h and f_h in target_hours_sorted:
                                 break
                             
-                            c_kwh = float(prof_today.get(str(f_h % 24), 1.0)) if f_h < 24 else float(prof_today.get(str(f_h % 24), 1.0)) # Simplified, using prof_today for both days
+                            c_kwh = float(prof_today.get(str(f_h % 24), 1.0))
                             g_kwh = float(prof_gen.get(str(f_h % 24), 0.0)) if 'prof_gen' in locals() else 0.0
                             cf = coeff_today if 'coeff_today' in locals() and f_h < 24 else (coeff_tom if 'coeff_tom' in locals() else 1.0)
                             
@@ -1898,14 +1899,14 @@ class EnergyProfileManager:
                         s_targ = min(target_soc, min_soc + ((s_need / batt_cap) * 100.0))
                         
                         if s_targ > sim_soc_plan and not cancel_surv:
-                            e_req = batt_cap * ((s_targ - sim_soc_plan) / 100.0)
-                            p = min(max_power, e_req)
+                            p = min(max_power, batt_cap * ((s_targ - sim_soc_plan) / 100.0))
                         else:
                             p = 0.0
                             
                         if p > 0.0:
-                            charge_plan[_format_hour_simple(h)] = {"Режим": "Мост (Выживание)", "Мощность": round(p, 2)}
+                            charge_plan[_format_hour_simple(h)] = {"Режим": "Мост (Выживание)", "Мощность": round(float(p), 2)}
                             final_active_hours.append(h)
+                            if plan_power <= 0: plan_power = p
                         
                         if h == cur_hour:
                             power_needed = p
@@ -2012,7 +2013,7 @@ class EnergyProfileManager:
                         "battery_capacity_kwh": round(float(batt_cap), 2),
                     }
 
-                if batt_soc > target_soc and cur_hour in target_hours:
+                if batt_soc > target_soc:
                     energy_available = batt_cap * ((batt_soc - target_soc) / 100.0)
                     power_needed = energy_available / hours_count if hours_count > 0 else 0.0
                 else:
@@ -2132,30 +2133,39 @@ class EnergyProfileManager:
                         "power_kw": round(float(best_opp["power_kw"]), 3),
                         "note": best_opp["note"]
                     }
-                    # ACTUAL FIX: Assign arbitrage power to recommended power if it's better than regular sell
                     if float(best_opp["power_kw"]) > float(power_needed):
+                        # Use arbitrage power even in waiting, but limit to real sense
                         power_needed = float(best_opp["power_kw"])
                         if cur_hour not in target_hours:
-                            target_hours = list(target_hours) # Ensure it's a list before appending
+                            target_hours = list(target_hours)
                             target_hours.append(cur_hour)
-                        # Ensure it stays in the final filtered list
-                        if cur_hour not in res.get("active_hours", []): # Use .get to avoid KeyError if not yet set
-                            if "active_hours" not in res:
-                                res["active_hours"] = []
+                        if cur_hour not in res.get("active_hours", []):
+                            if "active_hours" not in res: res["active_hours"] = []
                             res["active_hours"].append(cur_hour)
                 else:
-                    # Logic for explaining why no arbitrage
-                    reasons = []
+                    # Potential calculation for UI even if blocked by energy safety
+                    potential_p = 0.0
                     if cur_hour in all_prices:
                         if solar_replenish_h:
-                            p_margin = cur_sell_p
+                            p_margin = float(cur_sell_p)
+                            if p_margin > min_profit_threshold:
+                                potential_p = max(potential_p, float(max_power))
+                        if future_buy:
+                            min_buy_h = min(future_buy, key=future_buy.get)
+                            r_buy_cost = float(future_buy[min_buy_h]) / float(eff) if eff > 0 else float(future_buy[min_buy_h])
+                            p_margin = float(cur_sell_p) - r_buy_cost
+                            if p_margin > min_profit_threshold:
+                                potential_p = max(potential_p, float(max_power))
+                    
+                    # Logic for explaining why no arbitrage
+                    reasons = []
+                    cur_p_str = f"{cur_hour:02d}:00 ({round(float(cur_sell_p), 2)})"
+                    
+                    if cur_hour in all_prices:
+                        if solar_replenish_h:
+                            p_margin = float(cur_sell_p)
                             needed_kwh = get_energy_needed(cur_hour, solar_replenish_h)
                             rem_kwh = max(0.0, available_kwh - reserve_kwh)
-                            diff = round(rem_kwh - needed_kwh, 2)
-                            if p_margin <= min_profit_threshold:
-                                reasons.append(f"Солнце: выгода {round(float(p_margin), 2)} < порога {round(float(min_profit_threshold), 2)}")
-                            else:
-                                reasons.append(f"Солнце: дефицит {abs(diff)} kWh (надо {round(float(needed_kwh), 2)}, есть {round(float(rem_kwh), 2)})" if diff < 0 else f"Солнце: ок {diff}")
                         
                         if future_buy:
                             m_buy_h = min(future_buy, key=future_buy.get)
@@ -2172,11 +2182,15 @@ class EnergyProfileManager:
                     
                     res["arbitrage_buyback"] = {
                         "opportunity": False,
-                        "power_kw": 0.0,
-                        "note": "; ".join(reasons) if reasons else "Нет условий (текущая цена - минимум дня)",
+                        "power_kw": round(potential_p, 3),
+                        "note": full_note,
                         "available_kwh": round(float(available_kwh), 3),
                         "reserve_kwh": round(float(reserve_kwh), 3)
                     }
+                
+                # Protect recommended power from showing non-zero values if no plan exists at all
+                if not target_hours and not opportunities:
+                    power_needed = 0.0
 
         if max_power > 0 and power_needed > max_power:
             power_needed = max_power
@@ -3047,6 +3061,9 @@ class MarketStrategySensor(SensorEntity):
             "charge_plan": res.get("charge_plan", {}),
             "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
             "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
+            "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
+            "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
+            "arbitrage_energy_to_wait": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt
         }
