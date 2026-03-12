@@ -309,14 +309,14 @@ budget = (прогноз_генерации_скорр + энергия_бата
 | `permissions_reasons` | `dict[str, str]` | Объяснение решения для каждой нагрузки |
 | `forecast_remaining_kwh` | `float` | Скорректированный прогноз генерации (с учётом коэффициентов надёжности) |
 | `forecast_raw_kwh` | `float` | Сырой прогноз генерации без коррекции |
-| `forecast_correction_coefficient` | `float` | Итоговый смешанный коэффициент (blended) |
-| `forecast_hist_coefficient` | `float` | Исторический коэффициент надёжности прогноза (факт/ожидание за N дней) |
-| `forecast_today_coefficient` | `float` | Внутридневной динамический коэффициент (факт сегодня / ожидание к этому часу) |
-| `battery_energy_kwh` | `float` | Текущая энергия батареи = SOC/100 × ёмкость |
-| `expected_consumption_until_0800_kwh` | `float` | Ожидаемое потребление с текущего часа до 08:00 следующего дня (с учётом коэффициента присутствия) |
-| `occupancy_coefficient` | `float` | Применённый коэффициент присутствия (`1.0` если никто не ушёл или нет данных) |
-| `occupancy_persons_home` | `int` | Текущее количество людей/устройств дома (-1 = не настроено) |
-| `efficiency_coefficient` | `float` | КПД инвертора — отношение (Генерация − Потери) / Генерация за period. `1.0` = сенсор не настроен или недостаточно данных. Зажат в [0.70, 1.0] |
+| `forecast_coefficient_blended` | `float` | Итоговый смешанный коэффициент (blended) |
+| `forecast_coefficient_history` | `float` | Исторический коэффициент надёжности прогноза (факт/ожидание за N дней) |
+| `forecast_coefficient_today` | `float` | Внутридневной динамический коэффициент (факт сегодня / ожидание к этому часу) |
+| `battery_energy_kwh` | `float` | Текущая энергия батареи = SOC/100 × ёмкость × КПД |
+| `expected_consumption_kwh` | `float` | Ожидаемое потребление с текущего часа до 08:00 (с учётом присутствия) |
+| `occupancy_coefficient` | `float` | Применённый коэффициент присутствия |
+| `occupancy_persons_home` | `int` | Текущее количество людей/устройств дома |
+| `efficiency_coefficient` | `float` | КПД инвертора (DC↔AC). Зажат в [0.70, 1.0] |
 | `debug_actual_today` | `float` | Фактическая генерация сегодня (для отладки) |
 | `debug_expected_today_total` | `float` | Максимальный прогноз за сегодня (`temp_max_forecast`) |
 | `debug_expected_today_so_far` | `float` | Сколько из прогноза ожидалось к этому часу |
@@ -350,7 +350,7 @@ budget = (прогноз_генерации_скорр + энергия_бата
 | `sale_pv_no_bat` | Продажа PV без батареи при высокой цене продажи в дневное время |
 | `buy` | Зарядка батареи от сети (активна стратегия BUY) |
 | `stop_sale` | Запрет продажи (цена ниже порога `price_stop_sell`) |
-| `bat_emergency` | Аварийный заряд: SOC ≤ `min_soc` |
+| `bat_emergency` | Аварийный заряд: SOC ≤ `min_soc_buy` |
 
 **Логика выбора режима (приоритет сверху вниз):**
 
@@ -368,7 +368,6 @@ budget = (прогноз_генерации_скорр + энергия_бата
 | `mode_reason` | `str` | Объяснение выбранного режима |
 | `is_preparing_for_peak` | `bool` | `True` если BMS-симуляция показывает нехватку времени для заряда до пика продажи |
 | `next_peak_start_hour` | `str` | Время следующего ценового пика продажи (`"Сегодня 17:00"` / `"Завтра 08:00"` / `"Нет пика сегодня"`) |
-| `bms_forecast` | `dict` | Детальный отчёт BMS-симуляции (см. ниже) |
 | `charge_target_soc` | `float` | *Только в режиме `buy`* — целевой SOC для зарядки |
 | `charge_reason` | `str` | *Только в режиме `buy`* — причина зарядки (`"price"` / `"survival"` / `"idle"`) |
 
@@ -490,6 +489,82 @@ budget = (прогноз_генерации_скорр + энергия_бата
 
 ---
 
+### 10. Детектор аномалий (Anomaly Detection Sensor)
+
+**Имя:** `Детектор аномалий потребления`
+
+**Состояние (score):** Отношение текущей мощности к ожидаемой по профилю. `1.0` = норма.
+
+**Атрибуты:**
+- `status`: `"normal"` / `"anomaly_high_consumption"`
+- `expected_kw`: Ожидаемая мощность (кВт)
+- `actual_kw`: Текущая мощность (кВт)
+- `threshold_multiplier`: Порог срабатывания (из настроек)
+
+---
+
+### 11. Окупаемость системы (Payback / ROI Sensor)
+
+**Имя:** `Окупаемость системы (ROI)`
+
+**Состояние (%):** Процент возврата инвестиций.
+
+**Атрибуты:**
+- `total_investment`: Сумма вложений
+- `cumulative_savings`: Накопленная выгода
+- `remaining_amount`: Остаток до окупаемости
+- `estimated_payback_date`: Дата полной окупаемости
+
+---
+
+### 12. Износ батареи (Battery Degradation Sensor)
+
+**Имя:** `Стоимость износа батареи`
+
+**Единица:** `Валюта/кВт·ч`
+
+**Состояние:** Порог безубыточности арбитража (износ × 2).
+
+**Атрибуты:**
+- `wear_cost_per_kwh_throughput`: Реальный износ за 1 кВт·ч
+- `arbitrage_profit_threshold`: Минимальная разница цен для арбитража
+
+---
+
+### 13. Упущенная солнечная энергия (Solar Waste / Curtailment)
+
+**Имя:** `Упущенная солнечная энергия`
+
+**Единица:** `кВт·ч`
+
+**Состояние:** Суммарно упущенная энергия за сегодня (кВт·ч).
+
+**Атрибуты:**
+- `current_waste_kw`: Мощность потерь в данный момент (кВт)
+- `lost_potential_revenue`: Упущенная выгода в валюте (на основе текущей цены продажи)
+- `recommendation`: Рекомендация по использованию излишков
+- `potential_power_kw`: Оценка максимально возможной мощности панелей (кВт)
+
+---
+
+
+---
+
+### 14. Время автономной работы (Battery Autonomy)
+
+**Имя:** `Время автономной работы`
+
+**Единица:** `ч` (часы)
+
+**Состояние:** Прогнозируемое время работы в часах (float).
+
+**Атрибуты:**
+- `autonomy_to_empty`: Человекочитаемое время до 0% SOC (например, "14ч 20мин")
+- `autonomy_to_reserve`: Время до достижения порога `min_soc_buy` (Survival Reserve)
+- `current_load_avg_kw`: Усредненная нагрузка за 10 минут, используемая для расчета
+- `usable_energy_ac_kwh`: Доступная энергия в батарее с учетом КПД инвертора
+
+---
 
 ## Алгоритм расчёта бюджета
 
@@ -683,8 +758,8 @@ return clamp(eff, 0.70, 1.0)
 |------|--------|
 | `get_budget_and_permissions()` — прогноз | `forecast_adjusted × eff_coeff` |
 | `get_budget_and_permissions()` — батарея | `batt_energy = soc/100 × capacity × eff_coeff` |
-| `BatteryDepletionTimeSensor` — разряд | `soc_delta = (net_cons / eff_coeff) / capacity × 100` |
-| `BatteryDepletionTimeSensor` — заряд | `actual_charge = min(net_solar × eff_coeff, accepted_power)` |
+| `Inverter Mode` — разряд | `soc_delta = (net_cons / eff_coeff) / capacity × 100` |
+| `Inverter Mode` — заряд | `actual_charge = min(net_solar × eff_coeff, accepted_power)` |
 | `BatteryEndOfDaySOCSensor` — разряд | Аналогично Depletion |
 | `BatteryEndOfDaySOCSensor` — заряд | Аналогично Depletion |
 

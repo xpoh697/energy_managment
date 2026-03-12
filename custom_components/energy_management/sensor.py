@@ -105,6 +105,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if has_generation:
         entities.append(BatteryEndOfDaySOCSensor(manager, "Прогноз заряда к закату"))
     
+    if config_data.get(CONF_BATTERY_SOC) and config_data.get(CONF_BATTERY_CAPACITY):
+        entities.append(BatteryAutonomySensor(manager, "Время автономной работы"))
+    
 
     # Combined Savings / revenue tracking sensor
     if has_consumption and config_data.get(CONF_PRICE_BUY):
@@ -123,6 +126,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if has_consumption and has_generation:
         entities.append(InstantPowerAveragedSensor(manager, "load"))
         entities.append(InstantPowerAveragedSensor(manager, "gen"))
+        entities.append(SolarWasteSensor(manager, "Упущенная солнечная энергия"))
 
     async_add_entities(entities)
 
@@ -232,6 +236,9 @@ class EnergyProfileManager:
         # Sensors that need to re-establish a baseline on first read after restart
         # (prevents large accumulated deltas from being counted as generation/consumption)
         self._sensors_need_baseline: set = set()
+        
+        self.current_solar_waste_power = 0.0
+        self.last_blended_coeff = 1.0
 
     def set_max_days(self, days):
         self.max_days = days
@@ -279,6 +286,8 @@ class EnergyProfileManager:
             self.data["temp_daily_gen"] = 0.0
         if "temp_max_forecast" not in self.data:
             self.data["temp_max_forecast"] = 0.0
+        if "temp_daily_waste" not in self.data:
+            self.data["temp_daily_waste"] = 0.0
             
         if "prices_sell" not in self.data:
             self.data["prices_sell"] = {}
@@ -483,6 +492,24 @@ class EnergyProfileManager:
                     
                     self.cycle_actual_start_time.pop(sensor_id, None)
                     self.cycle_energy_start.pop(sensor_id, None)
+
+        # --- Solar Waste Calculation ---
+        if self.power_gen_sensors and self.generation_sensors:
+            # We need potential power. We'll use the profile-based estimate.
+            # (Calculation of blended_coeff is done in budget/strategy, but we'll use a snapshot here)
+            prof_gen_today = self.get_average_profile("generation", self.custom_period, "all")
+            cur_expected_gen = float(prof_gen_today.get(str(now.hour), 0.0))
+            potential_kw = cur_expected_gen * self.last_blended_coeff
+            
+            soc, _, _ = self.get_battery_state()
+            # Waste occurs if battery is near full and we generate less than the panels could potentially give
+            if soc >= 97.0 and potential_kw > (gen_kw + 0.1):
+                waste_kw = potential_kw - gen_kw
+                self.current_solar_waste_power = round(float(waste_kw), 3)
+                # Accumulate kWh (1 min sample)
+                self.data["temp_daily_waste"] = self.data.get("temp_daily_waste", 0.0) + (waste_kw / 60.0)
+            else:
+                self.current_solar_waste_power = 0.0
 
         self._notify_update()
 
@@ -747,6 +774,7 @@ class EnergyProfileManager:
             # Reset day temps
             self.data["temp_daily_gen"] = 0.0
             self.data["temp_max_forecast"] = 0.0
+            self.data["temp_daily_waste"] = 0.0
 
             # Prune historical prices to keep storage file small
             # We keep only yesterday, today, and any future forecasts
@@ -1206,6 +1234,7 @@ class EnergyProfileManager:
             today_coeff = max(0.2, min(today_coeff, 2.0))
             
         blended_coeff = (today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far))
+        self.last_blended_coeff = blended_coeff
                 
         forecast_val_adjusted = forecast_val * blended_coeff
                 
@@ -3101,6 +3130,7 @@ class MarketStrategySensor(SensorEntity):
         # Determine the user-friendly mode string
         current_mode = "Ожидание"
         state = res.get("state", "idle")
+        active_hours = res.get("active_hours", [])
         
         if state == "active":
             if self.mode == "buy":
@@ -3111,10 +3141,10 @@ class MarketStrategySensor(SensorEntity):
                     current_mode = "Зарядка (Дешевая цена)"
             else:
                 current_mode = "Активная продажа"
-        elif state == "price_limit_not_met":
-            current_mode = "Цена выше лимита" if self.mode == "buy" else "Цена ниже лимита"
+        elif state == "price_limit_not_met" or not active_hours:
+            current_mode = "Нет ценового окна"
         elif state == "unprofitable_arbitrage":
-            current_mode = "Арбитраж невыгоден"
+            current_mode = "Арбитраж невыгоден (Деградация АКБ)"
         elif state == "idle":
             current_mode = "Ожидание"
             
@@ -3444,6 +3474,137 @@ class BatteryDegradationSensor(SensorEntity):
             "battery_investment": batt_cost,
             "rated_cycles": cycles,
             "note": "arbitrage_note"
+        }
+
+class SolarWasteSensor(SensorEntity):
+    """Tracks lost solar energy (curtailment) when battery is full."""
+    def __init__(self, manager, name):
+        self.manager = manager
+        self._attr_name = name
+        self._attr_translation_key = "solar_waste"
+        self._attr_unique_id = f"{manager.entry.entry_id}_solar_waste"
+        self._attr_icon = "mdi:solar-power-variant-outline"
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        return round(self.manager.data.get("temp_daily_waste", 0.0), 3)
+
+    @property
+    def extra_state_attributes(self):
+        # Calculate possible daily revenue loss if we sell it at current price
+        prices_sell = self.manager.data.get("prices_sell", {})
+        now = dt_util.now()
+        today_str = now.strftime("%Y-%m-%d")
+        cur_hour_int = now.hour
+        cur_hour = str(cur_hour_int)
+        
+        cur_price = 0.0
+        if today_str in prices_sell and cur_hour in prices_sell[today_str]:
+            try:
+                cur_price = float(str(prices_sell[today_str][cur_hour]).replace(',', '.'))
+            except ValueError: pass
+            
+        waste_kwh = self.manager.data.get("temp_daily_waste", 0.0)
+        
+        # Recommendation logic
+        rec = "Система сбалансирована"
+        if self.manager.current_solar_waste_power > 0.5:
+            rec = f"Теряется {self.manager.current_solar_waste_power} кВт. Рекомендуем включить мощную нагрузку!"
+        elif waste_kwh > 2.0:
+            rec = "Значительные потери за день. Рассмотрите возможность увеличения емкости АКБ."
+
+        # Estimate potential power now
+        prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
+        potential_kw = round(float(prof_gen.get(cur_hour, 0.0) * self.manager.last_blended_coeff), 3)
+
+        return {
+            "current_waste_kw": self.manager.current_solar_waste_power,
+            "lost_potential_revenue": round(waste_kwh * cur_price, 2),
+            "recommendation": rec,
+            "potential_power_kw": potential_kw
+        }
+
+
+class BatteryAutonomySensor(SensorEntity):
+    """Calculates how long the battery will last at current load."""
+    def __init__(self, manager, name):
+        self.manager = manager
+        self._attr_name = name
+        self._attr_translation_key = "battery_autonomy"
+        self._attr_unique_id = f"{manager.entry.entry_id}_battery_autonomy"
+        self._attr_icon = "mdi:timer-sand"
+        self._attr_native_unit_of_measurement = "h"
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        soc, cap, energy_dc = self.manager.get_battery_state()
+        eff = self.manager.get_efficiency_coefficient()
+        
+        # Energy available at AC side
+        energy_ac = energy_dc * eff
+        
+        # Use 10-minute average load for stability, fallback to instant if history empty
+        load_kw = self.manager.avg_load_kw
+        if load_kw <= 0.005:
+            # Check instant power if average is 0
+            load_kw = sum((_get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
+        
+        if load_kw <= 0.005:
+            return 99.0 # Effectively infinity for the sensor state
+            
+        hours = energy_ac / load_kw
+        return round(float(hours), 2)
+
+    @property
+    def extra_state_attributes(self):
+        soc, cap, energy_dc = self.manager.get_battery_state()
+        eff = self.manager.get_efficiency_coefficient()
+        load_kw = self.manager.avg_load_kw
+        
+        # 1. Total Autonomy (to 0%)
+        total_hours = (energy_dc * eff) / load_kw if load_kw > 0.005 else 99.0
+        
+        # 2. Survival Autonomy (to min_soc_buy)
+        min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
+        reserve_energy_dc = (min_soc / 100.0) * cap
+        usable_energy_dc = max(0.0, energy_dc - reserve_energy_dc)
+        survival_hours = (usable_energy_dc * eff) / load_kw if load_kw > 0.005 else 99.0
+
+        def format_time(h):
+            if h >= 99: return "Бесконечно"
+            total_min = int(h * 60)
+            hh, mm = divmod(total_min, 60)
+            if hh > 48: return "> 48ч"
+            return f"{hh}ч {mm}мин"
+
+        return {
+            "autonomy_to_empty": format_time(total_hours),
+            "autonomy_to_reserve": format_time(survival_hours),
+            "current_load_avg_kw": round(float(load_kw), 3),
+            "usable_energy_ac_kwh": round(float(energy_dc * eff), 3),
+            "reserve_soc_target": min_soc
         }
 
 

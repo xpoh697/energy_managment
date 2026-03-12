@@ -169,6 +169,23 @@
       },
       "avg_power_gen": {
         "name": "Усредненная генерация (10 мин)"
+      },
+      "solar_waste": {
+        "state_attributes": {
+          "current_waste_kw": { "name": "Мощность потерь сейчас (кВт)" },
+          "lost_potential_revenue": { "name": "Упущенная выгода сегодня" },
+          "recommendation": { "name": "Рекомендация" },
+          "potential_power_kw": { "name": "Возможная мощность PV (кВт)" }
+        }
+      },
+      "battery_autonomy": {
+        "state_attributes": {
+          "autonomy_to_empty": { "name": "До полного разряда" },
+          "autonomy_to_reserve": { "name": "До резерва выживания" },
+          "current_load_avg_kw": { "name": "Средняя нагрузка (кВт)" },
+          "usable_energy_ac_kwh": { "name": "Доступная энергия (AC)" },
+          "reserve_soc_target": { "name": "Целевой порог резерва (%)" }
+        }
       }
     },
     "switch": {
