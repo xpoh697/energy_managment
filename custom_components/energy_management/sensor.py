@@ -1535,6 +1535,24 @@ class EnergyProfileManager:
         res["today_prices"] = today_prices
         res["tomorrow_prices"] = tomorrow_prices
         
+        # Initialize key variables at the start for all modes (prevents NameErrors)
+        batt_soc, batt_cap, batt_energy_val = self.get_battery_state()
+        
+        today_type = "weekend" if now.weekday() >= 5 else "weekday"
+        tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
+        
+        prof_today = self.get_average_profile("consumption_total", self.custom_period, today_type)
+        prof_tom = self.get_average_profile("consumption_total", self.custom_period, tom_type)
+        prof_gen = self.get_average_profile("generation", self.custom_period, "all")
+        
+        forecast_today_val = self.get_forecast_value(self.forecast_today_sensor)
+        forecast_tomorrow_val = self.get_forecast_value(self.forecast_tomorrow_sensor)
+        
+        coeff_today = self.get_gen_forecast_coefficient(forecast_today_val, prof_gen, cur_hour + 1, 24)
+        coeff_tom = self.get_gen_forecast_coefficient(forecast_tomorrow_val, prof_gen, 0, 24)
+        
+        max_power = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+        
         if not today_prices:
             return res
             
@@ -1545,15 +1563,9 @@ class EnergyProfileManager:
             res["limit_used"] = 0.0
             res["active_hours"] = [cur_hour]
             return res
-
-        if mode == "buy":
-            tolerance = self.get_setting(CONF_PRICE_TOLERANCE, 0.0)
-        else:
-            tolerance = self.get_setting(CONF_PRICE_SELL_TOLERANCE, 0.0)
-            
-        max_power = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
         
-        batt_soc, batt_cap, _ = self.get_battery_state()
+        # Determine tolerance based on mode
+        tolerance = self.get_setting(CONF_PRICE_TOLERANCE if mode == "buy" else CONF_PRICE_SELL_TOLERANCE, 0.0)
         
         # Unify today and tomorrow prices into a 48h timeline for FULL window evaluation
         all_prices = {}
@@ -1712,21 +1724,6 @@ class EnergyProfileManager:
         # Note: This deliberately ignores the Buy Price Limit, safely prioritizing survival over price rules!
         if mode == "buy" and batt_cap > 0 and self.get_setting(CONF_DYNAMIC_SOC_BUY, True) and active_window:
             min_soc = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
-            
-            today_type = "weekend" if now.weekday() >= 5 else "weekday"
-            tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
-            prof_today = self.get_average_profile("consumption_total", self.custom_period, today_type)
-            prof_tom = self.get_average_profile("consumption_total", self.custom_period, tom_type)
-            
-            prof_gen = self.get_average_profile("generation", self.custom_period, "all")
-            
-            # --- Forecast Solar Adjustments ---
-            forecast_today_val = self.get_forecast_value(self.forecast_today_sensor)
-            forecast_tom_val = self.get_forecast_value(self.forecast_tomorrow_sensor)
-            
-            coeff_today = self.get_gen_forecast_coefficient(forecast_today_val, prof_gen, cur_hour + 1, 24)
-            coeff_tom = self.get_gen_forecast_coefficient(forecast_tom_val, prof_gen, 0, 24)
-            # ----------------------------------
             
             natural_hours = set(target_hours)
             survival_hours = set(target_hours)
@@ -1995,7 +1992,7 @@ class EnergyProfileManager:
                     # Correction 2: add min_soc as a hard non-reducible reserve ON TOP of the
                     # consumption reserve (they are independent: one is energy needed, the
                     # other is the absolute floor the battery must never go below).
-                    ai_soc_reserve = (expected_night_from_batt / batt_cap) * 100.0 + min_soc_reserve
+                    ai_soc_reserve = ((expected_night_from_batt / batt_cap) * 100.0 if batt_cap > 0 else 0.0) + min_soc_reserve
 
                     # User's CONF_TARGET_SOC_SELL acts as absolute minimum floor only
                     target_soc = max(base_target, ai_soc_reserve)
