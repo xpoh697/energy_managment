@@ -38,6 +38,7 @@ from .const import (
     CONF_POWER_LOAD_SENSORS,
     CONF_POWER_GEN_SENSORS,
     CONF_SALE_PV_NO_BAT_MAX_HOUR,
+    CONF_FORCE_MARKET_SELL,
     CONF_PRESENCE_SENSORS,
     CONF_INVERTER_LOSSES_SENSOR,
     CONF_GRID_IMPORT_SENSORS,
@@ -1272,12 +1273,18 @@ class EnergyProfileManager:
         sell_only_pv_threshold = self.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0)
         sale_pv_no_bat_max_hour = self.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
         sell_price_limit = self.get_setting(CONF_PRICE_SELL_LIMIT, 999.0)
+        force_sell = self.get_setting(CONF_FORCE_MARKET_SELL, False)
 
         is_export_peak = False
         peak_reason = ""
         
+        # 0. Manual Force Sell Override
+        if force_sell:
+            is_export_peak = True
+            peak_reason = "Блокировка: Принудительная продажа (Force Market Sell ON)"
+        
         # 1. Absolute "Sell from Battery/PV" (Arbitrage) threshold - Alway applies
-        if cur_price_sell is not None and cur_price_sell >= sell_price_limit:
+        if not is_export_peak and cur_price_sell is not None and cur_price_sell >= sell_price_limit:
             is_export_peak = True
             peak_reason = f"Блокировка: Арбитражный пик (Цена {cur_price_sell} >= Sell Price Limit {sell_price_limit})"
         
@@ -1513,6 +1520,14 @@ class EnergyProfileManager:
         if not today_prices:
             return res
             
+        force_sell = self.get_setting(CONF_FORCE_MARKET_SELL, False)
+        if mode == "sell" and force_sell:
+            res["state"] = "active"
+            res["target_price"] = 0.0
+            res["limit_used"] = 0.0
+            res["active_hours"] = [cur_hour]
+            return res
+
         if mode == "buy":
             tolerance = self.get_setting(CONF_PRICE_TOLERANCE, 0.0)
         else:

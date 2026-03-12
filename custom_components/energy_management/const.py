@@ -28,6 +28,7 @@ CONF_POWER_LOAD_SENSORS = "power_load_sensors"
 CONF_POWER_GEN_SENSORS = "power_gen_sensors"
 
 CONF_SALE_PV_NO_BAT_MAX_HOUR = "sale_pv_no_bat_max_hour"
+CONF_FORCE_MARKET_SELL = "force_market_sell"
 
 CONF_PRESENCE_SENSORS = "presence_sensors"
 CONF_INVERTER_LOSSES_SENSOR = "inverter_losses_sensor"

@@ -4,7 +4,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from .const import (
     DOMAIN,
     CONF_DYNAMIC_SOC_BUY,
-    CONF_DYNAMIC_SOC_SELL
+    CONF_DYNAMIC_SOC_SELL,
+    CONF_FORCE_MARKET_SELL
 )
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -14,6 +15,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = [
         EnergyProfileSwitch(manager, CONF_DYNAMIC_SOC_BUY, "Smart Charge AI", "mdi:brain", True),
         EnergyProfileSwitch(manager, CONF_DYNAMIC_SOC_SELL, "Smart Sell AI", "mdi:brain", True),
+        EnergyProfileSwitch(manager, CONF_FORCE_MARKET_SELL, "Force Market Sell", "mdi:flash-red-eye", False),
     ]
     
     async_add_entities(entities)

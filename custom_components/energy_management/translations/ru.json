@@ -168,6 +168,17 @@
       "avg_power_gen": {
         "name": "Усредненная генерация (10 мин)"
       }
+    },
+    "switch": {
+      "force_market_sell": {
+        "name": "Принудительная продажа (Force Market Sell)"
+      },
+      "smart_charge_ai": {
+        "name": "Smart Charge AI"
+      },
+      "smart_sell_ai": {
+        "name": "Smart Sell AI"
+      }
     }
   }
 }
