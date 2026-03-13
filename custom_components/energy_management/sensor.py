@@ -738,11 +738,15 @@ class EnergyProfileManager:
         self.current_losses = 0.0
         self.current_hourly_deduct = 0.0
 
-        # Reset daily deduct consumption at midnight
+        # Reset daily deduct consumption and daily balance start at midnight
         if now.hour == 0:
             self.data["last_reset_date"] = now.strftime("%Y-%m-%d")
+            # Clear managed loads daily counters
             for s in self.daily_deduct_consumption:
                 self.daily_deduct_consumption[s] = 0.0
+            
+            # Record current balance as start-of-day baseline for the "Energy Wallet"
+            self.data["energy_balance_today_start"] = self.data.get("energy_balance", 0.0)
 
             # Forecast history rolling update
             actual = self.data.get("temp_daily_gen", 0.0)
@@ -2104,17 +2108,54 @@ class EnergyBalanceSensor(SensorEntity):
             self._attr_native_unit_of_measurement = "EUR"
         self.manager.register_listener(self.async_write_ha_state)
 
+    def _get_balance_summary(self):
+        now = dt_util.now()
+        savings_store = self.manager.data.get("savings", {})
+        total_balance = self.manager.data.get("energy_balance", 0.0)
+        today_start_v = self.manager.data.get("energy_balance_today_start", total_balance)
+        
+        # Real-time today balance
+        today_val = total_balance - today_start_v
+        
+        def _get_hist(days):
+            val = 0.0
+            for i in range(1, days + 1): # Skip today as we use real-time today_val
+                d_str = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+                val += savings_store.get(d_str, {}).get("total", 0.0)
+            return val
+
+        yesterday_val = _get_hist(1)
+        last_7_days   = _get_hist(7) + today_val
+        last_30_days  = _get_hist(30) + today_val
+        
+        this_month_pfx = now.strftime("%Y-%m")
+        this_month_val = sum(v.get("total", 0.0) for d, v in savings_store.items() if d.startswith(this_month_pfx))
+        # Adjust this_month if it already included an older 'today' hourly snapshot (rare edge case)
+        # but usually it's correct enough.
+
+        return {
+            "today":      round(today_val, 2),
+            "yesterday":  round(yesterday_val, 2),
+            "week":       round(last_7_days, 2),
+            "month":      round(last_30_days, 2),
+            "lifetime":   round(total_balance, 2),
+        }
+
     @property
     def native_value(self):
-        return round(self.manager.data.get("energy_balance", 0.0), 2)
+        return self._get_balance_summary()["today"]
 
     @property
     def extra_state_attributes(self):
+        s = self._get_balance_summary()
         return {
             "last_update": datetime.fromtimestamp(self.manager.data.get("last_balance_poll_time", 0)).isoformat() if self.manager.data.get("last_balance_poll_time") else None,
+            "yesterday": s["yesterday"],
+            "last_7_days": s["week"],
+            "last_30_days": s["month"],
+            "lifetime_all_time": s["lifetime"],
             "formula": "Savings(Solar+Battery)*Price_Buy + Export*Price_Sell - GridCharge*Price_Buy",
             "battery_power_sensor": self.manager.battery_power_sensor,
-            "current_energy_balance_raw": self.manager.data.get("energy_balance", 0.0)
         }
 
 class AnomalyDetectionSensor(SensorEntity):
