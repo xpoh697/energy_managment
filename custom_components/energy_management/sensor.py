@@ -1942,7 +1942,6 @@ class MarketStrategySensor(SensorEntity):
                 "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_start_pct", 0.0),
                 "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
                 "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
-                "sell_simulation": res.get("sell_simulation", {}),
                 "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
                 "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
                 "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
@@ -1953,8 +1952,6 @@ class MarketStrategySensor(SensorEntity):
             attrs.update({
                 "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
                 "projected_soc_at_buy_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
-                "buy_simulation": res.get("buy_simulation", {}),
-                "charge_plan": res.get("charge_plan", {}),
             })
             
         return attrs
