@@ -870,19 +870,19 @@ class StrategyEngine:
                         try: cur_sell_p = float(str(cur_sell_p).replace(',', '.'))
                         except ValueError: cur_sell_p = 0.0
                         
-                        # Calculation Logic:
-                        # Gain = (Sell Price - Buy Price) * Efficiency - Degradation
-                        gain_per_kwh = (cur_sell_p - cheap_p) * eff_coeff - deg_cost
-                        
-                        # Comparison:
-                        # If gain is high, we can sell more (down to AI target SOC or even lower if arbitrage is great)
-                        # For now, we use the AI target as a "safe" limit, but prioritize reporting the best path.
+                        # Gain = (Sell Price - Buy Price) * Efficiency
+                        threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
+                        raw_diff = (cur_sell_p - cheap_p)
+                        actual_gain = raw_diff * eff_coeff
                         
                         sell_strategy_note = "Продажа до солнца (стандарт)"
-                        if cheapest_h and gain_per_kwh > 0:
-                            sell_strategy_note = f"Арбитраж: откуп по {cheap_p:.2f} в {cheapest_h%24:02d}:00 (Профит {gain_per_kwh:.2f}/кВтч)"
+                        if cheapest_h:
+                            if actual_gain >= threshold:
+                                sell_strategy_note = f"Арбитраж ВЫГОДЕН: Продажа {cur_sell_p:.2f} -> Откуп {cheap_p:.2f} в {cheapest_h%24:02d}:00 (Профит {actual_gain:.2f} > Порога {threshold:.2f})"
+                            else:
+                                sell_strategy_note = f"Арбитраж НЕВЫГОДЕН: Продажа {cur_sell_p:.2f} -> Откуп {cheap_p:.2f}. Выгода {actual_gain:.2f} < Порога {threshold:.2f}"
                         
-                        res["arbitrage_decision"] += f" | {sell_strategy_note}"
+                        res["arbitrage_decision"] = f"{res.get('arbitrage_decision', '')} | {sell_strategy_note}"
 
                         delta_available = batt_energy_val - (target_soc * batt_cap / 100.0)
                         power_needed = max(0.0, (delta_available * eff_coeff) / len(target_hours))
