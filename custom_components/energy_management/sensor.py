@@ -2155,7 +2155,6 @@ class EnergyBalanceSensor(SensorEntity):
             "last_30_days": s["month"],
             "lifetime_all_time": s["lifetime"],
             "formula": "Savings(Solar+Battery)*Price_Buy + Export*Price_Sell - GridCharge*Price_Buy",
-            "battery_power_sensor": self.manager.battery_power_sensor,
         }
 
 class AnomalyDetectionSensor(SensorEntity):
