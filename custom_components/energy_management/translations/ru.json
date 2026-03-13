@@ -136,7 +136,13 @@
             "state": {
               "never": "Никогда"
             }
-          }
+          },
+          "upgrade_batt_cap_kwh": { "name": "Объем апгрейда (кВт·ч)" },
+          "upgrade_batt_cost": { "name": "Стоимость апгрейда" },
+          "upgrade_potential_benefit": { "name": "Потенциальная выгода" },
+          "upgrade_payback_years": { "name": "Окупаемость апгрейда (лет)" },
+          "upgrade_roi_annual": { "name": "ROI апгрейда (годовой)" },
+          "simulation_days": { "name": "Дней в симуляции" }
         }
       },
       "anomaly_detection": {

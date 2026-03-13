@@ -291,6 +291,8 @@ class EnergyProfileManager:
             
         if "prices_sell" not in self.data:
             self.data["prices_sell"] = {}
+        if "prices_buy" not in self.data:
+            self.data["prices_buy"] = {}
 
         if "savings" not in self.data:
             self.data["savings"] = {}  # {"YYYY-MM-DD": {"solar": x, "arbitrage": x, "sell": x}}
@@ -732,9 +734,18 @@ class EnergyProfileManager:
             # Arbitrage is the remainder
             day_entry["arbitrage"] = round(day_entry["total"] - day_entry["solar"] - day_entry["sell"], 4)
 
-            # Keep at most 400 days
+            # Keep at most 400 days of savings
             if len(self.data["savings"]) > 400:
                 del self.data["savings"][sorted(self.data["savings"].keys())[0]]
+
+            # Trim price stores to 60 days
+            cutoff_dt = now - timedelta(days=60)
+            cutoff_date = cutoff_dt.strftime("%Y-%m-%d")
+            for p_store_kr in ["prices_buy", "prices_sell"]:
+                p_store = self.data.get(p_store_kr, {})
+                for d_str in list(p_store.keys()):
+                    if d_str < cutoff_date:
+                        del p_store[d_str]
         # ── End savings tracking ───────────────────────────────────────────────
 
         # Reset counters BEFORE saving, so that the saved accumulators reflect
@@ -1081,6 +1092,107 @@ class EnergyProfileManager:
                 res[sh] = 0.0
         return res
 
+    def run_investment_simulation(self, extra_batt_kwh=0.0, pv_multiplier=1.0):
+        """Simulate last 30 days with modified system specs to predict extra savings."""
+        now = dt_util.now()
+        cur_h = now.hour
+        
+        # We look back at available history (up to 30 days)
+        max_idx = 0
+        for h in range(24):
+            max_idx = max(max_idx, len(self.data.get("consumption_total", {}).get(str(h), [])))
+        
+        days_to_sim = min(30, max_idx - 1)
+        if days_to_sim <= 0:
+            return {"extra_savings": 0.0, "note": "Недостаточно истории"}
+
+        total_extra_saved = 0.0
+        
+        _, batt_cap, _ = self.get_battery_state()
+        eff = self.get_efficiency_coefficient()
+        new_cap = batt_cap + extra_batt_kwh
+        
+        # Simulating day by day
+        for d_back in range(1, days_to_sim + 1):
+            sim_soc_kwh = 0.0 # Start empty for simplicity
+            sim_date = now - timedelta(days=d_back)
+            d_str = sim_date.strftime("%Y-%m-%d")
+            
+            p_buy_map = self.data.get("prices_buy", {}).get(d_str, {})
+            p_sell_map = self.data.get("prices_sell", {}).get(d_str, {})
+            
+            day_extra = 0.0
+            
+            for h in range(24):
+                sh = str(h)
+                
+                # Fetch historical values for this hour/day
+                idx = -1 - d_back
+                if h >= cur_h: idx += 1
+                
+                try:
+                    # Consumption
+                    c_h_raw = self.data["consumption_total"][sh][idx]
+                    c_h = float(c_h_raw.get("v", 0.0)) if isinstance(c_h_raw, dict) else float(c_h_raw)
+                    # Generation
+                    g_h_raw = self.data["generation"][sh][idx]
+                    g_h_base = float(g_h_raw.get("v", 0.0)) if isinstance(g_h_raw, dict) else float(g_h_raw)
+                    g_h = g_h_base * pv_multiplier
+                except (IndexError, ValueError, KeyError):
+                    continue
+
+                p_buy = float(p_buy_map.get(sh, 0.0))
+                p_sell = float(p_sell_map.get(sh, 0.0))
+                
+                # ── Step 1: Baseline (Wait, we compare against ACTUAL system, not zero) ──
+                # But a cleaner way is to simulate the whole thing and compare totals at the end.
+                # However, for simplicity, let's just simulate the new spec and see the delta.
+                
+                # ── Step 2: New Spec Simulation ──
+                net = g_h - c_h
+                
+                sim_grid_buy = 0.0
+                sim_grid_sell = 0.0
+                
+                if net > 0:
+                    # Surplus -> Charge Virtual Battery
+                    charge_room = new_cap - sim_soc_kwh
+                    charged = min(net * eff, charge_room)
+                    sim_soc_kwh += charged
+                    sim_grid_sell = net - (charged / eff)
+                else:
+                    # Deficit -> Discharge Virtual Battery
+                    needed = abs(net)
+                    discharged = min(needed / eff, sim_soc_kwh)
+                    sim_soc_kwh -= discharged
+                    sim_grid_buy = needed - (discharged * eff)
+
+                sim_cost = (sim_grid_buy * p_buy) - (sim_grid_sell * p_sell)
+                
+                # Compare with what user ACTUALLY did (or simplified actual)
+                # Actually, let's just calculate how much MORE solar we self-consumed
+                # or how much MORE arbitrage we did.
+                # Easiest way: Compare against a 0-spec baseline and then subtract real savings.
+                # But it's better to just track the "Improvement" directly.
+                
+                # Actually, I'll calculate total simulation benefit and subtract real reported benefit
+                total_extra_saved += (c_h * p_buy) - sim_cost
+                
+        # total_extra_saved now contains total benefit of simulated system.
+        # Now subtract the actual savings recorded for those days.
+        actual_total_savings = 0.0
+        for d_back in range(1, days_to_sim + 1):
+            d_str = (now - timedelta(days=d_back)).strftime("%Y-%m-%d")
+            actual_total_savings += self.data.get("savings", {}).get(d_str, {}).get("total", 0.0)
+            
+        improvement = max(0.0, total_extra_saved - actual_total_savings)
+        return {
+            "days_simulated": days_to_sim,
+            "extra_savings": round(improvement, 2),
+            "monthly_estimate": round(improvement * (30 / days_to_sim), 2) if days_to_sim > 0 else 0.0
+        }
+
+
     def get_setting(self, key, default=None):
         """Get setting from internal storage or config entry."""
         # 1. Try internal storage (persisted across reinstalls/reboots)
@@ -1098,11 +1210,8 @@ class EnergyProfileManager:
             return default
             
         if isinstance(default, float):
-            try:
-                # Handle both numeric and string values from UI
-                return float(str(val).replace(',', '.'))
-            except (ValueError, TypeError):
-                return default
+            try: return float(val)
+            except Exception: return default
         return val
 
     async def async_set_setting(self, key, value):
@@ -1823,7 +1932,7 @@ class EnergyProfileManager:
                             exact_target = max(batt_soc, cur_hour_end_soc - excess)
                             res["charge_target_soc"] = round(exact_target, 1)
                         else:
-                            res["charge_target_soc"] = round(cur_hour_end_soc, 1) if cur_hour_end_soc else 100.0
+                            res["charge_target_soc"] = 100.0
                     else:
                         res["charge_reason"] = "price"
                         res["charge_target_soc"] = 100.0
@@ -2718,7 +2827,7 @@ class InverterOperationModeSensor(SensorEntity):
                 prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
                 
                 # --- Forecast Adjustments ---
-                forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
+                forecast_today_val = self.manager.get_forecast_value(self.forecast_today_sensor)
                 coeff_today = self.manager.get_gen_forecast_coefficient(forecast_today_val, prof_gen, int(cur_hour) + 1, 24)
                 # ----------------------------
                 
@@ -2726,7 +2835,7 @@ class InverterOperationModeSensor(SensorEntity):
                 prof_cons_tom = self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type)
                 
                 # --- Forecast Tomorrow Adjustments ---
-                forecast_tom_val = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor)
+                forecast_tom_val = self.manager.get_forecast_value(self.forecast_tomorrow_sensor)
                 coeff_tom = self.manager.get_gen_forecast_coefficient(forecast_tom_val, prof_gen, 0, 24)
                 
                 max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
@@ -2968,7 +3077,7 @@ class LiveHourlySensor(RestoreEntity, SensorEntity):
         await super().async_added_to_hass()
         # Restore logic to ensure we don't lose the current hour progress unexpectedly
         last_state = await self.async_get_last_state()
-        if last_state and last_state.state not in (None, "unknown", "unavailable"):
+        if last_state and last_state.state not in ("unknown", "unavailable"):
             try:
                 val = float(str(last_state.state).replace(',', '.'))
                 # Recover into manager if it hasn't accumulated anything since restart
@@ -3428,13 +3537,33 @@ class PaybackSensor(SensorEntity):
         days_rem = int(remaining / avg_daily) if avg_daily > 0 else 9999
         payback_date = (dt_util.now() + timedelta(days=days_rem)).strftime("%Y-%m-%d") if avg_daily > 0 else "never"
 
+        # ── Investment AI Analysis ──
+        # Double the current battery capacity to see the impact
+        _, batt_cap, _ = self.manager.get_battery_state()
+        sim_batt_double = self.manager.run_investment_simulation(extra_batt_kwh=batt_cap)
+        extra_monthly = sim_batt_double['monthly_estimate']
+        
+        battery_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
+        
+        payback_years_upgrade = "N/A"
+        roi_upgrade = 0.0
+        if battery_cost > 0 and extra_monthly > 0:
+            payback_years_upgrade = round(battery_cost / (extra_monthly * 12), 2)
+            roi_upgrade = round(((extra_monthly * 12) / battery_cost) * 100, 1)
+
         return {
             "total_investment": f"{total_cost} {self._currency}",
             "cumulative_savings": f"{round(total_saved, 2)} {self._currency}",
             "remaining_amount": f"{round(remaining, 2)} {self._currency}",
             "average_daily_saving": f"{round(avg_daily, 2)} {self._currency}",
             "estimated_payback_days": days_rem if total_cost > 0 else "N/A",
-            "estimated_payback_date": payback_date if total_cost > 0 else "N/A"
+            "estimated_payback_date": payback_date if total_cost > 0 else "N/A",
+            "simulation_days": sim_batt_double.get("days_simulated", 0),
+            "upgrade_batt_cap_kwh": round(batt_cap, 2),
+            "upgrade_batt_cost": f"{battery_cost} {self._currency}",
+            "upgrade_potential_benefit": f"+{extra_monthly} {self._currency}/мес",
+            "upgrade_payback_years": payback_years_upgrade,
+            "upgrade_roi_annual": f"{roi_upgrade}%"
         }
 
 class BatteryDegradationSensor(SensorEntity):
