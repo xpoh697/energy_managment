@@ -471,6 +471,8 @@ class StrategyEngine:
             
             # Initialize key variables at the start for all modes (prevents NameErrors)
             batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
+            target_soc = batt_soc
+            sim_soc_plan = batt_soc
             
             today_type = "weekend" if now.weekday() >= 5 else "weekday"
             tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
@@ -769,30 +771,31 @@ class StrategyEngine:
                     
                     target_soc = min(100.0, target_soc)
                     sim_soc_plan = batt_soc
-                for h in target_hours_sorted:
-                    if h < cur_hour: continue
-                    rem_n = len([x for x in (natural_hours_names if 'natural_hours_names' in locals() else target_hours_sorted) if x >= h]) or 1
-                    if target_soc > sim_soc_plan:
-                        p = min(max_power, (batt_cap * (target_soc - sim_soc_plan) / 100.0) / rem_n)
-                    else: p = 0.0
-                    if h == cur_hour: power_needed = p
-                    sim_soc_plan = min(100.0, sim_soc_plan + (p / batt_cap * 100.0))
-            else: # sell
-                base_target = self.manager.get_setting(CONF_TARGET_SOC_SELL, 20.0)
-                if self.manager.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                    budget_data = self.get_budget_and_permissions(self.manager.custom_period, skip_strategy_check=True)
-                    expected_night = budget_data.get("expected_consumption", 0.0)
-                    eff_coeff = budget_data.get("efficiency_coefficient", 1.0)
-                    min_soc_reserve = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
-                    expected_night_from_batt = expected_night / eff_coeff if eff_coeff > 0 else expected_night
-                    ai_soc_reserve = (expected_night_from_batt / batt_cap * 100.0) + min_soc_reserve
-                    target_soc = max(base_target, ai_soc_reserve)
-                else: target_soc = base_target
-                
-                target_soc = min(100.0, target_soc)
-                if len(target_hours) > 0:
-                    delta_available = batt_energy_val - (target_soc * batt_cap / 100.0)
-                    power_needed = max(0.0, (delta_available * eff_coeff) / len(target_hours))
+                    
+                    for h in target_hours_sorted:
+                        if h < cur_hour: continue
+                        rem_n = len([x for x in (natural_hours_names if 'natural_hours_names' in locals() else target_hours_sorted) if x >= h]) or 1
+                        if target_soc > sim_soc_plan:
+                            p = min(max_power, (batt_cap * (target_soc - sim_soc_plan) / 100.0) / rem_n)
+                        else: p = 0.0
+                        if h == cur_hour: power_needed = p
+                        sim_soc_plan = min(100.0, sim_soc_plan + (p / batt_cap * 100.0))
+                else: # sell
+                    base_target = self.manager.get_setting(CONF_TARGET_SOC_SELL, 20.0)
+                    if self.manager.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                        budget_data = self.get_budget_and_permissions(self.manager.custom_period, skip_strategy_check=True)
+                        expected_night = budget_data.get("expected_consumption", 0.0)
+                        eff_coeff = budget_data.get("efficiency_coefficient", 1.0)
+                        min_soc_reserve = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
+                        expected_night_from_batt = expected_night / eff_coeff if eff_coeff > 0 else expected_night
+                        ai_soc_reserve = (expected_night_from_batt / batt_cap * 100.0) + min_soc_reserve
+                        target_soc = max(base_target, ai_soc_reserve)
+                    else: target_soc = base_target
+                    
+                    target_soc = min(100.0, target_soc)
+                    if len(target_hours) > 0:
+                        delta_available = batt_energy_val - (target_soc * batt_cap / 100.0)
+                        power_needed = max(0.0, (delta_available * eff_coeff) / len(target_hours))
                 
             res["recommended_power_kw"] = round(min(float(power_needed), max_power), 3)
             res["active_hours"] = target_hours_sorted
