@@ -2897,8 +2897,10 @@ class ConsumptionDeviationSensor(SensorEntity):
         now = dt_util.now()
         cur_hour = now.hour
         
-        # 1. Get Actual Base Today (since midnight)
-        total_actual = self.manager.data.get("temp_daily_cons_total", 0.0)
+        # 1. Get Actual Base Today (synchronized with Profile sensor)
+        today_total_prof = self.manager.get_todays_profile("consumption_total")
+        total_actual = sum(today_total_prof.values())
+        
         # Deduct managed loads (daily accumulators)
         deduct_sum = sum(self.manager.daily_deduct_consumption.get(s, 0.0) for s in self.manager.deduct_settings)
         actual_base = max(0.0, total_actual - deduct_sum)
