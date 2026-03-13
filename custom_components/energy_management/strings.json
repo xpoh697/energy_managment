@@ -160,6 +160,7 @@
           "unprofitable_arbitrage": "No price window",
           "charging": "Charging",
           "discharging": "Discharging",
+          "preparing_arbitrage": "Waiting for arbitrage",
           "survival_mode": "Survival mode"
         }
       },

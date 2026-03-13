@@ -590,6 +590,9 @@ class StrategyEngine:
                         target_hours = [h for h, p in combined]
                         target_price = min(p for h, p in combined)
                         res["target_price"] = target_price
+                        # Track if we are here ONLY because of arbitrage
+                        if not any(p <= buy_limit for h, p in combined):
+                            res["state"] = "preparing_arbitrage"
 
                 res["arbitrage_decision"] = global_arb_note
             else: # sell
@@ -609,7 +612,7 @@ class StrategyEngine:
                 
                 if not raw_peaks_today and not raw_peaks_tom:
                     res["state"] = "price_limit_not_met"
-                    res["arbitrage_decision"] = f"Ожидание: Пиков не найдено | {global_arb_note}"
+                    res["arbitrage_decision"] = "Нет ценового окна"
                 else:
                     peaks_today = []
                     today_notes = []
@@ -629,19 +632,12 @@ class StrategyEngine:
                     
                     if not peaks_today and not peaks_tom:
                         res["state"] = "price_limit_not_met"
-                        res["multi_cycle"] = "Деградация АКБ > Выгоды (и цена ниже лимита)"
-                        
-                        # Find best potential gain to explain why it's not profitable
-                        best_gain = -999.0
-                        best_info = ""
-                        for h, p in raw_peaks_today:
-                            _, gain, cp, ch = is_profitable(p, h)
-                            if gain > best_gain:
-                                best_gain = gain
-                                best_info = f"Пик {p:.2f} (h{h}) -> Откуп {cp:.2f} (h{ch}), выгода {gain:.2f} < порога {threshold:.2f}"
-                        
-                        res["arbitrage_decision"] = f"Ожидание лимита ({sell_limit}) или арбитража. {best_info or global_arb_note}"
+                        res["multi_cycle"] = "Не предвидится"
+                        res["arbitrage_decision"] = "Нет ценового окна"
                     else:
+                        # Track if we are here ONLY because of arbitrage
+                        if not any(p >= sell_limit for h, p in peaks_today + peaks_tom):
+                            res["state"] = "preparing_arbitrage"
                         # Success: found target hours either by limit or by profit
                         if peaks_today and peaks_tom:
                             max_h_today = max(h for h, p in peaks_today)
@@ -960,14 +956,15 @@ class StrategyEngine:
             res["active_hours_formatted"] = ", ".join([_format_hour_simple(h) for h in target_hours_sorted])
             res["active_periods"] = ", ".join(found_periods)
             
-            # State logic: only set to 'active' or 'idle' if not already set to a specific error/reason
+            # State logic: active > preparing_arbitrage > idle/price_limit_not_met
             if cur_hour in target_hours_sorted and res["recommended_power_kw"] > 0:
                 res["state"] = "active"
             elif not target_hours_sorted:
-                if res["state"] not in ["price_limit_not_met"]:
-                    res["state"] = "price_limit_not_met"
+                res["state"] = "price_limit_not_met"
             else:
-                res["state"] = "idle"
+                # If we already set preparing_arbitrage inside the mode-specific logic, keep it
+                if res["state"] != "preparing_arbitrage":
+                    res["state"] = "idle"
             
             return res
         finally:

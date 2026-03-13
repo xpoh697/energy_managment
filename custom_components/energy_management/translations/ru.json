@@ -169,6 +169,7 @@
           "unprofitable_arbitrage": "Нет ценового окна",
           "charging": "Зарядка (Сеть)",
           "discharging": "Разрядка (Продажа)",
+          "preparing_arbitrage": "Ожидание арбитража",
           "survival_mode": "Режим выживания (Подзарядка)"
         }
       },
