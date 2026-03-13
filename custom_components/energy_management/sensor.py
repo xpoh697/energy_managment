@@ -319,6 +319,10 @@ class EnergyProfileManager:
         
         # Recalculate base from total and deduct
         self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
+        
+        # Ensure temp_daily_cons_total is at least as much as current hour if we just upgraded
+        if self.data.get("temp_daily_cons_total") is None or self.data.get("temp_daily_cons_total") == 0:
+            self.data["temp_daily_cons_total"] = self.current_consumption_total
 
     async def async_save(self):
         self.data["learned_standby_power"] = self.learned_standby_power
@@ -334,6 +338,7 @@ class EnergyProfileManager:
             "grid_export": self.current_grid_export,
             "losses": self.current_losses,
             "hourly_deduct": self.current_hourly_deduct,
+            "temp_daily_cons_total": self.data.get("temp_daily_cons_total", 0.0)
         }
         await self.store.async_save(self.data)
 
