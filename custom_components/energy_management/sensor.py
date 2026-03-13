@@ -389,7 +389,7 @@ class EnergyProfileManager:
         gen_kw = 0.0
 
         if self.power_load_sensors:
-            load_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_load_sensors)
+            load_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_load_sensors) # sync_v2.1.3
         if self.power_gen_sensors:
             gen_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors)
 
