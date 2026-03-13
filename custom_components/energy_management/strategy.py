@@ -752,6 +752,8 @@ class StrategyEngine:
                 
             # Target & Power Calculation
             power_needed = 0.0
+            target_soc = batt_soc
+            sim_soc_plan = batt_soc
             if batt_cap > 0:
                 if mode == "buy":
                     base_target = self.manager.get_setting(CONF_TARGET_SOC_BUY, 100.0)
