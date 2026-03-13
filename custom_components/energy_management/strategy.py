@@ -622,6 +622,7 @@ class StrategyEngine:
                     if not peaks_today and not peaks_tom:
                         res["state"] = "unprofitable_arbitrage"
                         res["multi_cycle"] = "Деградация АКБ > Выгоды (и цена ниже лимита)"
+                        res["arbitrage_decision"] = f"Продажа невыгодна: Цена ниже лимита ({sell_limit}) и износа АКБ | {global_arb_note}"
                     else:
                         # Success: found target hours either by limit or by profit
                         if peaks_today and peaks_tom:
@@ -940,7 +941,16 @@ class StrategyEngine:
             res["active_hours"] = target_hours_sorted
             res["active_hours_formatted"] = ", ".join([_format_hour_simple(h) for h in target_hours_sorted])
             res["active_periods"] = ", ".join(found_periods)
-            res["state"] = "active" if cur_hour in target_hours_sorted and res["recommended_power_kw"] > 0 else "idle"
+            
+            # State logic: only set to 'active' or 'idle' if not already set to a specific error/reason
+            if cur_hour in target_hours_sorted and res["recommended_power_kw"] > 0:
+                res["state"] = "active"
+            elif not target_hours_sorted:
+                if res["state"] not in ["price_limit_not_met", "unprofitable_arbitrage"]:
+                    res["state"] = "price_limit_not_met"
+            else:
+                res["state"] = "idle"
+            
             return res
         finally:
             self._calculating_strategy = old_calc
