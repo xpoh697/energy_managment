@@ -1271,16 +1271,19 @@ class EnergyProfileManager:
         """Read a float value from a sensor entity. Handles strings, lists, and comma decimals."""
         if not entity_id:
             return default
-        # If passed as a list by mistake
+            
+        # Handle if passed as a list
         if isinstance(entity_id, list):
             if not entity_id: return default
             entity_id = entity_id[0]
             
         st = self.hass.states.get(str(entity_id))
-        if not st or st.state in ("unknown", "unavailable"):
+        if not st or st.state in ("unknown", "unavailable", "None"):
             return default
+            
         try:
-            return float(str(st.state).replace(',', '.'))
+            val_str = str(st.state).replace(',', '.')
+            return float(val_str)
         except (ValueError, TypeError):
             return default
 
@@ -1385,7 +1388,7 @@ class EnergyProfileManager:
         forecast_val_adjusted = forecast_val * blended_coeff
                 
         # 2. Get Battery Energy Available
-        _, _, batt_energy_val = self.get_battery_state()
+        batt_soc, _, batt_energy_val = self.get_battery_state()
                     
         # 3. Expected profile until 08AM
         today_type = "weekend" if now.weekday() >= 5 else "weekday"
@@ -1411,6 +1414,15 @@ class EnergyProfileManager:
         batt_energy_val *= eff_coeff
             
         initial_budget = (forecast_val_adjusted + batt_energy_val) - expected_consumption
+
+        # Unified Simulation for budget verification (optional but good for consistency)
+        # We simulate until 08:00 tomorrow
+        sim_hours_budget = []
+        for h in range(now.hour, 24): sim_hours_budget.append(h)
+        for h in range(24, 32): sim_hours_budget.append(h) # 0..8 tomorrow
+        
+        _, _ = self.run_soc_simulation(batt_soc, sim_hours_budget, now)
+        
         available_budget = initial_budget
         
         # 3.5 Calculate Instant Available Power (kW) based on recent deltas
@@ -1475,6 +1487,11 @@ class EnergyProfileManager:
 
         now = start_time or dt_util.now()
         
+        # Safety check for battery state
+        _, batt_cap, _ = self.get_battery_state()
+        if batt_cap <= 0:
+            return start_soc, {}
+
         # 1. Standard Forecast and Coefficients
         f_today = self.get_forecast_value(self.forecast_today_sensor)
         f_tom = self.get_forecast_value(self.forecast_tomorrow_sensor)
@@ -2772,7 +2789,11 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
         eff_coeff = self.manager.get_efficiency_coefficient()
 
         if batt_cap <= 0.0:
-            self._attr_extra_state_attributes = {"error": "Нет емкости батареи"}
+            sensor_name = self.manager.battery_capacity_sensor or "Не задан"
+            self._attr_extra_state_attributes = {
+                "error": "Нет емкости батареи",
+                "debug_sensor": str(sensor_name)
+            }
             return None
 
         prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
@@ -2805,7 +2826,7 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
                 sim_hours = list(range(now.hour + 1, sunrise_hour + 1))
 
         # 1. Run Unified Simulation Engine
-        simulated_soc, charge_log = self.manager.run_soc_simulation(batt_soc, sim_hours_full, now)
+        simulated_soc, charge_log = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
         
         # Calculate total expected gen from the simulation log area for display
         # (This remains as informative attribute)
