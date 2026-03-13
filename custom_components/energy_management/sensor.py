@@ -848,7 +848,8 @@ class EnergyProfileManager:
         savings = self.data.get("savings", {})
         total = 0.0
         for day in savings.values():
-            total += day.get("total", 0.0)
+            if isinstance(day, dict):
+                total += day.get("total", 0.0)
         return total
 
     def get_battery_degradation_cost(self) -> float:
@@ -1109,7 +1110,7 @@ class EnergyProfileManager:
         p_sensor = settings.get(CONF_POWER_SENSOR) if isinstance(settings, dict) else None
         if not p_sensor:
             # No power sensor configured — assume active if in cycle_start_time
-            return True
+            return True  # Assume active if no power sensor to check
         p_state = self.hass.states.get(p_sensor)
         if not p_state or p_state.state in ("unknown", "unavailable"):
             return True  # Keep as active if sensor unavailable (use last known state)
@@ -1118,7 +1119,7 @@ class EnergyProfileManager:
             if p_state.attributes.get("unit_of_measurement") == "kW":
                 cur_p *= 1000.0
         except ValueError:
-            return True
+            return True # Assume active if power sensor value is invalid
         standby = self.learned_standby_power.get(sensor_id, 15.0)
         return cur_p > (standby + 10.0)
 
@@ -2176,8 +2177,9 @@ class PaybackSensor(SensorEntity):
             try:
                 dt_d = dt_util.parse_datetime(d + "T12:00:00Z") # Midday to avoid edge cases
                 if dt_d and (now - dt_d).days <= 30:
-                    savings_30d += v.get("total", 0.0)
-                    days_found += 1
+                    if isinstance(v, dict): # Safety guard
+                        savings_30d += v.get("total", 0.0)
+                        days_found += 1
             except Exception:
                 continue
                 

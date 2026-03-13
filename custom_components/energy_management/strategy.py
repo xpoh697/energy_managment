@@ -113,8 +113,16 @@ class StrategyEngine:
                 if d_back > len(c_h_rec) or d_back > len(g_h_rec):
                     continue
                 
-                c_h = float(str(c_h_rec[-d_back]).replace(',', '.'))
-                g_h = float(str(g_h_rec[-d_back]).replace(',', '.')) * pv_multiplier
+                def _val(x):
+                    if isinstance(x, dict):
+                        return float(str(x.get("v", 0.0)).replace(',', '.'))
+                    return float(str(x).replace(',', '.'))
+                
+                try:
+                    c_h = _val(c_h_rec[-d_back])
+                    g_h = _val(g_h_rec[-d_back]) * pv_multiplier
+                except (ValueError, TypeError, IndexError):
+                    continue
                 
                 try:
                     p_buy = float(str(p_h_rec).replace(',', '.'))
@@ -149,7 +157,9 @@ class StrategyEngine:
         actual_total_savings = 0.0
         for d_back in range(1, days_to_sim + 1):
             d_str = (now - timedelta(days=d_back)).strftime("%Y-%m-%d")
-            actual_total_savings += self.manager.data.get("savings", {}).get(d_str, {}).get("total", 0.0)
+            day_savings = self.manager.data.get("savings", {}).get(d_str, {})
+            if isinstance(day_savings, dict):
+                actual_total_savings += day_savings.get("total", 0.0)
             
         improvement = max(0.0, total_extra_saved - actual_total_savings)
         return {
@@ -171,7 +181,8 @@ class StrategyEngine:
         total_hist_gen = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
         
         # Historical forecast vs real average
-        hist_coeff = forecast_val / total_hist_gen if total_hist_gen > 0.1 else 1.0
+        f_val = forecast_val or 0.0
+        hist_coeff = f_val / total_hist_gen if total_hist_gen > 0.1 else 1.0
         
         fraction_so_far = 0.0
         if total_hist_gen > 0.1:
@@ -190,7 +201,7 @@ class StrategyEngine:
         blended_coeff = (today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far))
         self.manager.last_blended_coeff = blended_coeff
                 
-        forecast_val_adjusted = forecast_val * blended_coeff
+        forecast_val_adjusted = f_val * blended_coeff
                 
         # 2. Get Battery Energy Available
         batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
