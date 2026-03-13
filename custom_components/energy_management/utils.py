@@ -2,7 +2,7 @@
 import logging
 from typing import Any
 from homeassistant.core import State
-
+# v2.1.2 - Verified logging import
 _LOGGER = logging.getLogger(__name__)
 
 def normalize_float(val: Any) -> float:
