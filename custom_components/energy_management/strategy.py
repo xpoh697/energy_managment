@@ -862,10 +862,17 @@ class StrategyEngine:
                     last_h = max(target_hours or [cur_hour])
                     key_after = f"{last_h%24:02d}:00" + (" (Завтра)" if last_h >= 24 else "")
                     
+                    # Logically determine what "morning" means relative to the sale
+                    # If sale is today (<24h), morning is tomorrow 08:00 (h=32)
+                    # If sale is tomorrow (>=24h), morning is the end of the simulation we have (h=47)
+                    morning_h = 32 if last_h < 24 else 47
+                    suffix = " (Завтра)" if morning_h >= 24 else ""
+                    key_morning = f"{morning_h%24:02d}:00" + suffix
+                    
                     res["sell_simulation"] = {
                         "projected_soc_at_start_pct": round(batt_soc, 1),
                         "projected_soc_after_sale_pct": round(sim_log.get(key_after, batt_soc), 1),
-                        "projected_soc_morning_pct": round(sim_log.get("08:00 (Завтра)", sim_log.get("08:00", 0.0)), 1)
+                        "projected_soc_morning_pct": round(sim_log.get(key_morning, sim_log.get("08:00 (Завтра)", 0.0)), 1)
                     }
                 
             res["recommended_power_kw"] = round(min(float(power_needed), max_power), 3)
