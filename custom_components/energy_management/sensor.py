@@ -1118,59 +1118,79 @@ class EnergyProfileManager:
         sim_max_p = current_max_p * scaling
         
         # Simulating day by day
+        buy_limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
+        sell_limit = self.get_setting(CONF_PRICE_SELL_LIMIT, 999.0)
+        min_soc_pct = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
+        min_soc_kwh_limit = new_cap * (min_soc_pct / 100.0)
+
         for d_back in range(1, days_to_sim + 1):
-            sim_soc_kwh = 0.0 # Start empty for simplicity
+            sim_soc_kwh = new_cap * 0.2 # Assume 20% start
             sim_date = now - timedelta(days=d_back)
             d_str = sim_date.strftime("%Y-%m-%d")
             
             p_buy_map = self.data.get("prices_buy", {}).get(d_str, {})
             p_sell_map = self.data.get("prices_sell", {}).get(d_str, {})
             
-            day_extra = 0.0
+            # --- Arbitrage Strategy (Charge window) ---
+            day_prices = []
+            for h_p in range(24):
+                try: day_prices.append(float(p_buy_map.get(str(h_p), 999.0)))
+                except (ValueError, TypeError): day_prices.append(999.0)
             
+            cheap_hours = sorted(range(len(day_prices)), key=lambda i: day_prices[i])[:4]
+
             for h in range(24):
                 sh = str(h)
                 
-                # Fetch historical values for this hour/day
+                # Fetch historical values 
                 idx = -1 - d_back
                 if h >= cur_h: idx += 1
                 
                 try:
-                    # Consumption
-                    c_h_raw = self.data["consumption_total"][sh][idx]
-                    c_h = float(c_h_raw.get("v", 0.0)) if isinstance(c_h_raw, dict) else float(c_h_raw)
-                    # Generation
-                    g_h_raw = self.data["generation"][sh][idx]
-                    g_h_base = float(g_h_raw.get("v", 0.0)) if isinstance(g_h_raw, dict) else float(g_h_raw)
-                    g_h = g_h_base * pv_multiplier
+                    c_h = float(self.data["consumption_total"][sh][idx].get("v", 0.0) if isinstance(self.data["consumption_total"][sh][idx], dict) else self.data["consumption_total"][sh][idx])
+                    g_h = float(self.data["generation"][sh][idx].get("v", 0.0) if isinstance(self.data["generation"][sh][idx], dict) else self.data["generation"][sh][idx]) * pv_multiplier
                 except (IndexError, ValueError, KeyError):
                     continue
 
                 p_buy = float(p_buy_map.get(sh, 0.0))
                 p_sell = float(p_sell_map.get(sh, 0.0))
                 
-                # ── Step 2: New Spec Simulation ──
-                net = g_h - c_h
-                
                 sim_grid_buy = 0.0
                 sim_grid_sell = 0.0
+
+                # ── Step 1: Active Sell Strategy (Discharge to Grid) ──
+                # If price is high, we want to sell.
+                active_sell_kwh = 0.0
+                if p_sell >= sell_limit and sim_soc_kwh > min_soc_kwh_limit:
+                    can_discharge = min(sim_max_p, (sim_soc_kwh - min_soc_kwh_limit) * eff)
+                    active_sell_kwh = can_discharge
+                    sim_soc_kwh -= (active_sell_kwh / eff)
+                    sim_grid_sell += active_sell_kwh
+
+                # ── Step 2: Virtual Smart Charging (Charge from Grid) ──
+                if h in cheap_hours and p_buy <= buy_limit:
+                    charge_room = new_cap - sim_soc_kwh
+                    if charge_room > 0:
+                        charged_from_grid = min(sim_max_p * eff, charge_room)
+                        sim_soc_kwh += charged_from_grid
+                        sim_grid_buy += (charged_from_grid / eff)
+
+                # ── Step 3: Normal Load/Gen Balance ──
+                net = g_h - c_h
                 
                 if net > 0:
-                    # Surplus -> Charge Virtual Battery
-                    # Can only charge at sim_max_p kW for 1 hour
-                    charge_power = min(net, sim_max_p)
+                    # Surplus -> Charge from Sun
                     charge_room = new_cap - sim_soc_kwh
-                    charged = min(charge_power * eff, charge_room)
-                    sim_soc_kwh += charged
-                    sim_grid_sell = net - (charged / eff)
+                    charged_sun = min(min(net, sim_max_p) * eff, charge_room)
+                    sim_soc_kwh += charged_sun
+                    sim_grid_sell += (net - (charged_sun / eff))
                 else:
-                    # Deficit -> Discharge Virtual Battery
-                    # Can only discharge at sim_max_p kW for 1 hour
+                    # Deficit -> Discharge for House
                     needed = abs(net)
                     discharge_power = min(needed, sim_max_p)
-                    discharged = min(discharge_power / eff, sim_soc_kwh)
-                    sim_soc_kwh -= discharged
-                    sim_grid_buy = needed - (discharged * eff)
+                    discharged_house = min(discharge_power / eff, sim_soc_kwh)
+                    sim_soc_kwh -= discharged_house
+                    sim_grid_buy += (needed - (discharged_house * eff))
 
                 sim_cost = (sim_grid_buy * p_buy) - (sim_grid_sell * p_sell)
                 
@@ -1781,6 +1801,39 @@ class EnergyProfileManager:
                     res["target_price"] = target_price
                     res["limit_used"] = limit
 
+            # --- ARBITRAGE OPPORTUNITY PRE-CALCULATION ---
+            # Identify high-price SELL peaks to prepare the battery in advance
+            sell_prices_today = self.data.get("prices_sell", {}).get(today_str, {})
+            sell_prices_tom = self.data.get("prices_sell", {}).get(tomorrow_str, {})
+            all_sell_prices = {}
+            for h, p in sell_prices_today.items():
+                try: all_sell_prices[int(h)] = float(str(p).replace(',', '.'))
+                except ValueError: all_sell_prices[int(h)] = 0.0
+            for h, p in sell_prices_tom.items():
+                try: all_sell_prices[int(h) + 24] = float(str(p).replace(',', '.'))
+                except ValueError: all_sell_prices[int(h) + 24] = 0.0
+
+            sell_limit = self.get_setting(CONF_PRICE_SELL_LIMIT, 99.0)
+            deg_cost = self.get_battery_degradation_cost()
+            eff = self.get_efficiency_coefficient()
+            min_p = self.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
+
+            def is_sell_profitable(sell_p, buy_p):
+                # Revenue gap must cover the threshold
+                # Logic: If user's limit is less than wear, use 2x wear as safety floor.
+                # Otherwise, use user's defined limit.
+                threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
+                return (sell_p - buy_p) * eff >= threshold
+
+            profitable_sell_peaks = []
+            if all_sell_prices:
+                # Find hours where sell price is above limit and profitable against current buy limit
+                buy_limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
+                for h_s, p_s in all_sell_prices.items():
+                    if h_s >= cur_hour and p_s >= sell_limit and is_sell_profitable(p_s, buy_limit):
+                        profitable_sell_peaks.append(h_s)
+            # ---------------------------------------------
+
         else: # sell
             limit = self.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
             res["limit_used"] = limit
@@ -1789,19 +1842,18 @@ class EnergyProfileManager:
                 res["state"] = "price_limit_not_met"
                 return res
             
-            # Profitability check against degradation cost
+            # Profitability check against degradation cost and user profit threshold
             deg_cost = self.get_battery_degradation_cost()
             eff = self.get_efficiency_coefficient()
-            # Requirement: (SellPrice - BuyPrice) * Efficiency > 2 * deg_cost
-            # We don't always know the exact buy price we used, but we can assume the Buy Limit or current min price 
+            min_p = self.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
             min_buy_limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
             
             # Filter peaks that aren't actually profitable
             def is_profitable(price):
-                if deg_cost <= 0: return True
-                # (Price - BuyLimit) * Eff > wear_of_cycle
-                profit_per_kwh = (price - min_buy_limit) * eff
-                return profit_per_kwh > (2 * deg_cost)
+                # Apply dynamic threshold: 2x wear if limit is too low
+                threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
+                raw_gain = (price - min_buy_limit) * eff
+                return raw_gain >= threshold
 
             raw_peaks_today = get_peaks(window_today, True, limit, tolerance)
             raw_peaks_tom = get_peaks(window_tomorrow, True, limit, tolerance)
@@ -1890,6 +1942,11 @@ class EnergyProfileManager:
                 min_sim_soc_in_run = 100.0
                 cur_hour_end_soc = None
                 
+                # Dynamic target per hour: min_soc (10%) by default, 100% at the start of sell peaks
+                soc_targets = {h: min_soc for h in range(cur_hour, active_window[1] + 1)}
+                for h_peak in profitable_sell_peaks:
+                    soc_targets[h_peak] = 100.0 # Aim for full battery before sell peak
+                
                 max_batt_power = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
                 
                 for h in range(cur_hour, active_window[1] + 1):
@@ -1918,20 +1975,30 @@ class EnergyProfileManager:
                         
                     min_sim_soc_in_run = min(min_sim_soc_in_run, simulated_soc)
                     
-                    if simulated_soc < min_soc:
+                    if simulated_soc < soc_targets.get(h, min_soc):
                         # Find cheapest legal hour between now and `h`
                         search_space = [sh for sh in range(cur_hour, h + 1) if sh not in survival_hours and sh in all_prices]
                         if search_space:
-                            cheapest_bridge = min(search_space, key=lambda sh: all_prices[sh])
-                            survival_hours.add(cheapest_bridge)
-                            added_bridge = True
-                            break
-                        else:
-                            break
+                            # Filter bridge candidates: must be profitable relative to the target at hour H
+                            # If we are bridging for a Sell Peak, use the Sell Price as benchmark
+                            target_val = soc_targets.get(h, min_soc)
+                            if target_val > min_soc and h in all_sell_prices:
+                                sell_price = all_sell_prices[h]
+                                search_space = [sh for sh in search_space if is_sell_profitable(sell_price, all_prices[sh])]
+                            
+                            if search_space:
+                                cheapest_bridge = min(search_space, key=lambda sh: all_prices[sh])
+                                survival_hours.add(cheapest_bridge)
+                                added_bridge = True
+                                break
+                        break
                             
                 if not added_bridge:
                     if cur_hour in survival_hours and cur_hour not in natural_hours:
-                        res["charge_reason"] = "survival"
+                        # Determine if this is survival or arbitrage prep
+                        is_arbitrage_prep = any(h_p in profitable_sell_peaks for h_p in range(cur_hour, active_window[1] + 1))
+                        res["charge_reason"] = "arbitrage_prep" if is_arbitrage_prep else "survival"
+                        
                         excess = min_sim_soc_in_run - min_soc
                         if excess > 0 and cur_hour_end_soc is not None:
                             exact_target = max(batt_soc, cur_hour_end_soc - excess)
@@ -3595,18 +3662,21 @@ class BatteryDegradationSensor(SensorEntity):
 
     @property
     def native_value(self):
-        # We show the ARBITRAGE threshold cost (2x degradation because 1 cycle = charge + discharge)
-        return round(self.manager.get_battery_degradation_cost() * 2, 4)
+        # We show the ARBITRAGE threshold cost (1x degradation covers the full cycle)
+        return round(self.manager.get_battery_degradation_cost(), 4)
 
     @property
     def extra_state_attributes(self):
         cost_per_kwh = self.manager.get_battery_degradation_cost()
+        min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
+        threshold = min_p if min_p >= cost_per_kwh else (2 * cost_per_kwh)
+        
         batt_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
         cycles = self.manager.get_setting(CONF_BATTERY_RATED_CYCLES, 6000)
         
         return {
-            "wear_cost_per_kwh_throughput": round(cost_per_kwh, 4),
-            "arbitrage_profit_threshold": round(cost_per_kwh * 2, 4),
+            "wear_cost_per_kwh_cycle": round(cost_per_kwh, 4),
+            "arbitrage_profit_threshold": round(threshold, 4),
             "battery_investment": batt_cost,
             "rated_cycles": cycles,
             "note": "arbitrage_note"
