@@ -1,4 +1,5 @@
 """Utility functions for Energy Management."""
+import logging
 from typing import Any
 from homeassistant.core import State
 
