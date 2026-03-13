@@ -128,15 +128,15 @@ class StrategyEngine:
                 if net > 0:
                     # Excess generation to battery
                     charge_kw = min(net * eff, max_batt_p)
-                    if sim_batt_cap > 0:
+                    if sim_batt_cap > 0.001:
                         sim_soc = min(100.0, sim_soc + (charge_kw / sim_batt_cap * 100.0))
                 else:
                     # Consumption from battery
                     needed = abs(net)
-                    from_batt = min(needed, sim_soc * sim_batt_cap / 100.0) if sim_batt_cap > 0 else 0.0
+                    from_batt = min(needed, sim_soc * sim_batt_cap / 100.0) if sim_batt_cap > 0.001 else 0.0
                     from_batt_ac = from_batt * eff
                     
-                    if sim_batt_cap > 0:
+                    if sim_batt_cap > 0.001:
                         sim_soc = max(0.0, sim_soc - (from_batt / sim_batt_cap * 100.0))
                     
                     sim_cost = max(0.0, needed - from_batt_ac) * p_buy
@@ -452,6 +452,7 @@ class StrategyEngine:
         coeff_tom = self.get_gen_forecast_coefficient(forecast_tomorrow_val, prof_gen, 0, 24)
         
         max_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+        eff_coeff = self.get_efficiency_coefficient()
         
         if not today_prices:
             return res
@@ -539,7 +540,7 @@ class StrategyEngine:
 
             sell_limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 99.0)
             deg_cost = self.get_battery_degradation_cost()
-            eff = self.get_efficiency_coefficient()
+            eff = eff_coeff
             min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
 
             def is_sell_profitable(sell_p, buy_p):
@@ -560,7 +561,7 @@ class StrategyEngine:
                 return res
             
             deg_cost = self.get_battery_degradation_cost()
-            eff = self.get_efficiency_coefficient()
+            eff = eff_coeff
             min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
             min_buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
             

@@ -2132,6 +2132,7 @@ class PaybackSensor(SensorEntity):
     def __init__(self, manager, name):
         self.manager = manager
         self._attr_name = name
+        self._currency = "EUR"
         self._attr_translation_key = "payback"
         self._attr_unique_id = f"{manager.entry.entry_id}_roi_payback"
         self._attr_icon = "mdi:finance"
