@@ -572,6 +572,7 @@ class EnergyProfileManager:
         if is_restarting:
             if delta > 0 and delta < 50.0:
                 if entity_id in self.consumption_sensors:
+                    self.data["temp_daily_cons_total"] = self.data.get("temp_daily_cons_total", 0.0) + delta
                     self.current_consumption_total += delta
                 if entity_id in self.deduct_sensors:
                     self.current_hourly_deduct += delta
@@ -607,6 +608,7 @@ class EnergyProfileManager:
             return
             
         if entity_id in self.consumption_sensors:
+            self.data["temp_daily_cons_total"] = self.data.get("temp_daily_cons_total", 0.0) + delta
             self.current_consumption_total += delta
         if entity_id in self.deduct_sensors:
             self.current_hourly_deduct += delta
@@ -785,6 +787,7 @@ class EnergyProfileManager:
 
             # Reset day temps
             self.data["temp_daily_gen"] = 0.0
+            self.data["temp_daily_cons_total"] = 0.0
             self.data["temp_max_forecast"] = 0.0
             self.data["temp_daily_waste"] = 0.0
 
@@ -1313,16 +1316,14 @@ class EnergyProfileManager:
         Returns a value between 0.02 and 1.0 representing the fraction
         of max charge power the battery can accept.
         """
-        if soc <= 85.0:
+        if soc <= 90.0:
             ratio = 1.0
-        elif soc <= 92.0:
-            ratio = 1.0 - ((soc - 85.0) / 7.0) * 0.3
-        elif soc <= 97.0:
-            ratio = 0.7 - ((soc - 92.0) / 5.0) * 0.5
-        elif soc <= 98.0:
-            ratio = 0.2 - ((soc - 97.0) / 1.0) * 0.1
+        elif soc <= 96.0:
+            ratio = 1.0 - ((soc - 90.0) / 6.0) * 0.5  # Drops to 0.5 at 96%
+        elif soc <= 98.5:
+            ratio = 0.5 - ((soc - 96.0) / 2.5) * 0.4  # Drops to 0.1 at 98.5%
         else:
-            ratio = 0.1 - ((soc - 98.0) / 2.0) * 0.08
+            ratio = 0.1 - ((soc - 98.5) / 1.5) * 0.08 # Tapers to 0.02
         return max(0.02, min(1.0, ratio))
 
     def get_gen_forecast_coefficient(self, forecast_value, prof_gen, hour_start, hour_end):
@@ -2465,9 +2466,9 @@ class EnergyProfileManager:
                 prof_gen = self.get_average_profile("generation", self.custom_period, "all")
                 
                 forecast_today = self.get_forecast_value(self.forecast_today_sensor)
-                forecast_tom = self.get_forecast_value(self.forecast_tomorrow_sensor)
+                f_tom = self.get_forecast_value(self.forecast_tomorrow_sensor)
                 coeff_today = self.get_gen_forecast_coefficient(forecast_today, prof_gen, cur_hour + 1, 24)
-                coeff_tom = self.get_gen_forecast_coefficient(forecast_tom, prof_gen, 0, 24)
+                coeff_tom = self.get_gen_forecast_coefficient(f_tom, prof_gen, 0, 24)
 
                 def get_energy_needed(start_h, end_h):
                     needed = 0.0
@@ -2828,17 +2829,19 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
         # 1. Run Unified Simulation Engine
         simulated_soc, charge_log = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
         
-        # Calculate total expected gen from the simulation log area for display
-        # (This remains as informative attribute)
-        f_today = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
-        total_expected_gen = f_today if f_today is not None else 0.0
+        f_raw = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
+        coeff = getattr(self.manager, "last_blended_coeff", 1.0)
+        f_val = f_raw * coeff if f_raw is not None else 0.0
 
         self._attr_extra_state_attributes = {
-            "target_event": target_label,
+            "prediction_target": target_label,
             "target_hour": f"{target_hour:02d}:00",
-            "initial_soc": round(batt_soc, 1),
-            "expected_remaining_gen": round(total_expected_gen, 2),
-            "hourly_simulation": charge_log
+            "current_soc_pct": round(batt_soc, 1),
+            "forecast_income_remaining_kwh": round(f_val, 2),
+            "forecast_raw_kwh": round(f_raw or 0.0, 2),
+            "forecast_coefficient_blended": round(coeff, 3),
+            "efficiency_coefficient": round(eff_coeff, 3),
+            "simulation_log": charge_log
         }
         return round(simulated_soc, 1)
 
@@ -2873,9 +2876,9 @@ class ConsumptionDeviationSensor(SensorEntity):
         now = dt_util.now()
         cur_hour = now.hour
         
-        # 1. Get Actual Base Today
-        total_actual = self.manager.data.get("hourly_accumulators", {}).get("consumption_total", 0.0)
-        # Deduct managed loads (real-time accumulator)
+        # 1. Get Actual Base Today (since midnight)
+        total_actual = self.manager.data.get("temp_daily_cons_total", 0.0)
+        # Deduct managed loads (daily accumulators)
         deduct_sum = sum(self.manager.daily_deduct_consumption.get(s, 0.0) for s in self.manager.deduct_settings)
         actual_base = max(0.0, total_actual - deduct_sum)
         
