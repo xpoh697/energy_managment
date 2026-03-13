@@ -577,6 +577,9 @@ class EnergyProfileManager:
         if is_restarting:
             if delta > 0 and delta < 50.0:
                 if entity_id in self.consumption_sensors:
+                    if self.data.get("temp_daily_cons_total", 0) < 0.001:
+                        deduct_sum = sum(self.daily_deduct_consumption.get(s, 0.0) for s in self.deduct_sensors)
+                        self.data["temp_daily_cons_total"] = deduct_sum
                     self.data["temp_daily_cons_total"] = self.data.get("temp_daily_cons_total", 0.0) + delta
                     self.current_consumption_total += delta
                 if entity_id in self.deduct_sensors:
@@ -613,6 +616,12 @@ class EnergyProfileManager:
             return
             
         if entity_id in self.consumption_sensors:
+            # If we just started tracking (value is 0 or missing), 
+            # try to jump-start it by adding the already known daily deducts.
+            if self.data.get("temp_daily_cons_total", 0) < 0.001:
+                deduct_sum = sum(self.daily_deduct_consumption.get(s, 0.0) for s in self.deduct_sensors)
+                self.data["temp_daily_cons_total"] = deduct_sum
+                
             self.data["temp_daily_cons_total"] = self.data.get("temp_daily_cons_total", 0.0) + delta
             self.current_consumption_total += delta
         if entity_id in self.deduct_sensors:
@@ -2908,7 +2917,8 @@ class ConsumptionDeviationSensor(SensorEntity):
             "actual_base_kwh": round(actual_base, 3),
             "expected_base_kwh": round(expected_so_far, 3),
             "managed_loads_kwh": round(deduct_sum, 3),
-            "day_type": day_type
+            "day_type": day_type,
+            "status": "accumulating" if actual_base < 0.1 else "active"
         }
         
         return round(deviation, 1)
