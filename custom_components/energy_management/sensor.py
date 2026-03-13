@@ -319,21 +319,6 @@ class EnergyProfileManager:
         
         # Recalculate base from total and deduct
         self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
-        
-        # Warm-start logic: If we have no daily counter, backfill it from the historical profile 
-        # so the deviation starts at ~0% instead of -100%.
-        if self.data.get("temp_daily_cons_total", 0) < 0.001:
-            now = dt_util.now()
-            day_type = "weekend" if now.weekday() >= 5 else "weekday"
-            prof_total = self.get_average_profile("consumption_total", self.custom_period, day_type)
-            
-            expected_total = sum(float(prof_total.get(str(h), 0.0)) for h in range(now.hour))
-            fraction = now.minute / 60.0
-            expected_total += float(prof_total.get(str(now.hour), 0.0)) * fraction
-            
-            # Ensure we are at least at the level of managed loads we already know about
-            deduct_sum = sum(self.daily_deduct_consumption.get(s, 0.0) for s in self.deduct_sensors)
-            self.data["temp_daily_cons_total"] = max(expected_total, deduct_sum)
 
     async def async_save(self):
         self.data["learned_standby_power"] = self.learned_standby_power
@@ -349,7 +334,7 @@ class EnergyProfileManager:
             "grid_export": self.current_grid_export,
             "losses": self.current_losses,
             "hourly_deduct": self.current_hourly_deduct,
-            "temp_daily_cons_total": self.data.get("temp_daily_cons_total", 0.0)
+            "hourly_deduct": self.current_hourly_deduct
         }
         await self.store.async_save(self.data)
 
@@ -588,10 +573,6 @@ class EnergyProfileManager:
         if is_restarting:
             if delta > 0 and delta < 50.0:
                 if entity_id in self.consumption_sensors:
-                    if self.data.get("temp_daily_cons_total", 0) < 0.001:
-                        deduct_sum = sum(self.daily_deduct_consumption.get(s, 0.0) for s in self.deduct_sensors)
-                        self.data["temp_daily_cons_total"] = deduct_sum
-                    self.data["temp_daily_cons_total"] = self.data.get("temp_daily_cons_total", 0.0) + delta
                     self.current_consumption_total += delta
                 if entity_id in self.deduct_sensors:
                     self.current_hourly_deduct += delta
@@ -627,9 +608,6 @@ class EnergyProfileManager:
             return
             
         if entity_id in self.consumption_sensors:
-            # The backfill is now handled in async_load/async_added_to_hass for better consistency,
-            # but we keep a safety check here.
-            self.data["temp_daily_cons_total"] = self.data.get("temp_daily_cons_total", 0.0) + delta
             self.current_consumption_total += delta
         if entity_id in self.deduct_sensors:
             self.current_hourly_deduct += delta
@@ -795,7 +773,8 @@ class EnergyProfileManager:
             
             if expected > 0.1 or actual > 0.1:
                 if "forecast_history" not in self.data:
-                    self.data["forecast_history"] = []
+                    self.data["forecast_history"] = [] # No daily reset needed anymore as we rely on get_todays_profile logic
+                                                       # which evaluates hours 0-23
                 self.data["forecast_history"].append({
                     "actual": round(actual, 3),
                     "forecast": round(expected, 3),
