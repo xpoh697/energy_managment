@@ -1112,6 +1112,11 @@ class EnergyProfileManager:
         eff = self.get_efficiency_coefficient()
         new_cap = batt_cap + extra_batt_kwh
         
+        # Power also scales with capacity (more batteries = more discharge/charge current)
+        current_max_p = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+        scaling = (new_cap / batt_cap) if batt_cap > 0 else 1.0
+        sim_max_p = current_max_p * scaling
+        
         # Simulating day by day
         for d_back in range(1, days_to_sim + 1):
             sim_soc_kwh = 0.0 # Start empty for simplicity
@@ -1144,10 +1149,6 @@ class EnergyProfileManager:
                 p_buy = float(p_buy_map.get(sh, 0.0))
                 p_sell = float(p_sell_map.get(sh, 0.0))
                 
-                # ── Step 1: Baseline (Wait, we compare against ACTUAL system, not zero) ──
-                # But a cleaner way is to simulate the whole thing and compare totals at the end.
-                # However, for simplicity, let's just simulate the new spec and see the delta.
-                
                 # ── Step 2: New Spec Simulation ──
                 net = g_h - c_h
                 
@@ -1156,14 +1157,18 @@ class EnergyProfileManager:
                 
                 if net > 0:
                     # Surplus -> Charge Virtual Battery
+                    # Can only charge at sim_max_p kW for 1 hour
+                    charge_power = min(net, sim_max_p)
                     charge_room = new_cap - sim_soc_kwh
-                    charged = min(net * eff, charge_room)
+                    charged = min(charge_power * eff, charge_room)
                     sim_soc_kwh += charged
                     sim_grid_sell = net - (charged / eff)
                 else:
                     # Deficit -> Discharge Virtual Battery
+                    # Can only discharge at sim_max_p kW for 1 hour
                     needed = abs(net)
-                    discharged = min(needed / eff, sim_soc_kwh)
+                    discharge_power = min(needed, sim_max_p)
+                    discharged = min(discharge_power / eff, sim_soc_kwh)
                     sim_soc_kwh -= discharged
                     sim_grid_buy = needed - (discharged * eff)
 
