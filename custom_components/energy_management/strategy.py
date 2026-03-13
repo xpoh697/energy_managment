@@ -194,120 +194,119 @@ class StrategyEngine:
         old_calc = self._calculating_strategy
         self._calculating_strategy = True
         try:
-        
-        # 1. Solar adjustment
-        forecast_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor) or 0.0
-        
-        prof_gen = self.manager.get_average_profile("generation", days_for_profile, "all")
-        hist_gen_so_far = sum(float(prof_gen.get(str(h), 0.0)) for h in range(cur_hour + 1))
-        total_hist_gen = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
-        
-        # Historical forecast vs real average
-        hist_coeff = forecast_val / total_hist_gen if total_hist_gen > 0.1 else 1.0
-        
-        fraction_so_far = 0.0
-        if total_hist_gen > 0.1:
-            fraction_so_far = hist_gen_so_far / total_hist_gen
+            # 1. Solar adjustment
+            forecast_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor) or 0.0
             
-        # Today's actual is taken from the daily accumulator (resilient to restart gaps)
-        actual_today = self.manager.data.get("temp_daily_gen", 0.0) or 0.0
-        expected_today_total = self.manager.data.get("temp_max_forecast", 0.0) or 0.0
-        expected_today_so_far = expected_today_total * fraction_so_far
-        
-        today_coeff = hist_coeff
-        if expected_today_so_far > 0.1:
-            today_coeff = actual_today / expected_today_so_far
-            today_coeff = max(0.2, min(today_coeff, 2.0))
+            prof_gen = self.manager.get_average_profile("generation", days_for_profile, "all")
+            hist_gen_so_far = sum(float(prof_gen.get(str(h), 0.0)) for h in range(cur_hour + 1))
+            total_hist_gen = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
             
-        blended_coeff = (today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far))
-        self.manager.last_blended_coeff = blended_coeff
+            # Historical forecast vs real average
+            hist_coeff = forecast_val / total_hist_gen if total_hist_gen > 0.1 else 1.0
+            
+            fraction_so_far = 0.0
+            if total_hist_gen > 0.1:
+                fraction_so_far = hist_gen_so_far / total_hist_gen
+            
+            # Today's actual is taken from the daily accumulator (resilient to restart gaps)
+            actual_today = self.manager.data.get("temp_daily_gen", 0.0) or 0.0
+            expected_today_total = self.manager.data.get("temp_max_forecast", 0.0) or 0.0
+            expected_today_so_far = expected_today_total * fraction_so_far
+            
+            today_coeff = hist_coeff
+            if expected_today_so_far > 0.1:
+                today_coeff = actual_today / expected_today_so_far
+                today_coeff = max(0.2, min(today_coeff, 2.0))
                 
-        forecast_val_adjusted = forecast_val * blended_coeff
-                
-        # 2. Get Battery Energy Available
-        batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
-        min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
-        eff_coeff = self.get_efficiency_coefficient() or 1.0
+            blended_coeff = (today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far))
+            self.manager.last_blended_coeff = blended_coeff
                     
-        # 3. Get Expected Consumption remaining till end of day
-        occ_coeff = self.manager.get_occupancy_coefficient()
-        expected_remaining = self.manager.get_expected_remaining("consumption_total", days_for_profile) * occ_coeff
-        expected_consumption = expected_remaining
-        
-        # Budget = (Today's remaining solar) + (Current battery energy ABOVE min_soc) - (Necessary consumption)
-        # Note: we use adjusted forecast
-        initial_budget = (forecast_val_adjusted * (1.0 - fraction_so_far)) + (batt_energy_val - (min_soc * batt_cap / 100.0)) - expected_remaining
-        available_budget = initial_budget
-        
-        # 4. Evaluate permissions for each managed load
-        permissions = {}
-        permissions_reasons = {}
-        
-        # Real-time power limit check
-        initial_power_kw = 0.0
-        if getattr(self.manager, "power_load_sensors", []) and getattr(self.manager, "power_gen_sensors", []):
-            load_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
-            gen_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
-            initial_power_kw = gen_kw - load_kw
+            forecast_val_adjusted = forecast_val * blended_coeff
+                
+            # 2. Get Battery Energy Available
+            batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
+            min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
+            eff_coeff = self.get_efficiency_coefficient() or 1.0
+                        
+            # 3. Get Expected Consumption remaining till end of day
+            occ_coeff = self.manager.get_occupancy_coefficient()
+            expected_remaining = self.manager.get_expected_remaining("consumption_total", days_for_profile) * occ_coeff
+            expected_consumption = expected_remaining
             
-        available_power_kw = initial_power_kw
-        available_gen_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+            # Budget = (Today's remaining solar) + (Current battery energy ABOVE min_soc) - (Necessary consumption)
+            # Note: we use adjusted forecast
+            initial_budget = (forecast_val_adjusted * (1.0 - fraction_so_far)) + (batt_energy_val - (min_soc * batt_cap / 100.0)) - expected_remaining
+            available_budget = initial_budget
         
-        cur_price_buy = None
-        if not skip_strategy_check:
-            # We check the latest market strategy to see if it's currently a "Free" price window
-            strategy_res = self.get_market_strategy("buy")
-            cur_price_buy = strategy_res.get("today_prices", {}).get(str(cur_hour))
+            # 4. Evaluate permissions for each managed load
+            permissions = {}
+            permissions_reasons = {}
+            
+            # Real-time power limit check
+            initial_power_kw = 0.0
+            if getattr(self.manager, "power_load_sensors", []) and getattr(self.manager, "power_gen_sensors", []):
+                load_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
+                gen_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+                initial_power_kw = gen_kw - load_kw
+                
+            available_power_kw = initial_power_kw
+            available_gen_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+            
+            cur_price_buy = None
+            if not skip_strategy_check:
+                # We check the latest market strategy to see if it's currently a "Free" price window
+                strategy_res = self.get_market_strategy("buy")
+                cur_price_buy = strategy_res.get("today_prices", {}).get(str(cur_hour))
 
-        for sensor_id, settings in self.manager.deduct_settings.items():
-            only_solar_free = settings.get("only_solar_free", False)
-            
-            req_kwh = settings.get("required_kwh", 2.5)
-            req_kw = self.manager.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
-            consumed = self.manager.daily_deduct_consumption.get(sensor_id, 0.0)
-            
-            # is_idle = NOT in active cycle (it's a candidate to START)
-            is_currently_pulling_now = self.manager._is_currently_pulling_power(sensor_id)
-            is_idle = not is_currently_pulling_now
-            
-            power_bottleneck = False
-            gen_bottleneck = False
-            is_free_price = cur_price_buy is not None and float(str(cur_price_buy).replace(',', '.')) <= 0.0
+            for sensor_id, settings in self.manager.deduct_settings.items():
+                only_solar_free = settings.get("only_solar_free", False)
+                
+                req_kwh = settings.get("required_kwh", 2.5)
+                req_kw = self.manager.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
+                consumed = self.manager.daily_deduct_consumption.get(sensor_id, 0.0)
+                
+                # is_idle = NOT in active cycle (it's a candidate to START)
+                is_currently_pulling_now = self.manager._is_currently_pulling_power(sensor_id)
+                is_idle = not is_currently_pulling_now
+                
+                power_bottleneck = False
+                gen_bottleneck = False
+                is_free_price = cur_price_buy is not None and float(str(cur_price_buy).replace(',', '.')) <= 0.0
 
-            if req_kw > 0.0:
-                if available_power_kw < req_kw:
+                if req_kw > 0.0:
+                    if available_power_kw < req_kw:
+                        power_bottleneck = True
+                    if only_solar_free and not is_free_price:
+                        if available_gen_kw < (req_kw * 0.6):
+                            gen_bottleneck = True
+                elif initial_power_kw > 0.5 and available_power_kw < 0:
                     power_bottleneck = True
-                if only_solar_free and not is_free_price:
-                    if available_gen_kw < (req_kw * 0.6):
-                        gen_bottleneck = True
-            elif initial_power_kw > 0.5 and available_power_kw < 0:
-                power_bottleneck = True
 
-            if req_kwh == 0:
-                # Dynamic load logic
-                if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
-                    permissions[sensor_id] = True
-                    if req_kw > 0.0:
-                        available_power_kw = float(available_power_kw) - float(req_kw)
-                        if only_solar_free and not is_free_price:
-                            available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
-                    
-                    b_val = round(max(0.0, float(available_budget)), 2)
-                    g_val = round(max(0.0, float(available_power_kw)), 2)
-                    permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профицит {b_val} кВт*ч, Доступно {g_val} кВт)"
-                else:
-                    permissions[sensor_id] = False
-                    g_val = round(float(available_power_kw), 2)
-                    g_gen = round(float(available_gen_kw), 2)
-                    if gen_bottleneck:
-                        permissions_reasons[sensor_id] = f"Блокировка: Доступная генер. {g_gen} кВт < 60% от {req_kw} кВт"
-                    elif power_bottleneck:
-                        permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Мощность {req_kw} кВт"
-                    elif available_budget <= 0:
-                        permissions_reasons[sensor_id] = f"Блокировка: Нет профицита энергии ({round(float(available_budget), 2)} кВт*ч)"
+                if req_kwh == 0:
+                    # Dynamic load logic
+                    if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
+                        permissions[sensor_id] = True
+                        if req_kw > 0.0:
+                            available_power_kw = float(available_power_kw) - float(req_kw)
+                            if only_solar_free and not is_free_price:
+                                available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
+                        
+                        b_val = round(max(0.0, float(available_budget)), 2)
+                        g_val = round(max(0.0, float(available_power_kw)), 2)
+                        permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профицит {b_val} кВт*ч, Доступно {g_val} кВт)"
                     else:
-                        permissions_reasons[sensor_id] = "Блокировка: Ограничения по мощности"
-                continue
+                        permissions[sensor_id] = False
+                        g_val = round(float(available_power_kw), 2)
+                        g_gen = round(float(available_gen_kw), 2)
+                        if gen_bottleneck:
+                            permissions_reasons[sensor_id] = f"Блокировка: Доступная генер. {g_gen} кВт < 60% от {req_kw} кВт"
+                        elif power_bottleneck:
+                            permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Мощность {req_kw} кВт"
+                        elif available_budget <= 0:
+                            permissions_reasons[sensor_id] = f"Блокировка: Нет профицита энергии ({round(float(available_budget), 2)} кВт*ч)"
+                        else:
+                            permissions_reasons[sensor_id] = "Блокировка: Ограничения по мощности"
+                    continue
 
             needed = req_kwh - consumed
             if needed <= 0:
@@ -460,187 +459,185 @@ class StrategyEngine:
         old_calc = self._calculating_strategy
         self._calculating_strategy = True
         try:
-        
-        now = dt_util.now()
-        cur_hour = now.hour
-        today_str = now.strftime("%Y-%m-%d")
-        tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        prices_store = self.manager.data.get(f"prices_{mode}", {})
-        today_prices = prices_store.get(today_str, {})
-        tomorrow_prices = prices_store.get(tomorrow_str, {})
-        
-        res["today_prices"] = today_prices
-        res["tomorrow_prices"] = tomorrow_prices
-        
-        # Initialize key variables at the start for all modes (prevents NameErrors)
-        batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
-        
-        today_type = "weekend" if now.weekday() >= 5 else "weekday"
-        tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
-        
-        prof_today = self.manager.get_average_profile("consumption_total", self.manager.custom_period, today_type)
-        prof_tom = self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type)
-        prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-        
-        forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor) or 0.0
-        forecast_tomorrow_val = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor) or 0.0
-        
-        coeff_today = self.get_gen_forecast_coefficient(forecast_today_val, prof_gen, cur_hour + 1, 24)
-        coeff_tom = self.get_gen_forecast_coefficient(forecast_tomorrow_val, prof_gen, 0, 24)
-        
-        max_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-        eff_coeff = self.get_efficiency_coefficient()
-        
-        if not today_prices:
-            return res
+            now = dt_util.now()
+            cur_hour = now.hour
+            today_str = now.strftime("%Y-%m-%d")
+            tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
             
-        force_sell = self.manager.get_setting(CONF_FORCE_MARKET_SELL, False)
-        if mode == "sell" and force_sell:
-            res["state"] = "active"
-            res["target_price"] = 0.0
-            res["limit_used"] = 0.0
-            res["active_hours"] = [cur_hour]
-            return res
+            prices_store = self.manager.data.get(f"prices_{mode}", {})
+            today_prices = prices_store.get(today_str, {})
+            tomorrow_prices = prices_store.get(tomorrow_str, {})
         
-        # Determine tolerance based on mode
-        tolerance = self.manager.get_setting(CONF_PRICE_TOLERANCE if mode == "buy" else CONF_PRICE_SELL_TOLERANCE, 0.0)
-        
-        # Unify today and tomorrow prices into a 48h timeline for FULL window evaluation
-        all_prices = {}
-        for h, p in today_prices.items():
-            try: all_prices[int(h)] = float(str(p).replace(',', '.'))
-            except ValueError: all_prices[int(h)] = 0.0
-        for h, p in tomorrow_prices.items():
-            try: all_prices[int(h) + 24] = float(str(p).replace(',', '.'))
-            except ValueError: all_prices[int(h) + 24] = 0.0
+            res["today_prices"] = today_prices
+            res["tomorrow_prices"] = tomorrow_prices
             
-        negative_hours = [h for h, p in all_prices.items() if p < 0 and h >= cur_hour]
-
-        # Evaluate the entire available horizon
-        if tomorrow_prices:
-            active_window = (0, 47)
-            res["analyzed_window"] = "Сегодня 00:00 - Завтра 23:59"
-        else:
-            active_window = (0, 23)
-            res["analyzed_window"] = "Сегодня 00:00 - Сегодня 23:59"
+            # Initialize key variables at the start for all modes (prevents NameErrors)
+            batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
+            
+            today_type = "weekend" if now.weekday() >= 5 else "weekday"
+            tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
+            
+            prof_today = self.manager.get_average_profile("consumption_total", self.manager.custom_period, today_type)
+            prof_tom = self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type)
+            prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
+            
+            forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor) or 0.0
+            forecast_tomorrow_val = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor) or 0.0
+            
+            coeff_today = self.get_gen_forecast_coefficient(forecast_today_val, prof_gen, cur_hour + 1, 24)
+            coeff_tom = self.get_gen_forecast_coefficient(forecast_tomorrow_val, prof_gen, 0, 24)
+            
+            max_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+            eff_coeff = self.get_efficiency_coefficient()
+            
+            if not today_prices:
+                return res
                 
-        target_hours = []
-        target_price = 0.0
-        limit_used = 0.0
-        carte_blanche = False
-
-        def get_peaks(window, is_sell, limit, tol):
-            if not window: return []
-            if is_sell:
-                best_p = max(window.values())
-                if best_p >= limit:
-                    return [(h, p) for h, p in window.items() if p >= limit and p >= (best_p - tol)]
-            else:
-                best_p = min(window.values())
-                if best_p <= limit:
-                    return [(h, p) for h, p in window.items() if p <= limit and p <= (best_p + tol)]
-            return []
-
-        window_today = {h: p for h, p in all_prices.items() if cur_hour <= h < 24}
-        window_tomorrow = {h: p for h, p in all_prices.items() if 24 <= h <= 47}
-
-        if mode == "buy":
-            limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
-            res["limit_used"] = limit
-            if negative_hours:
-                # Carte blanche: we buy whenever price is negative, ignore windows
-                target_hours = negative_hours
-                target_price = min([all_prices[h] for h in negative_hours])
-                res["target_price"] = target_price
-                carte_blanche = True
-            else:
-                peaks_today = get_peaks(window_today, False, limit, tolerance)
-                peaks_tom = get_peaks(window_tomorrow, False, limit, tolerance)
-                combined = peaks_today + peaks_tom
-                if combined:
-                    target_hours = [h for h, p in combined]
-                    target_price = min(p for h, p in combined)
-                    res["target_price"] = target_price
-                    res["limit_used"] = limit
-
-            # --- ARBITRAGE OPPORTUNITY PRE-CALCULATION ---
-            # Identify high-price SELL peaks to prepare the battery in advance
-            sell_prices_today = self.manager.data.get("prices_sell", {}).get(today_str, {})
-            sell_prices_tom = self.manager.data.get("prices_sell", {}).get(tomorrow_str, {})
-            all_sell_prices = {}
-            for h, p in sell_prices_today.items():
-                try: all_sell_prices[int(h)] = float(str(p).replace(',', '.'))
-                except ValueError: all_sell_prices[int(h)] = 0.0
-            for h, p in sell_prices_tom.items():
-                try: all_sell_prices[int(h) + 24] = float(str(p).replace(',', '.'))
-                except ValueError: all_sell_prices[int(h) + 24] = 0.0
-
-            sell_limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 99.0)
-            deg_cost = self.get_battery_degradation_cost()
-            eff = eff_coeff
-            min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
-
-            def is_sell_profitable(sell_p, buy_p):
-                threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
-                return (sell_p - buy_p) * eff >= threshold
-
-            profitable_sell_peaks = []
-            if all_sell_prices:
-                buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
-                for h_s, p_s in all_sell_prices.items():
-                    if h_s >= cur_hour and p_s >= sell_limit and is_sell_profitable(p_s, buy_limit):
-                        profitable_sell_peaks.append(h_s)
-        else: # sell
-            limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
-            res["limit_used"] = limit
-            if negative_hours and cur_hour in negative_hours:
-                res["state"] = "price_limit_not_met"
+            force_sell = self.manager.get_setting(CONF_FORCE_MARKET_SELL, False)
+            if mode == "sell" and force_sell:
+                res["target_price"] = 0.0
+                res["limit_used"] = 0.0
+                res["active_hours"] = [cur_hour]
                 return res
             
-            deg_cost = self.get_battery_degradation_cost()
-            eff = eff_coeff
-            min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
-            min_buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
+            # Determine tolerance based on mode
+            tolerance = self.manager.get_setting(CONF_PRICE_TOLERANCE if mode == "buy" else CONF_PRICE_SELL_TOLERANCE, 0.0)
             
-            def is_profitable(price):
-                threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
-                raw_gain = (price - min_buy_limit) * eff
-                return raw_gain >= threshold
-
-            raw_peaks_today = get_peaks(window_today, True, limit, tolerance)
-            raw_peaks_tom = get_peaks(window_tomorrow, True, limit, tolerance)
-            
-            if not raw_peaks_today and not raw_peaks_tom:
-                res["state"] = "price_limit_not_met"
-            else:
-                peaks_today = [(h, p) for h, p in raw_peaks_today if is_profitable(p)]
-                peaks_tom = [(h, p) for h, p in raw_peaks_tom if is_profitable(p)]
+            # Unify today and tomorrow prices into a 48h timeline for FULL window evaluation
+            all_prices = {}
+            for h, p in today_prices.items():
+                try: all_prices[int(h)] = float(str(p).replace(',', '.'))
+                except ValueError: all_prices[int(h)] = 0.0
+            for h, p in tomorrow_prices.items():
+                try: all_prices[int(h) + 24] = float(str(p).replace(',', '.'))
+                except ValueError: all_prices[int(h) + 24] = 0.0
                 
-                if not peaks_today and not peaks_tom:
-                    res["state"] = "unprofitable_arbitrage"
-                    res["multi_cycle"] = "Деградация АКБ > Выгоды"
+            negative_hours = [h for h, p in all_prices.items() if p < 0 and h >= cur_hour]
+
+            # Evaluate the entire available horizon
+            if tomorrow_prices:
+                active_window = (0, 47)
+                res["analyzed_window"] = "Сегодня 00:00 - Завтра 23:59"
+            else:
+                active_window = (0, 23)
+                res["analyzed_window"] = "Сегодня 00:00 - Сегодня 23:59"
+                    
+            target_hours = []
+            target_price = 0.0
+            limit_used = 0.0
+            carte_blanche = False
+
+            def get_peaks(window, is_sell, limit, tol):
+                if not window: return []
+                if is_sell:
+                    best_p = max(window.values())
+                    if best_p >= limit:
+                        return [(h, p) for h, p in window.items() if p >= limit and p >= (best_p - tol)]
                 else:
-                    if peaks_today and peaks_tom:
-                        max_h_today = max(h for h, p in peaks_today)
-                        min_h_tom = min(h for h, p in peaks_tom)
-                        
-                        buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
-                        can_recharge = False
-                        for h in range(max_h_today + 1, min_h_tom):
-                            if all_prices.get(h, 99.0) <= buy_limit:
-                                can_recharge = True
-                                res["multi_cycle"] = "Благоприятно (Дешевая сеть ночью)"
-                                break
-                            if 8 <= (h % 24) <= 16:
-                                fsensors = self.manager.forecast_tomorrow_sensor
-                                if fsensors:
-                                    if isinstance(fsensors, str): fsensors = [fsensors]
-                                    val_sum = 0.0
-                                    for fsensor in fsensors:
-                                        st = self.manager.hass.states.get(fsensor)
-                                        v = _get_kwh_val(st)
-                                        if v is not None: val_sum += v
+                    best_p = min(window.values())
+                    if best_p <= limit:
+                        return [(h, p) for h, p in window.items() if p <= limit and p <= (best_p + tol)]
+                return []
+
+            window_today = {h: p for h, p in all_prices.items() if cur_hour <= h < 24}
+            window_tomorrow = {h: p for h, p in all_prices.items() if 24 <= h <= 47}
+
+            if mode == "buy":
+                limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
+                res["limit_used"] = limit
+                if negative_hours:
+                    # Carte blanche: we buy whenever price is negative, ignore windows
+                    target_hours = negative_hours
+                    target_price = min([all_prices[h] for h in negative_hours])
+                    res["target_price"] = target_price
+                    carte_blanche = True
+                else:
+                    peaks_today = get_peaks(window_today, False, limit, tolerance)
+                    peaks_tom = get_peaks(window_tomorrow, False, limit, tolerance)
+                    combined = peaks_today + peaks_tom
+                    if combined:
+                        target_hours = [h for h, p in combined]
+                        target_price = min(p for h, p in combined)
+                        res["target_price"] = target_price
+                        res["limit_used"] = limit
+
+                # --- ARBITRAGE OPPORTUNITY PRE-CALCULATION ---
+                # Identify high-price SELL peaks to prepare the battery in advance
+                sell_prices_today = self.manager.data.get("prices_sell", {}).get(today_str, {})
+                sell_prices_tom = self.manager.data.get("prices_sell", {}).get(tomorrow_str, {})
+                all_sell_prices = {}
+                for h, p in sell_prices_today.items():
+                    try: all_sell_prices[int(h)] = float(str(p).replace(',', '.'))
+                    except ValueError: all_sell_prices[int(h)] = 0.0
+                for h, p in sell_prices_tom.items():
+                    try: all_sell_prices[int(h) + 24] = float(str(p).replace(',', '.'))
+                    except ValueError: all_sell_prices[int(h) + 24] = 0.0
+
+                sell_limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 99.0)
+                deg_cost = self.get_battery_degradation_cost()
+                eff = eff_coeff
+                min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
+
+                def is_sell_profitable(sell_p, buy_p):
+                    threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
+                    return (sell_p - buy_p) * eff >= threshold
+
+                profitable_sell_peaks = []
+                if all_sell_prices:
+                    buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
+                    for h_s, p_s in all_sell_prices.items():
+                        if h_s >= cur_hour and p_s >= sell_limit and is_sell_profitable(p_s, buy_limit):
+                            profitable_sell_peaks.append(h_s)
+            else: # sell
+                limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
+                res["limit_used"] = limit
+                if negative_hours and cur_hour in negative_hours:
+                    res["state"] = "price_limit_not_met"
+                    return res
+                
+                deg_cost = self.get_battery_degradation_cost()
+                eff = eff_coeff
+                min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
+                min_buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
+                
+                def is_profitable(price):
+                    threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
+                    raw_gain = (price - min_buy_limit) * eff
+                    return raw_gain >= threshold
+
+                raw_peaks_today = get_peaks(window_today, True, limit, tolerance)
+                raw_peaks_tom = get_peaks(window_tomorrow, True, limit, tolerance)
+                
+                if not raw_peaks_today and not raw_peaks_tom:
+                    res["state"] = "price_limit_not_met"
+                else:
+                    peaks_today = [(h, p) for h, p in raw_peaks_today if is_profitable(p)]
+                    peaks_tom = [(h, p) for h, p in raw_peaks_tom if is_profitable(p)]
+                    
+                    if not peaks_today and not peaks_tom:
+                        res["state"] = "unprofitable_arbitrage"
+                        res["multi_cycle"] = "Деградация АКБ > Выгоды"
+                    else:
+                        if peaks_today and peaks_tom:
+                            max_h_today = max(h for h, p in peaks_today)
+                            min_h_tom = min(h for h, p in peaks_tom)
+                            
+                            buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
+                            can_recharge = False
+                            for h in range(max_h_today + 1, min_h_tom):
+                                if all_prices.get(h, 99.0) <= buy_limit:
+                                    can_recharge = True
+                                    res["multi_cycle"] = "Благоприятно (Дешевая сеть ночью)"
+                                    break
+                                if 8 <= (h % 24) <= 16:
+                                    fsensors = self.manager.forecast_tomorrow_sensor
+                                    if fsensors:
+                                        if isinstance(fsensors, str): fsensors = [fsensors]
+                                        val_sum = 0.0
+                                        for fsensor in fsensors:
+                                            st = self.manager.hass.states.get(fsensor)
+                                            v = _get_kwh_val(st)
+                                            if v is not None: val_sum += v
                                     if val_sum > 3.0:
                                         can_recharge = True
                                         res["multi_cycle"] = "Благоприятно (Ожидается солнце)"
@@ -650,120 +647,120 @@ class StrategyEngine:
                                     res["multi_cycle"] = "Благоприятно (Световой день)"
                                     break
                                 
-                        if can_recharge:
-                            combined = peaks_today + peaks_tom
-                            target_hours = [h for h, p in combined]
-                            target_price = max(p for h, p in combined)
-                        else:
-                            res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
-                            max_today_p = max(p for h, p in peaks_today)
-                            max_tom_p = max(p for h, p in peaks_tom)
-                            if max_today_p >= max_tom_p:
-                                target_hours = [h for h, p in peaks_today]
-                                target_price = max_today_p
+                            if can_recharge:
+                                combined = peaks_today + peaks_tom
+                                target_hours = [h for h, p in combined]
+                                target_price = max(p for h, p in combined)
                             else:
-                                target_hours = [h for h, p in peaks_tom]
-                                target_price = max_tom_p
-                    elif peaks_today:
-                        target_hours = [h for h, p in peaks_today]
-                        target_price = max(p for h, p in peaks_today)
-                    elif peaks_tom:
-                        target_hours = [h for h, p in peaks_tom]
-                        target_price = max(p for h, p in peaks_tom)
+                                res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
+                                max_today_p = max(p for h, p in peaks_today)
+                                max_tom_p = max(p for h, p in peaks_tom)
+                                if max_today_p >= max_tom_p:
+                                    target_hours = [h for h, p in peaks_today]
+                                    target_price = max_today_p
+                                else:
+                                    target_hours = [h for h, p in peaks_tom]
+                                    target_price = max_tom_p
+                        elif peaks_today:
+                            target_hours = [h for h, p in peaks_today]
+                            target_price = max(p for h, p in peaks_today)
+                        elif peaks_tom:
+                            target_hours = [h for h, p in peaks_tom]
+                            target_price = max(p for h, p in peaks_tom)
+                        
+                        res["target_price"] = target_price
+
+            target_hours = [h for h in target_hours if h >= cur_hour]
+
+            # Survival Logic
+            if mode == "buy" and batt_cap > 0 and self.manager.get_setting(CONF_DYNAMIC_SOC_BUY, True) and active_window:
+                min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
+                natural_hours_names = set(target_hours)
+                survival_hours = set(target_hours)
+            
+                while True:
+                    added_bridge = False
+                    commands = {h_cmd: max_power for h_cmd in survival_hours}
+                    sim_range = list(range(cur_hour, active_window[1] + 1))
+                    final_soc, log = self.run_soc_simulation(batt_soc, sim_range, now, commands)
                     
-                    res["target_price"] = target_price
+                    violation_hour = None
+                    for h_step in sim_range:
+                        h_label = f"{h_step%24:0>2}:00" + (" (Завтра)" if h_step >= 24 else "")
+                        soc_at_h = log.get(h_label, 100.0)
+                        if soc_at_h < min_soc and violation_hour is None:
+                            violation_hour = h_step
+                    
+                    if violation_hour is not None:
+                        search_space = [sh for sh in range(cur_hour, violation_hour + 1) if sh not in survival_hours and sh in all_prices]
+                        if search_space:
+                            cheapest_bridge = min(search_space, key=lambda sh: all_prices[sh])
+                            survival_hours.add(cheapest_bridge)
+                            added_bridge = True
+                    
+                    if not added_bridge:
+                        cur_hour_label = f"{cur_hour:0>2}:00"
+                        if cur_hour in survival_hours and cur_hour not in natural_hours_names:
+                            res["charge_reason"] = "survival"
+                            res["charge_target_soc"] = 100.0
+                        else:
+                            res["charge_reason"] = "price"
+                        break
+                target_hours = list(survival_hours)
 
-        target_hours = [h for h in target_hours if h >= cur_hour]
+            res["limit_used"] = limit
+            future_active = [h for h in target_hours if h >= cur_hour]
+            if future_active:
+                upcoming_h = future_active[0]
+                rel_hours = [h for h in future_active if (h < 24 if upcoming_h < 24 else h >= 24)]
+                p_list = [all_prices.get(h, 0.0) for h in rel_hours]
+                if p_list:
+                    res["target_price"] = min(p_list) if mode == "buy" else max(p_list)
 
-        # Survival Logic
-        if mode == "buy" and batt_cap > 0 and self.manager.get_setting(CONF_DYNAMIC_SOC_BUY, True) and active_window:
-            min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
-            natural_hours = set(target_hours)
-            survival_hours = set(target_hours)
-            
-            while True:
-                added_bridge = False
-                commands = {h_cmd: max_power for h_cmd in survival_hours}
-                sim_range = list(range(cur_hour, active_window[1] + 1))
-                final_soc, log = self.run_soc_simulation(batt_soc, sim_range, now, commands)
+            if not target_hours and mode == "buy":
+                res["state"] = "price_limit_not_met"
+                return res
                 
-                violation_hour = None
-                for h_step in sim_range:
-                    h_label = f"{h_step%24:0>2}:00" + (" (Завтра)" if h_step >= 24 else "")
-                    soc_at_h = log.get(h_label, 100.0)
-                    if soc_at_h < min_soc and violation_hour is None:
-                        violation_hour = h_step
+            target_hours_sorted = sorted(target_hours)
+            found_periods = []
+            def _format_period(s, e):
+                s_d = "Завтра " if s >= 24 else ""
+                e_d = "Завтра " if e >= 24 else ""
+                return f"{s_d}{s % 24:02d}:00 - {e_d}{e % 24:02d}:59"
                 
-                if violation_hour is not None:
-                    search_space = [sh for sh in range(cur_hour, violation_hour + 1) if sh not in survival_hours and sh in all_prices]
-                    if search_space:
-                        cheapest_bridge = min(search_space, key=lambda sh: all_prices[sh])
-                        survival_hours.add(cheapest_bridge)
-                        added_bridge = True
-                
-                if not added_bridge:
-                    cur_hour_label = f"{cur_hour:0>2}:00"
-                    if cur_hour in survival_hours and cur_hour not in natural_hours:
-                        res["charge_reason"] = "survival"
-                        res["charge_target_soc"] = 100.0
+            if target_hours_sorted:
+                start = prev = target_hours_sorted[0]
+                for h in target_hours_sorted[1:]:
+                    if h == prev + 1: prev = h
                     else:
-                        res["charge_reason"] = "price"
-                    break
-            target_hours = list(survival_hours)
-
-        res["limit_used"] = limit
-        future_active = [h for h in target_hours if h >= cur_hour]
-        if future_active:
-            upcoming_h = future_active[0]
-            rel_hours = [h for h in future_active if (h < 24 if upcoming_h < 24 else h >= 24)]
-            p_list = [all_prices.get(h, 0.0) for h in rel_hours]
-            if p_list:
-                res["target_price"] = min(p_list) if mode == "buy" else max(p_list)
-
-        if not target_hours and mode == "buy":
-            res["state"] = "price_limit_not_met"
-            return res
-            
-        target_hours_sorted = sorted(target_hours)
-        found_periods = []
-        def _format_period(s, e):
-            s_d = "Завтра " if s >= 24 else ""
-            e_d = "Завтра " if e >= 24 else ""
-            return f"{s_d}{s % 24:02d}:00 - {e_d}{e % 24:02d}:59"
-            
-        if target_hours_sorted:
-            start = prev = target_hours_sorted[0]
-            for h in target_hours_sorted[1:]:
-                if h == prev + 1: prev = h
-                else:
-                    found_periods.append(_format_period(start, prev))
-                    start = prev = h
-            found_periods.append(_format_period(start, prev))
-            
-        def _format_hour_simple(h):
-            d = "Завтра " if h >= 24 else "Сегодня "
-            return f"{d}{h % 24:02d}:00"
-            
-        # Target & Power Calculation
-        power_needed = 0.0
-        if batt_cap > 0:
-            if mode == "buy":
-                base_target = self.manager.get_setting(CONF_TARGET_SOC_BUY, 100.0)
-                if negative_hours: target_soc = 100.0
-                elif self.manager.get_setting(CONF_DYNAMIC_SOC_BUY, True):
-                    budget_data = self.get_budget_and_permissions(self.manager.custom_period, skip_strategy_check=True)
-                    expected_night = budget_data.get("expected_consumption", 0.0)
-                    forecast = budget_data.get("forecast_val", 0.0)
-                    total_avg = sum(self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type).values())
-                    tomorrow_need = max(0.0, (total_avg - expected_night) - forecast)
-                    target_soc = min(base_target, (expected_night + tomorrow_need) / batt_cap * 100.0)
-                else: target_soc = base_target
+                        found_periods.append(_format_period(start, prev))
+                        start = prev = h
+                found_periods.append(_format_period(start, prev))
                 
-                target_soc = min(100.0, target_soc)
-                sim_soc_plan = batt_soc
+            def _format_hour_simple(h):
+                d = "Завтра " if h >= 24 else "Сегодня "
+                return f"{d}{h % 24:02d}:00"
+                
+            # Target & Power Calculation
+            power_needed = 0.0
+            if batt_cap > 0:
+                if mode == "buy":
+                    base_target = self.manager.get_setting(CONF_TARGET_SOC_BUY, 100.0)
+                    if negative_hours: target_soc = 100.0
+                    elif self.manager.get_setting(CONF_DYNAMIC_SOC_BUY, True):
+                        budget_data = self.get_budget_and_permissions(self.manager.custom_period, skip_strategy_check=True)
+                        expected_night = budget_data.get("expected_consumption", 0.0)
+                        forecast = budget_data.get("forecast_val", 0.0)
+                        total_avg = sum(self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type).values())
+                        tomorrow_need = max(0.0, (total_avg - expected_night) - forecast)
+                        target_soc = min(base_target, (expected_night + tomorrow_need) / batt_cap * 100.0)
+                    else: target_soc = base_target
+                    
+                    target_soc = min(100.0, target_soc)
+                    sim_soc_plan = batt_soc
                 for h in target_hours_sorted:
                     if h < cur_hour: continue
-                    rem_n = len([x for x in (natural_hours if 'natural_hours' in locals() else target_hours_sorted) if x >= h]) or 1
+                    rem_n = len([x for x in (natural_hours_names if 'natural_hours_names' in locals() else target_hours_sorted) if x >= h]) or 1
                     if target_soc > sim_soc_plan:
                         p = min(max_power, (batt_cap * (target_soc - sim_soc_plan) / 100.0) / rem_n)
                     else: p = 0.0
@@ -786,11 +783,11 @@ class StrategyEngine:
                     delta_available = batt_energy_val - (target_soc * batt_cap / 100.0)
                     power_needed = max(0.0, (delta_available * eff_coeff) / len(target_hours))
                 
-        res["recommended_power_kw"] = round(min(float(power_needed), max_power), 3)
-        res["active_hours"] = target_hours_sorted
-        res["active_hours_formatted"] = ", ".join([_format_hour_simple(h) for h in target_hours_sorted])
-        res["active_periods"] = ", ".join(found_periods)
-        res["state"] = "active" if cur_hour in target_hours_sorted and res["recommended_power_kw"] > 0 else "idle"
-        return res
-    finally:
-        self._calculating_strategy = old_calc
+            res["recommended_power_kw"] = round(min(float(power_needed), max_power), 3)
+            res["active_hours"] = target_hours_sorted
+            res["active_hours_formatted"] = ", ".join([_format_hour_simple(h) for h in target_hours_sorted])
+            res["active_periods"] = ", ".join(found_periods)
+            res["state"] = "active" if cur_hour in target_hours_sorted and res["recommended_power_kw"] > 0 else "idle"
+            return res
+        finally:
+            self._calculating_strategy = old_calc
