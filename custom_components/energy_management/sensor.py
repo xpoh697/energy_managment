@@ -1933,6 +1933,7 @@ class MarketStrategySensor(SensorEntity):
             "limit_used": round(float(res.get("limit_used", 0.0) or 0.0), 3),
             "recommended_power_kw": res.get("recommended_power_kw", 0.0),
             "current_mode": current_mode,
+            "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt
         }

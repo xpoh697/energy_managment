@@ -460,6 +460,7 @@ class StrategyEngine:
                 "projected_soc_after_sale_pct": 0,
                 "projected_soc_morning_pct": 0
             },
+            "arbitrage_decision": "Нет данных",
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
         
@@ -593,10 +594,14 @@ class StrategyEngine:
 
                 profitable_sell_peaks = []
                 if all_sell_prices:
-                    buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
                     for h_s, p_s in all_sell_prices.items():
                         if h_s >= cur_hour and p_s >= sell_limit and is_sell_profitable(p_s, buy_limit):
                             profitable_sell_peaks.append(h_s)
+                    
+                    if profitable_sell_peaks:
+                        res["arbitrage_decision"] = f"Обнаружено {len(profitable_sell_peaks)} выгодных периодов для будущей продажи"
+                    else:
+                        res["arbitrage_decision"] = "Выгодных периодов для арбитража в ближайшие 48 часов не обнаружено"
             else: # sell
                 limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
                 res["limit_used"] = limit
@@ -689,6 +694,17 @@ class StrategyEngine:
                             target_price = max(p for h, p in peaks_tom)
                         
                         res["target_price"] = target_price
+                        
+                        cur_p = today_prices.get(str(cur_hour), 0.0)
+                        try: cur_p = float(str(cur_p).replace(',', '.'))
+                        except ValueError: cur_p = 0.0
+                        
+                        if cur_p >= limit:
+                            res["arbitrage_decision"] = "Продажа: текущая цена выше лимита продажи"
+                        elif is_profitable(cur_p):
+                            res["arbitrage_decision"] = "Продажа: выгодный арбитражный цикл (покрывает деградацию АКБ)"
+                        else:
+                            res["arbitrage_decision"] = "Ожидание: цена ниже лимита и арбитраж невыгоден"
 
             target_hours = [h for h in target_hours if h >= cur_hour]
 
