@@ -460,7 +460,6 @@ class StrategyEngine:
                 "projected_soc_after_sale_pct": 0,
                 "projected_soc_morning_pct": 0
             },
-            "charge_plan": {},
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
         
@@ -793,16 +792,16 @@ class StrategyEngine:
                         charge_commands[h] = p
                         sim_soc_plan = min(100.0, sim_soc_plan + (p / batt_cap * 100.0))
                     
-                    res["charge_plan"] = {f"{h%24:02d}:00": round(p, 2) for h, p in charge_commands.items()}
-                    
                     # --- BUY SIMULATION ---
-                    sim_range = list(range(cur_hour, active_window[1] + 1))
+                    sim_range = list(range(cur_hour, max(target_hours_sorted) + 1))
                     _, sim_log = self.run_soc_simulation(batt_soc, sim_range, now, charge_commands)
+                    
+                    last_h = max(target_hours_sorted)
+                    key_end = f"{last_h%24:02d}:00" + (" (Завтра)" if last_h >= 24 else "")
                     
                     res["buy_simulation"] = {
                         "projected_soc_at_start_pct": round(batt_soc, 1),
-                        "projected_soc_at_end_pct": round(sim_log.get(f"{max(target_hours or [cur_hour])%24:02d}:00", 0.0), 1),
-                        "simulation_log": sim_log
+                        "projected_soc_at_end_pct": round(sim_log.get(key_end, sim_soc_plan), 1)
                     }
                 else: # sell
                     base_target = self.manager.get_setting(CONF_TARGET_SOC_SELL, 20.0)
@@ -860,11 +859,13 @@ class StrategyEngine:
                     sim_commands = {h: -max_power for h in target_hours if h >= cur_hour}
                     _, sim_log = self.run_soc_simulation(batt_soc, sim_range, now, sim_commands)
                     
+                    last_h = max(target_hours or [cur_hour])
+                    key_after = f"{last_h%24:02d}:00" + (" (Завтра)" if last_h >= 24 else "")
+                    
                     res["sell_simulation"] = {
                         "projected_soc_at_start_pct": round(batt_soc, 1),
-                        "projected_soc_after_sale_pct": round(sim_log.get(f"{max(target_hours or [cur_hour])%24:02d}:00", 0.0), 1),
-                        "projected_soc_morning_pct": round(sim_log.get("08:00 (Завтра)", sim_log.get("08:00", 0.0)), 1),
-                        "simulation_log": sim_log
+                        "projected_soc_after_sale_pct": round(sim_log.get(key_after, batt_soc), 1),
+                        "projected_soc_morning_pct": round(sim_log.get("08:00 (Завтра)", sim_log.get("08:00", 0.0)), 1)
                     }
                 
             res["recommended_power_kw"] = round(min(float(power_needed), max_power), 3)
