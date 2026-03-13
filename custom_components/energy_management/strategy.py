@@ -174,15 +174,14 @@ class StrategyEngine:
         cur_hour = now.hour
         
         # 1. Solar adjustment
-        forecast_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
+        forecast_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor) or 0.0
         
         prof_gen = self.manager.get_average_profile("generation", days_for_profile, "all")
         hist_gen_so_far = sum(float(prof_gen.get(str(h), 0.0)) for h in range(cur_hour + 1))
         total_hist_gen = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
         
         # Historical forecast vs real average
-        f_val = forecast_val or 0.0
-        hist_coeff = f_val / total_hist_gen if total_hist_gen > 0.1 else 1.0
+        hist_coeff = forecast_val / total_hist_gen if total_hist_gen > 0.1 else 1.0
         
         fraction_so_far = 0.0
         if total_hist_gen > 0.1:
@@ -201,7 +200,7 @@ class StrategyEngine:
         blended_coeff = (today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far))
         self.manager.last_blended_coeff = blended_coeff
                 
-        forecast_val_adjusted = f_val * blended_coeff
+        forecast_val_adjusted = forecast_val * blended_coeff
                 
         # 2. Get Battery Energy Available
         batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
@@ -344,8 +343,8 @@ class StrategyEngine:
             return start_soc, {}
 
         # 1. Standard Forecast and Coefficients
-        f_today = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
-        f_tom = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor)
+        f_today = self.manager.get_forecast_value(self.manager.forecast_today_sensor) or 0.0
+        f_tom = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor) or 0.0
         
         day_type_today = "weekend" if now.weekday() >= 5 else "weekday"
         tomorrow_dt = now + timedelta(days=1)
@@ -386,9 +385,9 @@ class StrategyEngine:
             # Generation
             hist_hour_gen = float(prof_gen.get(h_str, 0.0))
             if is_tom:
-                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_tom) if (f_tom is not None and total_hist_gen > 0) else hist_hour_gen
+                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_tom) if total_hist_gen > 0 else hist_hour_gen
             else:
-                expected_gen_kw = (hist_hour_gen / hist_gen_rem_today * f_today) if (f_today is not None and hist_gen_rem_today > 0.1) else hist_hour_gen
+                expected_gen_kw = (hist_hour_gen / hist_gen_rem_today * f_today) if hist_gen_rem_today > 0.1 else hist_hour_gen
                 expected_gen_kw *= blended_coeff
             
             # Consumption
@@ -456,8 +455,8 @@ class StrategyEngine:
         prof_tom = self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type)
         prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
         
-        forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
-        forecast_tomorrow_val = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor)
+        forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor) or 0.0
+        forecast_tomorrow_val = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor) or 0.0
         
         coeff_today = self.get_gen_forecast_coefficient(forecast_today_val, prof_gen, cur_hour + 1, 24)
         coeff_tom = self.get_gen_forecast_coefficient(forecast_tomorrow_val, prof_gen, 0, 24)
