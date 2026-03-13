@@ -320,9 +320,20 @@ class EnergyProfileManager:
         # Recalculate base from total and deduct
         self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
         
-        # Ensure temp_daily_cons_total is at least as much as current hour if we just upgraded
-        if self.data.get("temp_daily_cons_total") is None or self.data.get("temp_daily_cons_total") == 0:
-            self.data["temp_daily_cons_total"] = self.current_consumption_total
+        # Warm-start logic: If we have no daily counter, backfill it from the historical profile 
+        # so the deviation starts at ~0% instead of -100%.
+        if self.data.get("temp_daily_cons_total", 0) < 0.001:
+            now = dt_util.now()
+            day_type = "weekend" if now.weekday() >= 5 else "weekday"
+            prof_total = self.get_average_profile("consumption_total", self.custom_period, day_type)
+            
+            expected_total = sum(float(prof_total.get(str(h), 0.0)) for h in range(now.hour))
+            fraction = now.minute / 60.0
+            expected_total += float(prof_total.get(str(now.hour), 0.0)) * fraction
+            
+            # Ensure we are at least at the level of managed loads we already know about
+            deduct_sum = sum(self.daily_deduct_consumption.get(s, 0.0) for s in self.deduct_sensors)
+            self.data["temp_daily_cons_total"] = max(expected_total, deduct_sum)
 
     async def async_save(self):
         self.data["learned_standby_power"] = self.learned_standby_power
@@ -616,12 +627,8 @@ class EnergyProfileManager:
             return
             
         if entity_id in self.consumption_sensors:
-            # If we just started tracking (value is 0 or missing), 
-            # try to jump-start it by adding the already known daily deducts.
-            if self.data.get("temp_daily_cons_total", 0) < 0.001:
-                deduct_sum = sum(self.daily_deduct_consumption.get(s, 0.0) for s in self.deduct_sensors)
-                self.data["temp_daily_cons_total"] = deduct_sum
-                
+            # The backfill is now handled in async_load/async_added_to_hass for better consistency,
+            # but we keep a safety check here.
             self.data["temp_daily_cons_total"] = self.data.get("temp_daily_cons_total", 0.0) + delta
             self.current_consumption_total += delta
         if entity_id in self.deduct_sensors:
