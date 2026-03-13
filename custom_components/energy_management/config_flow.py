@@ -14,6 +14,7 @@ from .const import (
     CONF_FORECAST_TOMORROW,
     CONF_BATTERY_SOC,
     CONF_BATTERY_CAPACITY,
+    CONF_BATTERY_POWER,
     CONF_PRICE_BUY,
     CONF_PRICE_SELL,
     CONF_DEDUCT_SETTINGS,
@@ -93,6 +94,9 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_BATTERY_CAPACITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_BATTERY_POWER): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
                 vol.Optional(CONF_PRICE_BUY): selector.EntitySelector(
@@ -264,7 +268,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             )
 
-        for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_PRICE_BUY, CONF_PRICE_SELL]:
+        for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_BATTERY_POWER, CONF_PRICE_BUY, CONF_PRICE_SELL]:
             val = get_str(key)
             if val:
                 schema_dict[vol.Optional(key, default=val)] = selector.EntitySelector(

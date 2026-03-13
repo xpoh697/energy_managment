@@ -73,6 +73,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     # Combined Savings / revenue tracking sensor
     if has_consumption and config_data.get(CONF_PRICE_BUY):
         entities.append(SavingsSensor(manager, "total", "Экономия: Итоговая выгода"))
+        
+        if config_data.get(CONF_BATTERY_POWER):
+            entities.append(EnergyBalanceSensor(manager, "Энергетический кошелёк (Сальдо)"))
 
     # Advanced Analysis Sensors
     if has_consumption:
@@ -140,6 +143,7 @@ class EnergyProfileManager:
         self.forecast_tomorrow_sensor = [tomorrow_forecasts] if isinstance(tomorrow_forecasts, str) else tomorrow_forecasts
         self.battery_soc_sensor = config_data.get(CONF_BATTERY_SOC)
         self.battery_capacity_sensor = config_data.get(CONF_BATTERY_CAPACITY)
+        self.battery_power_sensor = config_data.get(CONF_BATTERY_POWER)
         
         # Presence / occupancy sensors (person.* or binary_sensor.*)
         presence_raw = config_data.get(CONF_PRESENCE_SENSORS, [])
@@ -183,6 +187,8 @@ class EnergyProfileManager:
         self.current_losses = 0.0  # kWh accumulated this hour
         if self.inverter_losses_sensor:
             self.all_sensors = self.all_sensors | {str(self.inverter_losses_sensor)}
+        if self.battery_power_sensor:
+            self.all_sensors = self.all_sensors | {str(self.battery_power_sensor)}
         
         # Track historical power samples for 5-10 minute average smoothing
         self.power_history: list[dict[str, Any]] = []
@@ -403,6 +409,52 @@ class EnergyProfileManager:
             gen_kw = sum((_get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors)
             
         self.power_history.append({"time": now, "load_kw": float(load_kw), "gen_kw": float(gen_kw)})
+        
+        # --- Real-time Balance / Savings Account Logic ---
+        # Logic: Increment/Decrement based on (Solar_to_Load + Battery_to_Load - Grid_to_Battery)
+        if self.price_buy_sensors and self.power_load_sensors and self.power_gen_sensors:
+            p_buy_state = self.hass.states.get(self.price_buy_sensors[0])
+            try:
+                p_buy = float(str(p_buy_state.state).replace(',', '.')) if p_buy_state else 0.0
+            except ValueError: p_buy = 0.0
+
+            batt_p = 0.0
+            if self.battery_power_sensor:
+                st = self.hass.states.get(self.battery_power_sensor)
+                batt_p = _get_kwh_val(st) or 0.0 # _get_kwh_val handles W/kW conversion
+                if st and st.attributes.get("unit_of_measurement") in ("Wh", "kWh"): 
+                    # If it accidentally returned energy instead of power, we should be careful.
+                    # But usually battery_power is W or kW.
+                    pass
+
+            # Time delta in hours (polling is roughly 1 min)
+            last_run = self.data.get("last_balance_poll_time")
+            now_ts = now.timestamp()
+            if last_run:
+                dt_h = (now_ts - last_run) / 3600.0
+                if 0 < dt_h < 0.2: # Guard against huge leaps
+                    # 1. Solar to Load = energy we didn't buy because of PV
+                    s_to_l = min(gen_kw, load_kw)
+                    
+                    # 2. Battery to Load = energy we didn't buy because of Battery
+                    # (only counts if it covers remaining load)
+                    load_rem = max(0.0, load_kw - gen_kw)
+                    b_to_l = min(max(0.0, batt_p), load_rem)
+                    
+                    # 3. Grid to Battery = energy we bought specifically to fill the buffer
+                    p_charge = max(0.0, -batt_p)
+                    s_avail_for_batt = max(0.0, gen_kw - load_kw)
+                    g_to_b = max(0.0, p_charge - s_avail_for_batt)
+                    
+                    # Net saving power in kW for this moment
+                    net_saving_kw = s_to_l + b_to_l - g_to_b
+                    
+                    step_saving = net_saving_kw * p_buy * dt_h
+                    
+                    current_bal = self.data.get("energy_balance", 0.0)
+                    self.data["energy_balance"] = round(current_bal + step_saving, 4)
+            
+            self.data["last_balance_poll_time"] = now_ts
         
         # Prune older than 10 minutes
         cutoff = now - timedelta(minutes=10)
@@ -2085,6 +2137,44 @@ class SavingsSensor(SensorEntity):
             })
             
         return attrs
+
+class EnergyBalanceSensor(SensorEntity):
+    """Real-time financial balance tracking (Saldo)."""
+
+    def __init__(self, manager, name):
+        self.manager = manager
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.entry_id}_energy_balance"
+        self._attr_icon = "mdi:wallet-outline"
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+        self._currency = "EUR"
+
+    async def async_added_to_hass(self):
+        try:
+            self._currency = self.hass.config.currency
+            self._attr_native_unit_of_measurement = self._currency
+        except Exception:
+            self._attr_native_unit_of_measurement = "EUR"
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        return round(self.manager.data.get("energy_balance", 0.0), 2)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "last_update": datetime.fromtimestamp(self.manager.data.get("last_balance_poll_time", 0)).isoformat() if self.manager.data.get("last_balance_poll_time") else None,
+            "formula": "min(Solar, Load)*Price + max(0, Battery)*Price - Grid_to_Battery*Price",
+            "battery_power_sensor": self.manager.battery_power_sensor,
+            "current_energy_balance_raw": self.manager.data.get("energy_balance", 0.0)
+        }
 
 class AnomalyDetectionSensor(SensorEntity):
     """Detects unusual consumption spikes compared to average profile."""
