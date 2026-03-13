@@ -254,6 +254,9 @@ class EnergyProfileManager:
         if "prices_buy" not in self.data:
             self.data["prices_buy"] = {}
 
+        if "energy_balance_today_start" not in self.data:
+            self.data["energy_balance_today_start"] = self.data.get("energy_balance", 0.0)
+
         if "savings" not in self.data:
             self.data["savings"] = {}  # {"YYYY-MM-DD": {"solar": x, "arbitrage": x, "sell": x}}
 
