@@ -5,24 +5,11 @@ from typing import Any
 from homeassistant.util import dt as dt_util
 
 from .const import *
+from .utils import get_kwh_val, normalize_float, get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-def _get_kwh_val(state_obj):
-    """Normalize state value to kWh."""
-    if not state_obj or state_obj.state in ("unknown", "unavailable"):
-        return None
-    try:
-        val = float(str(state_obj.state).replace(',', '.'))
-    except ValueError:
-        return None
-        
-    unit = state_obj.attributes.get("unit_of_measurement")
-    if unit in ("Wh", "W"):
-        return val / 1000.0
-    elif unit in ("MWh", "MW"):
-        return val * 1000.0
-    return val
+
 
 # Market Strategy Engine v5.1 - Fixed NameError
 class StrategyEngine:
@@ -60,11 +47,11 @@ class StrategyEngine:
             relevant = records[-days:] if days > 0 else records
             for rec in relevant:
                 if not isinstance(rec, dict): continue
-                gen = float(str(rec.get("gen", 0.0)).replace(",", "."))
-                loss = float(str(rec.get("v", 0.0)).replace(",", "."))
+                gen = normalize_float(rec.get("gen", 0.0))
+                loss = normalize_float(rec.get("v", 0.0))
                 if gen > 0.01:
-                    total_gen += float(gen)
-                    total_losses += float(loss)
+                    total_gen += gen
+                    total_losses += loss
                     sample_count += 1
         
         if sample_count < 5 or total_gen < 0.1: return 1.0
@@ -110,39 +97,16 @@ class StrategyEngine:
                 
                 # Get buy price for that specific day/hour
                 date_str = (now - timedelta(days=d_back)).strftime("%Y-%m-%d")
-                p_h_rec = self.manager.data.get("prices_buy", {}).get(date_str, {}).get(str(h), 0.0)
+                p_buy = self.manager.get_price("buy", date_str, h) or 0.0
                 
                 if d_back > len(c_h_rec) or d_back > len(g_h_rec):
                     continue
                 
-                def _val(x):
-                    if isinstance(x, dict):
-                        return float(str(x.get("v", 0.0)).replace(',', '.'))
-                    # Handle potential string-represented dicts or malformed records
-                    xs = str(x)
-                    if '{' in xs:
-                        try:
-                            # Try simple extraction if it looks like a dict string
-                            import re
-                            match = re.search(r"['\"]v['\"]\s*:\s*([\d\.,]+)", xs)
-                            if match:
-                                return float(match.group(1).replace(',', '.'))
-                        except: pass
-                    try:
-                        return float(xs.replace(',', '.'))
-                    except (ValueError, TypeError):
-                        return 0.0
-                
                 try:
-                    c_h = _val(c_h_rec[-d_back])
-                    g_h = _val(g_h_rec[-d_back]) * pv_multiplier
-                except (ValueError, TypeError, IndexError):
+                    c_h = normalize_float(c_h_rec[-d_back].get("v") if isinstance(c_h_rec[-d_back], dict) else c_h_rec[-d_back])
+                    g_h = normalize_float(g_h_rec[-d_back].get("v") if isinstance(g_h_rec[-d_back], dict) else g_h_rec[-d_back]) * pv_multiplier
+                except (IndexError, AttributeError):
                     continue
-                
-                try:
-                    p_buy = float(str(p_h_rec).replace(',', '.'))
-                except ValueError:
-                    p_buy = 0.0
                 
                 # Simple energy balance simulation
                 net = g_h - c_h
@@ -246,12 +210,12 @@ class StrategyEngine:
             # Real-time power limit check
             initial_power_kw = 0.0
             if getattr(self.manager, "power_load_sensors", []) and getattr(self.manager, "power_gen_sensors", []):
-                load_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
-                gen_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+                load_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
+                gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
                 initial_power_kw = gen_kw - load_kw
                 
             available_power_kw = initial_power_kw
-            available_gen_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+            available_gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
             
             cur_price_buy = None
             if not skip_strategy_check:
@@ -270,7 +234,7 @@ class StrategyEngine:
                 
                 power_bottleneck = False
                 gen_bottleneck = False
-                is_free_price = cur_price_buy is not None and float(str(cur_price_buy).replace(',', '.')) <= 0.0
+                is_free_price = cur_price_buy is not None and normalize_float(cur_price_buy) <= 0.0
 
                 if req_kw > 0.0:
                     if available_power_kw < req_kw:
@@ -425,7 +389,8 @@ class StrategyEngine:
                 cmd_p = float(commands[h_abs])
             
             net_house_kw = expected_gen_kw - expected_cons_kw
-            total_net_kw = net_house_kw + cmd_p
+            active_m_p = self.manager.get_active_managed_loads_power(i) if not is_tom else 0.0
+            total_net_kw = net_house_kw + cmd_p - active_m_p
             
             if total_net_kw > 0.1: # Charging
                 acc_ratio = self.get_cc_cv_ratio(simulated_soc)
@@ -517,11 +482,9 @@ class StrategyEngine:
             # Unify today and tomorrow prices into a 48h timeline for FULL window evaluation
             all_prices = {}
             for h, p in today_prices.items():
-                try: all_prices[int(h)] = float(str(p).replace(',', '.'))
-                except ValueError: all_prices[int(h)] = 0.0
+                all_prices[int(h)] = normalize_float(p)
             for h, p in tomorrow_prices.items():
-                try: all_prices[int(h) + 24] = float(str(p).replace(',', '.'))
-                except ValueError: all_prices[int(h) + 24] = 0.0
+                all_prices[int(h) + 24] = normalize_float(p)
                 
             negative_hours = [h for h, p in all_prices.items() if p < 0 and h >= cur_hour]
 
@@ -558,21 +521,17 @@ class StrategyEngine:
             sell_prices_tom = self.manager.data.get("prices_sell", {}).get(tomorrow_str, {})
             all_sell_prices = {}
             for h, p in sell_prices_today.items():
-                try: all_sell_prices[int(h)] = float(str(p).replace(',', '.'))
-                except ValueError: all_sell_prices[int(h)] = 0.0
+                all_sell_prices[int(h)] = normalize_float(p)
             for h, p in sell_prices_tom.items():
-                try: all_sell_prices[int(h) + 24] = float(str(p).replace(',', '.'))
-                except ValueError: all_sell_prices[int(h) + 24] = 0.0
+                all_sell_prices[int(h) + 24] = normalize_float(p)
 
             buy_prices_today = self.manager.data.get("prices_buy", {}).get(today_str, {})
             buy_prices_tom = self.manager.data.get("prices_buy", {}).get(tomorrow_str, {})
             all_buy_prices = {}
             for h_b, p_b in buy_prices_today.items():
-                try: all_buy_prices[int(h_b)] = float(str(p_b).replace(',', '.'))
-                except ValueError: continue
+                all_buy_prices[int(h_b)] = normalize_float(p_b)
             for h_b, p_b in buy_prices_tom.items():
-                try: all_buy_prices[int(h_b) + 24] = float(str(p_b).replace(',', '.'))
-                except ValueError: continue
+                all_buy_prices[int(h_b) + 24] = normalize_float(p_b)
 
             sell_limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 99.0)
             buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
@@ -713,9 +672,8 @@ class StrategyEngine:
                         
                         res["target_price"] = target_price
                         
-                        cur_p = today_prices.get(str(cur_hour), 0.0)
-                        try: cur_p = float(str(cur_p).replace(',', '.'))
-                        except ValueError: cur_p = 0.0
+                        cur_p = normalize_float(today_prices.get(str(cur_hour), 0.0))
+
                         
                         cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
                         cur_gain = (cur_p - cheap_p_back) * eff
@@ -858,9 +816,8 @@ class StrategyEngine:
                         
                         # Decision logic: 
                         # Is selling now (and buying back at cheap hour) better than saving for tomorrow's morning consumption?
-                        cur_p = today_prices.get(str(cur_hour), 0.0)
-                        try: cur_p = float(str(cur_p).replace(',', '.'))
-                        except ValueError: cur_p = 0.0
+                        cur_p = normalize_float(today_prices.get(str(cur_hour), 0.0))
+
                         
                         cheap_p_back, _ = get_best_buyback(cur_hour)
                         # Profit if we sell now and buy back

@@ -13,6 +13,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 from .const import *
 from .strategy import StrategyEngine
+from .utils import get_kwh_val, normalize_float, get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,9 +27,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     
     # We will create 3 defined periods and 1 custom
     periods = {
-        "week": ("Неделя", 7),
         "month": ("Месяц", 30),
-        "year": ("Год", 365),
     }
     
     config_data = {**entry.data, **entry.options}
@@ -94,21 +93,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     async_add_entities(entities)
 
-def _get_kwh_val(state_obj):
-    """Normalize state value to kWh."""
-    if not state_obj or state_obj.state in ("unknown", "unavailable"):
-        return None
-    try:
-        val = float(str(state_obj.state).replace(',', '.'))
-    except ValueError:
-        return None
-        
-    unit = state_obj.attributes.get("unit_of_measurement")
-    if unit in ("Wh", "W"):
-        return val / 1000.0
-    elif unit in ("MWh", "MW"):
-        return val * 1000.0
-    return val
+
 
 class EnergyProfileManager:
     def __init__(self, hass, entry):
@@ -413,15 +398,12 @@ class EnergyProfileManager:
         # --- Real-time Balance / Savings Account Logic ---
         # Logic: Increment/Decrement based on (Solar_to_Load + Battery_to_Load - Grid_to_Battery)
         if self.price_buy_sensors and self.power_load_sensors and self.power_gen_sensors:
-            p_buy_state = self.hass.states.get(self.price_buy_sensors[0])
-            try:
-                p_buy = float(str(p_buy_state.state).replace(',', '.')) if p_buy_state else 0.0
-            except ValueError: p_buy = 0.0
+            p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), now.hour) or 0.0
 
             batt_p = 0.0
             if self.battery_power_sensor:
                 st = self.hass.states.get(self.battery_power_sensor)
-                batt_p = _get_kwh_val(st) or 0.0 # _get_kwh_val handles W/kW conversion
+                batt_p = get_kwh_val(st) or 0.0 # _get_kwh_val handles W/kW conversion
                 if st and st.attributes.get("unit_of_measurement") in ("Wh", "kWh"): 
                     # If it accidentally returned energy instead of power, we should be careful.
                     # But usually battery_power is W or kW.
@@ -569,7 +551,7 @@ class EnergyProfileManager:
             return
 
         # Handle energy sensors
-        new_val = _get_kwh_val(new_state)
+        new_val = get_kwh_val(new_state)
         if new_val is None:
             return
             
@@ -590,38 +572,12 @@ class EnergyProfileManager:
             # Usually the new delta is just the new value. 
             delta = new_val
 
-        # If it is the first read after restart, the delta might be large (accumulated while HA was down).
-        # We count it towards the DAILY TOTAL and HOURLY ACCUMULATORS (for budget, forecast, and savings)
-        # but NOT towards the HOURLY PROFILE HISTORY to avoid massive visual spikes in the charts.
-        if is_restarting:
-            if delta > 0 and delta < 50.0:
-                if entity_id in self.consumption_sensors:
-                    self.current_consumption_total += delta
-                if entity_id in self.deduct_sensors:
-                    self.current_hourly_deduct += delta
-                    if entity_id not in self.daily_deduct_consumption:
-                        self.daily_deduct_consumption[entity_id] = 0.0
-                    self.daily_deduct_consumption[entity_id] += delta
-                if entity_id in self.generation_sensors:
-                    self.data["temp_daily_gen"] = self.data.get("temp_daily_gen", 0.0) + delta
-                    self.current_generation += delta
-                if entity_id in self.grid_import_sensors:
-                    self.current_grid_import += delta
-                if entity_id in self.grid_export_sensors:
-                    self.current_grid_export += delta
-                if self.inverter_losses_sensor and entity_id == self.inverter_losses_sensor:
-                    self.current_losses += delta
-            
-            # Recalculate base from total and deduct
-            self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
-            self.sensor_last_values[entity_id] = new_val
-            return
-            
+        # If it is the first read after restart, the delta might be large.
+        if is_restarting and (delta <= 0 or delta > 50.0):
+             self.sensor_last_values[entity_id] = new_val
+             return
+
         if delta > 100.0:
-            # If the calculated delta is impossible for a 1-minute HA tick (100 kWh = 6000 kW power),
-            # this means the sensor gave us a garbage reading before, and now returned to normal.
-            # E.g. device disconnected, HA got 0, device reconnected, HA got 18000. 
-            # We MUST reset the baseline, but we MUST NOT process this delta.
             _LOGGER.warning("Energy Management: Ignored impossible delta of %s kWh for sensor %s. Baseline reset.", delta, entity_id)
             self.sensor_last_values[entity_id] = new_val
             return
@@ -629,14 +585,13 @@ class EnergyProfileManager:
         self.sensor_last_values[entity_id] = new_val
         if delta == 0:
             return
-            
+
+        # Update accumulators
         if entity_id in self.consumption_sensors:
             self.current_consumption_total += delta
         if entity_id in self.deduct_sensors:
             self.current_hourly_deduct += delta
-            if entity_id not in self.daily_deduct_consumption:
-                self.daily_deduct_consumption[entity_id] = 0.0
-            self.daily_deduct_consumption[entity_id] += delta
+            self.daily_deduct_consumption[entity_id] = self.daily_deduct_consumption.get(entity_id, 0.0) + delta
         if entity_id in self.generation_sensors:
             self.current_generation += delta
             self.data["temp_daily_gen"] = self.data.get("temp_daily_gen", 0.0) + delta
@@ -698,14 +653,6 @@ class EnergyProfileManager:
             past_dt = now - timedelta(hours=1)
             past_date_str = past_dt.strftime("%Y-%m-%d")
 
-            def _get_stored_price(store, date_str, hour):
-                try:
-                    v = store.get(date_str, {}).get(str(hour))
-                    return float(str(v).replace(",", ".")) if v is not None else None
-                except (ValueError, TypeError):
-                    return None
-
-            p_buy  = _get_stored_price(self.data.get("prices_buy",  {}), past_date_str, past_hour)
             p_sell = _get_stored_price(self.data.get("prices_sell", {}), past_date_str, past_hour)
 
             gen_h  = self.current_generation
@@ -814,6 +761,32 @@ class EnergyProfileManager:
             self.data["temp_daily_cons_total"] = 0.0
             self.data["temp_max_forecast"] = 0.0
             self.data["temp_daily_waste"] = 0.0
+
+    async def async_set_setting(self, key, value):
+        self.settings[key] = value
+        self.data["settings"] = self.settings
+        await self.async_save()
+        self._notify_update()
+
+    def get_active_managed_loads_power(self, hour_offset=0):
+        """Calculate total power of currently active managed loads for simulation."""
+        active_load_kw = 0.0
+        for s_id, s_settings in self.get_setting(CONF_DEDUCT_SETTINGS, {}).items():
+            if self._is_currently_pulling_power(s_id):
+                is_cyclic = s_settings.get(CONF_IS_CYCLIC, False)
+                if is_cyclic and s_id in self.learned_avg_cycle_power:
+                    p_kw = self.learned_avg_cycle_power[s_id] / 1000.0
+                else:
+                    p_kw = self.learned_real_power.get(s_id, s_settings.get("required_kw", 0.0) * 1000.0) / 1000.0
+                
+                req_kwh = s_settings.get("required_kwh", 0.0)
+                if req_kwh > 0:
+                    remaining = max(0.0, req_kwh - self.daily_deduct_consumption.get(s_id, 0.0))
+                    if p_kw > 0 and (hour_offset + 1) <= (remaining / p_kw):
+                        active_load_kw += p_kw
+                elif hour_offset == 0:
+                    active_load_kw += p_kw
+        return active_load_kw
 
             # Prune historical prices to keep storage file small
             # We keep only yesterday, today, and any future forecasts
@@ -935,11 +908,11 @@ class EnergyProfileManager:
             for item in relevant:
                 try:
                     if isinstance(item, dict):
-                        v = float(str(item.get("v", 0.0)).replace(',', '.'))
+                        v = normalize_float(item.get("v", 0.0))
                         wd = item.get("wd")
                         occ = item.get("occ")
                     else:
-                        v = float(str(item).replace(',', '.'))
+                        v = normalize_float(item)
                         wd = None
                         occ = None
                         
@@ -953,7 +926,7 @@ class EnergyProfileManager:
                         if occupancy_filter == "away" and occ > 0: continue
                         
                     valid_vals.append(v)
-                except ValueError:
+                except Exception:
                     pass
                 
             if valid_vals:
@@ -1060,10 +1033,9 @@ class EnergyProfileManager:
             history = self.data.get("consumption_total", {}).get(sh, [])
             relevant = history[-days:] if days > 0 else history
             
-            for item in relevant:
                 if not isinstance(item, dict):
                     continue
-                v = float(str(item.get("v", 0.0)).replace(',', '.'))
+                v = normalize_float(item.get("v", 0.0))
                 occ = item.get("occ")
                 if occ is None:
                     continue  # Legacy data without occupancy tag
@@ -1106,13 +1078,8 @@ class EnergyProfileManager:
                 history = self.data[profile_type][sh]
                 if history:
                     last_record = history[-1]
-                    try:
-                        if isinstance(last_record, dict):
-                            res[sh] = round(float(str(last_record.get("v", 0.0)).replace(',', '.')), 3)
-                        else:
-                            res[sh] = round(float(str(last_record).replace(',', '.')), 3)
-                    except ValueError:
-                        res[sh] = 0.0
+                    val = normalize_float(last_record.get("v") if isinstance(last_record, dict) else last_record)
+                    res[sh] = round(val, 3)
                 else:
                     res[sh] = 0.0
             elif h == cur_hour:
@@ -1149,11 +1116,10 @@ class EnergyProfileManager:
             except Exception: return default
         return val
 
-    async def async_set_setting(self, key, value):
-        self.settings[key] = value
-        self.data["settings"] = self.settings
-        await self.async_save()
-        self._notify_update()
+    def get_price(self, mode, date_str, hour):
+        """Standardized price fetching from data store."""
+        store = self.data.get(f"prices_{mode}", {})
+        return get_price_from_store(store, date_str, hour)
 
     def _is_currently_pulling_power(self, sensor_id: str) -> bool:
         """Return True if the device currently has an active cycle (pulling power above standby)."""
@@ -1168,10 +1134,10 @@ class EnergyProfileManager:
         if not p_state or p_state.state in ("unknown", "unavailable"):
             return True  # Keep as active if sensor unavailable (use last known state)
         try:
-            cur_p = float(str(p_state.state).replace(',', '.'))
+            cur_p = normalize_float(p_state.state)
             if p_state.attributes.get("unit_of_measurement") == "kW":
                 cur_p *= 1000.0
-        except ValueError:
+        except Exception:
             return True # Assume active if power sensor value is invalid
         standby = self.learned_standby_power.get(sensor_id, 15.0)
         return cur_p > (standby + 10.0)
@@ -1191,9 +1157,8 @@ class EnergyProfileManager:
             return default
             
         try:
-            val_str = str(st.state).replace(',', '.')
-            return float(val_str)
-        except (ValueError, TypeError):
+            return normalize_float(st.state)
+        except Exception:
             return default
 
     def get_battery_state(self, soc_default=0.0):
@@ -1210,7 +1175,7 @@ class EnergyProfileManager:
         val_sum = 0.0
         for fsensor in sensor_list:
             st = self.hass.states.get(fsensor)
-            v = _get_kwh_val(st)
+            v = get_kwh_val(st)
             if v is not None:
                 val_sum += v
         return val_sum if val_sum > 0 else None
@@ -1431,7 +1396,7 @@ class ConsumptionDeviationSensor(EnergyBaseSensor):
             "status": "accumulating" if actual_base < 0.1 else "active"
         }
         
-        return round(deviation, 1)
+        return round(deviation, 1) if abs(deviation) < 1000 else 0.0
 
 
 class InverterOperationModeSensor(SensorEntity):
@@ -1480,14 +1445,7 @@ class InverterOperationModeSensor(SensorEntity):
             
         min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
         
-        # Prices
-        cur_price = None
-        prices_store = self.manager.data.get("prices_sell", {})
-        if today_str in prices_store and cur_hour in prices_store[today_str]:
-            try:
-                cur_price = float(str(prices_store[today_str][cur_hour]).replace(',', '.'))
-            except ValueError:
-                cur_price = None
+        cur_price = self.get_price("sell", today_str, now.hour)
             
         # Strategy
         sell_strategy = self.manager.get_market_strategy("sell")
@@ -1561,26 +1519,7 @@ class InverterOperationModeSensor(SensorEntity):
                         expected_cons = float(prof_cons_tom.get(str(h_mod), 0.0))
                         expected_gen = float(prof_gen.get(str(h_mod), 0.0)) * coeff_tom
                         
-                    # --- Dynamic: Add Active Loads to BMS Peak Simulation ---
-                    active_load_kw = 0.0
-                    for s_id, s_settings in self.manager.get_setting(CONF_DEDUCT_SETTINGS, {}).items():
-                        if self.manager._is_currently_pulling_power(s_id):
-                            is_cyclic = s_settings.get(CONF_IS_CYCLIC, False)
-                            if is_cyclic and s_id in self.manager.learned_avg_cycle_power:
-                                p_kw = self.manager.learned_avg_cycle_power[s_id] / 1000.0
-                            else:
-                                p_kw = self.manager.learned_real_power.get(s_id, s_settings.get("required_kw", 0.0) * 1000.0) / 1000.0
-                            
-                            req_kwh = s_settings.get("required_kwh", 0.0)
-                            if req_kwh > 0:
-                                remaining = max(0.0, req_kwh - self.manager.daily_deduct_consumption.get(s_id, 0.0))
-                                if p_kw > 0 and (h_offset + 1) <= (remaining / p_kw):
-                                    active_load_kw += p_kw
-                            elif h_offset == 0:
-                                # For boiler-type loads, only count in current hour of simulation
-                                active_load_kw += p_kw
-                    
-                    expected_cons += active_load_kw
+                    expected_cons += self.manager.get_active_managed_loads_power(h_offset)
                     # --------------------------------------------------------
 
                     net_gen_kw = max(0.0, expected_gen - expected_cons)
@@ -1717,6 +1656,7 @@ class InverterOperationModeSensor(SensorEntity):
             self._attr_extra_state_attributes["charge_reason"] = buy_strategy.get("charge_reason", "price")
             
         self._attr_extra_state_attributes["mode_reason"] = reason
+        self._attr_extra_state_attributes["bms_status"] = bms_debug
 
         return mode
 
@@ -1780,16 +1720,13 @@ class LiveHourlySensor(RestoreEntity, SensorEntity):
         # Restore logic to ensure we don't lose the current hour progress unexpectedly
         last_state = await self.async_get_last_state()
         if last_state and last_state.state not in ("unknown", "unavailable"):
-            try:
-                val = float(str(last_state.state).replace(',', '.'))
+            val = normalize_float(last_state.state)
                 # Recover into manager if it hasn't accumulated anything since restart
                 if self.ptype == "consumption" and self.manager.current_consumption_base == 0:
                     self.manager.current_consumption_base = val
                     self.manager.current_consumption_total = val # We can only guess total from base if restored like this
                 if self.ptype == "generation" and self.manager.current_generation == 0:
                     self.manager.current_generation = val
-            except ValueError:
-                pass
                 
         self.manager.register_listener(self.async_write_ha_state)
         
@@ -1949,8 +1886,7 @@ class MarketStrategySensor(SensorEntity):
         cur_hour = now.hour
         
         def safe_round(val):
-            try: return round(float(str(val).replace(',', '.')), 3)
-            except ValueError: return 0.0
+            return round(normalize_float(val), 3)
             
         today_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["today_prices"].items(), key=lambda item: int(item[0])) if int(k) >= cur_hour}
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
