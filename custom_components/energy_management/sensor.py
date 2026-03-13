@@ -11,48 +11,8 @@ from homeassistant.core import callback
 from homeassistant.const import UnitOfEnergy
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
-from .const import (
-    DOMAIN,
-    CONF_CONSUMPTION_SENSORS,
-    CONF_GENERATION_SENSORS,
-    CONF_DEDUCT_SENSORS,
-    CONF_CUSTOM_PERIOD,
-    CONF_FORECAST_TODAY_REMAINING,
-    CONF_FORECAST_TOMORROW,
-    CONF_BATTERY_SOC,
-    CONF_BATTERY_CAPACITY,
-    CONF_PRICE_BUY,
-    CONF_PRICE_SELL,
-    CONF_PRICE_BUY_LIMIT,
-    CONF_PRICE_SELL_LIMIT,
-    CONF_PRICE_STOP_SELL,
-    CONF_PRICE_SELL_ONLY_PV,
-    CONF_PRICE_TOLERANCE,
-    CONF_PRICE_SELL_TOLERANCE,
-    CONF_BATTERY_MAX_POWER,
-    CONF_TARGET_SOC_BUY,
-    CONF_TARGET_SOC_SELL,
-    CONF_MIN_SOC_BUY,
-    CONF_DYNAMIC_SOC_BUY,
-    CONF_DYNAMIC_SOC_SELL,
-    CONF_DEDUCT_SETTINGS,
-    CONF_POWER_LOAD_SENSORS,
-    CONF_POWER_GEN_SENSORS,
-    CONF_SALE_PV_NO_BAT_MAX_HOUR,
-    CONF_FORCE_MARKET_SELL,
-    CONF_PRESENCE_SENSORS,
-    CONF_INVERTER_LOSSES_SENSOR,
-    CONF_GRID_IMPORT_SENSORS,
-    CONF_GRID_EXPORT_SENSORS,
-    CONF_TOTAL_SYSTEM_COST,
-    CONF_BATTERY_COST,
-    CONF_BATTERY_RATED_CYCLES,
-    CONF_ANOMALY_THRESHOLD,
-    CONF_POWER_SENSOR,
-    CONF_ACTIVE_HOLD_TIME,
-    CONF_IS_CYCLIC,
-    CONF_ARBITRAGE_MIN_PROFIT,
-)
+from .const import *
+from .strategy import StrategyEngine
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -157,6 +117,8 @@ class EnergyProfileManager:
         # Initialize internal storage handler for preserving profiles across restarts
         self.store = Store(hass, STORAGE_VERSION, f"energy_management_{entry.entry_id}")
         
+        self.strategy_engine = StrategyEngine(self)
+        
         self.consumption_sensors: set[str] = set(config_data.get(CONF_CONSUMPTION_SENSORS, []) or [])
         self.generation_sensors: set[str] = set(config_data.get(CONF_GENERATION_SENSORS, []) or [])
         self.deduct_sensors: set[str] = set(config_data.get(CONF_DEDUCT_SENSORS, []) or [])
@@ -240,6 +202,7 @@ class EnergyProfileManager:
         
         self.current_solar_waste_power = 0.0
         self.last_blended_coeff = 1.0
+        self._profile_cache = {}
 
     def set_max_days(self, days):
         self.max_days = days
@@ -518,6 +481,14 @@ class EnergyProfileManager:
         self._notify_update()
 
     @property
+    def now(self):
+        return dt_util.now()
+
+    @property
+    def day_type(self):
+        return "weekend" if self.now.weekday() >= 5 else "weekday"
+
+    @property
     def avg_load_kw(self):
         if not self.power_history:
             return 0.0
@@ -637,6 +608,7 @@ class EnergyProfileManager:
 
     async def _async_reset_hour(self, now):
         # Time is precisely the top of the new hour, meaning we need to save the PAST hour.
+        self._profile_cache = {}
         past_hour = (now.hour - 1) % 24
         
         today_wd = now.weekday()
@@ -879,21 +851,9 @@ class EnergyProfileManager:
             total += day.get("total", 0.0)
         return total
 
-    def get_battery_degradation_cost(self):
-        """Cost of battery wear per kWh (Cycle Cost)."""
-        batt_cost = self.get_setting(CONF_BATTERY_COST, 0.0)
-        cycles = self.get_setting(CONF_BATTERY_RATED_CYCLES, 6000)
-        
-        # Get capacity from sensor if available, otherwise fallback to 10kWh
-        _, cap, _ = self.get_battery_state()
-        if cap <= 0:
-            cap = 10.0
-        
-        if cycles <= 0 or batt_cost <= 0:
-            return 0.0
-            
-        # Cost per 1 kWh of throughput (Charge + Discharge wear)
-        return batt_cost / (cycles * cap)
+    def get_battery_degradation_cost(self) -> float:
+        """Cost of battery wear per kWh."""
+        return self.strategy_engine.get_battery_degradation_cost()
 
     def get_expected_consumption(self):
         """Helper to get the expected consumption value for the current hour."""
@@ -907,6 +867,10 @@ class EnergyProfileManager:
         day_type: "all", "weekday", "weekend".
         occupancy_filter: None (no filter), "home" (occ > 0), "away" (occ == 0).
         """
+        cache_key = (profile_type, days, day_type, occupancy_filter)
+        if cache_key in self._profile_cache:
+            return self._profile_cache[cache_key]
+
         profile = {}
         for h in range(24):
             sh = str(h)
@@ -942,7 +906,51 @@ class EnergyProfileManager:
                 profile[str(h)] = round(sum(valid_vals) / len(valid_vals), 3)
             else:
                 profile[str(h)] = 0.0
+        
+        self._profile_cache[cache_key] = profile
         return profile
+
+    def get_expected_so_far(self, profile_type, days=None, day_type=None):
+        """Returns expected accumulated value from midnight to current minute."""
+        now = self.now
+        days = days or self.custom_period
+        day_type = day_type or self.day_type
+        
+        prof = self.get_average_profile(profile_type, days, day_type)
+        cur_hour = now.hour
+        
+        expected_full_hours = sum(float(prof.get(str(h), 0.0)) for h in range(cur_hour))
+        fraction = now.minute / 60.0
+        expected_current_hour = float(prof.get(str(cur_hour), 0.0)) * fraction
+        
+        return expected_full_hours + expected_current_hour
+
+    def get_expected_remaining(self, profile_type, days=None, day_type=None):
+        """Returns expected accumulated value from current minute to end of day."""
+        now = self.now
+        days = days or self.custom_period
+        day_type = day_type or self.day_type
+        
+        prof = self.get_average_profile(profile_type, days, day_type)
+        cur_hour = now.hour
+        
+        fraction_left = 1.0 - (now.minute / 60.0)
+        expected_current_hour = float(prof.get(str(cur_hour), 0.0)) * fraction_left
+        expected_remaining_hours = sum(float(prof.get(str(h), 0.0)) for h in range(cur_hour + 1, 24))
+        
+        return expected_current_hour + expected_remaining_hours
+
+    def get_total_so_far(self, profile_type):
+        """Returns actual accumulated value for today so far (past hours + current)."""
+        prof = self.get_todays_profile(profile_type)
+        return sum(prof.values())
+
+    def get_expected_for_day(self, profile_type, days=None, day_type=None):
+        """Returns total expected value for the entire day (24h)."""
+        days = days or self.custom_period
+        day_type = day_type or self.day_type
+        prof = self.get_average_profile(profile_type, days, day_type)
+        return sum(float(v) for v in prof.values())
 
     def get_current_occupancy(self):
         """Returns number of persons/entities currently 'home'.
@@ -1030,42 +1038,8 @@ class EnergyProfileManager:
         return 1.0
 
     def get_efficiency_coefficient(self):
-        """Calculate inverter efficiency coefficient from historical losses data.
-        
-        Returns a multiplier in [0.70, 1.0] representing the fraction of energy
-        that actually makes it through the inverter (1 - losses/generation).
-        
-        If no losses sensor is configured, returns 1.0 (no correction applied).
-        Requires at least 5 hourly samples with non-zero generation to activate.
-        """
-        if not self.inverter_losses_sensor:
-            return 1.0
-        
-        days = self.custom_period
-        total_gen = 0.0
-        total_losses = 0.0
-        sample_count = 0
-        
-        losses_data = self.data.get("losses", {})
-        for h in range(24):
-            records = losses_data.get(str(h), [])
-            relevant = records[-days:] if days > 0 else records
-            for rec in relevant:
-                if not isinstance(rec, dict):
-                    continue
-                gen = float(str(rec.get("gen", 0.0)).replace(",", "."))
-                loss = float(str(rec.get("v", 0.0)).replace(",", "."))
-                if gen > 0.01:   # Only count hours with real generation
-                    total_gen += float(gen)
-                    total_losses += float(loss)
-                    sample_count += 1
-        
-        if sample_count < 5 or total_gen < 0.1:
-            return 1.0
-        
-        efficiency = (total_gen - total_losses) / total_gen
-        # Clamp: don't let it go below 0.70 (30% losses is physically impossible for a good inverter)
-        return max(0.70, min(1.0, efficiency))
+        """Calculates historical inverter/system efficiency."""
+        return self.strategy_engine.get_efficiency_coefficient()
 
     def get_todays_profile(self, profile_type):
         """Returns the actual hourly profile for the current day up to the current hour."""
@@ -1097,130 +1071,8 @@ class EnergyProfileManager:
         return res
 
     def run_investment_simulation(self, extra_batt_kwh=0.0, pv_multiplier=1.0):
-        """Simulate last 30 days with modified system specs to predict extra savings."""
-        now = dt_util.now()
-        cur_h = now.hour
-        
-        # We look back at available history (up to 30 days)
-        max_idx = 0
-        for h in range(24):
-            max_idx = max(max_idx, len(self.data.get("consumption_total", {}).get(str(h), [])))
-        
-        days_to_sim = min(30, max_idx - 1)
-        if days_to_sim <= 0:
-            return {"extra_savings": 0.0, "note": "Недостаточно истории"}
-
-        total_extra_saved = 0.0
-        
-        _, batt_cap, _ = self.get_battery_state()
-        eff = self.get_efficiency_coefficient()
-        new_cap = batt_cap + extra_batt_kwh
-        
-        # Power also scales with capacity (more batteries = more discharge/charge current)
-        current_max_p = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-        scaling = (new_cap / batt_cap) if batt_cap > 0 else 1.0
-        sim_max_p = current_max_p * scaling
-        
-        # Simulating day by day
-        buy_limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
-        sell_limit = self.get_setting(CONF_PRICE_SELL_LIMIT, 999.0)
-        min_soc_pct = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
-        min_soc_kwh_limit = new_cap * (min_soc_pct / 100.0)
-
-        for d_back in range(1, days_to_sim + 1):
-            sim_soc_kwh = new_cap * 0.2 # Assume 20% start
-            sim_date = now - timedelta(days=d_back)
-            d_str = sim_date.strftime("%Y-%m-%d")
-            
-            p_buy_map = self.data.get("prices_buy", {}).get(d_str, {})
-            p_sell_map = self.data.get("prices_sell", {}).get(d_str, {})
-            
-            # --- Arbitrage Strategy (Charge window) ---
-            day_prices = []
-            for h_p in range(24):
-                try: day_prices.append(float(p_buy_map.get(str(h_p), 999.0)))
-                except (ValueError, TypeError): day_prices.append(999.0)
-            
-            cheap_hours = sorted(range(len(day_prices)), key=lambda i: day_prices[i])[:4]
-
-            for h in range(24):
-                sh = str(h)
-                
-                # Fetch historical values 
-                idx = -1 - d_back
-                if h >= cur_h: idx += 1
-                
-                try:
-                    c_h = float(self.data["consumption_total"][sh][idx].get("v", 0.0) if isinstance(self.data["consumption_total"][sh][idx], dict) else self.data["consumption_total"][sh][idx])
-                    g_h = float(self.data["generation"][sh][idx].get("v", 0.0) if isinstance(self.data["generation"][sh][idx], dict) else self.data["generation"][sh][idx]) * pv_multiplier
-                except (IndexError, ValueError, KeyError):
-                    continue
-
-                p_buy = float(p_buy_map.get(sh, 0.0))
-                p_sell = float(p_sell_map.get(sh, 0.0))
-                
-                sim_grid_buy = 0.0
-                sim_grid_sell = 0.0
-
-                # ── Step 1: Active Sell Strategy (Discharge to Grid) ──
-                # If price is high, we want to sell.
-                active_sell_kwh = 0.0
-                if p_sell >= sell_limit and sim_soc_kwh > min_soc_kwh_limit:
-                    can_discharge = min(sim_max_p, (sim_soc_kwh - min_soc_kwh_limit) * eff)
-                    active_sell_kwh = can_discharge
-                    sim_soc_kwh -= (active_sell_kwh / eff)
-                    sim_grid_sell += active_sell_kwh
-
-                # ── Step 2: Virtual Smart Charging (Charge from Grid) ──
-                if h in cheap_hours and p_buy <= buy_limit:
-                    charge_room = new_cap - sim_soc_kwh
-                    if charge_room > 0:
-                        charged_from_grid = min(sim_max_p * eff, charge_room)
-                        sim_soc_kwh += charged_from_grid
-                        sim_grid_buy += (charged_from_grid / eff)
-
-                # ── Step 3: Normal Load/Gen Balance ──
-                net = g_h - c_h
-                
-                if net > 0:
-                    # Surplus -> Charge from Sun
-                    charge_room = new_cap - sim_soc_kwh
-                    charged_sun = min(min(net, sim_max_p) * eff, charge_room)
-                    sim_soc_kwh += charged_sun
-                    sim_grid_sell += (net - (charged_sun / eff))
-                else:
-                    # Deficit -> Discharge for House
-                    needed = abs(net)
-                    discharge_power = min(needed, sim_max_p)
-                    discharged_house = min(discharge_power / eff, sim_soc_kwh)
-                    sim_soc_kwh -= discharged_house
-                    sim_grid_buy += (needed - (discharged_house * eff))
-
-                sim_cost = (sim_grid_buy * p_buy) - (sim_grid_sell * p_sell)
-                
-                # Compare with what user ACTUALLY did (or simplified actual)
-                # Actually, let's just calculate how much MORE solar we self-consumed
-                # or how much MORE arbitrage we did.
-                # Easiest way: Compare against a 0-spec baseline and then subtract real savings.
-                # But it's better to just track the "Improvement" directly.
-                
-                # Actually, I'll calculate total simulation benefit and subtract real reported benefit
-                total_extra_saved += (c_h * p_buy) - sim_cost
-                
-        # total_extra_saved now contains total benefit of simulated system.
-        # Now subtract the actual savings recorded for those days.
-        actual_total_savings = 0.0
-        for d_back in range(1, days_to_sim + 1):
-            d_str = (now - timedelta(days=d_back)).strftime("%Y-%m-%d")
-            actual_total_savings += self.data.get("savings", {}).get(d_str, {}).get("total", 0.0)
-            
-        improvement = max(0.0, total_extra_saved - actual_total_savings)
-        return {
-            "days_simulated": days_to_sim,
-            "extra_savings": round(improvement, 2),
-            "monthly_estimate": round(improvement * (30 / days_to_sim), 2) if days_to_sim > 0 else 0.0
-        }
-
+        """Simulate last 30 days with modified system specs."""
+        return self.strategy_engine.run_investment_simulation(extra_batt_kwh, pv_multiplier)
 
     def get_setting(self, key, default=None):
         """Get setting from internal storage or config entry."""
@@ -1311,1416 +1163,32 @@ class EnergyProfileManager:
 
     @staticmethod
     def get_cc_cv_ratio(soc):
-        """Calculate CC/CV charge acceptance ratio based on battery SOC.
-        
-        Returns a value between 0.02 and 1.0 representing the fraction
-        of max charge power the battery can accept.
-        """
-        if soc <= 90.0:
-            ratio = 1.0
-        elif soc <= 96.0:
-            ratio = 1.0 - ((soc - 90.0) / 6.0) * 0.5  # Drops to 0.5 at 96%
-        elif soc <= 98.5:
-            ratio = 0.5 - ((soc - 96.0) / 2.5) * 0.4  # Drops to 0.1 at 98.5%
-        else:
-            ratio = 0.1 - ((soc - 98.5) / 1.5) * 0.08 # Tapers to 0.02
-        return max(0.02, min(1.0, ratio))
+        """Calculate CC/CV charge acceptance ratio."""
+        return StrategyEngine.get_cc_cv_ratio(soc)
 
     def get_gen_forecast_coefficient(self, forecast_value, prof_gen, hour_start, hour_end):
-        """Calculate scaling coefficient between forecast and historical generation."""
-        hist_sum = sum(float(prof_gen.get(str(h), 0.0)) for h in range(hour_start, hour_end))
-        if forecast_value is not None and hist_sum > 0:
-            return forecast_value / hist_sum
-        return 1.0
+        """Calculate scaling coefficient."""
+        return self.strategy_engine.get_gen_forecast_coefficient(forecast_value, prof_gen, hour_start, hour_end)
 
+    def get_market_strategy(self, mode="buy"):
+        """Complex market strategy solver."""
+        return self.strategy_engine.get_market_strategy(mode)
+        
     def get_budget_and_permissions(self, days_for_profile=14, skip_strategy_check=False):
-        now = dt_util.now()
-        cur_hour = now.hour
-        
-        # 1. Get Forecast Remaining
-        forecast_raw_today = self.get_forecast_value(self.forecast_today_sensor)
-        forecast_val = forecast_raw_today if forecast_raw_today is not None else 0.0
-        
-        # Determine historical fractions
-        prof_gen_today = self.get_average_profile("generation", days_for_profile, "all")
-        total_hist_gen = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(24))
-        hist_gen_so_far = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(cur_hour))
-        hist_gen_rem = total_hist_gen - hist_gen_so_far
-        
-        # If the sensor is "Remaining", we reconstruct the "Full Day" expectation for the coefficient logic
-        # Otherwise constant decrease of forecast_val ruins the max() storage
-        expected_full_day_from_sensor = forecast_val
-        if hist_gen_rem > 0.1 and total_hist_gen > 0:
-            # Reconstruct: if 5kWh remains and historically 50% remains, then full day is 10kWh
-            expected_full_day_from_sensor = (forecast_val / hist_gen_rem) * total_hist_gen
-            
-        if self.forecast_today_sensor:
-            # We store the reconstructed full-day max to keep the 'Today Coeff' stable
-            self.data["temp_max_forecast"] = max(self.data.get("temp_max_forecast", 0.0), expected_full_day_from_sensor)
-                
-        # Calculate Historical Reliability Coefficient
-        hist_coeff = 1.0
-        history = self.data.get("forecast_history", [])
-        if history:
-            tot_actual = sum(h["actual"] for h in history)
-            tot_expected = sum(h["forecast"] for h in history)
-            if tot_expected > 0.1:
-                hist_coeff = tot_actual / tot_expected
-                hist_coeff = max(0.2, min(hist_coeff, 2.0)) # Clamp coefficient manually between 0.2 and 2.0
-                
-        # Calculate Intra-day Dynamic Coefficient (Blended)
-        fraction_so_far = 0.0
-        if total_hist_gen > 0.1:
-            fraction_so_far = hist_gen_so_far / total_hist_gen
-            
-        # Today's actual is taken from the daily accumulator (resilient to restart gaps)
-        actual_today = self.data.get("temp_daily_gen", 0.0)
-        expected_today_total = self.data.get("temp_max_forecast", 0.0)
-        expected_today_so_far = expected_today_total * fraction_so_far
-        
-        today_coeff = hist_coeff
-        if expected_today_so_far > 0.1:
-            today_coeff = actual_today / expected_today_so_far
-            today_coeff = max(0.2, min(today_coeff, 2.0))
-            
-        blended_coeff = (today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far))
-        self.last_blended_coeff = blended_coeff
-                
-        forecast_val_adjusted = forecast_val * blended_coeff
-                
-        # 2. Get Battery Energy Available
-        batt_soc, _, batt_energy_val = self.get_battery_state()
-                    
-        # 3. Expected profile until 08AM
-        today_type = "weekend" if now.weekday() >= 5 else "weekday"
-        tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
-        
-        prof_today = self.get_average_profile("consumption_base", days_for_profile, today_type)
-        prof_tom = self.get_average_profile("consumption_base", days_for_profile, tom_type)
-        
-        expected_consumption = 0.0
-        
-        for h in range(cur_hour, 24):
-            expected_consumption += prof_today.get(str(h), 0.0)
-        for h in range(0, 8):
-            expected_consumption += prof_tom.get(str(h), 0.0)
-        
-        # Apply occupancy coefficient to scale consumption when nobody is home
-        occ_coeff = self.get_occupancy_coefficient()
-        expected_consumption *= occ_coeff
-        
-        # Apply inverter efficiency coefficient to both forecast and battery energy
-        eff_coeff = self.get_efficiency_coefficient()
-        forecast_val_adjusted *= eff_coeff
-        batt_energy_val *= eff_coeff
-            
-        initial_budget = (forecast_val_adjusted + batt_energy_val) - expected_consumption
-
-        # Unified Simulation for budget verification (optional but good for consistency)
-        # We simulate until 08:00 tomorrow
-        sim_hours_budget = []
-        for h in range(now.hour, 24): sim_hours_budget.append(h)
-        for h in range(24, 32): sim_hours_budget.append(h) # 0..8 tomorrow
-        
-        _, _ = self.run_soc_simulation(batt_soc, sim_hours_budget, now)
-        
-        available_budget = initial_budget
-        
-        # 3.5 Calculate Instant Available Power (kW) based on recent deltas
-        # We estimate instant power (kW) by looking at generation vs consumption. 
-        # (This is a rough heuristic based on accumulation, but it's effective for catching if we are dragging the battery down *right now*)
-        current_instant_surplus_kw = 999.0 # Assume enough if no generators
-        if self.generation_sensors:
-            # Let's derive a quick 'instant surplus' metric from the current hourly accumulator state. 
-            # OR better yet, let's keep it simple: Has generation exceeded consumption since the last tick?
-            # It's hard to get true "instant" kW from kWh delta without timing the ticks exactly, 
-            # but if we just rely on battery discharging vs charging we'd need battery power sensor.
-            # Instead, we'll try to use a simple "is generation > consumption" check 
-            # as a safety factor if the user requested kW limits.
-            pass
-            
-        # For a truly robust instant kW check without polling external sensors, 
-        # we can calculate it dynamically if we track the time of the last update.
-        # But to keep it bulletproof: we'll add an expected power check vs budget.
-        
-        # 4. Market and Solar state for "Only Solar or Free" constraint
-        today_str = now.strftime("%Y-%m-%d")
-        
-        prices_store_buy = self.data.get("prices_buy", {})
-        cur_price_buy = None
-        if today_str in prices_store_buy and str(cur_hour) in prices_store_buy[today_str]:
-            try:
-                cur_price_buy = float(str(prices_store_buy[today_str][str(cur_hour)]).replace(',', '.'))
-            except ValueError:
-                cur_price_buy = None
-                
-        prices_store_sell = self.data.get("prices_sell", {})
-        cur_price_sell = None
-        if today_str in prices_store_sell and str(cur_hour) in prices_store_sell[today_str]:
-            try:
-                cur_price_sell = float(str(prices_store_sell[today_str][str(cur_hour)]).replace(',', '.'))
-            except ValueError:
-                cur_price_sell = None
-            
-        # prof_gen_today is already calculated above for the coefficient blending
-        cur_expected_gen = float(prof_gen_today.get(str(cur_hour), 0.0))
-        sun_state = self.hass.states.get("sun.sun")
-        is_sun_up = sun_state and sun_state.state == "above_horizon"
-        
-        is_solar_or_free = False
-        if cur_price_buy is not None and cur_price_buy <= 0.0:
-            is_solar_or_free = True
-        elif cur_expected_gen > 0.1 or is_sun_up:
-            # We consider it "solar time" if historically we generate > 100Wh this hour, or the sun is simply up.
-            is_solar_or_free = True
-            
-
-            
-        sell_only_pv_threshold = self.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0)
-        sale_pv_no_bat_max_hour = self.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
-        sell_price_limit = self.get_setting(CONF_PRICE_SELL_LIMIT, 999.0)
-        force_sell = self.get_setting(CONF_FORCE_MARKET_SELL, False)
-
-        is_export_peak = False
-        peak_reason = ""
-        planned_sell_kwh = 0.0
-        
-        # 0. Get Strategy and Reserve Sell Energy
-        if not skip_strategy_check:
-            sell_stat = self.get_market_strategy("sell")
-            # Account for planned sale energy in budget - it's no longer available for loads
-            sim_debug = sell_stat.get("sell_simulation_debug", {})
-            planned_sell_kwh = float(sim_debug.get("max_energy_to_sell_kwh", 0.0))
-            if planned_sell_kwh > 0:
-                available_budget = float(available_budget) - planned_sell_kwh
-            
-            if sell_stat.get("state") == "active":
-                is_export_peak = True
-                peak_reason = "Блокировка: Активен период продажи энергии в сеть"
-
-        # 1. Manual Force Sell Override
-        if not is_export_peak and force_sell:
-            is_export_peak = True
-            peak_reason = "Блокировка: Принудительная продажа (Force Market Sell ON)"
-        
-        # 2. Absolute Price Limits (Fallback / Manual)
-        # Only treat as a "Hard Peak" if we are not waiting for something better or if strategy specifically decided so.
-        if not is_export_peak and cur_price_sell is not None and cur_price_sell >= sell_price_limit:
-            # If we are NOT in an active sell hour (maybe waiting?), we don't hard-block loads 
-            # based on price alone - we let the budget (after reservation) decide.
-            if skip_strategy_check or is_export_peak: # is_export_peak is already false here, so mostly skip_strategy_check
-                is_export_peak = True
-                peak_reason = f"Блокировка: Арбитражный пик (Цена {cur_price_sell} >= Лимит {sell_price_limit})"
-
-        # 3. Daytime "Sell from PV" threshold
-        if not is_export_peak and int(cur_hour) < sale_pv_no_bat_max_hour:
-            if cur_price_sell is not None and cur_price_sell >= sell_only_pv_threshold:
-                # Same here: if it's not actually an active sale hour, don't hard-block
-                if skip_strategy_check or is_export_peak:
-                    is_export_peak = True
-                    peak_reason = f"Блокировка: Дорогой день PV (Цена {cur_price_sell} >= {sell_only_pv_threshold})"
-        
-        # 5. Filter and sort permissions
-        permissions = {}
-        permissions_reasons = {}
-        sorted_sensors = sorted(self.deduct_settings.items(), key=lambda item: item[1].get("priority", 999))
-        
-        avg_gen_kw = 0.0
-        if self.power_history:
-            avg_gen_kw = sum(x["gen_kw"] for x in self.power_history) / len(self.power_history)
-
-        available_gen_kw = avg_gen_kw
-        available_power_kw = avg_gen_kw
-        initial_power_kw = avg_gen_kw
-
-        # Pass 1: Pre-detect and commit resources for active cycles (Grace Period)
-        committed_sensors = {}
-        
-        for sensor_id, settings in sorted_sensors:
-            # We need to perform the same cycle/grace detection as in the main loop
-            p_sensor = settings.get(CONF_POWER_SENSOR)
-            hold_time_min = settings.get(CONF_ACTIVE_HOLD_TIME, 15)
-            
-            cur_p_watts = 0.0
-            if p_sensor:
-                p_state = self.hass.states.get(p_sensor)
-                if p_state and p_state.state not in ("unknown", "unavailable"):
-                    try:
-                        cur_p_watts = float(str(p_state.state).replace(',', '.'))
-                        if p_state.attributes.get("unit_of_measurement") == "kW":
-                            cur_p_watts *= 1000.0
-                    except ValueError: pass
-
-            standby_threshold = self.learned_standby_power.get(sensor_id, 15.0)
-            is_currently_pulling_power = cur_p_watts > (standby_threshold + 10.0)
-            
-            is_cyclic = settings.get(CONF_IS_CYCLIC, False)
-            curr_cycle_kwh = 0.0
-            if sensor_id in self.cycle_energy_start and p_sensor:
-                st = self.hass.states.get(p_sensor)
-                if st and st.state not in ("unknown", "unavailable"):
-                    try: curr_cycle_kwh = max(0.0, float(st.state) - self.cycle_energy_start[sensor_id])
-                    except ValueError: pass
-
-            is_in_grace_period = False
-            if sensor_id in self.cycle_start_time:
-                diff = (now - self.cycle_start_time[sensor_id]).total_seconds()
-                if diff < (float(hold_time_min) * 60):
-                    is_in_grace_period = True
-                    if is_cyclic and sensor_id in self.learned_cycle_total_kwh:
-                        if curr_cycle_kwh >= (self.learned_cycle_total_kwh[sensor_id] * 1.05):
-                            is_in_grace_period = False
-
-            if is_in_grace_period:
-                req_kw = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
-                active_kw = (cur_p_watts / 1000.0) if cur_p_watts > 10.0 else req_kw
-                
-                # Commit resources
-                active_kw_f = float(active_kw)
-                available_power_kw = float(available_power_kw) - active_kw_f
-                available_gen_kw = float(available_gen_kw) - active_kw_f
-                available_budget = float(available_budget) - active_kw_f
-                
-                committed_sensors[sensor_id] = {
-                    "is_in_grace_period": True,
-                    "active_kw": active_kw_f,
-                    "cur_p_watts": float(cur_p_watts)
-                }
-
-        # Pass 2: Evaluate candidate loads in priority order
-        for sensor_id, settings in sorted_sensors:
-            if is_export_peak:
-                permissions[sensor_id] = False
-                permissions_reasons[sensor_id] = peak_reason
-                continue
-                
-            only_solar_free = settings.get("only_solar_or_negative_price", False)
-            if only_solar_free and not is_solar_or_free:
-                permissions[sensor_id] = False
-                permissions_reasons[sensor_id] = "Блокировка: Ограничение 'Только от солнца или Цена <= 0'"
-                continue
-                
-            # If already committed in Pass 1
-            if sensor_id in committed_sensors:
-                permissions[sensor_id] = True
-                permissions_reasons[sensor_id] = "Разрешено: Удержание активного цикла (Grace Period)"
-                continue
-
-            # Full evaluation for all other (idle or non-grace) sensors
-            p_sensor = settings.get(CONF_POWER_SENSOR)
-            hold_time_min = settings.get(CONF_ACTIVE_HOLD_TIME, 15)
-            
-            cur_p_watts = 0.0
-            if p_sensor:
-                p_state = self.hass.states.get(p_sensor)
-                if p_state and p_state.state not in ("unknown", "unavailable"):
-                    try:
-                        cur_p_watts = float(str(p_state.state).replace(',', '.'))
-                        if p_state.attributes.get("unit_of_measurement") == "kW":
-                            cur_p_watts *= 1000.0
-                        self.last_known_power[sensor_id] = cur_p_watts
-                    except ValueError:
-                        cur_p_watts = self.last_known_power.get(sensor_id, 0.0)
-                else:
-                    cur_p_watts = self.last_known_power.get(sensor_id, 0.0)
-
-            req_kwh = settings.get("required_kwh", 2.5)
-            req_kw = self.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0) / 1000.0
-            consumed = self.daily_deduct_consumption.get(sensor_id, 0.0)
-            
-            # is_idle = NOT in active cycle (it's a candidate to START)
-            is_currently_pulling_now = self._is_currently_pulling_power(sensor_id)
-            is_idle = not is_currently_pulling_now
-            
-            power_bottleneck = False
-            gen_bottleneck = False
-            is_free_price = cur_price_buy is not None and cur_price_buy <= 0.0
-
-            if req_kw > 0.0:
-                if available_power_kw < req_kw:
-                    power_bottleneck = True
-                if only_solar_free and not is_free_price:
-                    if available_gen_kw < (req_kw * 0.6):
-                        gen_bottleneck = True
-            elif initial_power_kw > 0.5 and available_power_kw < 0:
-                power_bottleneck = True
-
-            if req_kwh == 0:
-                # Dynamic load logic
-                if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
-                    permissions[sensor_id] = True
-                    if req_kw > 0.0:
-                        available_power_kw = float(available_power_kw) - float(req_kw)
-                        if only_solar_free and not is_free_price:
-                            available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
-                    
-                    b_val = round(max(0.0, float(available_budget)), 2)
-                    g_val = round(max(0.0, float(available_power_kw)), 2)
-                    permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профицит {b_val} кВт*ч, Доступно {g_val} кВт)"
-                else:
-                    permissions[sensor_id] = False
-                    g_val = round(float(available_power_kw), 2)
-                    g_gen = round(float(available_gen_kw), 2)
-                    if gen_bottleneck:
-                        permissions_reasons[sensor_id] = f"Блокировка: Доступная генер. {g_gen} кВт < 60% от {req_kw} кВт"
-                    elif power_bottleneck:
-                        permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Мощность {req_kw} кВт"
-                    elif available_budget <= 0:
-                        permissions_reasons[sensor_id] = f"Блокировка: Нет профицита энергии ({round(float(available_budget), 2)} кВт*ч)"
-                    else:
-                        permissions_reasons[sensor_id] = "Блокировка: Ограничения по мощности"
-                continue
-
-            needed = req_kwh - consumed
-            if needed <= 0:
-                permissions[sensor_id] = True
-                permissions_reasons[sensor_id] = "Разрешено: Дневная норма выполнена (или перерасход)"
-            elif available_budget >= needed and not power_bottleneck and not gen_bottleneck:
-                permissions[sensor_id] = True
-                available_budget -= float(needed)
-                if only_solar_free and not is_free_price and req_kw > 0.0:
-                    available_gen_kw -= (float(req_kw) * 0.6)
-                
-                n_val = round(float(needed), 2)
-                permissions_reasons[sensor_id] = f"Разрешено: Зарезервировано {n_val} кВт*ч из профицита"
-            else:
-                permissions[sensor_id] = False
-                if gen_bottleneck:
-                    permissions_reasons[sensor_id] = f"Блокировка: Доступная генерация {round(float(available_gen_kw), 2)} кВт < 60% от {req_kw} кВт"
-                elif power_bottleneck:
-                    permissions_reasons[sensor_id] = f"Блокировка: Доступно {round(float(available_power_kw), 2)} кВт < Мощность {req_kw} кВт"
-                else:
-                    permissions_reasons[sensor_id] = f"Блокировка: Не хватает энергии (нужно {round(float(needed), 2)} кВт*ч, доступно {round(float(available_budget), 2)} кВт*ч)"
-                
-                
-        return {
-            "initial_budget": initial_budget,
-            "permissions": permissions,
-            "permissions_reasons": permissions_reasons,
-            "forecast_val": forecast_val_adjusted,
-            "forecast_raw": forecast_val,
-            "forecast_coefficient": blended_coeff,
-            "forecast_hist_coefficient": hist_coeff,
-            "forecast_today_coefficient": today_coeff,
-            "batt_energy_val": batt_energy_val,
-            "expected_consumption": expected_consumption,
-            "debug_actual_today": actual_today,
-            "debug_expected_today_total": expected_today_total,
-            "debug_expected_today_so_far": expected_today_so_far,
-            "debug_fraction_so_far": fraction_so_far,
-            "occupancy_coefficient": occ_coeff,
-            "efficiency_coefficient": eff_coeff
-        }
+        """Analyze current day state and return permissions for heavy loads."""
+        return self.strategy_engine.get_budget_and_permissions(days_for_profile, skip_strategy_check)
         
     def run_soc_simulation(self, start_soc, sim_hours_abs, start_time=None, charge_commands=None):
-        """
-        Universal SOC simulation engine.
-        sim_hours_abs: List of absolute hours (e.g. [11, 12, 13...24, 25...])
-        start_time: Current datetime for fractional first hour.
-        charge_commands: Optional dict {abs_hour: kw_power} (positive=charge, negative=sell/discharge)
-        """
-        if not sim_hours_abs:
-            return start_soc, {}
-
+        """Universal SOC simulation engine."""
         now = start_time or dt_util.now()
+        return self.strategy_engine.run_soc_simulation(start_soc, sim_hours_abs, now, charge_commands)
         
-        # Safety check for battery state
-        _, batt_cap, _ = self.get_battery_state()
-        if batt_cap <= 0:
-            return start_soc, {}
-
-        # 1. Standard Forecast and Coefficients
-        f_today = self.get_forecast_value(self.forecast_today_sensor)
-        f_tom = self.get_forecast_value(self.forecast_tomorrow_sensor)
-        
-        day_type_today = "weekend" if now.weekday() >= 5 else "weekday"
-        tomorrow_dt = now + timedelta(days=1)
-        day_type_tom = "weekend" if tomorrow_dt.weekday() >= 5 else "weekday"
-        
-        prof_gen = self.get_average_profile("generation", self.custom_period, "all")
-        prof_cons_today = self.get_average_profile("consumption_total", self.custom_period, day_type_today)
-        prof_cons_tom = self.get_average_profile("consumption_total", self.custom_period, day_type_tom)
-        
-        total_hist_gen = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
-        # Determine sunset for 'remaining' logic
-        sunset_h = 17 
-        sun_state = self.hass.states.get("sun.sun")
-        if sun_state and "next_setting" in sun_state.attributes:
-            try:
-                sunset_h = dt_util.parse_datetime(sun_state.attributes["next_setting"]).astimezone(now.tzinfo).hour
-            except Exception: pass
-            
-        hist_gen_rem_today = sum(float(prof_gen.get(str(h), 0.0)) for h in range(now.hour, min(24, sunset_h + 1)))
-        blended_coeff = getattr(self, "last_blended_coeff", 1.0)
-        
-        eff_coeff = self.get_efficiency_coefficient()
-        _, batt_cap, _ = self.get_battery_state()
-        max_batt_p = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-
-        simulated_soc = float(start_soc)
-        history_log = {}
-        fraction_left_in_first_hour = 1.0 - (now.minute / 60.0)
-
-        for i, h_abs in enumerate(sim_hours_abs):
-            real_h = h_abs % 24
-            is_tom = (h_abs >= 24)
-            h_str = str(real_h)
-            
-            step_duration = fraction_left_in_first_hour if i == 0 else 1.0
-            if step_duration <= 0: continue
-
-            # Generation
-            hist_hour_gen = float(prof_gen.get(h_str, 0.0))
-            if is_tom:
-                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_tom) if (f_tom is not None and total_hist_gen > 0) else hist_hour_gen
-            else:
-                expected_gen_kw = (hist_hour_gen / hist_gen_rem_today * f_today) if (f_today is not None and hist_gen_rem_today > 0.1) else hist_hour_gen
-                expected_gen_kw *= blended_coeff
-            
-            # Consumption
-            p_cons = prof_cons_tom if is_tom else prof_cons_today
-            expected_cons_kw = float(p_cons.get(h_str, 0.0))
-            
-            # Additional load scaling (Occupancy)
-            expected_cons_kw *= self.get_occupancy_coefficient()
-            
-            # Combine house activities and commands
-            cmd_p = 0.0
-            if charge_commands and h_abs in charge_commands:
-                cmd_p = float(charge_commands[h_abs])
-            
-            net_house_kw = expected_gen_kw - expected_cons_kw
-            total_net_kw = net_house_kw + cmd_p
-            
-            if total_net_kw > 0.1: # Charging
-                acc_ratio = EnergyProfileManager.get_cc_cv_ratio(simulated_soc)
-                actual_charge_kw = min(total_net_kw * eff_coeff, max_batt_p * acc_ratio)
-                if batt_cap > 0:
-                    simulated_soc = min(100.0, simulated_soc + (actual_charge_kw * step_duration / batt_cap * 100.0))
-            elif total_net_kw < -0.1: # Discharging
-                actual_discharge_kw = abs(total_net_kw) / eff_coeff
-                if batt_cap > 0:
-                    simulated_soc = max(0.0, simulated_soc - (actual_discharge_kw * step_duration / batt_cap * 100.0))
-            
-            history_log[f"{real_h:0>2}:00" + (" (Завтра)" if is_tom else "")] = round(simulated_soc, 1)
-
-        return simulated_soc, history_log
-        
-    def get_market_strategy(self, mode="buy"):
-        res = {
-            "state": "idle",
-            "active_hours": [],
-            "active_periods": "",
-            "recommended_power_kw": 0.0,
-            "target_price": 0.0,
-            "limit_used": 0.0,
-            "today_prices": {},
-            "tomorrow_prices": {},
-            "multi_cycle": "Не предвидится",
-            "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
-        }
-        
-        now = dt_util.now()
-        cur_hour = now.hour
-        today_str = now.strftime("%Y-%m-%d")
-        tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        prices_store = self.data.get(f"prices_{mode}", {})
-        today_prices = prices_store.get(today_str, {})
-        tomorrow_prices = prices_store.get(tomorrow_str, {})
-        
-        res["today_prices"] = today_prices
-        res["tomorrow_prices"] = tomorrow_prices
-        
-        # Initialize key variables at the start for all modes (prevents NameErrors)
-        batt_soc, batt_cap, batt_energy_val = self.get_battery_state()
-        
-        today_type = "weekend" if now.weekday() >= 5 else "weekday"
-        tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
-        
-        prof_today = self.get_average_profile("consumption_total", self.custom_period, today_type)
-        prof_tom = self.get_average_profile("consumption_total", self.custom_period, tom_type)
-        prof_gen = self.get_average_profile("generation", self.custom_period, "all")
-        
-        forecast_today_val = self.get_forecast_value(self.forecast_today_sensor)
-        forecast_tomorrow_val = self.get_forecast_value(self.forecast_tomorrow_sensor)
-        
-        coeff_today = self.get_gen_forecast_coefficient(forecast_today_val, prof_gen, cur_hour + 1, 24)
-        coeff_tom = self.get_gen_forecast_coefficient(forecast_tomorrow_val, prof_gen, 0, 24)
-        
-        max_power = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-        
-        if not today_prices:
-            return res
-            
-        force_sell = self.get_setting(CONF_FORCE_MARKET_SELL, False)
-        if mode == "sell" and force_sell:
-            res["state"] = "active"
-            res["target_price"] = 0.0
-            res["limit_used"] = 0.0
-            res["active_hours"] = [cur_hour]
-            return res
-        
-        # Determine tolerance based on mode
-        tolerance = self.get_setting(CONF_PRICE_TOLERANCE if mode == "buy" else CONF_PRICE_SELL_TOLERANCE, 0.0)
-        
-        # Unify today and tomorrow prices into a 48h timeline for FULL window evaluation
-        all_prices = {}
-        for h, p in today_prices.items():
-            try: all_prices[int(h)] = float(str(p).replace(',', '.'))
-            except ValueError: all_prices[int(h)] = 0.0
-        for h, p in tomorrow_prices.items():
-            try: all_prices[int(h) + 24] = float(str(p).replace(',', '.'))
-            except ValueError: all_prices[int(h) + 24] = 0.0
-            
-        negative_hours = [h for h, p in all_prices.items() if p < 0 and h >= cur_hour]
-
-        # Evaluate the entire available horizon
-        if tomorrow_prices:
-            active_window = (0, 47)
-            res["analyzed_window"] = "Сегодня 00:00 - Завтра 23:59"
-        else:
-            active_window = (0, 23)
-            res["analyzed_window"] = "Сегодня 00:00 - Сегодня 23:59"
-                
-        target_hours = []
-        target_price = 0.0
-        limit_used = 0.0
-        carte_blanche = False
-
-        def get_peaks(window, is_sell, limit, tol):
-            if not window: return []
-            if is_sell:
-                best_p = max(window.values())
-                if best_p >= limit:
-                    return [(h, p) for h, p in window.items() if p >= limit and p >= (best_p - tol)]
-            else:
-                best_p = min(window.values())
-                if best_p <= limit:
-                    return [(h, p) for h, p in window.items() if p <= limit and p <= (best_p + tol)]
-            return []
-
-        window_today = {h: p for h, p in all_prices.items() if cur_hour <= h < 24}
-        window_tomorrow = {h: p for h, p in all_prices.items() if 24 <= h <= 47}
-
-        if mode == "buy":
-            limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
-            res["limit_used"] = limit
-            if negative_hours:
-                # Carte blanche: we buy whenever price is negative, ignore windows
-                target_hours = negative_hours
-                target_price = min([all_prices[h] for h in negative_hours])
-                res["target_price"] = target_price
-                carte_blanche = True
-            else:
-                peaks_today = get_peaks(window_today, False, limit, tolerance)
-                peaks_tom = get_peaks(window_tomorrow, False, limit, tolerance)
-                combined = peaks_today + peaks_tom
-                if combined:
-                    target_hours = [h for h, p in combined]
-                    target_price = min(p for h, p in combined)
-                    res["target_price"] = target_price
-                    res["limit_used"] = limit
-
-            # --- ARBITRAGE OPPORTUNITY PRE-CALCULATION ---
-            # Identify high-price SELL peaks to prepare the battery in advance
-            sell_prices_today = self.data.get("prices_sell", {}).get(today_str, {})
-            sell_prices_tom = self.data.get("prices_sell", {}).get(tomorrow_str, {})
-            all_sell_prices = {}
-            for h, p in sell_prices_today.items():
-                try: all_sell_prices[int(h)] = float(str(p).replace(',', '.'))
-                except ValueError: all_sell_prices[int(h)] = 0.0
-            for h, p in sell_prices_tom.items():
-                try: all_sell_prices[int(h) + 24] = float(str(p).replace(',', '.'))
-                except ValueError: all_sell_prices[int(h) + 24] = 0.0
-
-            sell_limit = self.get_setting(CONF_PRICE_SELL_LIMIT, 99.0)
-            deg_cost = self.get_battery_degradation_cost()
-            eff = self.get_efficiency_coefficient()
-            min_p = self.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
-
-            def is_sell_profitable(sell_p, buy_p):
-                # Revenue gap must cover the threshold
-                # Logic: If user's limit is less than wear, use 2x wear as safety floor.
-                # Otherwise, use user's defined limit.
-                threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
-                return (sell_p - buy_p) * eff >= threshold
-
-            profitable_sell_peaks = []
-            if all_sell_prices:
-                # Find hours where sell price is above limit and profitable against current buy limit
-                buy_limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
-                for h_s, p_s in all_sell_prices.items():
-                    if h_s >= cur_hour and p_s >= sell_limit and is_sell_profitable(p_s, buy_limit):
-                        profitable_sell_peaks.append(h_s)
-            # ---------------------------------------------
-
-        else: # sell
-            limit = self.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
-            res["limit_used"] = limit
-            if negative_hours and cur_hour in negative_hours:
-                # If price is negative today, we PAY to sell to the grid. NEVER SELL.
-                res["state"] = "price_limit_not_met"
-                return res
-            
-            # Profitability check against degradation cost and user profit threshold
-            deg_cost = self.get_battery_degradation_cost()
-            eff = self.get_efficiency_coefficient()
-            min_p = self.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
-            min_buy_limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
-            
-            # Filter peaks that aren't actually profitable
-            def is_profitable(price):
-                # Apply dynamic threshold: 2x wear if limit is too low
-                threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
-                raw_gain = (price - min_buy_limit) * eff
-                return raw_gain >= threshold
-
-            raw_peaks_today = get_peaks(window_today, True, limit, tolerance)
-            raw_peaks_tom = get_peaks(window_tomorrow, True, limit, tolerance)
-            
-            if not raw_peaks_today and not raw_peaks_tom:
-                res["state"] = "price_limit_not_met"
-                # Fall through to allow arbitrage buyback check
-
-            peaks_today = [(h, p) for h, p in raw_peaks_today if is_profitable(p)]
-            peaks_tom = [(h, p) for h, p in raw_peaks_tom if is_profitable(p)]
-            
-            if not peaks_today and not peaks_tom:
-                res["state"] = "unprofitable_arbitrage"
-                res["multi_cycle"] = "Деградация АКБ > Выгоды"
-                # Fall through to allow arbitrage buyback check
-
-            if peaks_today and peaks_tom:
-                # We have peaks on both days. Check if we can recharge between them.
-                max_h_today = max(h for h, p in peaks_today)
-                min_h_tom = min(h for h, p in peaks_tom)
-                
-                buy_limit = self.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
-                can_recharge = False
-                for h in range(max_h_today + 1, min_h_tom):
-                    if all_prices.get(h, 99.0) <= buy_limit:
-                        can_recharge = True
-                        res["multi_cycle"] = "Благоприятно (Дешевая сеть ночью)"
-                        break
-                    if 8 <= (h % 24) <= 16:
-                        # Ensure there's actually a decent forecast for solar generation!
-                        fsensors = self.forecast_tomorrow_sensor
-                        if fsensors:
-                            if isinstance(fsensors, str): fsensors = [fsensors]
-                            val_sum = 0.0
-                            for fsensor in fsensors:
-                                st = self.hass.states.get(fsensor)
-                                v = _get_kwh_val(st)
-                                if v is not None: val_sum += v
-                            if val_sum > 3.0: # threshold of 3kWh expected solar energy 
-                                can_recharge = True
-                                res["multi_cycle"] = "Благоприятно (Ожидается солнце)"
-                                break
-                        else:
-                            # If no forecast sensors are configured, fallback to pure daylight hours
-                            can_recharge = True
-                            res["multi_cycle"] = "Благоприятно (Световой день)"
-                            break
-                        
-                if can_recharge:
-                    combined = peaks_today + peaks_tom
-                    target_hours = [h for h, p in combined]
-                    target_price = max(p for h, p in combined)
-                else:
-                    res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
-                    max_today_p = max(p for h, p in peaks_today)
-                    max_tom_p = max(p for h, p in peaks_tom)
-                    if max_today_p >= max_tom_p:
-                        target_hours = [h for h, p in peaks_today]
-                        target_price = max_today_p
-                    else:
-                        target_hours = [h for h, p in peaks_tom]
-                        target_price = max_tom_p
-            elif peaks_today:
-                target_hours = [h for h, p in peaks_today]
-                target_price = max(p for h, p in peaks_today)
-            elif peaks_tom:
-                target_hours = [h for h, p in peaks_tom]
-                target_price = max(p for h, p in peaks_tom)
-            
-            res["target_price"] = target_price
-
-        # Filter out past hours ONLY from the final execution command, so we don't return past periods
-        target_hours = [h for h in target_hours if h >= cur_hour]
-
-        # Survival Logic (Bridge the gap if battery risks hitting min_soc before next charge)
-        # Note: This deliberately ignores the Buy Price Limit, safely prioritizing survival over price rules!
-        if mode == "buy" and batt_cap > 0 and self.get_setting(CONF_DYNAMIC_SOC_BUY, True) and active_window:
-            min_soc = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
-            
-            natural_hours = set(target_hours)
-            survival_hours = set(target_hours)
-            
-            # Optimization Loop: add cheapest bridge hours until SOC doesn't fall below min_soc
-            while True:
-                added_bridge = False
-                
-                # Run unified simulation
-                # Convert survival_hours/natural_hours to command dict for the simulation engine
-                commands = {}
-                for h_cmd in survival_hours:
-                    commands[h_cmd] = max_batt_power # Charging at max power
-                
-                # Simulation up to the end of window
-                sim_range = list(range(cur_hour, active_window[1] + 1))
-                final_soc, log = self.run_soc_simulation(batt_soc, sim_range, now, commands)
-                
-                # Check for violations
-                min_sim_soc_in_run = 100.0
-                violation_hour = None
-                for i, h_step in enumerate(sim_range):
-                    h_label = f"{h_step%24:0>2}:00" + (" (Завтра)" if h_step >= 24 else "")
-                    soc_at_h = log.get(h_label, 100.0)
-                    min_sim_soc_in_run = min(min_sim_soc_in_run, soc_at_h)
-                    
-                    target_for_h = soc_targets.get(h_step, min_soc)
-                    if soc_at_h < target_for_h and violation_hour is None:
-                        violation_hour = h_step
-                
-                if violation_hour is not None:
-                    # Find cheapest legal hour between current and violation point
-                    search_space = [sh for sh in range(cur_hour, violation_hour + 1) if sh not in survival_hours and sh in all_prices]
-                    if search_space:
-                        # Efficiency/Profit filters for Arbitrage Prep
-                        target_val = soc_targets.get(violation_hour, min_soc)
-                        if target_val > min_soc and violation_hour in all_sell_prices:
-                            sell_price = all_sell_prices[violation_hour]
-                            search_space = [sh for sh in search_space if is_sell_profitable(sell_price, all_prices[sh])]
-                        
-                        if search_space:
-                            cheapest_bridge = min(search_space, key=lambda sh: all_prices[sh])
-                            survival_hours.add(cheapest_bridge)
-                            added_bridge = True
-                
-                if not added_bridge:
-                    # Find cur_hour status in the finalized run
-                    cur_hour_label = f"{cur_hour:0>2}:00"
-                    cur_hour_end_soc = log.get(cur_hour_label)
-                    
-                    if cur_hour in survival_hours and cur_hour not in natural_hours:
-                        is_arbitrage_prep = any(h_p in profitable_sell_peaks for h_p in range(cur_hour, active_window[1] + 1))
-                        res["charge_reason"] = "arbitrage_prep" if is_arbitrage_prep else "survival"
-                        
-                        excess = min_sim_soc_in_run - min_soc
-                        if excess > 0 and cur_hour_end_soc is not None:
-                            exact_target = max(batt_soc, cur_hour_end_soc - excess)
-                            res["charge_target_soc"] = round(exact_target, 1)
-                        else:
-                            res["charge_target_soc"] = 100.0
-                    else:
-                        res["charge_reason"] = "price"
-                        res["charge_target_soc"] = 100.0
-                    break
-                    
-            target_hours = list(survival_hours)
-
-        # Final attribute population after all logic (including survival bridge)
-        res["limit_used"] = limit
-        
-        future_active = [h for h in target_hours if h >= cur_hour]
-        if future_active:
-            upcoming_h = future_active[0]
-            if upcoming_h < 24:
-                rel_hours = [h for h in future_active if h < 24]
-            else:
-                rel_hours = [h for h in future_active if h >= 24]
-            
-            p_list = [all_prices.get(h, 0.0) for h in rel_hours]
-            if p_list:
-                if mode == "buy":
-                    res["target_price"] = min(p_list)
-                else:
-                    res["target_price"] = max(p_list)
-
-        if not target_hours and mode == "buy":
-            res["state"] = "price_limit_not_met"
-            return res
-        # For "sell" mode, we continue even with empty target_hours to check arbitrage
-            
-        target_hours_sorted = sorted(target_hours)
-        found_periods = []
-        
-        def _format_period(s, e):
-            s_d = "Завтра " if s >= 24 else ""
-            e_d = "Завтра " if e >= 24 else ""
-            return f"{s_d}{s % 24:02d}:00 - {e_d}{e % 24:02d}:59"
-            
-        if target_hours_sorted:
-            start = target_hours_sorted[0]
-            prev = target_hours_sorted[0]
-            for h in target_hours_sorted[1:]:
-                if h == prev + 1:
-                    prev = h
-                else:
-                    found_periods.append(_format_period(start, prev))
-                    start = h
-                    prev = h
-            found_periods.append(_format_period(start, prev))
-            
-        def _format_hour_simple(h):
-            d = "Завтра " if h >= 24 else "Сегодня "
-            return f"{d}{h % 24:02d}:00"
-            
-        # Deferred UI Population
-            
-        # SOC Target & Power Calculation
-        hours_count = len(target_hours)
-        power_needed = 0.0
-        
-        if batt_cap > 0:
-            if mode == "buy":
-                base_target = self.get_setting(CONF_TARGET_SOC_BUY, 100.0)
-                if carte_blanche:
-                    target_soc = 100.0 # Force max charge when you get paid to do it
-                elif self.get_setting(CONF_DYNAMIC_SOC_BUY, True):
-                    # Smart AI calculation
-                    budget_data = self.get_budget_and_permissions(self.custom_period)
-                    expected_night = budget_data.get("expected_consumption", 0.0)
-                    forecast = budget_data.get("forecast_val", 0.0)
-                    
-                    tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
-                    total_avg = sum(self.get_average_profile("consumption_total", self.custom_period, tom_type).values())
-                    day_need = max(0.0, total_avg - expected_night)
-                    tomorrow_need = max(0.0, day_need - forecast)
-                    total_need = expected_night + tomorrow_need
-                    
-                    ai_soc = (total_need / batt_cap) * 100.0
-                    target_soc = min(base_target, ai_soc) # User setting acts as max ceiling
-                else:
-                    target_soc = base_target
-                    
-                target_soc = min(100.0, target_soc)
-                
-                charge_plan = {}
-                sim_soc_plan = batt_soc
-                projected_start_soc = None
-                projected_end_soc = None
-                nh_set = natural_hours if 'natural_hours' in locals() else set(target_hours_sorted)
-                prof_today = self.get_average_profile("consumption_total", self.custom_period, "all")
-                min_soc = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
-                
-                final_active_hours = []
-                plan_power = 0.0
-                
-                for h in target_hours_sorted:
-                    if h < cur_hour:
-                        continue
-                        
-                    is_surv = h not in nh_set
-                    
-                    if is_surv:
-                        gap_cons = 0.0
-                        for f_h in range(h, h + 24):
-                            if f_h > h and f_h in target_hours_sorted:
-                                break
-                            
-                            c_kwh = float(prof_today.get(str(f_h % 24), 1.0))
-                            g_kwh = float(prof_gen.get(str(f_h % 24), 0.0)) if 'prof_gen' in locals() else 0.0
-                            cf = coeff_today if 'coeff_today' in locals() and f_h < 24 else (coeff_tom if 'coeff_tom' in locals() else 1.0)
-                            
-                            gap_cons += max(0.0, c_kwh - (g_kwh * cf))
-                            
-                        s_need = gap_cons + (batt_cap * 0.05)
-                        
-                        # Suppress Survival Bridge if currently producing generous solar surplus
-                        cancel_surv = False
-                        if h == cur_hour and getattr(self, "power_load_sensors", []) and getattr(self, "power_gen_sensors", []):
-                            load_kw = sum((_get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_load_sensors)
-                            gen_kw = sum((_get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors)
-                            surplus_kw = gen_kw - load_kw
-                            if surplus_kw > 0.3:
-                                cancel_surv = True
-                        
-                        s_targ = min(target_soc, min_soc + ((s_need / batt_cap) * 100.0))
-                        
-                        if s_targ > sim_soc_plan and not cancel_surv:
-                            p = min(max_power, batt_cap * ((s_targ - sim_soc_plan) / 100.0))
-                        else:
-                            p = 0.0
-                            
-                        if p > 0.0:
-                            if projected_start_soc is None:
-                                projected_start_soc = sim_soc_plan
-                            charge_plan[_format_hour_simple(h)] = {"Режим": "Мост (Выживание)", "Мощность": round(float(p), 2)}
-                            final_active_hours.append(h)
-                            if plan_power <= 0: plan_power = float(p)
-                        
-                        if h == cur_hour:
-                            power_needed = float(p)
-                            res["charge_reason"] = "survival_bridge" if p > 0 else "idle"
-                            
-                        sim_soc_plan = min(100.0, sim_soc_plan + (float(p) / batt_cap * 100.0))
-                        projected_end_soc = sim_soc_plan
-                    else:
-                        rem_n = [x for x in nh_set if x >= h]
-                        n_count = len(rem_n) if rem_n else 1
-                        
-                        if target_soc > sim_soc_plan:
-                            e_req = batt_cap * ((target_soc - sim_soc_plan) / 100.0)
-                            p = min(max_power, e_req / n_count)
-                        else:
-                            p = 0.0
-                            
-                        if p > 0.0:
-                            if projected_start_soc is None:
-                                projected_start_soc = sim_soc_plan
-                            charge_plan[_format_hour_simple(h)] = {"Режим": "Штатный (Дешевая цена)", "Мощность": round(p, 2)}
-                            final_active_hours.append(h)
-                        
-                        if h == cur_hour:
-                            power_needed = p
-                            res["charge_reason"] = "price" if p > 0 else "idle"
-                            
-                        sim_soc_plan = min(100.0, sim_soc_plan + (p / batt_cap * 100.0))
-                        projected_end_soc = sim_soc_plan
-                        
-                    # Project SOC drop for current hour and subsequent idle hours
-                    if h < target_hours_sorted[-1]:
-                        next_h = [x for x in target_hours_sorted if x > h][0]
-                        drop_kwh = 0.0
-                        for drop_h in range(h, next_h):
-                            c_kwh = float(prof_today.get(str(drop_h % 24), 1.0))
-                            g_kwh = float(prof_gen.get(str(drop_h % 24), 0.0)) if 'prof_gen' in locals() else 0.0
-                            cf = coeff_today if 'coeff_today' in locals() and drop_h < 24 else (coeff_tom if 'coeff_tom' in locals() else 1.0)
-                            drop_kwh += max(0.0, c_kwh - (g_kwh * cf))
-                            
-                        sim_soc_plan = max(0.0, sim_soc_plan - (drop_kwh / batt_cap * 100.0))
-                            
-                res["charge_plan"] = charge_plan
-                res["buy_simulation"] = {
-                    "projected_soc_at_start_pct": round(float(projected_start_soc), 1) if projected_start_soc is not None else round(float(batt_soc), 1),
-                    "projected_soc_at_end_pct": round(float(projected_end_soc), 1) if projected_end_soc is not None else round(float(sim_soc_plan), 1)
-                }
-                if cur_hour not in target_hours_sorted or power_needed <= 0:
-                    res["charge_reason"] = "idle"
-                    
-                target_hours = final_active_hours
-                
-                # Recompile strings purely based on non-zero hours to keep UI clean
-                found_periods = []
-                if final_active_hours:
-                    start = final_active_hours[0]
-                    prev = final_active_hours[0]
-                    for curr_h in final_active_hours[1:]:
-                        if curr_h == prev + 1:
-                            prev = curr_h
-                        else:
-                            found_periods.append(_format_period(start, prev))
-                            start = curr_h
-                            prev = curr_h
-                    found_periods.append(_format_period(start, prev))
-                    
-                res["active_hours_raw"] = final_active_hours
-            else: # mode == "sell"
-                base_target = self.get_setting(CONF_TARGET_SOC_SELL, 20.0)
-                if self.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                    # Smart AI calculation
-                    budget_data = self.get_budget_and_permissions(self.custom_period, skip_strategy_check=True)
-                    expected_night = budget_data.get("expected_consumption", 0.0)
-                    eff_coeff = budget_data.get("efficiency_coefficient", 1.0)
-                    min_soc_reserve = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
-
-                    # Correction 1: account for inverter losses.
-                    # expected_night is AC-side consumption. To deliver that from the battery
-                    # we need more raw DC energy: expected_night / eff_coeff.
-                    # Only apply when eff_coeff < 1 (i.e. a losses sensor is configured).
-                    expected_night_from_batt = expected_night / eff_coeff if eff_coeff > 0 else expected_night
-
-                    # Correction 2: add min_soc as a hard non-reducible reserve ON TOP of the
-                    # consumption reserve (they are independent: one is energy needed, the
-                    # other is the absolute floor the battery must never go below).
-                    ai_soc_reserve = ((expected_night_from_batt / batt_cap) * 100.0 if batt_cap > 0 else 0.0) + min_soc_reserve
-
-                    # User's CONF_TARGET_SOC_SELL acts as absolute minimum floor only
-                    target_soc = max(base_target, ai_soc_reserve)
-                else:
-                    target_soc = base_target
-
-                target_soc = min(100.0, target_soc)
-
-                # Store debug info for sell mode
-                if self.get_setting(CONF_DYNAMIC_SOC_SELL, True) and batt_cap > 0:
-                    res["sell_target_soc_debug"] = {
-                        "base": round(float(base_target), 1),
-                        "ai_reserve": round(float(ai_soc_reserve), 1),
-                        "expected_night": round(float(expected_night), 3),
-                        "batt_energy": round(float(batt_cap), 3), # Assuming batt_energy refers to batt_cap
-                        "min_soc_reserve": round(float(min_soc_reserve), 1),
-                        "target_final": round(float(target_soc), 1),
-                        "expected_consumption_kwh": round(float(expected_night), 3),
-                        "efficiency_coefficient": round(float(eff_coeff), 3),
-                        "expected_from_battery_kwh": round(float(expected_night_from_batt), 3),
-                        "min_soc_reserve_pct": round(float(min_soc_reserve), 1),
-                        "ai_soc_reserve_pct": round(float(ai_soc_reserve), 1),
-                        "base_target_soc_pct": round(float(base_target), 1),
-                        "final_target_soc_pct": round(float(target_soc), 1),
-                        "current_soc_pct": round(float(batt_soc), 1),
-                        "battery_capacity_kwh": round(float(batt_cap), 2),
-                    }
-
-                plan_power = 0.0
-                sim_data = {}
-                if hours_count > 0:
-                    budget_data = self.get_budget_and_permissions(self.custom_period, skip_strategy_check=True)
-                    eff = budget_data.get("efficiency_coefficient", 1.0)
-                    
-                    # Simulation: Start from NOW
-                    sim_energy = batt_energy_val
-                    
-                    # Phase 1: From NOW to Start of Sale
-                    first_sell_h = min(target_hours)
-                    for h in range(cur_hour, first_sell_h):
-                        h_mod = h % 24
-                        # Use average profile to see what happens before sale
-                        h_gen = float(prof_gen.get(str(h_mod), 0.0)) * budget_data.get("forecast_coefficient", 1.0)
-                        h_cons = float(prof_today.get(str(h_mod), 1.0)) * budget_data.get("occupancy_coefficient", 1.0)
-                        
-                        # Accuracy Fix: If we are in the current hour, only count the remaining time
-                        if h == cur_hour:
-                            fraction = max(0.0, (60 - now.minute) / 60.0)
-                            h_gen *= fraction
-                            h_cons *= fraction
-                            
-                        # Losses
-                        sim_energy = min(batt_cap, sim_energy + (h_gen - h_cons) * (eff if h_gen > h_cons else 1.0/eff if eff > 0 else 1.0))
-
-                    energy_at_start = sim_energy
-                    
-                    # Phase 2: From End of Sale to 08:00 tomorrow
-                    last_sell_h = max(target_hours)
-                    energy_needed_after_ac = 0.0
-                    for h in range(last_sell_h + 1, 48):
-                        h_mod = h % 24
-                        if h_mod == 8 and h >= 24: break
-                        h_cons = float(prof_today.get(str(h_mod), 1.0)) if h < 24 else float(prof_tom.get(str(h_mod), 1.0))
-                        energy_needed_after_ac += h_cons * budget_data.get("occupancy_coefficient", 1.0)
-                    
-                    min_soc_reserve_kwh = (self.get_setting(CONF_MIN_SOC_BUY, 10.0) / 100.0) * batt_cap
-                    # DC Energy needed to cover AC consumption + safety floor
-                    total_reserve_dc_at_end = (energy_needed_after_ac / eff if eff > 0 else energy_needed_after_ac) + min_soc_reserve_kwh
-                    
-                    # Phase 3: During Sale
-                    cons_during_sale_ac = 0.0
-                    for h in target_hours:
-                        h_mod = h % 24
-                        cons_during_sale_ac += float(prof_today.get(str(h_mod), 1.0)) * budget_data.get("occupancy_coefficient", 1.0)
-                    
-                    # Energy available for selling (AC side)
-                    # (Starting DC - Needed DC Reserve) * eff - House Cons during sale
-                    delta_dc_available = energy_at_start - total_reserve_dc_at_end
-                    available_to_dump_ac = (delta_dc_available * eff) - cons_during_sale_ac
-                    
-                    power_needed = max(0.0, available_to_dump_ac / hours_count)
-                    plan_power = power_needed
-
-                    # Final SOC Projection After Sale
-                    # We subtract actual planned sale + actual house cons from starting DC
-                    actual_sale_ac = min(available_to_dump_ac, max_power * hours_count if max_power > 0 else 999.0)
-                    dc_spent_during_sale = (max(0.0, actual_sale_ac) + cons_during_sale_ac) / eff if eff > 0 else (actual_sale_ac + cons_during_sale_ac)
-                    energy_after_sale = max(0.0, energy_at_start - dc_spent_during_sale)
-                    
-                    # Final SOC Projection at 08:00 AM tomorrow
-                    # Subtracting the night consumption (converted to DC) from the state after sale
-                    dc_spent_at_night = energy_needed_after_ac / eff if eff > 0 else energy_needed_after_ac
-                    energy_morning = max(0.0, energy_after_sale - dc_spent_at_night)
-                    
-                    sim_data = {
-                        "projected_soc_at_start_pct": round(float(energy_at_start / batt_cap * 100.0), 1) if batt_cap > 0 else 0,
-                        "projected_soc_after_sale_pct": round(float(energy_after_sale / batt_cap * 100.0), 1) if batt_cap > 0 else 0,
-                        "projected_soc_morning_pct": round(float(energy_morning / batt_cap * 100.0), 1) if batt_cap > 0 else 0,
-                        "reserve_needed_after_sale_kwh": round(float(total_reserve_dc_at_end), 3),
-                        "max_energy_to_sell_kwh": round(float(available_to_dump_ac), 3),
-                        "available_energy_after_sale_kwh": round(float(energy_after_sale), 3)
-                    }
-                else:
-                    power_needed = 0.0
-                    
-                res["sell_simulation_debug"] = sim_data
-                    
-                # Arbitrage Buy-back / Solar Recharge opportunity check
-                buy_prices_store = self.data.get("prices_buy", {})
-                today_buy = buy_prices_store.get(today_str, {})
-                tom_buy = buy_prices_store.get(tomorrow_str, {})
-                all_buy_prices = {}
-                for h_str, p in today_buy.items():
-                    try: all_buy_prices[int(h_str)] = float(str(p).replace(',', '.'))
-                    except ValueError: all_buy_prices[int(h_str)] = 0.0
-                for h_str, p in tom_buy.items():
-                    try: all_buy_prices[int(h_str) + 24] = float(str(p).replace(',', '.'))
-                    except ValueError: all_buy_prices[int(h_str) + 24] = 0.0
-                
-                window_end = 47 if tomorrow_prices else 23
-                future_buy = {h: p for h, p in all_buy_prices.items() if cur_hour < h <= window_end}
-                
-                # 1. Prepare data for consumption simulation
-                today_type = "weekend" if now.weekday() >= 5 else "weekday"
-                tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
-                prof_cons_today = self.get_average_profile("consumption_total", self.custom_period, today_type)
-                prof_cons_tom = self.get_average_profile("consumption_total", self.custom_period, tom_type)
-                prof_gen = self.get_average_profile("generation", self.custom_period, "all")
-                
-                forecast_today = self.get_forecast_value(self.forecast_today_sensor)
-                f_tom = self.get_forecast_value(self.forecast_tomorrow_sensor)
-                coeff_today = self.get_gen_forecast_coefficient(forecast_today, prof_gen, cur_hour + 1, 24)
-                coeff_tom = self.get_gen_forecast_coefficient(f_tom, prof_gen, 0, 24)
-
-                def get_energy_needed(start_h, end_h):
-                    needed = 0.0
-                    for h in range(start_h, end_h):
-                        h_mod = h % 24
-                        if h < 24:
-                            c = float(prof_cons_today.get(str(h_mod), 0.0))
-                            g = float(prof_gen.get(str(h_mod), 0.0)) * coeff_today
-                        else:
-                            c = float(prof_cons_tom.get(str(h_mod), 0.0))
-                            g = float(prof_gen.get(str(h_mod), 0.0)) * coeff_tom
-                        
-                        hour_val = max(0.0, c - g)
-                        if h == cur_hour:
-                            # Account for remaining fraction of the current hour
-                            fraction = max(0.0, (60 - now.minute) / 60.0)
-                            needed += hour_val * fraction
-                        else:
-                            needed += hour_val
-                    return needed
-
-                # Find first hour with solar surplus (starting from next hour)
-                solar_replenish_h = None
-                for h in range(cur_hour + 1, 48):
-                    h_mod = h % 24
-                    if h < 24:
-                        c = float(prof_cons_today.get(str(h_mod), 0.0))
-                        g = float(prof_gen.get(str(h_mod), 0.0)) * coeff_today
-                    else:
-                        c = float(prof_cons_tom.get(str(h_mod), 0.0))
-                        g = float(prof_gen.get(str(h_mod), 0.0)) * coeff_tom
-                    
-                    if g > (c + 0.5): # Significant surplus
-                        solar_replenish_h = h
-                        break
-                
-                cur_sell_p = all_prices.get(cur_hour, 0.0)
-                eff = self.get_efficiency_coefficient()
-                min_profit_threshold = self.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
-                min_soc_reserve = self.get_setting(CONF_MIN_SOC_BUY, 10.0)
-                
-                available_kwh = (batt_soc / 100.0) * batt_cap
-                reserve_kwh = (min_soc_reserve / 100.0) * batt_cap
-                
-                opportunities = []
-                
-                # Check for future better sell opportunities before refill
-                # This ensures we don't dump energy at a low price if we can get more 1-2 hours later.
-                refill_h_any = solar_replenish_h
-                if future_buy:
-                    m_buy_h = min(future_buy, key=future_buy.get)
-                    if refill_h_any is None or m_buy_h < refill_h_any:
-                        refill_h_any = m_buy_h
-                
-                wait_for_better_note = None
-                if refill_h_any:
-                    better_h_list = [h for h in range(cur_hour + 1, refill_h_any)
-                                    if all_prices.get(h, 0.0) > cur_sell_p + 0.01]
-                    if better_h_list:
-                        spare_kwh = available_kwh - reserve_kwh - get_energy_needed(cur_hour, refill_h_any)
-                        # We need energy to cover all better hours at max power
-                        if spare_kwh < (len(better_h_list) * max_power):
-                            best_future_h = max(better_h_list, key=lambda h: all_prices.get(h, 0.0))
-                            wait_for_better_note = f"Ожидаем пик цены в {_format_hour_simple(best_future_h)} ({round(all_prices.get(best_future_h), 2)})"
-
-                # Method 1: Solar (Cost = 0)
-                if solar_replenish_h and not wait_for_better_note:
-                    energy_to_wait = get_energy_needed(cur_hour, solar_replenish_h)
-                    profit_margin = cur_sell_p
-                    if profit_margin > min_profit_threshold:
-                        # DC energy buffer
-                        safe_energy_dc = max(0.0, available_kwh - reserve_kwh - energy_to_wait)
-                        # AC energy available for grid (subtracting house consumption for the current hour)
-                        cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
-                        safe_to_sell_ac = (safe_energy_dc * eff) - cur_h_cons
-                        
-                        if safe_to_sell_ac > 0.01:
-                            opportunities.append({
-                                "total_profit": safe_to_sell_ac * profit_margin,
-                                "power_kw": min(safe_to_sell_ac, max_power),
-                                "note": f"Выгодно продать сейчас: дотянем на остатке до избытка солнца в {_format_hour_simple(solar_replenish_h)}",
-                                "energy_to_wait_kwh": round(float(energy_to_wait), 3),
-                                "available_kwh_after_reserve": round(float(available_kwh - reserve_kwh), 3)
-                            })
-                
-                # Method 2: Grid Arbitrage
-                if future_buy and not wait_for_better_note:
-                    min_buy_h = min(future_buy, key=future_buy.get)
-                    min_buy_p = future_buy[min_buy_h]
-                    real_buy_cost = min_buy_p / eff if eff > 0 else min_buy_p
-                    profit_margin = cur_sell_p - real_buy_cost
-                    
-                    if profit_margin > min_profit_threshold:
-                        energy_to_wait = get_energy_needed(cur_hour, min_buy_h)
-                        safe_energy_dc = max(0.0, float(available_kwh) - float(reserve_kwh) - float(energy_to_wait))
-                        cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
-                        safe_to_sell_ac = (safe_energy_dc * eff) - cur_h_cons
-                        
-                        if safe_to_sell_ac > 0.01:
-                            opportunities.append({
-                                "total_profit": float(safe_to_sell_ac) * float(profit_margin),
-                                "power_kw": min(float(safe_to_sell_ac), float(max_power)),
-                                "note": f"Выгодно продать: откупим из сети в {_format_hour_simple(min_buy_h)} по {round(float(min_buy_p), 2)}",
-                                "energy_to_wait_kwh": round(float(energy_to_wait), 3),
-                                "available_kwh_after_reserve": round(float(available_kwh - reserve_kwh), 3)
-                            })
-
-                best_opp = None
-                if opportunities:
-                    best_opp = max(opportunities, key=lambda x: x["total_profit"])
-                    res["arbitrage_buyback"] = {
-                        "opportunity": True,
-                        "power_kw": round(float(best_opp["power_kw"]), 3),
-                        "note": best_opp["note"],
-                        "available_kwh": round(float(available_kwh), 3),
-                        "reserve_kwh": round(float(reserve_kwh), 3),
-                        "energy_to_wait_kwh": round(float(best_opp.get("energy_to_wait_kwh", 0.0)), 3)
-                    }
-                    if float(best_opp["power_kw"]) > float(power_needed):
-                        # Use arbitrage power even in waiting, but limit to real sense
-                        power_needed = float(best_opp["power_kw"])
-                        if cur_hour not in target_hours:
-                            target_hours = list(target_hours)
-                            target_hours.append(cur_hour)
-                        if cur_hour not in res.get("active_hours", []):
-                            if "active_hours" not in res: res["active_hours"] = []
-                            res["active_hours"].append(cur_hour)
-                else:
-                    # Potential calculation for UI even if blocked by energy safety
-                    potential_p = 0.0
-                    if cur_hour in all_prices:
-                        # If we already have a detailed simulation for this window, use its AC power limit
-                        if sim_data and sim_data.get("max_energy_to_sell_kwh") is not None:
-                            potential_p = min(float(max_power), float(sim_data["max_energy_to_sell_kwh"]))
-                        elif solar_replenish_h:
-                            p_margin = float(cur_sell_p)
-                            if p_margin > min_profit_threshold:
-                                energy_buffer_dc = max(0.0, available_kwh - reserve_kwh - get_energy_needed(cur_hour, solar_replenish_h))
-                                cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
-                                potential_ac = (energy_buffer_dc * eff) - cur_h_cons
-                                potential_p = max(potential_p, min(float(max_power), max(0.0, potential_ac)))
-                        if not potential_p and future_buy:
-                            min_buy_h = min(future_buy, key=future_buy.get)
-                            r_buy_cost = float(future_buy[min_buy_h]) / float(eff) if eff > 0 else float(future_buy[min_buy_h])
-                            p_margin = float(cur_sell_p) - r_buy_cost
-                            if p_margin > min_profit_threshold:
-                                energy_buffer_dc = max(0.0, available_kwh - reserve_kwh - get_energy_needed(cur_hour, min_buy_h))
-                                cur_h_cons = float(prof_cons_today.get(str(cur_hour), 0.0))
-                                potential_ac = (energy_buffer_dc * eff) - cur_h_cons
-                                potential_p = max(potential_p, min(float(max_power), max(0.0, potential_ac)))
-                    
-                    # Logic for explaining why no arbitrage
-                    reasons = []
-                    cur_p_str = f"Тек.час {cur_hour:02d}:00 ({round(float(cur_sell_p), 2) if cur_hour in all_prices else '?'})"
-                    reasons.append(cur_p_str)
-                    
-                    if wait_for_better_note:
-                        reasons.append(wait_for_better_note)
-                    
-                    if cur_hour in all_prices:
-                        if solar_replenish_h:
-                            p_margin = float(cur_sell_p)
-                            needed_kwh = get_energy_needed(cur_hour, solar_replenish_h)
-                            rem_kwh = max(0.0, available_kwh - reserve_kwh)
-                            diff = round(float(rem_kwh - needed_kwh), 2)
-                            time_label = _format_hour_simple(solar_replenish_h)
-                            if diff < 0:
-                                reasons.append(f"До солнца ({time_label}) дефицит {abs(diff)} кВт·ч")
-                            else:
-                                reasons.append(f"До солнца ({time_label}) избыток {diff} кВт·ч")
-                        
-                        if future_buy:
-                            m_buy_h = min(future_buy, key=future_buy.get)
-                            m_buy_p = future_buy[m_buy_h]
-                            r_buy_cost = float(m_buy_p) / float(eff) if eff > 0 else float(m_buy_p)
-                            p_margin = float(cur_sell_p) - r_buy_cost
-                            time_label = _format_hour_simple(m_buy_h)
-                            
-                            if p_margin <= min_profit_threshold:
-                                reasons.append(f"Выгода {round(float(p_margin), 2)} < порога {round(float(min_profit_threshold), 2)} (откуп в {time_label} по {round(m_buy_p, 2)})")
-                            else:
-                                needed_kwh = get_energy_needed(cur_hour, m_buy_h)
-                                rem_kwh = max(0.0, available_kwh - reserve_kwh)
-                                diff = round(float(rem_kwh - needed_kwh), 2)
-                                if diff < 0:
-                                    reasons.append(f"До откупа ({time_label}) дефицит {abs(diff)} кВт·ч")
-                                else:
-                                    reasons.append(f"До откупа ({time_label}) избыток {diff} кВт·ч")
-
-                    full_note = " | ".join(reasons)
-                    res["arbitrage_buyback"] = {
-                        "opportunity": False,
-                        "power_kw": round(float(potential_p), 3),
-                        "note": full_note,
-                        "available_kwh": round(float(available_kwh), 3),
-                        "reserve_kwh": round(float(reserve_kwh), 3),
-                        "energy_to_wait_kwh": round(float(needed_kwh), 3) if 'needed_kwh' in locals() else 0.0
-                    }
-                
-                # Protect recommended power from showing non-zero values if no plan exists at all
-                if not target_hours and not opportunities:
-                    power_needed = 0.0
-
-        if max_power > 0 and float(power_needed) > float(max_power):
-            power_needed = float(max_power)
-
-        display_p = float(power_needed)
-        if display_p <= 0 and 'plan_power' in locals() and float(plan_power) > 0:
-            display_p = float(plan_power)
-            
-        res["recommended_power_kw"] = round(float(display_p), 3)
-        if 'sim_data' in locals():
-            res["sell_simulation"] = sim_data
-
-        # Final UI Strings Compilation
-        target_hours_sorted = sorted(target_hours)
-        found_periods = []
-        if target_hours_sorted:
-            start = target_hours_sorted[0]
-            prev = target_hours_sorted[0]
-            for h in target_hours_sorted[1:]:
-                if h == prev + 1:
-                    prev = h
-                else:
-                    found_periods.append(_format_period(start, prev))
-                    start = h
-                    prev = h
-            found_periods.append(_format_period(start, prev))
-            
-        res["active_hours"] = list(target_hours_sorted)
-        res["active_hours_formatted"] = ", ".join([_format_hour_simple(int(h)) for h in target_hours_sorted])
-        res["active_periods"] = ", ".join(found_periods)
-
-        if round(float(power_needed), 3) <= 0.0:
-            res["state"] = "idle"
-        else:
-            res["state"] = "active" if cur_hour in target_hours else "idle"
-
-        return res
-
-class ProfileAveragedSensor(SensorEntity):
-    """Sensor exposing Total Average as state and 24-hours array in attributes."""
-    def __init__(self, manager, ptype, period_key, name, days):
+class EnergyBaseSensor(SensorEntity):
+    """Base class for Energy Management sensors to reduce boilerplate."""
+    def __init__(self, manager, name, unique_id_prefix):
         self.manager = manager
-        self.ptype = ptype
-        self.period_key = period_key
-        self.days = days
         self._attr_name = name
-        self._attr_unique_id = f"{manager.entry.entry_id}_{ptype}_{period_key}"
-        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_icon = "mdi:chart-bell-curve-cumulative"
+        self._attr_unique_id = f"{manager.entry.entry_id}_{unique_id_prefix}"
         
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
@@ -2728,9 +1196,20 @@ class ProfileAveragedSensor(SensorEntity):
             manufacturer="Energy AI",
             model="Energy Trader System",
         )
-        
+
     async def async_added_to_hass(self):
+        """Register listener for manager updates."""
         self.manager.register_listener(self.async_write_ha_state)
+
+class ProfileAveragedSensor(EnergyBaseSensor):
+    def __init__(self, manager, ptype, period_key, name, days):
+        super().__init__(manager, name, f"{ptype}_{period_key}")
+        self.ptype = ptype
+        self.period_key = period_key
+        self.days = days
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_icon = "mdi:chart-bell-curve-cumulative"
         
     @property
     def native_value(self):
@@ -2852,24 +1331,13 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
         return self._attr_extra_state_attributes
 
 
-class ConsumptionDeviationSensor(SensorEntity):
+class ConsumptionDeviationSensor(EnergyBaseSensor):
     """Compares current base consumption against historical profile (weekday/weekend aware)."""
     def __init__(self, manager, name):
-        self.manager = manager
-        self._attr_name = name
-        self._attr_unique_id = f"{manager.entry.entry_id}_consumption_deviation"
+        super().__init__(manager, name, "consumption_deviation")
         self._attr_icon = "mdi:gauge"
         self._attr_native_unit_of_measurement = "%"
         self._attr_state_class = SensorStateClass.MEASUREMENT
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(manager.entry.entry_id))},
-            name=manager.entry.data.get("name", "Energy Management"),
-            manufacturer="Energy AI",
-            model="Energy Trader System",
-        )
-
-    async def async_added_to_hass(self):
-        self.manager.register_listener(self.async_write_ha_state)
 
     @property
     def native_value(self):
