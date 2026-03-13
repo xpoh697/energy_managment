@@ -2039,63 +2039,62 @@ class EnergyProfileManager:
             natural_hours = set(target_hours)
             survival_hours = set(target_hours)
             
-                # Optimization Loop: add cheapest bridge hours until SOC doesn't fall below min_soc
-                while True:
-                    added_bridge = False
+            # Optimization Loop: add cheapest bridge hours until SOC doesn't fall below min_soc
+            while True:
+                added_bridge = False
+                
+                # Run unified simulation
+                # Convert survival_hours/natural_hours to command dict for the simulation engine
+                commands = {}
+                for h_cmd in survival_hours:
+                    commands[h_cmd] = max_batt_power # Charging at max power
+                
+                # Simulation up to the end of window
+                sim_range = list(range(cur_hour, active_window[1] + 1))
+                final_soc, log = self.run_soc_simulation(batt_soc, sim_range, now, commands)
+                
+                # Check for violations
+                min_sim_soc_in_run = 100.0
+                violation_hour = None
+                for i, h_step in enumerate(sim_range):
+                    h_label = f"{h_step%24:0>2}:00" + (" (Завтра)" if h_step >= 24 else "")
+                    soc_at_h = log.get(h_label, 100.0)
+                    min_sim_soc_in_run = min(min_sim_soc_in_run, soc_at_h)
                     
-                    # Run unified simulation
-                    # Convert survival_hours/natural_hours to command dict for the simulation engine
-                    commands = {}
-                    for h_cmd in survival_hours:
-                        commands[h_cmd] = max_batt_power # Charging at max power
-                    
-                    # Simulation up to the end of window
-                    sim_range = list(range(cur_hour, active_window[1] + 1))
-                    final_soc, log = self.run_soc_simulation(batt_soc, sim_range, now, commands)
-                    
-                    # Check for violations
-                    min_sim_soc_in_run = 100.0
-                    violation_hour = None
-                    for i, h_step in enumerate(sim_range):
-                        h_label = f"{h_step%24:0>2}:00" + (" (Завтра)" if h_step >= 24 else "")
-                        soc_at_h = log.get(h_label, 100.0)
-                        min_sim_soc_in_run = min(min_sim_soc_in_run, soc_at_h)
+                    target_for_h = soc_targets.get(h_step, min_soc)
+                    if soc_at_h < target_for_h and violation_hour is None:
+                        violation_hour = h_step
+                
+                if violation_hour is not None:
+                    # Find cheapest legal hour between current and violation point
+                    search_space = [sh for sh in range(cur_hour, violation_hour + 1) if sh not in survival_hours and sh in all_prices]
+                    if search_space:
+                        # Efficiency/Profit filters for Arbitrage Prep
+                        target_val = soc_targets.get(violation_hour, min_soc)
+                        if target_val > min_soc and violation_hour in all_sell_prices:
+                            sell_price = all_sell_prices[violation_hour]
+                            search_space = [sh for sh in search_space if is_sell_profitable(sell_price, all_prices[sh])]
                         
-                        target_for_h = soc_targets.get(h_step, min_soc)
-                        if soc_at_h < target_for_h and violation_hour is None:
-                            violation_hour = h_step
-                    
-                    if violation_hour is not None:
-                        # Find cheapest legal hour between current and violation point
-                        search_space = [sh for sh in range(cur_hour, violation_hour + 1) if sh not in survival_hours and sh in all_prices]
                         if search_space:
-                            # Efficiency/Profit filters for Arbitrage Prep
-                            target_val = soc_targets.get(violation_hour, min_soc)
-                            if target_val > min_soc and violation_hour in all_sell_prices:
-                                sell_price = all_sell_prices[violation_hour]
-                                search_space = [sh for sh in search_space if is_sell_profitable(sell_price, all_prices[sh])]
-                            
-                            if search_space:
-                                cheapest_bridge = min(search_space, key=lambda sh: all_prices[sh])
-                                survival_hours.add(cheapest_bridge)
-                                added_bridge = True
+                            cheapest_bridge = min(search_space, key=lambda sh: all_prices[sh])
+                            survival_hours.add(cheapest_bridge)
+                            added_bridge = True
+                
+                if not added_bridge:
+                    # Find cur_hour status in the finalized run
+                    cur_hour_label = f"{cur_hour:0>2}:00"
+                    cur_hour_end_soc = log.get(cur_hour_label)
                     
-                    if not added_bridge:
-                        # Find cur_hour status in the finalized run
-                        cur_hour_label = f"{cur_hour:0>2}:00"
-                        cur_hour_end_soc = log.get(cur_hour_label)
+                    if cur_hour in survival_hours and cur_hour not in natural_hours:
+                        is_arbitrage_prep = any(h_p in profitable_sell_peaks for h_p in range(cur_hour, active_window[1] + 1))
+                        res["charge_reason"] = "arbitrage_prep" if is_arbitrage_prep else "survival"
                         
-                        if cur_hour in survival_hours and cur_hour not in natural_hours:
-                            is_arbitrage_prep = any(h_p in profitable_sell_peaks for h_p in range(cur_hour, active_window[1] + 1))
-                            res["charge_reason"] = "arbitrage_prep" if is_arbitrage_prep else "survival"
-                            
-                            excess = min_sim_soc_in_run - min_soc
-                            if excess > 0 and cur_hour_end_soc is not None:
-                                exact_target = max(batt_soc, cur_hour_end_soc - excess)
-                                res["charge_target_soc"] = round(exact_target, 1)
-                            else:
-                                res["charge_target_soc"] = 100.0
-                        break
+                        excess = min_sim_soc_in_run - min_soc
+                        if excess > 0 and cur_hour_end_soc is not None:
+                            exact_target = max(batt_soc, cur_hour_end_soc - excess)
+                            res["charge_target_soc"] = round(exact_target, 1)
+                        else:
+                            res["charge_target_soc"] = 100.0
                     else:
                         res["charge_reason"] = "price"
                         res["charge_target_soc"] = 100.0
