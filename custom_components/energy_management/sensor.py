@@ -1909,10 +1909,8 @@ class MarketStrategySensor(SensorEntity):
                     current_mode = "Зарядка (Дешевая цена)"
             else:
                 current_mode = "Активная продажа"
-        elif state == "price_limit_not_met" or not active_hours:
+        elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not active_hours:
             current_mode = "Нет ценового окна"
-        elif state == "unprofitable_arbitrage":
-            current_mode = "Арбитраж невыгоден (Деградация АКБ)"
         elif state == "idle":
             current_mode = "Ожидание"
 

@@ -561,7 +561,7 @@ class StrategyEngine:
                     max_arb_gain = gain
                     best_arb_pair = (h_s, h_b)
 
-            global_arb_note = "Арбитраж невыгоден"
+            global_arb_note = "Нет прибыльного арбитража"
             if max_arb_gain >= threshold:
                 s_h, b_h = best_arb_pair
                 global_arb_note = f"Макс. профит: Прод. {all_sell_prices[s_h]:.2f} ({s_h%24:02d}:00) -> Отк. {all_buy_prices[b_h]:.2f} ({b_h%24:02d}:00), выгода {max_arb_gain:.2f} (порог {threshold:.2f})"
@@ -964,7 +964,7 @@ class StrategyEngine:
             if cur_hour in target_hours_sorted and res["recommended_power_kw"] > 0:
                 res["state"] = "active"
             elif not target_hours_sorted:
-                if res["state"] not in ["price_limit_not_met", "unprofitable_arbitrage"]:
+                if res["state"] not in ["price_limit_not_met"]:
                     res["state"] = "price_limit_not_met"
             else:
                 res["state"] = "idle"

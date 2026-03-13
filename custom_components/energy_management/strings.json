@@ -156,8 +156,8 @@
       "market_strategy": {
         "state": {
           "idle": "Idle",
-          "price_limit_not_met": "Price limit not met",
-          "unprofitable_arbitrage": "Unprofitable arbitrage",
+          "price_limit_not_met": "No price window",
+          "unprofitable_arbitrage": "No price window",
           "charging": "Charging",
           "discharging": "Discharging",
           "survival_mode": "Survival mode"

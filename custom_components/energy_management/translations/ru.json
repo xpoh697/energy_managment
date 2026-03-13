@@ -165,8 +165,8 @@
       "market_strategy": {
         "state": {
           "idle": "Ожидание",
-          "price_limit_not_met": "Цена вне лимитов",
-          "unprofitable_arbitrage": "Арбитраж невыгоден",
+          "price_limit_not_met": "Нет ценового окна",
+          "unprofitable_arbitrage": "Нет ценового окна",
           "charging": "Зарядка (Сеть)",
           "discharging": "Разрядка (Продажа)",
           "survival_mode": "Режим выживания (Подзарядка)"
