@@ -840,15 +840,36 @@ class StrategyEngine:
                     }
                 else: # sell
                     base_target = self.manager.get_setting(CONF_TARGET_SOC_SELL, 20.0)
+                    target_soc = base_target
+                    
                     if self.manager.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         budget_data = self.get_budget_and_permissions(self.manager.custom_period, skip_strategy_check=True)
                         expected_night = budget_data.get("expected_consumption", 0.0)
                         eff_coeff = budget_data.get("efficiency_coefficient", 1.0)
                         min_soc_reserve = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
+                        
                         expected_night_from_batt = expected_night / eff_coeff if eff_coeff > 0 else expected_night
                         ai_soc_reserve = (expected_night_from_batt / batt_cap * 100.0) + min_soc_reserve
-                        target_soc = max(base_target, ai_soc_reserve)
-                    else: target_soc = base_target
+                        
+                        # Decision logic: 
+                        # Is selling now (and buying back at cheap hour) better than saving for tomorrow's morning consumption?
+                        cur_p = today_prices.get(str(cur_hour), 0.0)
+                        try: cur_p = float(str(cur_p).replace(',', '.'))
+                        except ValueError: cur_p = 0.0
+                        
+                        cheap_p_back, _ = get_best_buyback(cur_hour)
+                        # Profit if we sell now and buy back
+                        arb_gain = (cur_p - cheap_p_back) * eff_coeff - deg_cost
+                        
+                        # "Holding" gain = saving money on future purchase at standard buy limit
+                        hold_gain = (buy_limit - cur_p) # simplified, if holding saves us from buying at buy_limit later
+                        
+                        if arb_gain > 0.05: # Arbitrage is clearly better (adjustable margin)
+                            target_soc = base_target
+                            res["arbitrage_decision"] += " | Цель: Продажа (Арбитраж выгоднее хранения)"
+                        else:
+                            target_soc = max(base_target, ai_soc_reserve)
+                            res["arbitrage_decision"] += " | Цель: Хранение (До солнца)"
                     
                     target_soc = min(100.0, target_soc)
                     if len(target_hours) > 0:
