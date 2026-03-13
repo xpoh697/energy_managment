@@ -451,6 +451,11 @@ class StrategyEngine:
             "today_prices": {},
             "tomorrow_prices": {},
             "multi_cycle": "Не предвидится",
+            "sell_simulation": {
+                "projected_soc_at_start_pct": 0,
+                "projected_soc_after_sale_pct": 0,
+                "projected_soc_morning_pct": 0
+            },
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
         
@@ -796,6 +801,52 @@ class StrategyEngine:
                     if len(target_hours) > 0:
                         delta_available = batt_energy_val - (target_soc * batt_cap / 100.0)
                         power_needed = max(0.0, (delta_available * eff_coeff) / len(target_hours))
+
+                    # --- BUYBACK OPPORTUNITY (ARBITRAGE) ---
+                    # Find cheapest buy price in the window
+                    buy_prices = all_prices # all_prices contains buy prices for 'buy' mode, but here we are in 'sell' mode.
+                    # Wait, all_prices here depends on 'mode'. If mode=='sell', all_prices are sell prices.
+                    # We need BUY prices to check for buyback.
+                    buy_prices_today = self.manager.data.get("prices_buy", {}).get(today_str, {})
+                    buy_prices_tom = self.manager.data.get("prices_buy", {}).get(tomorrow_str, {})
+                    full_buy_prices = {}
+                    for h, p in buy_prices_today.items():
+                        try: full_buy_prices[int(h)] = float(str(p).replace(',', '.'))
+                        except ValueError: full_buy_prices[int(h)] = 0.0
+                    for h, p in buy_prices_tom.items():
+                        try: full_buy_prices[int(h) + 24] = float(str(p).replace(',', '.'))
+                        except ValueError: full_buy_prices[int(h) + 24] = 0.0
+                    
+                    if full_buy_prices:
+                        cheapest_h = min([h for h in full_buy_prices if h > max(target_hours or [cur_hour])], key=lambda h: full_buy_prices[h], default=None)
+                        if cheapest_h is not None:
+                            cheap_p = full_buy_prices[cheapest_h]
+                            cur_sell_p = today_prices.get(str(cur_hour), 0.0)
+                            try: cur_sell_p = float(str(cur_sell_p).replace(',', '.'))
+                            except ValueError: cur_sell_p = 0.0
+                            
+                            buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
+                            if (cur_sell_p - cheap_p) * eff_coeff >= deg_cost:
+                                res["arbitrage_buyback"] = {
+                                    "opportunity": True,
+                                    "power_kw": power_needed if cur_hour in target_hours else 0.0,
+                                    "available_kwh": round(batt_energy_val, 2),
+                                    "reserve_kwh": round(target_soc * batt_cap / 100.0, 2),
+                                    "energy_to_wait_kwh": round(max(0.0, (target_soc * batt_cap / 100.0) - batt_energy_val), 2),
+                                    "note": f"Выгодно: продажа по {cur_sell_p}, откуп по {cheap_p} в {cheapest_h%24:02d}:00"
+                                }
+
+                    # --- SELL SIMULATION ---
+                    sim_range = list(range(cur_hour, active_window[1] + 1))
+                    sim_commands = {h: -max_power for h in target_hours if h >= cur_hour}
+                    _, sim_log = self.run_soc_simulation(batt_soc, sim_range, now, sim_commands)
+                    
+                    res["sell_simulation"] = {
+                        "projected_soc_at_start_pct": round(batt_soc, 1),
+                        "projected_soc_after_sale_pct": round(sim_log.get(f"{max(target_hours or [cur_hour])%24:02d}:00", 0.0), 1),
+                        "projected_soc_morning_pct": round(sim_log.get("08:00 (Завтра)", sim_log.get("08:00", 0.0)), 1),
+                        "simulation_log": sim_log
+                    }
                 
             res["recommended_power_kw"] = round(min(float(power_needed), max_power), 3)
             res["active_hours"] = target_hours_sorted
