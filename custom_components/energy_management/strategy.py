@@ -845,6 +845,45 @@ class StrategyEngine:
                     
                     target_soc = min(100.0, target_soc)
                     if len(target_hours) > 0:
+                        # --- DUAL STRATEGY ARBITRAGE ANALYSIS ---
+                        # Strategy 1: Last until Solar
+                        # We only need to keep enough for tonight's consumption
+                        # Strategy 2: Last until next Cheap Hour (Buyback)
+                        # Identify the cheapest buyback hour and price
+                        
+                        full_buy_prices = {}
+                        buy_prices_today = self.manager.data.get("prices_buy", {}).get(today_str, {})
+                        buy_prices_tom = self.manager.data.get("prices_buy", {}).get(tomorrow_str, {})
+                        for h, p in buy_prices_today.items():
+                            try: full_buy_prices[int(h)] = float(str(p).replace(',', '.'))
+                            except ValueError: continue
+                        for h, p in buy_prices_tom.items():
+                            try: full_buy_prices[int(h) + 24] = float(str(p).replace(',', '.'))
+                            except ValueError: continue
+                            
+                        # Find cheapest buyback after current sell hours
+                        future_buy = {h: p for h, p in full_buy_prices.items() if h > max(target_hours)}
+                        cheapest_h = min(future_buy, key=future_buy.get) if future_buy else None
+                        cheap_p = future_buy[cheapest_h] if cheapest_h else 999.0
+                        
+                        cur_sell_p = today_prices.get(str(cur_hour), 0.0)
+                        try: cur_sell_p = float(str(cur_sell_p).replace(',', '.'))
+                        except ValueError: cur_sell_p = 0.0
+                        
+                        # Calculation Logic:
+                        # Gain = (Sell Price - Buy Price) * Efficiency - Degradation
+                        gain_per_kwh = (cur_sell_p - cheap_p) * eff_coeff - deg_cost
+                        
+                        # Comparison:
+                        # If gain is high, we can sell more (down to AI target SOC or even lower if arbitrage is great)
+                        # For now, we use the AI target as a "safe" limit, but prioritize reporting the best path.
+                        
+                        sell_strategy_note = "Продажа до солнца (стандарт)"
+                        if cheapest_h and gain_per_kwh > 0:
+                            sell_strategy_note = f"Арбитраж: откуп по {cheap_p:.2f} в {cheapest_h%24:02d}:00 (Профит {gain_per_kwh:.2f}/кВтч)"
+                        
+                        res["arbitrage_decision"] += f" | {sell_strategy_note}"
+
                         delta_available = batt_energy_val - (target_soc * batt_cap / 100.0)
                         power_needed = max(0.0, (delta_available * eff_coeff) / len(target_hours))
 
