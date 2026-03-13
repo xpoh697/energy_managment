@@ -7,6 +7,10 @@ from homeassistant.util import dt as dt_util
 from .const import *
 from .utils import get_kwh_val, normalize_float, get_price_from_store
 
+# Legacy aliases for safety during refactoring synchronization
+_get_kwh_val = get_kwh_val
+_normalize_float = normalize_float
+
 _LOGGER = logging.getLogger(__name__)
 
 

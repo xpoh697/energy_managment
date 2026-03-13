@@ -15,6 +15,11 @@ from .const import *
 from .strategy import StrategyEngine
 from .utils import get_kwh_val, normalize_float, get_price_from_store
 
+# Legacy aliases for safety during refactoring synchronization
+_get_kwh_val = get_kwh_val
+_normalize_float = normalize_float
+_get_stored_price = get_price_from_store
+
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
