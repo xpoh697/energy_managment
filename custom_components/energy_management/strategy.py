@@ -712,6 +712,10 @@ class StrategyEngine:
                         
                         res["target_price"] = target_price
                         
+                        cur_p = today_prices.get(str(cur_hour), 0.0)
+                        try: cur_p = float(str(cur_p).replace(',', '.'))
+                        except ValueError: cur_p = 0.0
+                        
                         cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
                         cur_gain = (cur_p - cheap_p_back) * eff
                         
@@ -763,7 +767,7 @@ class StrategyEngine:
                         break
                 target_hours = list(survival_hours)
 
-            res["limit_used"] = limit
+            res["limit_used"] = buy_limit if mode == "buy" else sell_limit
             future_active = [h for h in target_hours if h >= cur_hour]
             if future_active:
                 upcoming_h = future_active[0]
