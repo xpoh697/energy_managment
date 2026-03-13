@@ -555,24 +555,8 @@ class StrategyEngine:
             if mode == "buy":
                 limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 99.0)
                 res["limit_used"] = limit
-                if negative_hours:
-                    # Carte blanche: we buy whenever price is negative, ignore windows
-                    target_hours = negative_hours
-                    target_price = min([all_prices[h] for h in negative_hours])
-                    res["target_price"] = target_price
-                    carte_blanche = True
-                else:
-                    peaks_today = get_peaks(window_today, False, limit, tolerance)
-                    peaks_tom = get_peaks(window_tomorrow, False, limit, tolerance)
-                    combined = peaks_today + peaks_tom
-                    if combined:
-                        target_hours = [h for h, p in combined]
-                        target_price = min(p for h, p in combined)
-                        res["target_price"] = target_price
-                        res["limit_used"] = limit
 
                 # --- ARBITRAGE OPPORTUNITY PRE-CALCULATION ---
-                # Identify high-price SELL peaks to prepare the battery in advance
                 sell_prices_today = self.manager.data.get("prices_sell", {}).get(today_str, {})
                 sell_prices_tom = self.manager.data.get("prices_sell", {}).get(tomorrow_str, {})
                 all_sell_prices = {}
@@ -588,20 +572,48 @@ class StrategyEngine:
                 eff = eff_coeff
                 min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
 
-                def is_sell_profitable(sell_p, buy_p):
+                def is_buy_profitable_arb(buy_p, hour):
+                    # Check if buying at this price is profitable against ANY future sell peak
                     threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
-                    return (sell_p - buy_p) * eff >= threshold
+                    future_sell_prices = [p_s for h_s, p_s in all_sell_prices.items() if h_s > hour and p_s >= sell_limit]
+                    if not future_sell_prices: return False
+                    max_future_sell = max(future_sell_prices)
+                    return (max_future_sell - buy_p) * eff >= threshold
 
                 profitable_sell_peaks = []
                 if all_sell_prices:
+                    buy_limit_temp = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
                     for h_s, p_s in all_sell_prices.items():
-                        if h_s >= cur_hour and p_s >= sell_limit and is_sell_profitable(p_s, buy_limit):
+                        if h_s >= cur_hour and p_s >= sell_limit and (p_s - buy_limit_temp) * eff >= (min_p if min_p >= deg_cost else (2 * deg_cost)):
                             profitable_sell_peaks.append(h_s)
+
+                if profitable_sell_peaks:
+                    res["arbitrage_decision"] = f"Обнаружено {len(profitable_sell_peaks)} выгодных периодов для будущей продажи"
+                else:
+                    res["arbitrage_decision"] = "Выгодных периодов для арбитража в ближайшие 48 часов не обнаружено"
+
+                if negative_hours:
+                    # Carte blanche: we buy whenever price is negative, ignore windows
+                    target_hours = negative_hours
+                    target_price = min([all_prices[h] for h in negative_hours])
+                    res["target_price"] = target_price
+                    carte_blanche = True
+                else:
+                    # Identify peaks based on Buy Limit OR Arbitrage Profitability
+                    def is_valid_buy(h, p):
+                        return p <= limit or is_buy_profitable_arb(p, h)
+
+                    wt_filtered = {h: p for h, p in window_today.items() if is_valid_buy(h, p)}
+                    wom_filtered = {h: p for h, p in window_tomorrow.items() if is_valid_buy(h, p)}
                     
-                    if profitable_sell_peaks:
-                        res["arbitrage_decision"] = f"Обнаружено {len(profitable_sell_peaks)} выгодных периодов для будущей продажи"
-                    else:
-                        res["arbitrage_decision"] = "Выгодных периодов для арбитража в ближайшие 48 часов не обнаружено"
+                    peaks_today = get_peaks(wt_filtered, False, 999.0, tolerance) # Use a high limit as filtering is done by is_valid_buy
+                    peaks_tom = get_peaks(wom_filtered, False, 999.0, tolerance) # Use a high limit as filtering is done by is_valid_buy
+                    combined = peaks_today + peaks_tom
+                    if combined:
+                        target_hours = [h for h, p in combined]
+                        target_price = min(p for h, p in combined)
+                        res["target_price"] = target_price
+                        res["limit_used"] = limit
             else: # sell
                 limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, -99.0)
                 res["limit_used"] = limit
@@ -784,7 +796,7 @@ class StrategyEngine:
             if batt_cap > 0:
                 if mode == "buy":
                     base_target = self.manager.get_setting(CONF_TARGET_SOC_BUY, 100.0)
-                    if negative_hours: target_soc = 100.0
+                    if negative_hours or (locals().get('profitable_sell_peaks') or False): target_soc = 100.0
                     elif self.manager.get_setting(CONF_DYNAMIC_SOC_BUY, True):
                         budget_data = self.get_budget_and_permissions(self.manager.custom_period, skip_strategy_check=True)
                         expected_night = budget_data.get("expected_consumption", 0.0)
