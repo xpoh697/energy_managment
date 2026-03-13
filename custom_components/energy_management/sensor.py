@@ -1832,24 +1832,34 @@ class EnergyBudgetSensor(SensorEntity):
     def _calculate(self):
         try:
             res = self.manager.get_budget_and_permissions(self.days_for_profile)
-            self._state = float(res.get("initial_budget", 0.0))
+            if not isinstance(res, dict):
+                res = {}
+                
+            def _sr(v, default=0.0):
+                """Safe round."""
+                try:
+                    return round(float(v if v is not None else default), 3)
+                except (TypeError, ValueError):
+                    return round(float(default), 3)
+
+            self._state = float(res.get("initial_budget", 0.0) or 0.0)
             self._attrs = {
                 "permissions": res.get("permissions", {}),
                 "permissions_reasons": res.get("permissions_reasons", {}),
-                "forecast_remaining_kwh": round(res.get("forecast_val", 0.0), 3),
-                "forecast_raw_kwh": round(res.get("forecast_raw", 0.0), 3),
-                "forecast_coefficient_blended": round(res.get("forecast_coefficient", 1.0), 3),
-                "forecast_coefficient_history": round(res.get("forecast_hist_coefficient", 1.0), 3),
-                "forecast_coefficient_today": round(res.get("forecast_today_coefficient", 1.0), 3),
-                "battery_energy_kwh": round(res.get("batt_energy_val", 0.0), 3),
-                "expected_consumption_kwh": round(res.get("expected_consumption", 0.0), 3),
-                "occupancy_coefficient": round(res.get("occupancy_coefficient", 1.0), 3),
+                "forecast_remaining_kwh": _sr(res.get("forecast_val")),
+                "forecast_raw_kwh": _sr(res.get("forecast_raw")),
+                "forecast_coefficient_blended": _sr(res.get("forecast_coefficient", 1.0), 1.0),
+                "forecast_coefficient_history": _sr(res.get("forecast_hist_coefficient", 1.0), 1.0),
+                "forecast_coefficient_today": _sr(res.get("forecast_today_coefficient", 1.0), 1.0),
+                "battery_energy_kwh": _sr(res.get("batt_energy_val")),
+                "expected_consumption_kwh": _sr(res.get("expected_consumption")),
+                "occupancy_coefficient": _sr(res.get("occupancy_coefficient", 1.0), 1.0),
                 "occupancy_persons_home": self.manager.get_current_occupancy() if self.manager.presence_sensors else "N/A",
-                "efficiency_coefficient": round(res.get("efficiency_coefficient", 1.0), 3),
-                "debug_actual_today": round(res.get("debug_actual_today", 0), 3),
-                "debug_expected_today_total": round(res.get("debug_expected_today_total", 0), 3),
-                "debug_expected_today_so_far": round(res.get("debug_expected_today_so_far", 0), 3),
-                "debug_fraction_so_far": round(res.get("debug_fraction_so_far", 0), 3),
+                "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
+                "debug_actual_today": _sr(res.get("debug_actual_today")),
+                "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
+                "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
+                "debug_fraction_so_far": _sr(res.get("debug_fraction_so_far")),
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
@@ -1919,9 +1929,9 @@ class MarketStrategySensor(SensorEntity):
             "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
             "active_hours": res.get("active_hours_formatted", ""),
             "active_periods": res.get("active_periods", ""),
-            "target_price": round(res["target_price"], 3),
-            "limit_used": round(res["limit_used"], 3),
-            "recommended_power_kw": res["recommended_power_kw"],
+            "target_price": round(float(res.get("target_price", 0.0) or 0.0), 3),
+            "limit_used": round(float(res.get("limit_used", 0.0) or 0.0), 3),
+            "recommended_power_kw": res.get("recommended_power_kw", 0.0),
             "current_mode": current_mode,
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt
@@ -2200,23 +2210,25 @@ class PaybackSensor(SensorEntity):
         sim_batt_double = self.manager.run_investment_simulation(extra_batt_kwh=batt_cap)
         extra_monthly = sim_batt_double['monthly_estimate']
         
-        battery_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
-        
         payback_years_upgrade = "N/A"
         roi_upgrade = 0.0
-        if battery_cost > 0 and extra_monthly > 0:
-            payback_years_upgrade = round(battery_cost / (extra_monthly * 12), 2)
-            roi_upgrade = round(((extra_monthly * 12) / battery_cost) * 100, 1)
+        try:
+            battery_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
+            if battery_cost > 0 and extra_monthly > 0:
+                payback_years_upgrade = round(float(battery_cost / (extra_monthly * 12)), 2)
+                roi_upgrade = round(float(((extra_monthly * 12) / battery_cost) * 100), 1)
+        except Exception:
+            pass
 
         return {
             "total_investment": f"{total_cost} {self._currency}",
-            "cumulative_savings": f"{round(total_saved, 2)} {self._currency}",
-            "remaining_amount": f"{round(remaining, 2)} {self._currency}",
-            "average_daily_saving": f"{round(avg_daily, 2)} {self._currency}",
+            "cumulative_savings": f"{round(float(total_saved or 0.0), 2)} {self._currency}",
+            "remaining_amount": f"{round(float(remaining or 0.0), 2)} {self._currency}",
+            "average_daily_saving": f"{round(float(avg_daily or 0.0), 2)} {self._currency}",
             "estimated_payback_days": days_rem if total_cost > 0 else "N/A",
             "estimated_payback_date": payback_date if total_cost > 0 else "N/A",
             "simulation_days": sim_batt_double.get("days_simulated", 0),
-            "upgrade_batt_cap_kwh": round(batt_cap, 2),
+            "upgrade_batt_cap_kwh": round(float(batt_cap or 0.0), 2),
             "upgrade_batt_cost": f"{battery_cost} {self._currency}",
             "upgrade_potential_benefit": f"+{extra_monthly} {self._currency}/мес",
             "upgrade_payback_years": payback_years_upgrade,

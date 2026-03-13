@@ -29,6 +29,7 @@ class StrategyEngine:
     
     def __init__(self, manager):
         self.manager = manager
+        self._calculating_strategy = False
 
     @staticmethod
     def get_cc_cv_ratio(soc):
@@ -186,6 +187,14 @@ class StrategyEngine:
         now = dt_util.now()
         cur_hour = now.hour
         
+        if self._calculating_strategy and not skip_strategy_check:
+            # Recursion guard
+            skip_strategy_check = True
+
+        old_calc = self._calculating_strategy
+        self._calculating_strategy = True
+        try:
+        
         # 1. Solar adjustment
         forecast_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor) or 0.0
         
@@ -321,24 +330,26 @@ class StrategyEngine:
                 else:
                     permissions_reasons[sensor_id] = f"Блокировка: Не хватает энергии (нужно {round(float(needed), 2)} кВт*ч, доступно {round(float(available_budget), 2)} кВт*ч)"
                 
-        return {
-            "initial_budget": initial_budget,
-            "permissions": permissions,
-            "permissions_reasons": permissions_reasons,
-            "forecast_val": forecast_val_adjusted,
-            "forecast_raw": forecast_val,
-            "forecast_coefficient": blended_coeff,
-            "forecast_hist_coefficient": hist_coeff,
-            "forecast_today_coefficient": today_coeff,
-            "batt_energy_val": batt_energy_val,
-            "expected_consumption": expected_consumption,
-            "debug_actual_today": actual_today,
-            "debug_expected_today_total": expected_today_total,
-            "debug_expected_today_so_far": expected_today_so_far,
-            "debug_fraction_so_far": fraction_so_far,
-            "occupancy_coefficient": occ_coeff,
-            "efficiency_coefficient": eff_coeff
-        }
+            return {
+                "initial_budget": float(initial_budget or 0.0),
+                "permissions": permissions or {},
+                "permissions_reasons": permissions_reasons or {},
+                "forecast_val": float(forecast_val_adjusted or 0.0),
+                "forecast_raw": float(forecast_val or 0.0),
+                "forecast_coefficient": float(blended_coeff or 1.0),
+                "forecast_hist_coefficient": float(hist_coeff or 1.0),
+                "forecast_today_coefficient": float(today_coeff or 1.0),
+                "batt_energy_val": float(batt_energy_val or 0.0),
+                "expected_consumption": float(expected_consumption or 0.0),
+                "debug_actual_today": float(actual_today or 0.0),
+                "debug_expected_today_total": float(expected_today_total or 0.0),
+                "debug_expected_today_so_far": float(expected_today_so_far or 0.0),
+                "debug_fraction_so_far": float(fraction_so_far or 0.0),
+                "occupancy_coefficient": float(occ_coeff or 1.0),
+                "efficiency_coefficient": float(eff_coeff or 1.0)
+            }
+        finally:
+            self._calculating_strategy = old_calc
 
     def run_soc_simulation(self, start_soc, sim_range, now, commands=None):
         """
@@ -445,6 +456,10 @@ class StrategyEngine:
             "multi_cycle": "Не предвидится",
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
+        
+        old_calc = self._calculating_strategy
+        self._calculating_strategy = True
+        try:
         
         now = dt_util.now()
         cur_hour = now.hour
@@ -777,3 +792,5 @@ class StrategyEngine:
         res["active_periods"] = ", ".join(found_periods)
         res["state"] = "active" if cur_hour in target_hours_sorted and res["recommended_power_kw"] > 0 else "idle"
         return res
+    finally:
+        self._calculating_strategy = old_calc
