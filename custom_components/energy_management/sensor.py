@@ -389,9 +389,9 @@ class EnergyProfileManager:
         gen_kw = 0.0
 
         if self.power_load_sensors:
-            load_kw = sum((_get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_load_sensors)
+            load_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_load_sensors)
         if self.power_gen_sensors:
-            gen_kw = sum((_get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors)
+            gen_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors)
 
         self.power_history.append({"time": now, "load_kw": float(load_kw), "gen_kw": float(gen_kw)})
 
@@ -653,7 +653,7 @@ class EnergyProfileManager:
             past_dt = now - timedelta(hours=1)
             past_date_str = past_dt.strftime("%Y-%m-%d")
 
-            p_sell = _get_stored_price(self.data.get("prices_sell", {}), past_date_str, past_hour)
+            p_sell = self.get_price("sell", past_date_str, past_hour)
 
             gen_h  = self.current_generation
             cons_h = self.current_consumption_total
@@ -1627,12 +1627,12 @@ class InverterOperationModeSensor(SensorEntity):
                 else:
                     # Fallback if no history yet
                     if getattr(self.manager, "power_load_sensors", []) and getattr(self.manager, "power_gen_sensors", []):
-                        load_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
-                        gen_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+                        load_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
+                        gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
                         if gen_kw <= load_kw + 0.1:
                             instant_ok = False
                     elif getattr(self.manager, "power_gen_sensors", []):
-                        gen_kw = sum((_get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+                        gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
                         if gen_kw < 0.1:
                             instant_ok = False
 
@@ -2395,7 +2395,7 @@ class BatteryAutonomySensor(SensorEntity):
         load_kw = self.manager.avg_load_kw
         if load_kw <= 0.005:
             # Check instant power if average is 0
-            load_kw = sum((_get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
+            load_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
 
         if load_kw <= 0.005:
             return 99.0 # Effectively infinity for the sensor state

@@ -638,7 +638,7 @@ class StrategyEngine:
                                         val_sum = 0.0
                                         for fsensor in fsensors:
                                             st = self.manager.hass.states.get(fsensor)
-                                            v = _get_kwh_val(st)
+                                            v = get_kwh_val(st)
                                             if v is not None: val_sum += v
                                     if val_sum > 3.0:
                                         can_recharge = True
