@@ -24,6 +24,7 @@ def _get_kwh_val(state_obj):
         return val * 1000.0
     return val
 
+# Market Strategy Engine v5.1 - Fixed NameError
 class StrategyEngine:
     """Mathematical engine for energy management strategies and simulations."""
     
@@ -638,8 +639,8 @@ class StrategyEngine:
                     cheap_p_back, _ = get_best_buyback(hour)
                     return (price - cheap_p_back) * eff >= threshold
 
-                raw_peaks_today = get_peaks(window_today, True, 999.0, tolerance)
-                raw_peaks_tom = get_peaks(window_tomorrow, True, 999.0, tolerance)
+                raw_peaks_today = get_peaks(window_today, True, 0.0, tolerance)
+                raw_peaks_tom = get_peaks(window_tomorrow, True, 0.0, tolerance)
                 
                 if not raw_peaks_today and not raw_peaks_tom:
                     res["state"] = "price_limit_not_met"
