@@ -1473,101 +1473,7 @@ class EnergyProfileManager:
             # We consider it "solar time" if historically we generate > 100Wh this hour, or the sun is simply up.
             is_solar_or_free = True
             
-        return initial_budget, is_solar_or_free
 
-    def run_soc_simulation(self, start_soc, sim_hours_abs, start_time=None, charge_commands=None):
-        """
-        Universal SOC simulation engine.
-        sim_hours_abs: List of absolute hours (e.g. [11, 12, 13...24, 25...])
-        start_time: Current datetime for fractional first hour.
-        charge_commands: Optional dict {abs_hour: kw_power} (positive=charge, negative=sell/discharge)
-        """
-        if not sim_hours_abs:
-            return start_soc, {}
-
-        now = start_time or dt_util.now()
-        
-        # Safety check for battery state
-        _, batt_cap, _ = self.get_battery_state()
-        if batt_cap <= 0:
-            return start_soc, {}
-
-        # 1. Standard Forecast and Coefficients
-        f_today = self.get_forecast_value(self.forecast_today_sensor)
-        f_tom = self.get_forecast_value(self.forecast_tomorrow_sensor)
-        
-        day_type_today = "weekend" if now.weekday() >= 5 else "weekday"
-        tomorrow_dt = now + timedelta(days=1)
-        day_type_tom = "weekend" if tomorrow_dt.weekday() >= 5 else "weekday"
-        
-        prof_gen = self.get_average_profile("generation", self.custom_period, "all")
-        prof_cons_today = self.get_average_profile("consumption_total", self.custom_period, day_type_today)
-        prof_cons_tom = self.get_average_profile("consumption_total", self.custom_period, day_type_tom)
-        
-        total_hist_gen = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
-        # Determine sunset for 'remaining' logic
-        sunset_h = 17 
-        sun_state = self.hass.states.get("sun.sun")
-        if sun_state and "next_setting" in sun_state.attributes:
-            try:
-                sunset_h = dt_util.parse_datetime(sun_state.attributes["next_setting"]).astimezone(now.tzinfo).hour
-            except Exception: pass
-            
-        hist_gen_rem_today = sum(float(prof_gen.get(str(h), 0.0)) for h in range(now.hour, min(24, sunset_h + 1)))
-        blended_coeff = getattr(self, "last_blended_coeff", 1.0)
-        
-        eff_coeff = self.get_efficiency_coefficient()
-        _, batt_cap, _ = self.get_battery_state()
-        max_batt_p = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-
-        simulated_soc = float(start_soc)
-        history_log = {}
-        fraction_left_in_first_hour = 1.0 - (now.minute / 60.0)
-
-        for i, h_abs in enumerate(sim_hours_abs):
-            real_h = h_abs % 24
-            is_tom = (h_abs >= 24)
-            h_str = str(real_h)
-            
-            step_duration = fraction_left_in_first_hour if i == 0 else 1.0
-            if step_duration <= 0: continue
-
-            # Generation
-            hist_hour_gen = float(prof_gen.get(h_str, 0.0))
-            if is_tom:
-                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_tom) if (f_tom is not None and total_hist_gen > 0) else hist_hour_gen
-            else:
-                expected_gen_kw = (hist_hour_gen / hist_gen_rem_today * f_today) if (f_today is not None and hist_gen_rem_today > 0.1) else hist_hour_gen
-                expected_gen_kw *= blended_coeff
-            
-            # Consumption
-            p_cons = prof_cons_tom if is_tom else prof_cons_today
-            expected_cons_kw = float(p_cons.get(h_str, 0.0))
-            
-            # Additional load scaling (Occupancy)
-            expected_cons_kw *= self.get_occupancy_coefficient()
-            
-            # Combine house activities and commands
-            cmd_p = 0.0
-            if charge_commands and h_abs in charge_commands:
-                cmd_p = float(charge_commands[h_abs])
-            
-            net_house_kw = expected_gen_kw - expected_cons_kw
-            total_net_kw = net_house_kw + cmd_p
-            
-            if total_net_kw > 0.1: # Charging
-                acc_ratio = EnergyProfileManager.get_cc_cv_ratio(simulated_soc)
-                actual_charge_kw = min(total_net_kw * eff_coeff, max_batt_p * acc_ratio)
-                if batt_cap > 0:
-                    simulated_soc = min(100.0, simulated_soc + (actual_charge_kw * step_duration / batt_cap * 100.0))
-            elif total_net_kw < -0.1: # Discharging
-                actual_discharge_kw = abs(total_net_kw) / eff_coeff
-                if batt_cap > 0:
-                    simulated_soc = max(0.0, simulated_soc - (actual_discharge_kw * step_duration / batt_cap * 100.0))
-            
-            history_log[f"{real_h:0>2}:00" + (" (Завтра)" if is_tom else "")] = round(simulated_soc, 1)
-
-        return simulated_soc, history_log
             
         sell_only_pv_threshold = self.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0)
         sale_pv_no_bat_max_hour = self.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
@@ -1804,6 +1710,100 @@ class EnergyProfileManager:
             "occupancy_coefficient": occ_coeff,
             "efficiency_coefficient": eff_coeff
         }
+        
+    def run_soc_simulation(self, start_soc, sim_hours_abs, start_time=None, charge_commands=None):
+        """
+        Universal SOC simulation engine.
+        sim_hours_abs: List of absolute hours (e.g. [11, 12, 13...24, 25...])
+        start_time: Current datetime for fractional first hour.
+        charge_commands: Optional dict {abs_hour: kw_power} (positive=charge, negative=sell/discharge)
+        """
+        if not sim_hours_abs:
+            return start_soc, {}
+
+        now = start_time or dt_util.now()
+        
+        # Safety check for battery state
+        _, batt_cap, _ = self.get_battery_state()
+        if batt_cap <= 0:
+            return start_soc, {}
+
+        # 1. Standard Forecast and Coefficients
+        f_today = self.get_forecast_value(self.forecast_today_sensor)
+        f_tom = self.get_forecast_value(self.forecast_tomorrow_sensor)
+        
+        day_type_today = "weekend" if now.weekday() >= 5 else "weekday"
+        tomorrow_dt = now + timedelta(days=1)
+        day_type_tom = "weekend" if tomorrow_dt.weekday() >= 5 else "weekday"
+        
+        prof_gen = self.get_average_profile("generation", self.custom_period, "all")
+        prof_cons_today = self.get_average_profile("consumption_total", self.custom_period, day_type_today)
+        prof_cons_tom = self.get_average_profile("consumption_total", self.custom_period, day_type_tom)
+        
+        total_hist_gen = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
+        # Determine sunset for 'remaining' logic
+        sunset_h = 17 
+        sun_state = self.hass.states.get("sun.sun")
+        if sun_state and "next_setting" in sun_state.attributes:
+            try:
+                sunset_h = dt_util.parse_datetime(sun_state.attributes["next_setting"]).astimezone(now.tzinfo).hour
+            except Exception: pass
+            
+        hist_gen_rem_today = sum(float(prof_gen.get(str(h), 0.0)) for h in range(now.hour, min(24, sunset_h + 1)))
+        blended_coeff = getattr(self, "last_blended_coeff", 1.0)
+        
+        eff_coeff = self.get_efficiency_coefficient()
+        _, batt_cap, _ = self.get_battery_state()
+        max_batt_p = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+
+        simulated_soc = float(start_soc)
+        history_log = {}
+        fraction_left_in_first_hour = 1.0 - (now.minute / 60.0)
+
+        for i, h_abs in enumerate(sim_hours_abs):
+            real_h = h_abs % 24
+            is_tom = (h_abs >= 24)
+            h_str = str(real_h)
+            
+            step_duration = fraction_left_in_first_hour if i == 0 else 1.0
+            if step_duration <= 0: continue
+
+            # Generation
+            hist_hour_gen = float(prof_gen.get(h_str, 0.0))
+            if is_tom:
+                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_tom) if (f_tom is not None and total_hist_gen > 0) else hist_hour_gen
+            else:
+                expected_gen_kw = (hist_hour_gen / hist_gen_rem_today * f_today) if (f_today is not None and hist_gen_rem_today > 0.1) else hist_hour_gen
+                expected_gen_kw *= blended_coeff
+            
+            # Consumption
+            p_cons = prof_cons_tom if is_tom else prof_cons_today
+            expected_cons_kw = float(p_cons.get(h_str, 0.0))
+            
+            # Additional load scaling (Occupancy)
+            expected_cons_kw *= self.get_occupancy_coefficient()
+            
+            # Combine house activities and commands
+            cmd_p = 0.0
+            if charge_commands and h_abs in charge_commands:
+                cmd_p = float(charge_commands[h_abs])
+            
+            net_house_kw = expected_gen_kw - expected_cons_kw
+            total_net_kw = net_house_kw + cmd_p
+            
+            if total_net_kw > 0.1: # Charging
+                acc_ratio = EnergyProfileManager.get_cc_cv_ratio(simulated_soc)
+                actual_charge_kw = min(total_net_kw * eff_coeff, max_batt_p * acc_ratio)
+                if batt_cap > 0:
+                    simulated_soc = min(100.0, simulated_soc + (actual_charge_kw * step_duration / batt_cap * 100.0))
+            elif total_net_kw < -0.1: # Discharging
+                actual_discharge_kw = abs(total_net_kw) / eff_coeff
+                if batt_cap > 0:
+                    simulated_soc = max(0.0, simulated_soc - (actual_discharge_kw * step_duration / batt_cap * 100.0))
+            
+            history_log[f"{real_h:0>2}:00" + (" (Завтра)" if is_tom else "")] = round(simulated_soc, 1)
+
+        return simulated_soc, history_log
         
     def get_market_strategy(self, mode="buy"):
         res = {
