@@ -609,13 +609,24 @@ class StrategyEngine:
                 if not raw_peaks_today and not raw_peaks_tom:
                     res["state"] = "price_limit_not_met"
                 else:
-                    peaks_today = [(h, p) for h, p in raw_peaks_today if is_profitable(p)]
-                    peaks_tom = [(h, p) for h, p in raw_peaks_tom if is_profitable(p)]
+                    # Parallel strategy: 
+                    # 1. Price is above Sell Limit (Simple sale)
+                    # 2. Price is profitable for arbitrage (Battery cycle)
+                    peaks_today = []
+                    for h, p in raw_peaks_today:
+                        if p >= limit or is_profitable(p):
+                            peaks_today.append((h, p))
+                            
+                    peaks_tom = []
+                    for h, p in raw_peaks_tom:
+                        if p >= limit or is_profitable(p):
+                            peaks_tom.append((h, p))
                     
                     if not peaks_today and not peaks_tom:
                         res["state"] = "unprofitable_arbitrage"
-                        res["multi_cycle"] = "Деградация АКБ > Выгоды"
+                        res["multi_cycle"] = "Деградация АКБ > Выгоды (и цена ниже лимита)"
                     else:
+                        # Success: found target hours either by limit or by profit
                         if peaks_today and peaks_tom:
                             max_h_today = max(h for h, p in peaks_today)
                             min_h_tom = min(h for h, p in peaks_tom)
