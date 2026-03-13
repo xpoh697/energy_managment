@@ -736,7 +736,7 @@ class StrategyEngine:
                 base_target = self.manager.get_setting(CONF_TARGET_SOC_BUY, 100.0)
                 if negative_hours: target_soc = 100.0
                 elif self.manager.get_setting(CONF_DYNAMIC_SOC_BUY, True):
-                    budget_data = self.get_budget_and_permissions(self.manager.custom_period)
+                    budget_data = self.get_budget_and_permissions(self.manager.custom_period, skip_strategy_check=True)
                     expected_night = budget_data.get("expected_consumption", 0.0)
                     forecast = budget_data.get("forecast_val", 0.0)
                     total_avg = sum(self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type).values())
