@@ -599,8 +599,10 @@ class StrategyEngine:
                     return res
                 
                 def is_profitable(price, hour):
-                    cheap_p_back, _ = get_best_buyback(hour)
-                    return (price - cheap_p_back) * eff >= threshold
+                    cheap_p_back, cheap_h = get_best_buyback(hour)
+                    gain = (price - cheap_p_back) * eff
+                    is_ok = gain >= threshold
+                    return is_ok, gain, cheap_p_back, cheap_h
 
                 raw_peaks_today = get_peaks(window_today, True, 0.0, tolerance)
                 raw_peaks_tom = get_peaks(window_tomorrow, True, 0.0, tolerance)
@@ -610,19 +612,35 @@ class StrategyEngine:
                     res["arbitrage_decision"] = f"Ожидание: Пиков не найдено | {global_arb_note}"
                 else:
                     peaks_today = []
+                    today_notes = []
                     for h, p in raw_peaks_today:
-                        if p >= sell_limit or is_profitable(p, h):
+                        ok_arb, gain, cp, ch = is_profitable(p, h)
+                        if p >= sell_limit:
                             peaks_today.append((h, p))
+                        elif ok_arb:
+                            peaks_today.append((h, p))
+                            today_notes.append(f"Arb {p:.2f}->{cp:.2f} (h{ch}) gain {gain:.2f}")
                             
                     peaks_tom = []
                     for h, p in raw_peaks_tom:
-                        if p >= sell_limit or is_profitable(p, h):
+                        ok_arb, gain, cp, ch = is_profitable(p, h)
+                        if p >= sell_limit or ok_arb:
                             peaks_tom.append((h, p))
                     
                     if not peaks_today and not peaks_tom:
-                        res["state"] = "unprofitable_arbitrage"
+                        res["state"] = "price_limit_not_met"
                         res["multi_cycle"] = "Деградация АКБ > Выгоды (и цена ниже лимита)"
-                        res["arbitrage_decision"] = f"Продажа невыгодна: Цена ниже лимита ({sell_limit}) и износа АКБ | {global_arb_note}"
+                        
+                        # Find best potential gain to explain why it's not profitable
+                        best_gain = -999.0
+                        best_info = ""
+                        for h, p in raw_peaks_today:
+                            _, gain, cp, ch = is_profitable(p, h)
+                            if gain > best_gain:
+                                best_gain = gain
+                                best_info = f"Пик {p:.2f} (h{h}) -> Откуп {cp:.2f} (h{ch}), выгода {gain:.2f} < порога {threshold:.2f}"
+                        
+                        res["arbitrage_decision"] = f"Ожидание лимита ({sell_limit}) или арбитража. {best_info or global_arb_note}"
                     else:
                         # Success: found target hours either by limit or by profit
                         if peaks_today and peaks_tom:
