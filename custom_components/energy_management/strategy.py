@@ -451,11 +451,16 @@ class StrategyEngine:
             "today_prices": {},
             "tomorrow_prices": {},
             "multi_cycle": "Не предвидится",
+            "buy_simulation": {
+                "projected_soc_at_start_pct": 0,
+                "projected_soc_at_end_pct": 0
+            },
             "sell_simulation": {
                 "projected_soc_at_start_pct": 0,
                 "projected_soc_after_sale_pct": 0,
                 "projected_soc_morning_pct": 0
             },
+            "charge_plan": {},
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
         
@@ -777,6 +782,7 @@ class StrategyEngine:
                     target_soc = min(100.0, target_soc)
                     sim_soc_plan = batt_soc
                     
+                    charge_commands = {}
                     for h in target_hours_sorted:
                         if h < cur_hour: continue
                         rem_n = len([x for x in (natural_hours_names if 'natural_hours_names' in locals() else target_hours_sorted) if x >= h]) or 1
@@ -784,7 +790,20 @@ class StrategyEngine:
                             p = min(max_power, (batt_cap * (target_soc - sim_soc_plan) / 100.0) / rem_n)
                         else: p = 0.0
                         if h == cur_hour: power_needed = p
+                        charge_commands[h] = p
                         sim_soc_plan = min(100.0, sim_soc_plan + (p / batt_cap * 100.0))
+                    
+                    res["charge_plan"] = {f"{h%24:02d}:00": round(p, 2) for h, p in charge_commands.items()}
+                    
+                    # --- BUY SIMULATION ---
+                    sim_range = list(range(cur_hour, active_window[1] + 1))
+                    _, sim_log = self.run_soc_simulation(batt_soc, sim_range, now, charge_commands)
+                    
+                    res["buy_simulation"] = {
+                        "projected_soc_at_start_pct": round(batt_soc, 1),
+                        "projected_soc_at_end_pct": round(sim_log.get(f"{max(target_hours or [cur_hour])%24:02d}:00", 0.0), 1),
+                        "simulation_log": sim_log
+                    }
                 else: # sell
                     base_target = self.manager.get_setting(CONF_TARGET_SOC_SELL, 20.0)
                     if self.manager.get_setting(CONF_DYNAMIC_SOC_SELL, True):
