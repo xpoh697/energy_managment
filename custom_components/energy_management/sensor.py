@@ -404,15 +404,12 @@ class EnergyProfileManager:
         # Logic: Increment/Decrement based on (Solar_to_Load + Battery_to_Load - Grid_to_Battery)
         if self.price_buy_sensors and self.power_load_sensors and self.power_gen_sensors:
             p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), now.hour) or 0.0
+            p_sell = self.get_price("sell", now.strftime("%Y-%m-%d"), now.hour) or 0.0
 
             batt_p = 0.0
             if self.battery_power_sensor:
                 st = self.hass.states.get(self.battery_power_sensor)
                 batt_p = get_kwh_val(st) or 0.0 # _get_kwh_val handles W/kW conversion
-                if st and st.attributes.get("unit_of_measurement") in ("Wh", "kWh"):
-                    # If it accidentally returned energy instead of power, we should be careful.
-                    # But usually battery_power is W or kW.
-                    pass
 
             # Time delta in hours (polling is roughly 1 min)
             last_run = self.data.get("last_balance_poll_time")
@@ -433,13 +430,17 @@ class EnergyProfileManager:
                     s_avail_for_batt = max(0.0, gen_kw - load_kw)
                     g_to_b = max(0.0, p_charge - s_avail_for_batt)
 
+                    # 4. Grid Export = surplus energy we sold
+                    grid_export_kw = max(0.0, gen_kw + batt_p - load_kw)
+
                     # Net saving power in kW for this moment
                     net_saving_kw = s_to_l + b_to_l - g_to_b
 
-                    step_saving = net_saving_kw * p_buy * dt_h
+                    # Total incremental wallet change: savings from self-consumption + revenue from sales
+                    step_delta = (net_saving_kw * p_buy * dt_h) + (grid_export_kw * p_sell * dt_h)
 
                     current_bal = self.data.get("energy_balance", 0.0)
-                    self.data["energy_balance"] = round(current_bal + step_saving, 4)
+                    self.data["energy_balance"] = round(current_bal + step_delta, 4)
 
             self.data["last_balance_poll_time"] = now_ts
 
@@ -2111,7 +2112,7 @@ class EnergyBalanceSensor(SensorEntity):
     def extra_state_attributes(self):
         return {
             "last_update": datetime.fromtimestamp(self.manager.data.get("last_balance_poll_time", 0)).isoformat() if self.manager.data.get("last_balance_poll_time") else None,
-            "formula": "min(Solar, Load)*Price + max(0, Battery)*Price - Grid_to_Battery*Price",
+            "formula": "Savings(Solar+Battery)*Price_Buy + Export*Price_Sell - GridCharge*Price_Buy",
             "battery_power_sensor": self.manager.battery_power_sensor,
             "current_energy_balance_raw": self.manager.data.get("energy_balance", 0.0)
         }
