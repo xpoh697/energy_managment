@@ -762,6 +762,30 @@ class EnergyProfileManager:
             self.data["temp_max_forecast"] = 0.0
             self.data["temp_daily_waste"] = 0.0
 
+
+
+        # Prune historical prices to keep storage file small
+        # We keep only yesterday, today, and any future forecasts
+        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        for p_key in ["prices_buy", "prices_sell"]:
+            if p_key in self.data:
+                store = self.data[p_key]
+                to_delete = [d for d in store.keys() if d < yesterday_str]
+                for d in to_delete:
+                    del store[d]
+
+        # Save to internal filesystem AFTER all resets
+        await self.async_save()
+        
+        self._notify_update()
+
+    def register_listener(self, update_cb):
+        self.update_listeners.append(update_cb)
+        
+    def _notify_update(self):
+        for cb in self.update_listeners:
+            cb()
+
     async def async_set_setting(self, key, value):
         self.settings[key] = value
         self.data["settings"] = self.settings
@@ -787,30 +811,6 @@ class EnergyProfileManager:
                 elif hour_offset == 0:
                     active_load_kw += p_kw
         return active_load_kw
-
-            # Prune historical prices to keep storage file small
-            # We keep only yesterday, today, and any future forecasts
-            yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-            for p_key in ["prices_buy", "prices_sell"]:
-                if p_key in self.data:
-                    store = self.data[p_key]
-                    to_delete = [d for d in store.keys() if d < yesterday_str]
-                    for d in to_delete:
-                        del store[d]
-
-        # Save to internal filesystem AFTER all resets
-        # This ensures that saved accumulators = 0, saved daily_deduct is fresh,
-        # and sensor_last_values reflect the latest readings at the hour boundary.
-        await self.async_save()
-        
-        self._notify_update()
-
-    def register_listener(self, update_cb):
-        self.update_listeners.append(update_cb)
-        
-    def _notify_update(self):
-        for cb in self.update_listeners:
-            cb()
 
     def _update_prices_from_sensor(self, entity_id, state_obj):
         if not state_obj:
@@ -1032,7 +1032,7 @@ class EnergyProfileManager:
             sh = str(h)
             history = self.data.get("consumption_total", {}).get(sh, [])
             relevant = history[-days:] if days > 0 else history
-            
+            for item in relevant:
                 if not isinstance(item, dict):
                     continue
                 v = normalize_float(item.get("v", 0.0))
@@ -1721,13 +1721,12 @@ class LiveHourlySensor(RestoreEntity, SensorEntity):
         last_state = await self.async_get_last_state()
         if last_state and last_state.state not in ("unknown", "unavailable"):
             val = normalize_float(last_state.state)
-                # Recover into manager if it hasn't accumulated anything since restart
-                if self.ptype == "consumption" and self.manager.current_consumption_base == 0:
-                    self.manager.current_consumption_base = val
-                    self.manager.current_consumption_total = val # We can only guess total from base if restored like this
-                if self.ptype == "generation" and self.manager.current_generation == 0:
-                    self.manager.current_generation = val
-                
+            # Recover into manager if it hasn't accumulated anything since restart
+            if self.ptype == "consumption" and self.manager.current_consumption_base == 0:
+                self.manager.current_consumption_base = val
+                self.manager.current_consumption_total = val # We can only guess total from base if restored like this
+            if self.ptype == "generation" and self.manager.current_generation == 0:
+                self.manager.current_generation = val
         self.manager.register_listener(self.async_write_ha_state)
         
     @property
