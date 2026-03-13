@@ -116,7 +116,20 @@ class StrategyEngine:
                 def _val(x):
                     if isinstance(x, dict):
                         return float(str(x.get("v", 0.0)).replace(',', '.'))
-                    return float(str(x).replace(',', '.'))
+                    # Handle potential string-represented dicts or malformed records
+                    xs = str(x)
+                    if '{' in xs:
+                        try:
+                            # Try simple extraction if it looks like a dict string
+                            import re
+                            match = re.search(r"['\"]v['\"]\s*:\s*([\d\.,]+)", xs)
+                            if match:
+                                return float(match.group(1).replace(',', '.'))
+                        except: pass
+                    try:
+                        return float(xs.replace(',', '.'))
+                    except (ValueError, TypeError):
+                        return 0.0
                 
                 try:
                     c_h = _val(c_h_rec[-d_back])
@@ -188,8 +201,8 @@ class StrategyEngine:
             fraction_so_far = hist_gen_so_far / total_hist_gen
             
         # Today's actual is taken from the daily accumulator (resilient to restart gaps)
-        actual_today = self.manager.data.get("temp_daily_gen", 0.0)
-        expected_today_total = self.manager.data.get("temp_max_forecast", 0.0)
+        actual_today = self.manager.data.get("temp_daily_gen", 0.0) or 0.0
+        expected_today_total = self.manager.data.get("temp_max_forecast", 0.0) or 0.0
         expected_today_so_far = expected_today_total * fraction_so_far
         
         today_coeff = hist_coeff
@@ -205,7 +218,7 @@ class StrategyEngine:
         # 2. Get Battery Energy Available
         batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
         min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
-        eff_coeff = self.get_efficiency_coefficient()
+        eff_coeff = self.get_efficiency_coefficient() or 1.0
                     
         # 3. Get Expected Consumption remaining till end of day
         occ_coeff = self.manager.get_occupancy_coefficient()

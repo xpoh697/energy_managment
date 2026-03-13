@@ -875,7 +875,8 @@ class EnergyProfileManager:
         profile = {}
         for h in range(24):
             sh = str(h)
-            history = self.data[profile_type][sh]
+            h_data = self.data.get(profile_type, {})
+            history = h_data.get(sh, [])
             relevant = history[-days:] if days > 0 else history
             valid_vals = []
             
@@ -1829,26 +1830,31 @@ class EnergyBudgetSensor(SensorEntity):
         return self._attrs
         
     def _calculate(self):
-        res = self.manager.get_budget_and_permissions(self.days_for_profile)
-        self._state = res["initial_budget"]
-        self._attrs = {
-            "permissions": res.get("permissions", {}),
-            "permissions_reasons": res.get("permissions_reasons", {}),
-            "forecast_remaining_kwh": round(res.get("forecast_val", 0.0), 3),
-            "forecast_raw_kwh": round(res.get("forecast_raw", 0.0), 3),
-            "forecast_coefficient_blended": round(res.get("forecast_coefficient", 1.0), 3),
-            "forecast_coefficient_history": round(res.get("forecast_hist_coefficient", 1.0), 3),
-            "forecast_coefficient_today": round(res.get("forecast_today_coefficient", 1.0), 3),
-            "battery_energy_kwh": round(res.get("batt_energy_val", 0.0), 3),
-            "expected_consumption_kwh": round(res.get("expected_consumption", 0.0), 3),
-            "occupancy_coefficient": round(res.get("occupancy_coefficient", 1.0), 3),
-            "occupancy_persons_home": self.manager.get_current_occupancy() if self.manager.presence_sensors else "N/A",
-            "efficiency_coefficient": round(res.get("efficiency_coefficient", 1.0), 3),
-            "debug_actual_today": round(res.get("debug_actual_today", 0), 3),
-            "debug_expected_today_total": round(res.get("debug_expected_today_total", 0), 3),
-            "debug_expected_today_so_far": round(res.get("debug_expected_today_so_far", 0), 3),
-            "debug_fraction_so_far": round(res.get("debug_fraction_so_far", 0), 3),
-        }
+        try:
+            res = self.manager.get_budget_and_permissions(self.days_for_profile)
+            self._state = float(res.get("initial_budget", 0.0))
+            self._attrs = {
+                "permissions": res.get("permissions", {}),
+                "permissions_reasons": res.get("permissions_reasons", {}),
+                "forecast_remaining_kwh": round(res.get("forecast_val", 0.0), 3),
+                "forecast_raw_kwh": round(res.get("forecast_raw", 0.0), 3),
+                "forecast_coefficient_blended": round(res.get("forecast_coefficient", 1.0), 3),
+                "forecast_coefficient_history": round(res.get("forecast_hist_coefficient", 1.0), 3),
+                "forecast_coefficient_today": round(res.get("forecast_today_coefficient", 1.0), 3),
+                "battery_energy_kwh": round(res.get("batt_energy_val", 0.0), 3),
+                "expected_consumption_kwh": round(res.get("expected_consumption", 0.0), 3),
+                "occupancy_coefficient": round(res.get("occupancy_coefficient", 1.0), 3),
+                "occupancy_persons_home": self.manager.get_current_occupancy() if self.manager.presence_sensors else "N/A",
+                "efficiency_coefficient": round(res.get("efficiency_coefficient", 1.0), 3),
+                "debug_actual_today": round(res.get("debug_actual_today", 0), 3),
+                "debug_expected_today_total": round(res.get("debug_expected_today_total", 0), 3),
+                "debug_expected_today_so_far": round(res.get("debug_expected_today_so_far", 0), 3),
+                "debug_fraction_so_far": round(res.get("debug_fraction_so_far", 0), 3),
+            }
+        except Exception as e:
+            _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
+            self._state = 0.0
+            self._attrs = {"error": str(e)}
 
 class MarketStrategySensor(SensorEntity):
     def __init__(self, manager, mode, name):
