@@ -26,15 +26,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = []
     if isinstance(deduct_settings, dict):
         for sensor_id, config in deduct_settings.items():
-            if not isinstance(config, dict):
+            if not isinstance(config, dict) or not isinstance(sensor_id, str):
                 continue
-            fallback_id = sensor_id.replace("sensor.", "").replace("_", " ").title()
-            clean_id = config.get("name") or fallback_id
+            
+            clean_sensor_id = sensor_id.strip()
+            # Clean power sensor ID in config copy
+            config_copy = dict(config)
+            if CONF_POWER_SENSOR in config_copy and isinstance(config_copy[CONF_POWER_SENSOR], str):
+                config_copy[CONF_POWER_SENSOR] = config_copy[CONF_POWER_SENSOR].strip()
+            
+            fallback_id = clean_sensor_id.replace("sensor.", "").replace("_", " ").title()
+            clean_name = config_copy.get("name") or fallback_id
             entities.append(
                 EnergyPermissionSensor(
                     manager,
-                    sensor_id,
-                    f"Разрешение: {clean_id}",
+                    clean_sensor_id,
+                    f"Разрешение: {clean_name}",
                     custom_period,
                 )
             )
