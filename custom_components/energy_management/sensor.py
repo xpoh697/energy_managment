@@ -1709,7 +1709,8 @@ class InverterOperationModeSensor(SensorEntity):
             self._attr_extra_state_attributes["charge_target_soc"] = buy_strategy.get("charge_target_soc", 100.0)
             self._attr_extra_state_attributes["charge_reason"] = buy_strategy.get("charge_reason", "price")
 
-        self._attr_extra_state_attributes["mode_reason"] = reason
+        debug_info = f" [Buy:{is_buying_active}, Sell:{is_selling_active}, P:{cur_price}, Stop:{price_stop_sell}]"
+        self._attr_extra_state_attributes["mode_reason"] = reason + debug_info
         self._attr_extra_state_attributes["bms_status"] = bms_debug
 
         return mode
