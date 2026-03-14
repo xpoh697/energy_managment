@@ -510,7 +510,13 @@ class EnergyProfileManager:
 
                 # Active Power Learning (EMA)
                 old_real = float(self.learned_real_power.get(sensor_id, cur_p))
-                self.learned_real_power[sensor_id] = round(old_real * 0.9 + float(cur_p) * 0.1, 1)
+                if settings.get(CONF_IS_CYCLIC):
+                    # For cyclic, we use a slow EMA as it might have different phases
+                    self.learned_real_power[sensor_id] = round(old_real * 0.9 + float(cur_p) * 0.1, 1)
+                else:
+                    # For non-cyclic (Boiler, etc), we want the PEAK power observed
+                    # A faster EMA + Max tracker
+                    self.learned_real_power[sensor_id] = round(max(old_real, float(cur_p)) * 0.5 + float(cur_p) * 0.5, 1)
             else:
                 # Standby Power Learning (Slow EMA)
                 if 0.1 < cur_p < (standby + 5.0):
@@ -524,7 +530,9 @@ class EnergyProfileManager:
 
                     if energy > 0.02 and duration > (1/60.0): # At least 20Wh and 1 minute
                         avg_p_w = (float(energy) * 1000.0) / float(duration)
-                        self.learned_real_power[sensor_id] = round(float(avg_p_w), 1)
+                        if settings.get(CONF_IS_CYCLIC):
+                            self.learned_real_power[sensor_id] = round(float(avg_p_w), 1)
+                        # For non-cyclic, we DON'T overwrite with average, as average is skewed by thermostat OFF time
                         if settings.get(CONF_IS_CYCLIC):
                             self.learned_cycle_total_kwh[sensor_id] = round(float(energy), 3)
                             self.learned_avg_cycle_power[sensor_id] = round(float(avg_p_w), 1)
