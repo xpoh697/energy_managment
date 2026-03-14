@@ -324,18 +324,32 @@ class EnergyProfileManager:
                 self.data = imported_data
                 self.settings = self.data.get("settings", {})
 
-                # v2.1.4 - Hot Restore live accumulators from imported data
-                accum = self.data.get("hourly_accumulators", {})
-                if accum:
-                    self.current_consumption_total = accum.get("consumption_total", 0.0)
-                    self.current_generation = accum.get("generation", 0.0)
-                    self.current_grid_import = accum.get("grid_import", 0.0)
-                    self.current_grid_export = accum.get("grid_export", 0.0)
-                    self.current_losses = accum.get("losses", 0.0)
-                    self.current_hourly_deduct = accum.get("hourly_deduct", 0.0)
+                # v2.1.4 - Hot Restore live values from imported data
+                
+                # 1. Daily Deduct Consumption (Managed loads)
+                saved_deduct = self.data.get("daily_deduct_consumption", {})
+                for s in self.deduct_sensors:
+                    self.daily_deduct_consumption[s] = saved_deduct.get(s, 0.0)
 
-                    # Refresh base
-                    self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
+                # 2. Hourly accumulators
+                accum = self.data.get("hourly_accumulators", {})
+                self.current_consumption_total = accum.get("consumption_total", 0.0)
+                self.current_generation = accum.get("generation", 0.0)
+                self.current_grid_import = accum.get("grid_import", 0.0)
+                self.current_grid_export = accum.get("grid_export", 0.0)
+                self.current_losses = accum.get("losses", 0.0)
+                self.current_hourly_deduct = accum.get("hourly_deduct", 0.0)
+                self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
+
+                # 3. Learned values and baselines
+                self.learned_standby_power = self.data.get("learned_standby_power", {})
+                self.learned_real_power = self.data.get("learned_real_power", {})
+                self.learned_avg_cycle_power = self.data.get("learned_avg_cycle_power", {})
+                self.learned_cycle_total_kwh = self.data.get("learned_cycle_total_kwh", {})
+                self.sensor_last_values = self.data.get("sensor_last_values", {})
+                
+                # 4. Notify all entities to refresh their state
+                self._notify_update()
 
                 return True
         except Exception as e:
