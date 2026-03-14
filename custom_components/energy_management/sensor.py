@@ -558,9 +558,13 @@ class EnergyProfileManager:
                     # For cyclic, we use a slow EMA as it might have different phases
                     self.learned_real_power[sensor_id] = round(old_real * 0.9 + float(cur_p) * 0.1, 1)
                 else:
-                    # For non-cyclic (Boiler, etc), we want the PEAK power observed
-                    # A faster EMA + Max tracker
-                    self.learned_real_power[sensor_id] = round(max(old_real, float(cur_p)) * 0.5 + float(cur_p) * 0.5, 1)
+                    # For non-cyclic (Boiler, etc), we want the stable peak power observed
+                    if float(cur_p) >= old_real:
+                        # Instant jump to new higher peak
+                        self.learned_real_power[sensor_id] = round(float(cur_p), 1)
+                    else:
+                        # Very slow decay if current is lower (to filter ramps and capture steady "on" state)
+                        self.learned_real_power[sensor_id] = round(old_real * 0.98 + float(cur_p) * 0.02, 1)
             else:
                 # Standby Power Learning (Slow EMA)
                 if 0.1 < cur_p < (standby + 5.0):

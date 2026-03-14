@@ -108,6 +108,9 @@ class EnergyPermissionSensor(BinarySensorEntity):
             "learned_peak_power_w": round(
                 self.manager.learned_real_power.get(self.target_sensor_id, 0.0), 1
             ),
+            "configured_peak_power_w": round(
+                settings.get("required_kw", 0.0) * 1000.0, 1
+            ),
             "learned_standby_power_w": round(
                 self.manager.learned_standby_power.get(self.target_sensor_id, 0.0), 1
             ),
@@ -167,7 +170,6 @@ class EnergyPermissionSensor(BinarySensorEntity):
                 except:
                     pass
 
-            self._attrs["configured_power_sensor_state"] = st.state if st else "unknown"
             self._attrs["current_power_w"] = round(
                 self.manager.last_known_power.get(self.target_sensor_id, 0.0), 1
             )

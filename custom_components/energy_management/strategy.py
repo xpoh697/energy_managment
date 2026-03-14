@@ -239,7 +239,13 @@ class StrategyEngine:
             for sensor_id, settings in self.manager.deduct_settings.items():
                 only_solar_free = settings.get("only_solar_free", False)
                 req_kwh = float(settings.get("required_kwh", 2.5))
-                req_kw = float(self.manager.learned_real_power.get(sensor_id, settings.get("required_kw", 0.0) * 1000.0)) / 1000.0
+                # Learned power (W) converted to kW
+                learned_kw = float(self.manager.learned_real_power.get(sensor_id, 0.0)) / 1000.0
+                # User configured power (kW)
+                config_kw = float(settings.get("required_kw", 0.0))
+                
+                # Use the higher of learned vs configured to ensure manually specified ratings are respected
+                req_kw = max(learned_kw, config_kw)
                 consumed = float(self.manager.daily_deduct_consumption.get(sensor_id, 0.0))
                 
                 is_currently_pulling_now = self.manager._is_currently_pulling_power(sensor_id)
