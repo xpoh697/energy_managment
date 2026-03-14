@@ -132,6 +132,10 @@ class EnergyPermissionSensor(BinarySensorEntity):
 
         # Add current power only if configured
         if settings.get(CONF_POWER_SENSOR):
+            p_ent = settings.get(CONF_POWER_SENSOR)
+            self._attrs["configured_power_sensor"] = p_ent
+            st = self.manager.hass.states.get(p_ent)
+            self._attrs["configured_power_sensor_state"] = st.state if st else "unknown"
             self._attrs["current_power_w"] = round(
                 self.manager.last_known_power.get(self.target_sensor_id, 0.0), 1
             )
