@@ -135,6 +135,17 @@ class EnergyPermissionSensor(BinarySensorEntity):
             p_ent = settings.get(CONF_POWER_SENSOR)
             self._attrs["configured_power_sensor"] = p_ent
             st = self.manager.hass.states.get(p_ent)
+            
+            # Forced update of manager's last known power if we have a state
+            if st and st.state not in ("unknown", "unavailable"):
+                try:
+                    val = float(str(st.state).replace(',', '.'))
+                    if st.attributes.get("unit_of_measurement") == "kW":
+                        val *= 1000.0
+                    self.manager.last_known_power[self.target_sensor_id] = val
+                except:
+                    pass
+
             self._attrs["configured_power_sensor_state"] = st.state if st else "unknown"
             self._attrs["current_power_w"] = round(
                 self.manager.last_known_power.get(self.target_sensor_id, 0.0), 1
