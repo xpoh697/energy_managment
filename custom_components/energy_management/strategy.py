@@ -252,10 +252,13 @@ class StrategyEngine:
                     # If load is already running, we check if we can afford to KEEP it (surplus > 0)
                     # If it's idle, we check if we have enough room to START it (surplus > req_kw)
                     if is_currently_pulling_now:
-                        if available_power_kw < -0.1: # Allow 100W margin
+                        # v2.1.8 - Symmetrical 60% rule: keep running as long as solar covers at least 60% 
+                        # (i.e. we don't pull more than 40% from the battery/grid)
+                        if available_power_kw < -(req_kw * 0.4):
                             power_bottleneck = True
                     else:
-                        if available_power_kw < req_kw:
+                        # v2.1.7 - Restore the 60% threshold for starting (permits taking some from battery)
+                        if available_power_kw < (req_kw * 0.6):
                             power_bottleneck = True
                             
                     if only_solar_free and not is_free_price:
@@ -285,7 +288,12 @@ class StrategyEngine:
                         if gen_bottleneck:
                             permissions_reasons[sensor_id] = f"Блокировка: Доступная генер. {g_gen} кВт < 60% от {req_kw} кВт"
                         elif power_bottleneck:
-                            permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Мощность {req_kw} кВт"
+                            if is_currently_pulling_now:
+                                threshold = round(-(req_kw * 0.4), 2)
+                                permissions_reasons[sensor_id] = f"Блокировка: Баланс {g_val} кВт < лимит АКБ {threshold} кВт (допуск 40% от {req_kw})"
+                            else:
+                                threshold = round(req_kw * 0.6, 2)
+                                permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Порог {threshold} кВт (60% от {req_kw})"
                         elif available_budget <= 0:
                             permissions_reasons[sensor_id] = f"Блокировка: Нет профицита энергии ({round(float(available_budget), 2)} кВт*ч)"
                         else:
