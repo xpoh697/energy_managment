@@ -139,6 +139,11 @@ class EnergyProfileManager:
         presence_raw = config_data.get(CONF_PRESENCE_SENSORS, [])
         self.presence_sensors = [s.strip() for s in ([presence_raw] if isinstance(presence_raw, str) else (presence_raw or [])) if isinstance(s, str)]
 
+        self.all_power_sensors: set[str] = set()
+        if self.power_load_sensors: self.all_power_sensors.update(self.power_load_sensors)
+        if self.power_gen_sensors: self.all_power_sensors.update(self.power_gen_sensors)
+        if self.battery_power_sensor: self.all_power_sensors.add(self.battery_power_sensor)
+
         raw_deduct = config_data.get(CONF_DEDUCT_SETTINGS, {})
         self.deduct_settings = {}
         if isinstance(raw_deduct, dict):
@@ -146,7 +151,9 @@ class EnergyProfileManager:
                 # Clean nested power sensor IDs
                 if isinstance(s_conf, dict) and CONF_POWER_SENSOR in s_conf:
                     if isinstance(s_conf[CONF_POWER_SENSOR], str):
-                        s_conf[CONF_POWER_SENSOR] = s_conf[CONF_POWER_SENSOR].strip()
+                        p_s = s_conf[CONF_POWER_SENSOR].strip()
+                        s_conf[CONF_POWER_SENSOR] = p_s
+                        self.all_power_sensors.add(p_s)
                 self.deduct_settings[s_id.strip()] = s_conf
 
         self.consumption_sensors = {s.strip() for s in self.consumption_sensors if isinstance(s, str)}
@@ -428,7 +435,7 @@ class EnergyProfileManager:
                 ev = MockEvent({"entity_id": entity_id, "new_state": state_obj})
                 self._async_state_changed(ev)
 
-        monitored_sensors = self.all_sensors | self.all_price_sensors
+        monitored_sensors = self.all_sensors | self.all_price_sensors | self.all_power_sensors
         if self.battery_soc_sensor: monitored_sensors.add(self.battery_soc_sensor)
         if self.battery_capacity_sensor: monitored_sensors.add(self.battery_capacity_sensor)
         if self.forecast_today_sensor: monitored_sensors.update(self.forecast_today_sensor)
@@ -448,7 +455,7 @@ class EnergyProfileManager:
                 self.hass, self._poll_instant_power, timedelta(minutes=1)
             )
             # Perform initial poll
-            self._poll_instant_power(dt_util.utcnow())
+            self._poll_instant_power(dt_util.now())
 
         # Periodic save to disk every 5 minutes to prevent data loss on frequent restarts
         self._unsub_periodic_save = async_track_time_interval(
@@ -633,9 +640,13 @@ class EnergyProfileManager:
         entity_id = event.data.get("entity_id")
         new_state = event.data.get("new_state")
 
-        # Handle prices
         if entity_id in self.all_price_sensors:
             self._update_prices_from_sensor(entity_id, new_state)
+            return
+
+        # Handle power sensors (trigger re-calculation of current power and balance)
+        if entity_id in self.all_power_sensors:
+            self._poll_instant_power(dt_util.now())
             return
 
         # Handle energy sensors
@@ -891,6 +902,7 @@ class EnergyProfileManager:
 
     def get_active_managed_loads_power(self, hour_offset=0):
         """Calculate total power of currently active managed loads for simulation."""
+        now = dt_util.now()
         active_load_kw = 0.0
         for s_id, s_settings in self.get_setting(CONF_DEDUCT_SETTINGS, {}).items():
             if self._is_currently_pulling_power(s_id):

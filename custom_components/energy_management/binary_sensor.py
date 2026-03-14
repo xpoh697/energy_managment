@@ -98,13 +98,12 @@ class EnergyPermissionSensor(BinarySensorEntity):
 
         attrs = {
             "controlled_entity_id": self.target_sensor_id,
-            "priority": settings.get("priority", "?"),
-            "target_required_kwh": settings.get("required_kwh", 0.0),
-            "is_cyclic": is_cyclic,
+            "status_reason": budget_res.get("permissions_reasons", {}).get(self.target_sensor_id, "Unknown"),
+            "daily_consumption_kwh": round(consumed_today, 3),
+            "priority": settings.get("priority", 99),
             "already_consumed_today_kwh": round(consumed_today, 3),
             "estimated_initial_budget_kwh": round(budget_res.get("initial_budget", 0.0), 3),
             "forecast_correction_coefficient": round(budget_res.get("forecast_coefficient", 1.0), 3),
-            "reason": budget_res.get("permissions_reasons", {}).get(self.target_sensor_id, "Нет данных"),
             # Learned power values
             "learned_peak_power_w": round(
                 self.manager.learned_real_power.get(self.target_sensor_id, 0.0), 1
@@ -113,6 +112,21 @@ class EnergyPermissionSensor(BinarySensorEntity):
                 self.manager.learned_standby_power.get(self.target_sensor_id, 0.0), 1
             ),
         }
+
+        # Device detection and Status
+        is_actually_working = self.manager._is_currently_pulling_power(self.target_sensor_id)
+        if is_actually_working:
+            if self._is_on:
+                status = "Работает" # (Working)
+            else:
+                status = "Работает (Принудительно)" # (Manual Overrun)
+        else:
+            if self._is_on:
+                status = "Зарезервировано" # (Reserved/Waiting)
+            else:
+                status = "Ожидание" # (IDLE/Standby)
+        
+        attrs["device_status"] = status
 
         # Only show cyclic attributes for cyclic devices
         if is_cyclic:
