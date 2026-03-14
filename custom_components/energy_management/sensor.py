@@ -1655,15 +1655,15 @@ class InverterOperationModeSensor(SensorEntity):
         if batt_soc <= min_soc:
             mode = "bat_emergency"
             reason = f"Заряд батареи ({round(batt_soc, 1)}%) <= Критического минимума ({min_soc}%)"
-        elif cur_price is not None and cur_price < price_stop_sell:
-            mode = "stop_sale"
-            reason = f"Текущая цена ({cur_price}) < Порога блокировки продажи ({price_stop_sell})"
         elif is_buying_active:
             mode = "buy"
             reason = f"Активна стратегия ПОКУПКИ (Смотри сенсор Market BUY Strategy)"
         elif is_selling_active:
             mode = "sale_pv_bat"
             reason = f"Активна стратегия ПРОДАЖИ (Смотри сенсор Market SELL Strategy)"
+        elif cur_price is not None and cur_price < price_stop_sell:
+            mode = "stop_sale"
+            reason = f"Текущая цена ({cur_price}) < Порога блокировки продажи ({price_stop_sell})"
         elif cur_price is not None and cur_price >= price_sell_only_pv and not is_preparing_for_peak:
             if int(cur_hour) < sale_pv_no_bat_max_hour:
                 instant_ok = True
