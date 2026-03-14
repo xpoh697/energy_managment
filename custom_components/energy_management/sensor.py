@@ -1156,23 +1156,30 @@ class EnergyProfileManager:
 
     def _is_currently_pulling_power(self, sensor_id: str) -> bool:
         """Return True if the device currently has an active cycle (pulling power above standby)."""
-        if sensor_id not in self.cycle_start_time:
-            return False
         settings = self.deduct_settings.get(sensor_id, {})
         p_sensor = settings.get(CONF_POWER_SENSOR) if isinstance(settings, dict) else None
+        
+        standby = self.learned_standby_power.get(sensor_id, 15.0)
+        
         if not p_sensor:
-            # No power sensor configured — assume active if in cycle_start_time
-            return True  # Assume active if no power sensor to check
+            # No power sensor configured — rely on cycle_start_time (manual start/stop logic)
+            return sensor_id in self.cycle_start_time
+            
         p_state = self.hass.states.get(p_sensor)
         if not p_state or p_state.state in ("unknown", "unavailable"):
-            return True  # Keep as active if sensor unavailable (use last known state)
+            # If sensor is dead, but it was running recently, assume it's still running
+            return sensor_id in self.cycle_start_time
+
         try:
             cur_p = normalize_float(p_state.state)
             if p_state.attributes.get("unit_of_measurement") == "kW":
                 cur_p *= 1000.0
         except Exception:
             return True # Assume active if power sensor value is invalid
-        standby = self.learned_standby_power.get(sensor_id, 15.0)
+
+        # Update last known power for UI consistency if we're here
+        self.last_known_power[sensor_id] = cur_p
+
         return cur_p > (standby + 10.0)
 
     def get_sensor_float(self, entity_id, default=0.0):
