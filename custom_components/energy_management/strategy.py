@@ -983,7 +983,7 @@ class StrategyEngine:
             res["active_periods"] = ", ".join(found_periods)
             
             # State logic: active > preparing_arbitrage > idle/price_limit_not_met
-            if cur_hour in target_hours_sorted and res["recommended_power_kw"] > 0:
+            if cur_hour in target_hours_sorted:
                 res["state"] = "active"
             elif not target_hours_sorted:
                 res["state"] = "price_limit_not_met"

@@ -1950,14 +1950,20 @@ class MarketStrategySensor(SensorEntity):
         active_hours = res.get("active_hours", [])
 
         if state == "active":
+            rec_p = res.get("recommended_power_kw", 0.0)
             if self.mode == "buy":
                 reason = res.get("charge_reason", "price")
-                if reason == "survival":
+                if rec_p <= 0:
+                    current_mode = "Ожидание (Заряжено)"
+                elif reason == "survival":
                     current_mode = "Зарядка (Экстренно)"
                 else:
                     current_mode = "Зарядка (Дешевая цена)"
             else:
-                current_mode = "Активная продажа"
+                if rec_p <= 0:
+                    current_mode = "Ожидание (Пусто)"
+                else:
+                    current_mode = "Активная продажа"
         elif state == "preparing_arbitrage":
             current_mode = "Ожидание арбитража"
         elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not active_hours:
