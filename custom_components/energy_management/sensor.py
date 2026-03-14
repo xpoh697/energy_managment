@@ -1527,7 +1527,7 @@ class InverterOperationModeSensor(SensorEntity):
                 prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
 
                 # --- Forecast Adjustments ---
-                forecast_today_val = self.manager.get_forecast_value(self.forecast_today_sensor)
+                forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
                 coeff_today = self.manager.get_gen_forecast_coefficient(forecast_today_val, prof_gen, int(cur_hour) + 1, 24)
                 # ----------------------------
 
@@ -1535,7 +1535,7 @@ class InverterOperationModeSensor(SensorEntity):
                 prof_cons_tom = self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type)
 
                 # --- Forecast Tomorrow Adjustments ---
-                forecast_tom_val = self.manager.get_forecast_value(self.forecast_tomorrow_sensor)
+                forecast_tom_val = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor)
                 coeff_tom = self.manager.get_gen_forecast_coefficient(forecast_tom_val, prof_gen, 0, 24)
 
                 max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
