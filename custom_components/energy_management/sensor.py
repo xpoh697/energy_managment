@@ -1436,21 +1436,33 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
                     found_sun = True
                 sunset_hour = h
 
-        is_day = sunrise_hour <= now.hour < sunset_hour
+        # Current actual status can override profile if it's currently sunny.
+        # This helps during seasonal transitions (spring/autumn) or exceptionally clear days.
+        avg_gen = self.manager.avg_gen_kw
+        is_gen_active = avg_gen > 0.05
+
+        # We consider it "day" if we are within productive hours OR we currently have generation.
+        # We include sunset_hour in the inclusive range because the productive period usually ends
+        # AT THE END of that hour.
+        is_day = (sunrise_hour <= now.hour <= sunset_hour) or is_gen_active
 
         if is_day:
-            target_hour = sunset_hour
+            # If we are in "overtime" (sunny but profile says night), predict until end of this hour or profile sunset
+            actual_sunset_h = max(sunset_hour, now.hour)
+            target_hour = (actual_sunset_h + 1) % 24
             target_label = "К закату"
             self._attr_icon = "mdi:battery-arrow-up"
-            sim_hours = list(range(now.hour + 1, sunset_hour + 1))
+            # Include current hour in simulation for partial-hour accuracy
+            sim_hours = list(range(now.hour, actual_sunset_h + 1))
         else:
             target_hour = sunrise_hour
             target_label = "К восходу"
             self._attr_icon = "mdi:battery-arrow-down"
-            if now.hour >= sunset_hour:
-                sim_hours = list(range(now.hour + 1, 24)) + list(range(0, sunrise_hour + 1))
+            # Night simulation till sunrise (including remainder of current hour)
+            if now.hour > sunset_hour:
+                sim_hours = list(range(now.hour, 24)) + list(range(0, sunrise_hour))
             else:
-                sim_hours = list(range(now.hour + 1, sunrise_hour + 1))
+                sim_hours = list(range(now.hour, sunrise_hour))
 
         # 1. Run Unified Simulation Engine
         simulated_soc, charge_log = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
