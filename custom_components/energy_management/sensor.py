@@ -658,76 +658,81 @@ class EnergyProfileManager:
         self.data["sensor_last_values"] = self.sensor_last_values
 
         # ── Hourly Savings Tracking ────────────────────────────────────────────
-        if self.price_buy_sensors or self.price_sell_sensors:
-            past_dt = now - timedelta(hours=1)
-            past_date_str = past_dt.strftime("%Y-%m-%d")
+        try:
+            if self.price_buy_sensors or self.price_sell_sensors:
+                past_dt = now - timedelta(hours=1)
+                past_date_str = past_dt.strftime("%Y-%m-%d")
 
-            p_sell = self.get_price("sell", past_date_str, past_hour)
+                p_buy  = self.get_price("buy",  past_date_str, past_hour)
+                p_sell = self.get_price("sell", past_date_str, past_hour)
 
-            gen_h  = self.current_generation
-            cons_h = self.current_consumption_total
+                gen_h  = self.current_generation
+                cons_h = self.current_consumption_total
 
-            # Battery SOC delta across this hour
-            batt_cap_h = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
-            soc_now    = self.get_sensor_float(self.battery_soc_sensor, 0.0)
-            last_soc_v = self.data.get("last_soc_savings", soc_now)
-            soc_delta  = soc_now - last_soc_v
-            kwh_delta  = batt_cap_h * soc_delta / 100.0 if batt_cap_h > 0 else 0.0
-            self.data["last_soc_savings"] = soc_now
+                # Battery SOC delta across this hour
+                batt_cap_h = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
+                soc_now    = self.get_sensor_float(self.battery_soc_sensor, 0.0)
+                last_soc_v = self.data.get("last_soc_savings", soc_now)
+                soc_delta  = soc_now - last_soc_v
+                kwh_delta  = batt_cap_h * soc_delta / 100.0 if batt_cap_h > 0 else 0.0
+                self.data["last_soc_savings"] = soc_now
 
-            batt_charged    = max(0.0,  kwh_delta)
-            batt_discharged = max(0.0, -kwh_delta)
+                batt_charged    = max(0.0,  kwh_delta)
+                batt_discharged = max(0.0, -kwh_delta)
 
-            # ── Unified Savings Logic ───────────────────────────────────────────
-            # Formula: (Consumption * p_buy) - (Grid_Buy * p_buy) + (Grid_Sell * p_sell)
-            # This accounts for solar self-consumption, arbitrage, and sales in one go.
+                # ── Unified Savings Logic ───────────────────────────────────────────
+                # Formula: (Consumption * p_buy) - (Grid_Buy * p_buy) + (Grid_Sell * p_sell)
+                # This accounts for solar self-consumption, arbitrage, and sales in one go.
 
-            # We need grid_buy_h and grid_sell_h.
-            # If we have direct import/export sensors, use them.
-            # Otherwise derive from mathematical balance (which can have errors due to КПД/SOC drift).
-            if self.grid_import_sensors or self.grid_export_sensors:
-                h_buy_kwh = self.current_grid_import
-                h_sell_kwh = self.current_grid_export
-            else:
-                grid_flow = cons_h + batt_charged - gen_h - batt_discharged
-                h_buy_kwh  = max(0.0,  grid_flow)
-                h_sell_kwh = max(0.0, -grid_flow)
+                # We need grid_buy_h and grid_sell_h.
+                # If we have direct import/export sensors, use them.
+                # Otherwise derive from mathematical balance (which can have errors due to КПД/SOC drift).
+                if self.grid_import_sensors or self.grid_export_sensors:
+                    h_buy_kwh = self.current_grid_import
+                    h_sell_kwh = self.current_grid_export
+                else:
+                    grid_flow = cons_h + batt_charged - gen_h - batt_discharged
+                    h_buy_kwh  = max(0.0,  grid_flow)
+                    h_sell_kwh = max(0.0, -grid_flow)
 
-            # 1. Total Benefit Component
-            # Value of not having the system (Baseline)
-            baseline_cost = cons_h * (p_buy or 0.0)
-            # Actual cost now
-            actual_net_cost = (h_buy_kwh * (p_buy or 0.0)) - (h_sell_kwh * (p_sell or 0.0))
+                # 1. Total Benefit Component
+                # Value of not having the system (Baseline)
+                baseline_cost = cons_h * (p_buy or 0.0)
+                # Actual cost now
+                actual_net_cost = (h_buy_kwh * (p_buy or 0.0)) - (h_sell_kwh * (p_sell or 0.0))
 
-            total_profit_h = round(baseline_cost - actual_net_cost, 4)
+                total_profit_h = round(baseline_cost - actual_net_cost, 4)
 
-            # Persist to "total" category
-            if "savings" not in self.data:
-                self.data["savings"] = {}
-            day_entry = self.data["savings"].setdefault(
-                past_date_str, {"total": 0.0, "solar": 0.0, "arbitrage": 0.0, "sell": 0.0})
+                # Persist to "total" category
+                if "savings" not in self.data:
+                    self.data["savings"] = {}
+                day_entry = self.data["savings"].setdefault(
+                    past_date_str, {"total": 0.0, "solar": 0.0, "arbitrage": 0.0, "sell": 0.0})
 
-            day_entry["total"] = round(day_entry.get("total", 0.0) + total_profit_h, 4)
+                day_entry["total"] = round(day_entry.get("total", 0.0) + total_profit_h, 4)
 
-            # Also keep old components as breakdown (for attributes)
-            solar_self = min(gen_h, cons_h)
-            day_entry["solar"]     = round(day_entry.get("solar",     0.0) + (solar_self * (p_buy or 0.0)), 4)
-            day_entry["sell"]      = round(day_entry.get("sell",      0.0) + (h_sell_kwh * (p_sell or 0.0)), 4)
-            # Arbitrage is the remainder
-            day_entry["arbitrage"] = round(day_entry["total"] - day_entry["solar"] - day_entry["sell"], 4)
+                # Also keep old components as breakdown (for attributes)
+                solar_self = min(gen_h, cons_h)
+                day_entry["solar"]     = round(day_entry.get("solar",     0.0) + (solar_self * (p_buy or 0.0)), 4)
+                day_entry["sell"]      = round(day_entry.get("sell",      0.0) + (h_sell_kwh * (p_sell or 0.0)), 4)
+                # Arbitrage is the remainder
+                day_entry["arbitrage"] = round(day_entry["total"] - day_entry["solar"] - day_entry["sell"], 4)
 
-            # Keep at most 400 days of savings
-            if len(self.data["savings"]) > 400:
-                del self.data["savings"][sorted(self.data["savings"].keys())[0]]
+                # Keep at most 400 days of savings
+                if len(self.data["savings"]) > 400:
+                    del self.data["savings"][sorted(self.data["savings"].keys())[0]]
 
-            # Trim price stores to 60 days
-            cutoff_dt = now - timedelta(days=60)
-            cutoff_date = cutoff_dt.strftime("%Y-%m-%d")
-            for p_store_kr in ["prices_buy", "prices_sell"]:
-                p_store = self.data.get(p_store_kr, {})
-                for d_str in list(p_store.keys()):
-                    if d_str < cutoff_date:
-                        del p_store[d_str]
+                # Trim price stores to 60 days
+                cutoff_dt = now - timedelta(days=60)
+                cutoff_date = cutoff_dt.strftime("%Y-%m-%d")
+                for p_store_kr in ["prices_buy", "prices_sell"]:
+                    p_store = self.data.get(p_store_kr, {})
+                    for d_str in list(p_store.keys()):
+                        if d_str < cutoff_date:
+                            del p_store[d_str]
+        except Exception as e:
+            _LOGGER.error("Energy Management: Error in hourly savings tracking: %s", e)
+
         # ── End savings tracking ───────────────────────────────────────────────
 
         # Reset counters BEFORE saving, so that the saved accumulators reflect
