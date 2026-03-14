@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorDeviceClass
 from homeassistant.helpers.device_registry import DeviceInfo
 
@@ -114,6 +115,18 @@ class EnergyPermissionSensor(BinarySensorEntity):
             attrs["learned_cycle_total_kwh"] = round(
                 self.manager.learned_cycle_total_kwh.get(self.target_sensor_id, 0.0), 3
             )
+            
+            avg_dur_min = round(self.manager.learned_avg_cycle_duration.get(self.target_sensor_id, 0.0) / 60.0, 1)
+            attrs["learned_avg_cycle_duration_min"] = avg_dur_min
+
+            if self.target_sensor_id in self.manager.cycle_actual_start_time:
+                start_dt = self.manager.cycle_actual_start_time[self.target_sensor_id]
+                attrs["cycle_start_time"] = start_dt.strftime("%H:%M:%S")
+                
+                avg_dur_sec = self.manager.learned_avg_cycle_duration.get(self.target_sensor_id, 0.0)
+                if avg_dur_sec > 0:
+                    end_dt = start_dt + timedelta(seconds=avg_dur_sec)
+                    attrs["predicted_cycle_end_time"] = end_dt.strftime("%H:%M:%S")
 
         self._attrs = attrs
 

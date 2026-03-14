@@ -188,6 +188,7 @@ class EnergyProfileManager:
         self.learned_real_power: dict[str, float] = {}
         self.learned_avg_cycle_power: dict[str, float] = {}
         self.learned_cycle_total_kwh: dict[str, float] = {}
+        self.learned_avg_cycle_duration: dict[str, float] = {}  # In seconds
         self.cycle_start_time: dict[str, datetime] = {}
         self.cycle_actual_start_time: dict[str, datetime] = {}
         self.cycle_energy_start: dict[str, float] = {}
@@ -229,6 +230,15 @@ class EnergyProfileManager:
         self.learned_real_power = self.data.get("learned_real_power", {})
         self.learned_avg_cycle_power = self.data.get("learned_avg_cycle_power", {})
         self.learned_cycle_total_kwh = self.data.get("learned_cycle_total_kwh", {})
+        self.learned_avg_cycle_duration = self.data.get("learned_avg_cycle_duration", {})
+        
+        # Restore cycle start times (handle ISO strings or missing)
+        saved_starts = self.data.get("cycle_actual_start_time", {})
+        for s_id, start_str in saved_starts.items():
+            try:
+                self.cycle_actual_start_time[s_id] = dt_util.parse_datetime(start_str)
+            except:
+                pass
 
         if "generation" not in self.data:
             self.data["generation"] = {str(i): [] for i in range(24)}
@@ -287,6 +297,10 @@ class EnergyProfileManager:
         self.data["learned_real_power"] = self.learned_real_power
         self.data["learned_avg_cycle_power"] = self.learned_avg_cycle_power
         self.data["learned_cycle_total_kwh"] = self.learned_cycle_total_kwh
+        self.data["learned_avg_cycle_duration"] = self.learned_avg_cycle_duration
+        self.data["cycle_actual_start_time"] = {
+            s_id: dt.isoformat() for s_id, dt in self.cycle_actual_start_time.items()
+        }
         self.data["sensor_last_values"] = self.sensor_last_values
         self.data["daily_deduct_consumption"] = dict(self.daily_deduct_consumption)
         self.data["hourly_accumulators"] = {
@@ -536,6 +550,11 @@ class EnergyProfileManager:
                         if settings.get(CONF_IS_CYCLIC):
                             self.learned_cycle_total_kwh[sensor_id] = round(float(energy), 3)
                             self.learned_avg_cycle_power[sensor_id] = round(float(avg_p_w), 1)
+                            
+                            # Update historical duration (EMA)
+                            dur_secs = (now - self.cycle_actual_start_time[sensor_id]).total_seconds()
+                            old_dur = float(self.learned_avg_cycle_duration.get(sensor_id, dur_secs))
+                            self.learned_avg_cycle_duration[sensor_id] = round(old_dur * 0.7 + dur_secs * 0.3, 0)
 
                     self.cycle_actual_start_time.pop(sensor_id, None)
                     self.cycle_energy_start.pop(sensor_id, None)
@@ -862,6 +881,13 @@ class EnergyProfileManager:
                 if req_kwh > 0:
                     remaining = max(0.0, req_kwh - self.daily_deduct_consumption.get(s_id, 0.0))
                     if p_kw > 0 and (hour_offset + 1) <= (remaining / p_kw):
+                        active_load_kw += p_kw
+                elif is_cyclic and s_id in self.cycle_actual_start_time:
+                    # Estimate based on learned duration
+                    start_time = self.cycle_actual_start_time[s_id]
+                    avg_dur = self.learned_avg_cycle_duration.get(s_id, 3600.0) # default 1h
+                    predicted_end = start_time + timedelta(seconds=avg_dur)
+                    if (now + timedelta(hours=hour_offset)) < predicted_end:
                         active_load_kw += p_kw
                 elif hour_offset == 0:
                     active_load_kw += p_kw
