@@ -2536,7 +2536,10 @@ class SolarWasteSensor(SensorEntity):
 
         # Estimate potential power now
         prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-        potential_kw = round(float(prof_gen.get(cur_hour, 0.0) * self.manager.last_blended_coeff), 3)
+        prof_val = float(prof_gen.get(cur_hour, 0.0))
+        coeff = getattr(self.manager, "last_blended_coeff", 1.0)
+        # Reality check: potential cannot be less than actual generation
+        potential_kw = round(max(prof_val * coeff, self.manager.avg_gen_kw), 3)
 
         return {
             "current_waste_kw": self.manager.current_solar_waste_power,
