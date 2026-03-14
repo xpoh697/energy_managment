@@ -137,7 +137,30 @@ class EnergyProfileManager:
 
         # Presence / occupancy sensors (person.* or binary_sensor.*)
         presence_raw = config_data.get(CONF_PRESENCE_SENSORS, [])
-        self.presence_sensors = [presence_raw] if isinstance(presence_raw, str) else (presence_raw or [])
+        self.presence_sensors = [s.strip() for s in ([presence_raw] if isinstance(presence_raw, str) else (presence_raw or [])) if isinstance(s, str)]
+
+        raw_deduct = config_data.get(CONF_DEDUCT_SETTINGS, {})
+        self.deduct_settings = {}
+        if isinstance(raw_deduct, dict):
+            for s_id, s_conf in raw_deduct.items():
+                # Clean nested power sensor IDs
+                if isinstance(s_conf, dict) and CONF_POWER_SENSOR in s_conf:
+                    if isinstance(s_conf[CONF_POWER_SENSOR], str):
+                        s_conf[CONF_POWER_SENSOR] = s_conf[CONF_POWER_SENSOR].strip()
+                self.deduct_settings[s_id.strip()] = s_conf
+
+        self.consumption_sensors = {s.strip() for s in self.consumption_sensors if isinstance(s, str)}
+        self.generation_sensors = {s.strip() for s in self.generation_sensors if isinstance(s, str)}
+        self.deduct_sensors = {s.strip() for s in self.deduct_sensors if isinstance(s, str)}
+        self.grid_import_sensors = {s.strip() for s in self.grid_import_sensors if isinstance(s, str)}
+        self.grid_export_sensors = {s.strip() for s in self.grid_export_sensors if isinstance(s, str)}
+        
+        if self.battery_soc_sensor and isinstance(self.battery_soc_sensor, str):
+            self.battery_soc_sensor = self.battery_soc_sensor.strip()
+        if self.battery_capacity_sensor and isinstance(self.battery_capacity_sensor, str):
+            self.battery_capacity_sensor = self.battery_capacity_sensor.strip()
+        if self.battery_power_sensor and isinstance(self.battery_power_sensor, str):
+            self.battery_power_sensor = self.battery_power_sensor.strip()
 
         buy_p = config_data.get(CONF_PRICE_BUY)
         sell_p = config_data.get(CONF_PRICE_SELL)
@@ -1216,14 +1239,15 @@ class EnergyProfileManager:
         p_state = self.hass.states.get(p_sensor)
         if not p_state or p_state.state in ("unknown", "unavailable"):
             # If sensor is dead, but it was running recently, assume it's still running
-            return sensor_id in self.cycle_start_time
+            # OR if we have an active persistent cycle
+            return (sensor_id in self.cycle_start_time) or (sensor_id in self.cycle_actual_start_time)
 
         try:
             cur_p = normalize_float(p_state.state)
             if p_state.attributes.get("unit_of_measurement") == "kW":
                 cur_p *= 1000.0
         except Exception:
-            return True # Assume active if power sensor value is invalid
+            return (sensor_id in self.cycle_start_time) or (sensor_id in self.cycle_actual_start_time)
 
         # Update last known power for UI consistency if we're here
         self.last_known_power[sensor_id] = cur_p
