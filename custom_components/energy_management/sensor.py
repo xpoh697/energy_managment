@@ -405,7 +405,8 @@ class EnergyProfileManager:
 
         # --- Real-time Balance / Savings Account Logic ---
         # Logic: Increment/Decrement based on (Solar_to_Load + Battery_to_Load - Grid_to_Battery)
-        if self.price_buy_sensors and self.power_load_sensors and self.power_gen_sensors:
+        # We need at least price and load power to calculate any savings.
+        if self.price_buy_sensors and self.power_load_sensors:
             p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), now.hour) or 0.0
             p_sell = self.get_price("sell", now.strftime("%Y-%m-%d"), now.hour) or 0.0
 
