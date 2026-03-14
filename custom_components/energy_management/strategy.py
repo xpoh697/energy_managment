@@ -248,8 +248,16 @@ class StrategyEngine:
                 is_free_price = cur_price_buy is not None and normalize_float(cur_price_buy) <= 0.0
 
                 if req_kw > 0.0:
-                    if available_power_kw < req_kw:
-                        power_bottleneck = True
+                    # v2.1.6 - Hysteresis logic to prevent self-blocking
+                    # If load is already running, we check if we can afford to KEEP it (surplus > 0)
+                    # If it's idle, we check if we have enough room to START it (surplus > req_kw)
+                    if is_currently_pulling_now:
+                        if available_power_kw < -0.1: # Allow 100W margin
+                            power_bottleneck = True
+                    else:
+                        if available_power_kw < req_kw:
+                            power_bottleneck = True
+                            
                     if only_solar_free and not is_free_price:
                         if available_gen_kw < (req_kw * 0.6):
                             gen_bottleneck = True
@@ -261,9 +269,11 @@ class StrategyEngine:
                     if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
                         permissions[sensor_id] = True
                         if req_kw > 0.0:
-                            available_power_kw = float(available_power_kw) - float(req_kw)
-                            if only_solar_free and not is_free_price:
-                                available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
+                            # v2.1.6 - Only subtract power if the load was IDLE (not already in load_kw)
+                            if not is_currently_pulling_now:
+                                available_power_kw = float(available_power_kw) - float(req_kw)
+                                if only_solar_free and not is_free_price:
+                                    available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
                         
                         b_val = round(max(0.0, float(available_budget)), 2)
                         g_val = round(max(0.0, float(available_power_kw)), 2)
@@ -290,7 +300,8 @@ class StrategyEngine:
                         permissions[sensor_id] = True
                         available_budget -= float(needed)
                         if only_solar_free and not is_free_price and req_kw > 0.0:
-                            available_gen_kw -= (float(req_kw) * 0.6)
+                            if not is_currently_pulling_now:
+                                available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
                         
                         n_val = round(float(needed), 2)
                         permissions_reasons[sensor_id] = f"Разрешено: Зарезервировано {n_val} кВт*ч из профицита"
