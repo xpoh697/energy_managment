@@ -179,6 +179,13 @@ class StrategyEngine:
             
             # Today's actual is taken from the daily accumulator (resilient to restart gaps)
             actual_today = self.manager.data.get("temp_daily_gen", 0.0) or 0.0
+            
+            # v2.1.5 - Ensure temp_max_forecast is up-to-date
+            # Total expected today = actual already produced + remaining forecast
+            predicted_total = actual_today + forecast_val
+            if predicted_total > self.manager.data.get("temp_max_forecast", 0.0):
+                self.manager.data["temp_max_forecast"] = float(predicted_total)
+
             expected_today_total = self.manager.data.get("temp_max_forecast", 0.0) or 0.0
             expected_today_so_far = expected_today_total * fraction_so_far
             
