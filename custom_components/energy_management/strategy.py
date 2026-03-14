@@ -234,6 +234,8 @@ class StrategyEngine:
                 strategy_res = self.get_market_strategy("buy")
                 cur_price_buy = strategy_res.get("today_prices", {}).get(str(cur_hour))
 
+            reserved_by = []
+
             for sensor_id, settings in self.manager.deduct_settings.items():
                 only_solar_free = settings.get("only_solar_free", False)
                 req_kwh = float(settings.get("required_kwh", 2.5))
@@ -277,10 +279,16 @@ class StrategyEngine:
                                 available_power_kw = float(available_power_kw) - float(req_kw)
                                 if only_solar_free and not is_free_price:
                                     available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
+                            
+                            # Track who is using power for reasons of others
+                            friendly_name = settings.get("name", sensor_id.split('.')[-1])
+                            status_tag = "Работает" if is_currently_pulling_now else "Зарезервировано"
+                            reserved_by.append(f"{friendly_name} ({status_tag})")
                         
                         b_val = round(max(0.0, float(available_budget)), 2)
                         g_val = round(max(0.0, float(available_power_kw)), 2)
-                        permissions_reasons[sensor_id] = f"Разрешено: Динамическая (Профицит {b_val} кВт*ч, Доступно {g_val} кВт)"
+                        main_reason = "Разрешено" if is_currently_pulling_now else "Разрешено (Старт)"
+                        permissions_reasons[sensor_id] = f"{main_reason}: Динамическая (Профицит {b_val} кВт*ч, Доступно {g_val} кВт)"
                     else:
                         permissions[sensor_id] = False
                         g_val = round(float(available_power_kw), 2)
@@ -288,12 +296,13 @@ class StrategyEngine:
                         if gen_bottleneck:
                             permissions_reasons[sensor_id] = f"Блокировка: Доступная генер. {g_gen} кВт < 60% от {req_kw} кВт"
                         elif power_bottleneck:
+                            others_note = f" (Занято: {', '.join(reserved_by)})" if reserved_by else ""
                             if is_currently_pulling_now:
                                 threshold = round(-(req_kw * 0.4), 2)
-                                permissions_reasons[sensor_id] = f"Блокировка: Баланс {g_val} кВт < лимит АКБ {threshold} кВт (допуск 40% от {req_kw})"
+                                permissions_reasons[sensor_id] = f"Блокировка: Баланс {g_val} кВт < лимит АКБ {threshold} кВт (допуск 40% от {req_kw}){others_note}"
                             else:
                                 threshold = round(req_kw * 0.6, 2)
-                                permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Порог {threshold} кВт (60% от {req_kw})"
+                                permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Порог {threshold} кВт (60% от {req_kw}){others_note}"
                         elif available_budget <= 0:
                             permissions_reasons[sensor_id] = f"Блокировка: Нет профицита энергии ({round(float(available_budget), 2)} кВт*ч)"
                         else:
@@ -311,14 +320,21 @@ class StrategyEngine:
                             if not is_currently_pulling_now:
                                 available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
                         
+                        if req_kw > 0.0:
+                            friendly_name = settings.get("name", sensor_id.split('.')[-1])
+                            status_tag = "Работает" if is_currently_pulling_now else "Зарезервировано"
+                            reserved_by.append(f"{friendly_name} ({status_tag})")
+
                         n_val = round(float(needed), 2)
-                        permissions_reasons[sensor_id] = f"Разрешено: Зарезервировано {n_val} кВт*ч из профицита"
+                        main_reason = "Разрешено" if is_currently_pulling_now else "Разрешено (Старт)"
+                        permissions_reasons[sensor_id] = f"{main_reason}: Зарезервировано {n_val} кВт*ч из профицита"
                     else:
                         permissions[sensor_id] = False
                         if gen_bottleneck:
                             permissions_reasons[sensor_id] = f"Блокировка: Доступная генерация {round(float(available_gen_kw), 2)} кВт < 60% от {req_kw} кВт"
                         elif power_bottleneck:
-                            permissions_reasons[sensor_id] = f"Блокировка: Доступно {round(float(available_power_kw), 2)} кВт < Мощность {req_kw} кВт"
+                            others_note = f" (Занято: {', '.join(reserved_by)})" if reserved_by else ""
+                            permissions_reasons[sensor_id] = f"Блокировка: Доступно {round(float(available_power_kw), 2)} кВт < Мощность {req_kw} кВт{others_note}"
                         else:
                             permissions_reasons[sensor_id] = f"Блокировка: Не хватает энергии (нужно {round(float(needed), 2)} кВт*ч, доступно {round(float(available_budget), 2)} кВт*ч)"
                 
