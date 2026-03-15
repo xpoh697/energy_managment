@@ -169,6 +169,9 @@
       },
       "avg_power_gen": {
         "name": "Averaged generation power (10 min)"
+      },
+      "bms_learned_profile": {
+        "name": "BMS Learned Charge Profile"
       }
     },
     "number": {

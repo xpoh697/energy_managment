@@ -179,6 +179,9 @@
       "avg_power_gen": {
         "name": "Усредненная генерация (10 мин)"
       },
+      "bms_learned_profile": {
+        "name": "Обученный профиль заряда BMS"
+      },
       "solar_waste": {
         "state_attributes": {
           "current_waste_kw": { "name": "Мощность потерь сейчас (кВт)" },

@@ -95,6 +95,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(InstantPowerAveragedSensor(manager, "load"))
         entities.append(InstantPowerAveragedSensor(manager, "gen"))
         entities.append(SolarWasteSensor(manager, "Упущенная солнечная энергия"))
+        entities.append(BMSLearnedProfileSensor(manager))
 
     async_add_entities(entities)
 
@@ -143,6 +144,10 @@ class EnergyProfileManager:
         if self.power_load_sensors: self.all_power_sensors.update(self.power_load_sensors)
         if self.power_gen_sensors: self.all_power_sensors.update(self.power_gen_sensors)
         if self.battery_power_sensor: self.all_power_sensors.add(self.battery_power_sensor)
+        
+        # Adaptive BMS Model: "SOC" -> Max Charge Power (kW)
+        self.bms_learned_profile: dict[int, float] = {}
+        self.current_inverter_mode: str = "sale_pv"
 
         raw_deduct = config_data.get(CONF_DEDUCT_SETTINGS, {})
         self.deduct_settings = {}
@@ -261,6 +266,7 @@ class EnergyProfileManager:
         self.learned_avg_cycle_power = self.data.get("learned_avg_cycle_power", {})
         self.learned_cycle_total_kwh = self.data.get("learned_cycle_total_kwh", {})
         self.learned_avg_cycle_duration = self.data.get("learned_avg_cycle_duration", {})
+        self.bms_learned_profile = {int(k): float(v) for k, v in self.data.get("bms_learned_profile", {}).items() if str(k).isdigit()}
         
         # Restore cycle start times (handle ISO strings or missing)
         saved_starts = self.data.get("cycle_actual_start_time", {})
@@ -331,6 +337,7 @@ class EnergyProfileManager:
         self.data["cycle_actual_start_time"] = {
             s_id: dt.isoformat() for s_id, dt in self.cycle_actual_start_time.items()
         }
+        self.data["bms_learned_profile"] = self.bms_learned_profile
         self.data["sensor_last_values"] = self.sensor_last_values
         self.data["daily_deduct_consumption"] = dict(self.daily_deduct_consumption)
         self.data["hourly_accumulators"] = {
@@ -473,7 +480,15 @@ class EnergyProfileManager:
         if self.power_gen_sensors:
             gen_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors)
 
-        self.power_history.append({"time": now, "load_kw": float(load_kw), "gen_kw": float(gen_kw)})
+        self.power_history.append({
+            "time": now, 
+            "load_kw": float(load_kw), 
+            "gen_kw": float(gen_kw),
+            "batt_kw": float(batt_p) if 'batt_p' in locals() else (get_kwh_val(self.hass.states.get(self.battery_power_sensor)) if self.battery_power_sensor else 0.0),
+            "export_kw": max(0.0, float(gen_kw) + (float(batt_p) if 'batt_p' in locals() else 0.0) - float(load_kw))
+        })
+
+        self._update_bms_learned_profile(now)
 
         # --- Real-time Balance / Savings Account Logic ---
         # Logic: Increment/Decrement based on (Solar_to_Load + Battery_to_Load - Grid_to_Battery)
@@ -633,6 +648,22 @@ class EnergyProfileManager:
         if not self.power_history:
             return 0.0
         val = sum(x["gen_kw"] for x in self.power_history) / len(self.power_history)
+        return round(float(val), 3)
+
+    @property
+    def avg_batt_kw(self):
+        """Average battery power (positive=discharging, negative=charging)."""
+        if not self.power_history:
+            return 0.0
+        val = sum(x.get("batt_kw", 0.0) for x in self.power_history) / len(self.power_history)
+        return round(float(val), 3)
+
+    @property
+    def avg_export_kw(self):
+        """Average export to grid power."""
+        if not self.power_history:
+            return 0.0
+        val = sum(x.get("export_kw", 0.0) for x in self.power_history) / len(self.power_history)
         return round(float(val), 3)
 
     async def _async_periodic_save(self, _now):
@@ -1328,6 +1359,20 @@ class EnergyProfileManager:
         """Complex market strategy solver."""
         return self.strategy_engine.get_market_strategy(mode)
 
+    def get_battery_charge_limit_kw(self, soc):
+        """Returns the maximum possible charge power (kW) for a given SOC.
+        Uses learned BMS profile if available, otherwise falls back to theoretical CC/CV model.
+        """
+        # Try finding the closest learned point (with 2% tolerance)
+        soc_int = int(round(soc))
+        if soc_int in self.bms_learned_profile:
+            return self.bms_learned_profile[soc_int]
+        
+        # Fallback to theoretical model from StrategyEngine
+        max_batt_power = self.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+        theoretical_ratio = self.get_cc_cv_ratio(soc)
+        return float(max_batt_power) * theoretical_ratio
+
     def get_budget_and_permissions(self, days_for_profile=14, skip_strategy_check=False):
         """Analyze current day state and return permissions for heavy loads."""
         return self.strategy_engine.get_budget_and_permissions(days_for_profile, skip_strategy_check)
@@ -1336,6 +1381,30 @@ class EnergyProfileManager:
         """Universal SOC simulation engine."""
         now = start_time or dt_util.now()
         return self.strategy_engine.run_soc_simulation(start_soc, sim_hours_abs, now, charge_commands)
+
+    def _update_bms_learned_profile(self, now):
+        """Analyze stable power history to learn BMS charging limits."""
+        if len(self.power_history) < 5: return
+        # Condition 1: Inverter Mode must be one that prioritizes charging
+        if self.current_inverter_mode not in ["sale_pv", "buy"]: return
+
+        avg_export = self.avg_export_kw
+        avg_batt = self.avg_batt_kw # avg_batt < 0 means charging
+        
+        if avg_batt < -0.1 and avg_export > 0.05:
+            soc, _, _ = self.get_battery_state()
+            soc_int = int(round(soc))
+            charge_power_limit = abs(avg_batt)
+            
+            current_val = self.bms_learned_profile.get(soc_int)
+            if current_val is None: current_val = self.get_battery_charge_limit_kw(soc_int)
+            
+            if charge_power_limit > current_val:
+                new_val = float(round(charge_power_limit, 3))
+            else:
+                new_val = float(round(current_val * 0.98 + charge_power_limit * 0.02, 3))
+            
+            self.bms_learned_profile[soc_int] = new_val
 
 class EnergyBaseSensor(SensorEntity):
     """Base class for Energy Management sensors to reduce boilerplate."""
@@ -1395,6 +1464,50 @@ class ProfileAveragedSensor(EnergyBaseSensor):
             }
 
 
+class BMSLearnedProfileSensor(SensorEntity):
+    """Diagnostic sensor showing the learned BMS charge limit profile."""
+    _attr_has_entity_name = True
+    def __init__(self, manager):
+        self.manager = manager
+        self._attr_translation_key = "bms_learned_profile"
+        self._attr_unique_id = f"{manager.entry.entry_id}_bms_learned_profile"
+        self._attr_icon = "mdi:battery-charging-high"
+        
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        return len(self.manager.bms_learned_profile)
+
+    @property
+    def extra_state_attributes(self):
+        sorted_profile = {str(k): v for k, v in sorted(self.manager.bms_learned_profile.items())}
+        return {
+            "profile": sorted_profile,
+            "learned_points_count": len(sorted_profile)
+        }
+
+
+
+    @property
+    def avg_batt_kw(self):
+        """Average battery power over last 10 mins (positive=discharge, negative=charge)."""
+        if not self.power_history: return 0.0
+        return sum(x.get("batt_kw", 0.0) for x in self.power_history) / len(self.power_history)
+
+    @property
+    def avg_export_kw(self):
+        """Average export to grid power over last 10 mins (positive=export)."""
+        if not self.power_history: return 0.0
+        return sum(x.get("export_kw", 0.0) for x in self.power_history) / len(self.power_history)
 
 class BatteryEndOfDaySOCSensor(SensorEntity):
     """Predicts battery SOC at the next major event (sunset or sunrise)."""
@@ -1757,6 +1870,7 @@ class InverterOperationModeSensor(SensorEntity):
         self._attr_extra_state_attributes["mode_reason"] = reason + debug_info
         self._attr_extra_state_attributes["bms_status"] = bms_debug
 
+        self.manager.current_inverter_mode = mode
         return mode
 
 class InstantPowerAveragedSensor(SensorEntity):
