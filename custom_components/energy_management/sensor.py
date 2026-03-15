@@ -1073,8 +1073,8 @@ class EnergyProfileManager:
         return expected_full_hours + expected_current_hour
 
     def get_expected_remaining(self, profile_type, days=None, day_type=None):
-        """Returns expected accumulated value from current minute to end of day."""
-        now = self.now
+        """Returns expected accumulated value from current minute to end of day (23:59)."""
+        now = dt_util.now()
         days = days or self.custom_period
         day_type = day_type or self.day_type
 
@@ -1086,6 +1086,13 @@ class EnergyProfileManager:
         expected_remaining_hours = sum(float(prof.get(str(h), 0.0)) for h in range(cur_hour + 1, 24))
 
         return expected_current_hour + expected_remaining_hours
+
+    def get_expected_night(self, profile_type, days=None, day_type=None, until_hour=8):
+        """Returns expected accumulated value from 00:00 to until_hour (usually morning)."""
+        days = days or self.custom_period
+        day_type = day_type or self.day_type
+        prof = self.get_average_profile(profile_type, days, day_type)
+        return sum(float(prof.get(str(h), 0.0)) for h in range(0, until_hour))
 
     def get_total_so_far(self, profile_type):
         """Returns actual accumulated value for today so far (past hours + current)."""
