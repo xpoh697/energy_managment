@@ -336,6 +336,8 @@ class StrategyEngine:
                     power_bottleneck = True
 
                 # v3.7 - Be even stricter for dynamic loads with Solar Only
+                price_suffix = " (Беспл. цена)" if is_free_price else ""
+                
                 # If priority is low (dynamic), we want 80% solar coverage, not just 60%
                 if req_kwh == 0 and only_solar_free and not is_free_price:
                     if available_gen_kw < (req_kw * 0.8):

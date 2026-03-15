@@ -95,22 +95,22 @@ class EnergyPermissionSensor(BinarySensorEntity):
 
         is_cyclic = settings.get(CONF_IS_CYCLIC, False)
         consumed_today = self.manager.daily_deduct_consumption.get(self.target_sensor_id, 0.0)
+        only_solar_free = settings.get("only_solar_free", False)
+        learned_kw = float(self.manager.learned_real_power.get(self.target_sensor_id, 0.0)) / 1000.0
+        config_kw = float(settings.get("required_kw", 0.0))
+        req_kw = max(learned_kw, config_kw)
 
         attrs = {
             "controlled_entity_id": self.target_sensor_id,
             "status_reason": budget_res.get("permissions_reasons", {}).get(self.target_sensor_id, "Unknown"),
             "daily_consumption_kwh": round(float(settings.get("required_kwh", 0.0)), 2),
             "priority": settings.get("priority", 99),
-            "already_consumed_today_kwh": round(float(self.manager.daily_deduct_consumption.get(self.target_sensor_id, 0.0)), 2),
+            "already_consumed_today_kwh": round(float(consumed_today), 2),
             "estimated_initial_budget_kwh": round(budget_res.get("initial_budget", 0.0), 3),
             "forecast_correction_coefficient": round(budget_res.get("forecast_coefficient", 1.0), 3),
             # Learned power values
-            "learned_peak_power_w": round(
-                self.manager.learned_real_power.get(self.target_sensor_id, 0.0), 1
-            ),
-            "configured_peak_power_w": round(
-                settings.get("required_kw", 0.0) * 1000.0, 1
-            ),
+            "learned_peak_power_w": round(learned_kw * 1000.0, 1),
+            "configured_peak_power_w": round(config_kw * 1000.0, 1),
             "learned_standby_power_w": round(
                 self.manager.learned_standby_power.get(self.target_sensor_id, 0.0), 1
             ),

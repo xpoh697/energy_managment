@@ -474,18 +474,22 @@ class EnergyProfileManager:
         """Poll and save the current instantaneous power levels for averaging."""
         load_kw = 0.0
         gen_kw = 0.0
+        batt_p = 0.0
 
         if self.power_load_sensors:
-            load_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_load_sensors) # sync_v2.1.3
+            load_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_load_sensors)
         if self.power_gen_sensors:
             gen_kw = sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors)
+        
+        if self.battery_power_sensor:
+            batt_p = get_kwh_val(self.hass.states.get(self.battery_power_sensor)) or 0.0
 
         self.power_history.append({
             "time": now, 
             "load_kw": float(load_kw), 
             "gen_kw": float(gen_kw),
-            "batt_kw": float(batt_p) if 'batt_p' in locals() else (get_kwh_val(self.hass.states.get(self.battery_power_sensor)) if self.battery_power_sensor else 0.0),
-            "export_kw": max(0.0, float(gen_kw) + (float(batt_p) if 'batt_p' in locals() else 0.0) - float(load_kw))
+            "batt_kw": float(batt_p),
+            "export_kw": max(0.0, float(gen_kw) + float(batt_p) - float(load_kw))
         })
 
         self._update_bms_learned_profile(now)
@@ -640,14 +644,14 @@ class EnergyProfileManager:
     def avg_load_kw(self):
         if not self.power_history:
             return 0.0
-        val = sum(x["load_kw"] for x in self.power_history) / len(self.power_history)
+        val = sum(float(x.get("load_kw") or 0.0) for x in self.power_history) / len(self.power_history)
         return round(float(val), 3)
 
     @property
     def avg_gen_kw(self):
         if not self.power_history:
             return 0.0
-        val = sum(x["gen_kw"] for x in self.power_history) / len(self.power_history)
+        val = sum(float(x.get("gen_kw") or 0.0) for x in self.power_history) / len(self.power_history)
         return round(float(val), 3)
 
     @property
@@ -655,7 +659,7 @@ class EnergyProfileManager:
         """Average battery power (positive=discharging, negative=charging)."""
         if not self.power_history:
             return 0.0
-        val = sum(x.get("batt_kw", 0.0) for x in self.power_history) / len(self.power_history)
+        val = sum(float(x.get("batt_kw") or 0.0) for x in self.power_history) / len(self.power_history)
         return round(float(val), 3)
 
     @property
