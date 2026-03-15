@@ -1497,17 +1497,7 @@ class BMSLearnedProfileSensor(SensorEntity):
 
 
 
-    @property
-    def avg_batt_kw(self):
-        """Average battery power over last 10 mins (positive=discharge, negative=charge)."""
-        if not self.power_history: return 0.0
-        return sum(x.get("batt_kw", 0.0) for x in self.power_history) / len(self.power_history)
 
-    @property
-    def avg_export_kw(self):
-        """Average export to grid power over last 10 mins (positive=export)."""
-        if not self.power_history: return 0.0
-        return sum(x.get("export_kw", 0.0) for x in self.power_history) / len(self.power_history)
 
 class BatteryEndOfDaySOCSensor(SensorEntity):
     """Predicts battery SOC at the next major event (sunset or sunrise)."""
