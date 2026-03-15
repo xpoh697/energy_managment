@@ -288,7 +288,7 @@ class StrategyEngine:
             reserved_by = []
 
             for sensor_id, settings in self.manager.deduct_settings.items():
-                only_solar_free = settings.get("only_solar_free", False)
+                only_solar_free = settings.get(CONF_ONLY_SOLAR, False)
                 req_kwh = float(settings.get("required_kwh", 2.5))
                 # Learned power (W) converted to kW
                 learned_kw = float(self.manager.learned_real_power.get(sensor_id, 0.0)) / 1000.0

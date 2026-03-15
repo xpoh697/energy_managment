@@ -31,6 +31,7 @@ from .const import (
     CONF_POWER_SENSOR,
     CONF_ACTIVE_HOLD_TIME,
     CONF_IS_CYCLIC,
+    CONF_ONLY_SOLAR,
 )
 
 
@@ -145,7 +146,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "priority": user_input.get("priority", 1),
                 "required_kwh": user_input.get("required_kwh", 0.0),
                 "required_kw": user_input.get("required_kw", 0.0),
-                "only_solar_or_negative_price": user_input.get("only_solar_or_negative_price", False),
+                CONF_ONLY_SOLAR: user_input.get(CONF_ONLY_SOLAR, False),
                 CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
                 CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
                 CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
@@ -159,7 +160,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required("priority", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
             vol.Required("required_kwh", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
             vol.Required("required_kw", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
-            vol.Optional("only_solar_or_negative_price", default=False): bool,
+            vol.Optional(CONF_ONLY_SOLAR, default=False): bool,
             vol.Optional(CONF_POWER_SENSOR): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
@@ -337,7 +338,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 "priority": user_input.get("priority", 1),
                 "required_kwh": user_input.get("required_kwh", 0.0),
                 "required_kw": user_input.get("required_kw", 0.0),
-                "only_solar_or_negative_price": user_input.get("only_solar_or_negative_price", False),
+                CONF_ONLY_SOLAR: user_input.get(CONF_ONLY_SOLAR, False),
                 CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
                 CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
                 CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
@@ -352,7 +353,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Required("priority", default=existing.get("priority", 1)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
             vol.Required("required_kwh", default=existing.get("required_kwh", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
             vol.Required("required_kw", default=existing.get("required_kw", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
-            vol.Optional("only_solar_or_negative_price", default=existing.get("only_solar_or_negative_price", False)): bool,
+            vol.Optional(CONF_ONLY_SOLAR, default=existing.get(CONF_ONLY_SOLAR, False)): bool,
             vol.Optional(CONF_POWER_SENSOR, default=existing.get(CONF_POWER_SENSOR)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),

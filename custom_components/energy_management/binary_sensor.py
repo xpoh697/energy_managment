@@ -9,6 +9,7 @@ from .const import (
     CONF_CUSTOM_PERIOD,
     CONF_IS_CYCLIC,
     CONF_POWER_SENSOR,
+    CONF_ONLY_SOLAR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class EnergyPermissionSensor(BinarySensorEntity):
 
         is_cyclic = settings.get(CONF_IS_CYCLIC, False)
         consumed_today = self.manager.daily_deduct_consumption.get(self.target_sensor_id, 0.0)
-        only_solar_free = settings.get("only_solar_free", False)
+        only_solar_free = settings.get(CONF_ONLY_SOLAR, False)
         learned_kw = float(self.manager.learned_real_power.get(self.target_sensor_id, 0.0)) / 1000.0
         config_kw = float(settings.get("required_kw", 0.0))
         req_kw = max(learned_kw, config_kw)
@@ -118,7 +119,7 @@ class EnergyPermissionSensor(BinarySensorEntity):
             "only_solar_checked": only_solar_free,
             "available_power_total_kw": round(budget_res.get("available_power_total_kw", 0.0), 2),
             "available_gen_kw": round(budget_res.get("available_gen_kw", 0.0), 2),
-            "only_solar_threshold_kw": round(req_kw * 0.6 if only_solar_free else 0.0, 2),
+            "only_solar_threshold_kw": round(float(req_kw) * (0.8 if settings.get("required_kwh", 2.5) == 0 else 0.6) if only_solar_free else 0.0, 2),
             "waste_compensation_kw": round(budget_res.get("waste_compensation_kw", 0.0), 2),
             "battery_flexible_kw": round(budget_res.get("battery_flexible_kw", 0.0), 2),
             "battery_discharge_budget_kw": round(budget_res.get("battery_discharge_budget_kw", 0.0), 2),
