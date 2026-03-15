@@ -238,15 +238,40 @@ class StrategyEngine:
             permissions = {}
             permissions_reasons = {}
             
-            # Real-time power limit check
+            # Real-time power limit check (improved v3.2)
             initial_power_kw = 0.0
-            if getattr(self.manager, "power_load_sensors", []) and getattr(self.manager, "power_gen_sensors", []):
-                load_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
-                gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+            batt_p_flexible = 0.0
+            waste_kw = 0.0
+            
+            p_load_sensors = getattr(self.manager, "power_load_sensors", [])
+            p_gen_sensors = getattr(self.manager, "power_gen_sensors", [])
+            
+            if p_load_sensors and p_gen_sensors:
+                load_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in p_load_sensors)
+                gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in p_gen_sensors)
+                
+                # 1. Base balance (Grid Balance if load_kw includes battery, otherwise PV-House)
                 initial_power_kw = gen_kw - load_kw
                 
+                # 2. Solar Waste Compensation (Potential - Actual)
+                cur_hist_val = float(prof_gen.get(str(cur_hour), 0.0))
+                potential_gen = max(gen_kw, cur_hist_val * blended_coeff)
+                waste_kw = max(0.0, potential_gen - gen_kw)
+                
+                # 3. Flexible Battery Power (If charging, this power can be redirected)
+                if self.manager.battery_power_sensor:
+                    st_batt = self.manager.hass.states.get(self.manager.battery_power_sensor)
+                    batt_v = get_kwh_val(st_batt) or 0.0 # + discharge, - charge
+                    # If charging (batt_v < 0), this is power we can take back
+                    batt_p_flexible = max(0.0, -batt_v)
+                
+                # Total available = (Net) + (Unused Solar) + (Current Battery Charge)
+                # This correctly handles both "Total Load" and "House Only" sensor setups
+                # if we have a separate battery sensor to compensate.
+                initial_power_kw = initial_power_kw + waste_kw + batt_p_flexible
+                
             available_power_kw = initial_power_kw
-            available_gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
+            available_gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in p_gen_sensors) + waste_kw
             
             cur_price_buy = None
             if not skip_strategy_check:
@@ -380,7 +405,10 @@ class StrategyEngine:
                 "debug_expected_today_so_far": float(expected_today_so_far or 0.0),
                 "debug_fraction_so_far": float(fraction_so_far or 0.0),
                 "occupancy_coefficient": float(occ_coeff or 1.0),
-                "efficiency_coefficient": float(eff_coeff or 1.0)
+                "efficiency_coefficient": float(eff_coeff or 1.0),
+                "available_power_total_kw": float(initial_power_kw or 0.0),
+                "waste_compensation_kw": float(waste_kw or 0.0),
+                "battery_flexible_kw": float(batt_p_flexible or 0.0)
             }
         finally:
             self._calculating_strategy = old_calc

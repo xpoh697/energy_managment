@@ -115,6 +115,9 @@ class EnergyPermissionSensor(BinarySensorEntity):
                 self.manager.learned_standby_power.get(self.target_sensor_id, 0.0), 1
             ),
             "is_cyclic": is_cyclic,
+            "available_power_total_kw": round(budget_res.get("available_power_total_kw", 0.0), 2),
+            "waste_compensation_kw": round(budget_res.get("waste_compensation_kw", 0.0), 2),
+            "battery_flexible_kw": round(budget_res.get("battery_flexible_kw", 0.0), 2),
         }
 
         # Device detection and Status
