@@ -208,14 +208,24 @@ class StrategyEngine:
             min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
             eff_coeff = self.get_efficiency_coefficient() or 1.0
                         
-            # 3. Get Expected Consumption remaining till end of day
+            # 3. Get Expected Consumption remaining till end of day + night
             occ_coeff = self.manager.get_occupancy_coefficient()
-            expected_remaining = self.manager.get_expected_remaining("consumption_total", days_for_profile) * occ_coeff
-            expected_consumption = expected_remaining
             
-            # Budget = (Today's remaining solar) + (Current battery energy ABOVE min_soc) - (Necessary consumption)
-            # Note: we use adjusted forecast
-            initial_budget = (forecast_val_adjusted * (1.0 - fraction_so_far)) + (batt_energy_val - (min_soc * batt_cap / 100.0)) - expected_remaining
+            # Use 'consumption_base' for budget to avoid subtracting managed loads that we are currently deciding upon
+            expected_today = self.manager.get_expected_remaining("consumption_base", days_for_profile) * occ_coeff
+            expected_night = self.manager.get_expected_night("consumption_base", days_for_profile) * occ_coeff
+            expected_consumption = expected_today + expected_night
+            
+            # Solar remainder: distribute total forecast by profile but strictly for remaining time
+            fraction_left_this_hour = 1.0 - (now.minute / 60.0)
+            cur_hist_val = float(prof_gen.get(str(cur_hour), 0.0))
+            hist_gen_remaining = (cur_hist_val * fraction_left_this_hour) + sum(float(prof_gen.get(str(h), 0.0)) for h in range(cur_hour + 1, 24))
+            
+            # Scaled remaining solar = forecast_val_adjusted (which is daily total) * (remaining_hist / total_hist)
+            solar_remaining = (forecast_val_adjusted * (hist_gen_remaining / total_hist_gen)) if total_hist_gen > 0.1 else 0.0
+            
+            # Budget = (Today's remaining solar) + (Current battery energy ABOVE min_soc) - (Necessary consumption till morning)
+            initial_budget = solar_remaining + (batt_energy_val - (min_soc * batt_cap / 100.0)) - expected_consumption
             available_budget = initial_budget
         
             # 4. Evaluate permissions for each managed load
