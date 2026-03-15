@@ -310,16 +310,25 @@ class StrategyEngine:
                     # v2.1.6 - Hysteresis logic to prevent self-blocking
                     # If load is already running, we check if we can afford to KEEP it (surplus > 0)
                     # If it's idle, we check if we have enough room to START it (surplus > req_kw)
+                    # v3.4 - Refined bottleneck logic
+                    # 1. Total Power Bottleneck
+                    # We use a 60% threshold if "Only Solar/Free" is ON, 
+                    # otherwise (relaxed mode) we just need ANY non-negative power balance.
+                    is_strict_power = only_solar_free and not is_free_price
+                    
+                    # v3.5 - Harmonized logic and reasons
+                    is_strict_power = only_solar_free and not is_free_price
+                    p_threshold = (req_kw * 0.6) if is_strict_power else 0.0
+                    p_limit = -(req_kw * 0.4) if is_strict_power else -(req_kw * 0.95)
+                    
                     if is_currently_pulling_now:
-                        # v2.1.8 - Symmetrical 60% rule: keep running as long as solar covers at least 60% 
-                        # (i.e. we don't pull more than 40% from the battery/grid)
-                        if available_power_kw < -(req_kw * 0.4):
+                        if available_power_kw < p_limit:
                             power_bottleneck = True
                     else:
-                        # v2.1.7 - Restore the 60% threshold for starting (permits taking some from battery)
-                        if available_power_kw < (req_kw * 0.6):
+                        if available_power_kw < p_threshold:
                             power_bottleneck = True
                             
+                    # 2. Solar Generation Bottleneck (Specifically what user asked)
                     if only_solar_free and not is_free_price:
                         if available_gen_kw < (req_kw * 0.6):
                             gen_bottleneck = True
@@ -355,11 +364,13 @@ class StrategyEngine:
                         elif power_bottleneck:
                             others_note = f" (Занято: {', '.join(reserved_by)})" if reserved_by else ""
                             if is_currently_pulling_now:
-                                threshold = round(-(req_kw * 0.4), 2)
-                                permissions_reasons[sensor_id] = f"Блокировка: Баланс {g_val} кВт < лимит АКБ {threshold} кВт (допуск 40% от {req_kw}){others_note}"
+                                threshold_val = round(p_limit, 2)
+                                pct = "40%" if is_strict_power else "95%"
+                                permissions_reasons[sensor_id] = f"Блокировка: Баланс {g_val} кВт < лимит АКБ {threshold_val} кВт (допуск {pct} от {req_kw}){others_note}"
                             else:
-                                threshold = round(req_kw * 0.6, 2)
-                                permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Порог {threshold} кВт (60% от {req_kw}){others_note}"
+                                threshold_val = round(p_threshold, 2)
+                                pct = "60%" if is_strict_power else "0%"
+                                permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Порог {threshold_val} кВт ({pct} от {req_kw}){others_note}"
                         elif available_budget <= 0:
                             permissions_reasons[sensor_id] = f"Блокировка: Нет профицита энергии ({round(float(available_budget), 2)} кВт*ч)"
                         else:
