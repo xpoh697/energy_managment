@@ -184,18 +184,21 @@ class StrategyEngine:
             # v2.1.5 - Ensure temp_max_forecast is up-to-date
             # Total expected today = actual already produced + remaining forecast
             predicted_total = actual_today + forecast_val
-            if predicted_total > self.manager.data.get("temp_max_forecast", 0.0):
-                self.manager.data["temp_max_forecast"] = float(predicted_total)
-
+            # v3.1 - Improved Blended Coefficient logic
             expected_today_total = self.manager.data.get("temp_max_forecast", 0.0) or 0.0
             expected_today_so_far = expected_today_total * fraction_so_far
             
-            today_coeff = hist_coeff
+            # If we don't have enough data yet today, trust the forecast (coeff = 1.0)
+            performance_coeff = 1.0
             if expected_today_so_far > 0.1:
-                today_coeff = actual_today / expected_today_so_far
-                today_coeff = max(0.2, min(today_coeff, 2.0))
+                performance_coeff = actual_today / expected_today_so_far
+                performance_coeff = max(0.2, min(performance_coeff, 2.0))
+            
+            # map for debug return
+            today_coeff = performance_coeff
                 
-            blended_coeff = (today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far))
+            # As the day progresses, we trust today's actual performance more than the raw forecast.
+            blended_coeff = (performance_coeff * fraction_so_far) + (1.0 * (1.0 - fraction_so_far))
             self.manager.last_blended_coeff = blended_coeff
                     
             forecast_val_adjusted = forecast_val * blended_coeff
@@ -390,10 +393,11 @@ class StrategyEngine:
         day_type_tom = "weekend" if tomorrow_dt.weekday() >= 5 else "weekday"
         
         prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-        prof_cons_today = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type_today)
-        prof_cons_tom = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type_tom)
+        prof_cons_today = self.manager.get_average_profile("consumption_base", self.manager.custom_period, day_type_today)
+        prof_cons_tom = self.manager.get_average_profile("consumption_base", self.manager.custom_period, day_type_tom)
         
         total_hist_gen = sum(float(prof_gen.get(str(h), 0.0)) for h in range(24))
+        if total_hist_gen < 0.1: total_hist_gen = 1.0 # Avoid div by zero
         
         # Determine sunset for 'remaining' logic
         sunset_h = 17 
@@ -421,13 +425,22 @@ class StrategyEngine:
             step_duration = fraction_left_in_first_hour if i == 0 else 1.0
             if step_duration <= 0: continue
 
-            # Generation
+            # Generation - Distribute daily forecast by profile
             hist_hour_gen = float(prof_gen.get(h_str, 0.0))
             if is_tom:
-                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_tom) if total_hist_gen > 0 else hist_hour_gen
+                # For tomorrow, we use the forecast scaled by blended_coeff (overall system performance)
+                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_tom * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
             else:
-                expected_gen_kw = (hist_hour_gen / hist_gen_rem_today * f_today) if hist_gen_rem_today > 0.1 else hist_hour_gen
-                expected_gen_kw *= blended_coeff
+                # For today, f_today is the TOTAL forecast for the day. 
+                # We distribute it using TOTAL profile to get the expected hourly power.
+                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_today * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
+                
+                # If this is the current hour and we ALREADY have sun, use the HIGHER of forecast vs actual 
+                # (to react to "sun жарит" immediately even if profile/forecast is low for this specific hour)
+                if i == 0 and not is_tom:
+                    cur_actual_gen = self.manager.avg_gen_kw
+                    if cur_actual_gen > expected_gen_kw:
+                        expected_gen_kw = cur_actual_gen
             
             # Consumption
             p_cons = prof_cons_tom if is_tom else prof_cons_today
