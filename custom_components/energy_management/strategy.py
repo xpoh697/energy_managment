@@ -441,9 +441,13 @@ class StrategyEngine:
                 # For tomorrow, we use the forecast scaled by blended_coeff (overall system performance)
                 expected_gen_kw = (hist_hour_gen / total_hist_gen * f_tom * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
             else:
-                # For today, f_today is the TOTAL forecast for the day. 
-                # We distribute it using TOTAL profile to get the expected hourly power.
-                expected_gen_kw = (hist_hour_gen / total_hist_gen * f_today * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
+                # For today, f_today is typically the REMAINING forecast for the day.
+                # We should distribute it based on the remaining portion of the profile.
+                rem_sum = sum(float(prof_gen.get(str(h), 0.0)) for h in range(now.hour, 24))
+                if rem_sum > 0.1:
+                    expected_gen_kw = (hist_hour_gen / rem_sum * f_today * blended_coeff)
+                else:
+                    expected_gen_kw = (hist_hour_gen / total_hist_gen * f_today * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
                 
                 # If this is the current hour and we ALREADY have sun, use the HIGHER of forecast vs actual 
                 # (to react to "sun жарит" immediately even if profile/forecast is low for this specific hour)
