@@ -13,13 +13,14 @@ The core of the integration relies on creating a "statistical daily profile" of 
 
 ### 2. Auto-Adjusting Solar Forecast & Inverter Efficiency
 Cloud coverage forecasts (like Forecast.Solar) are often over-optimistic. The integration contains a "Confidence Algorithm":
-- **Forecast Correction**: It compares daily actual production vs predicted and calculates a reliability coefficient.
+- **Forecast Correction & Real-time Adaptivity**: It compares daily actual production vs predicted and calculates a reliability coefficient. As the day progresses, it dynamically weights real-time generation more heavily (the "blended coefficient"), ensuring the system reacts immediately to unexpectedly high solar irradiation.
 - **Inverter Efficiency (КПД)**: If you provide an inverter loss sensor, the system calculates real DC↔AC conversion efficiency. This ensures that battery discharge and solar forecasts are adjusted for real-world thermal losses.
 
 ### 3. Smart Energy Budget (Surplus Calculator)
 The integration generates an `Energy Budget` sensor. The budget formula is:
 `Available Budget = (Adjusted Solar Forecast × КПД) + (Current Battery Energy × КПД) - (Expected Base Consumption × Occupancy Factor)`
-If the budget is positive, you have a confirmed surplus that can be used by managed loads without risking grid reliance.
+
+**Note:** Starting from v3.2, the budget is calculated from the current minute **until 08:00 AM next morning**, and explicitly uses **Base Consumption** (total minus managed loads). This prevents double-counting and ensures your morning coffee is "pre-booked" in the battery before permitting a secondary boiler to run.
 
 ### 4. Hierarchical Load Permissions
 You configure "Managed Loads" (Boilers, EV Chargers, etc.) with:
@@ -69,4 +70,4 @@ Track exactly how much free energy was lost because your battery was full and yo
 
 Installation is available via **HACS** or manual copy to `custom_components/energy_management`. Configuration is fully handled via the Home Assistant UI (Integrations page).
 
-*Version: 1.3.1 | 2026*
+*Version: 1.3.4 (v3.2 core) | 2026*
