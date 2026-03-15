@@ -99,9 +99,9 @@ class EnergyPermissionSensor(BinarySensorEntity):
         attrs = {
             "controlled_entity_id": self.target_sensor_id,
             "status_reason": budget_res.get("permissions_reasons", {}).get(self.target_sensor_id, "Unknown"),
-            "daily_consumption_kwh": round(consumed_today, 3),
+            "daily_consumption_kwh": round(float(settings.get("required_kwh", 0.0)), 2),
             "priority": settings.get("priority", 99),
-            "already_consumed_today_kwh": round(consumed_today, 3),
+            "already_consumed_today_kwh": round(float(self.manager.daily_deduct_consumption.get(self.target_sensor_id, 0.0)), 2),
             "estimated_initial_budget_kwh": round(budget_res.get("initial_budget", 0.0), 3),
             "forecast_correction_coefficient": round(budget_res.get("forecast_coefficient", 1.0), 3),
             # Learned power values

@@ -335,18 +335,19 @@ class StrategyEngine:
                 elif initial_power_kw > 0.5 and available_power_kw < 0:
                     power_bottleneck = True
 
+                # v3.6 - Improved reasons and goal logic
+                price_suffix = " (Беспл. цена)" if is_free_price else ""
+                
                 if req_kwh == 0:
                     # Dynamic load logic
                     if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
                         permissions[sensor_id] = True
                         if req_kw > 0.0:
-                            # v2.1.6 - Only subtract power if the load was IDLE (not already in load_kw)
                             if not is_currently_pulling_now:
                                 available_power_kw = float(available_power_kw) - float(req_kw)
                                 if only_solar_free and not is_free_price:
                                     available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
                             
-                            # Track who is using power for reasons of others
                             friendly_name = settings.get("name", sensor_id.split('.')[-1])
                             status_tag = "Работает" if is_currently_pulling_now else "Зарезервировано"
                             reserved_by.append(f"{friendly_name} ({status_tag})")
@@ -354,33 +355,32 @@ class StrategyEngine:
                         b_val = round(max(0.0, float(available_budget)), 2)
                         g_val = round(max(0.0, float(available_power_kw)), 2)
                         main_reason = "Разрешено" if is_currently_pulling_now else "Разрешено (Старт)"
-                        permissions_reasons[sensor_id] = f"{main_reason}: Динамическая (Профицит {b_val} кВт*ч, Доступно {g_val} кВт)"
+                        permissions_reasons[sensor_id] = f"{main_reason}: Динамическая (Бюджет {b_val} кВт*ч, Ток {g_val} кВт){price_suffix}"
                     else:
                         permissions[sensor_id] = False
                         g_val = round(float(available_power_kw), 2)
                         g_gen = round(float(available_gen_kw), 2)
                         if gen_bottleneck:
-                            permissions_reasons[sensor_id] = f"Блокировка: Доступная генер. {g_gen} кВт < 60% от {req_kw} кВт"
+                            permissions_reasons[sensor_id] = f"Блокировка: Мало солнца ({g_gen} < {round(req_kw*0.6, 2)} кВт)"
                         elif power_bottleneck:
                             others_note = f" (Занято: {', '.join(reserved_by)})" if reserved_by else ""
                             if is_currently_pulling_now:
                                 threshold_val = round(p_limit, 2)
-                                pct = "40%" if is_strict_power else "95%"
-                                permissions_reasons[sensor_id] = f"Блокировка: Баланс {g_val} кВт < лимит АКБ {threshold_val} кВт (допуск {pct} от {req_kw}){others_note}"
+                                permissions_reasons[sensor_id] = f"Блокировка: Баланс {g_val} < {threshold_val} кВт{others_note}"
                             else:
                                 threshold_val = round(p_threshold, 2)
-                                pct = "60%" if is_strict_power else "0%"
-                                permissions_reasons[sensor_id] = f"Блокировка: Доступно {g_val} кВт < Порог {threshold_val} кВт ({pct} от {req_kw}){others_note}"
+                                permissions_reasons[sensor_id] = f"Блокировка: Баланс {g_val} < {threshold_val} кВт{others_note}"
                         elif available_budget <= 0:
                             permissions_reasons[sensor_id] = f"Блокировка: Нет профицита энергии ({round(float(available_budget), 2)} кВт*ч)"
                         else:
-                            permissions_reasons[sensor_id] = "Блокировка: Ограничения по мощности"
+                            permissions_reasons[sensor_id] = "Блокировка: Мощность (Прочее)"
                 else:
                     # Fixed daily goal logic
                     needed = req_kwh - consumed
+                    # v3.6 - If norm reached, don't just "permit" from grid. Treat as met OR dynamic.
                     if needed <= 0:
                         permissions[sensor_id] = True
-                        permissions_reasons[sensor_id] = "Разрешено: Дневная норма выполнена (или перерасход)"
+                        permissions_reasons[sensor_id] = "Разрешено: Дневная норма выполнена"
                     elif available_budget >= needed and not power_bottleneck and not gen_bottleneck:
                         permissions[sensor_id] = True
                         available_budget -= float(needed)
@@ -395,16 +395,17 @@ class StrategyEngine:
 
                         n_val = round(float(needed), 2)
                         main_reason = "Разрешено" if is_currently_pulling_now else "Разрешено (Старт)"
-                        permissions_reasons[sensor_id] = f"{main_reason}: Зарезервировано {n_val} кВт*ч из профицита"
+                        permissions_reasons[sensor_id] = f"{main_reason}: Норма {n_val} кВт*ч из профицита{price_suffix}"
                     else:
                         permissions[sensor_id] = False
                         if gen_bottleneck:
-                            permissions_reasons[sensor_id] = f"Блокировка: Доступная генерация {round(float(available_gen_kw), 2)} кВт < 60% от {req_kw} кВт"
+                            permissions_reasons[sensor_id] = f"Блокировка: Мало солнца ({round(float(available_gen_kw), 2)} кВт)"
                         elif power_bottleneck:
                             others_note = f" (Занято: {', '.join(reserved_by)})" if reserved_by else ""
-                            permissions_reasons[sensor_id] = f"Блокировка: Доступно {round(float(available_power_kw), 2)} кВт < Мощность {req_kw} кВт{others_note}"
+                            permissions_reasons[sensor_id] = f"Блокировка: Баланс {round(float(available_power_kw), 2)} кВт < {round(p_threshold, 2)}{others_note}"
                         else:
-                            permissions_reasons[sensor_id] = f"Блокировка: Не хватает энергии (нужно {round(float(needed), 2)} кВт*ч, доступно {round(float(available_budget), 2)} кВт*ч)"
+                            b_val = round(float(available_budget), 2)
+                            permissions_reasons[sensor_id] = f"Блокировка: Недобор энергии (Нужно {round(float(needed), 2)}, Есть {b_val} кВт*ч)"
                 
             return {
                 "initial_budget": float(initial_budget or 0.0),
