@@ -115,7 +115,10 @@ class EnergyPermissionSensor(BinarySensorEntity):
                 self.manager.learned_standby_power.get(self.target_sensor_id, 0.0), 1
             ),
             "is_cyclic": is_cyclic,
+            "only_solar_checked": only_solar_free,
             "available_power_total_kw": round(budget_res.get("available_power_total_kw", 0.0), 2),
+            "available_gen_kw": round(budget_res.get("available_gen_kw", 0.0), 2),
+            "only_solar_threshold_kw": round(req_kw * 0.6 if only_solar_free else 0.0, 2),
             "waste_compensation_kw": round(budget_res.get("waste_compensation_kw", 0.0), 2),
             "battery_flexible_kw": round(budget_res.get("battery_flexible_kw", 0.0), 2),
             "battery_discharge_budget_kw": round(budget_res.get("battery_discharge_budget_kw", 0.0), 2),

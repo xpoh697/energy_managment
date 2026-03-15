@@ -335,9 +335,12 @@ class StrategyEngine:
                 elif initial_power_kw > 0.5 and available_power_kw < 0:
                     power_bottleneck = True
 
-                # v3.6 - Improved reasons and goal logic
-                price_suffix = " (Беспл. цена)" if is_free_price else ""
-                
+                # v3.7 - Be even stricter for dynamic loads with Solar Only
+                # If priority is low (dynamic), we want 80% solar coverage, not just 60%
+                if req_kwh == 0 and only_solar_free and not is_free_price:
+                    if available_gen_kw < (req_kw * 0.8):
+                        gen_bottleneck = True
+
                 if req_kwh == 0:
                     # Dynamic load logic
                     if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
@@ -361,7 +364,8 @@ class StrategyEngine:
                         g_val = round(float(available_power_kw), 2)
                         g_gen = round(float(available_gen_kw), 2)
                         if gen_bottleneck:
-                            permissions_reasons[sensor_id] = f"Блокировка: Мало солнца ({g_gen} < {round(req_kw*0.6, 2)} кВт)"
+                            t_val = round(req_kw * (0.8 if req_kwh == 0 else 0.6), 2)
+                            permissions_reasons[sensor_id] = f"Блокировка: Мало солнца ({g_gen} < {t_val} кВт)"
                         elif power_bottleneck:
                             others_note = f" (Занято: {', '.join(reserved_by)})" if reserved_by else ""
                             if is_currently_pulling_now:
@@ -425,6 +429,7 @@ class StrategyEngine:
                 "occupancy_coefficient": float(occ_coeff or 1.0),
                 "efficiency_coefficient": float(eff_coeff or 1.0),
                 "available_power_total_kw": float(initial_power_kw or 0.0),
+                "available_gen_kw": float(available_gen_kw or 0.0),
                 "waste_compensation_kw": float(waste_kw or 0.0),
                 "battery_flexible_kw": float(batt_p_flexible or 0.0),
                 "battery_discharge_budget_kw": float(batt_discharge_allowed or 0.0)
