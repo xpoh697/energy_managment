@@ -444,12 +444,12 @@ class StrategyEngine:
             active_m_p = self.manager.get_active_managed_loads_power(i) if not is_tom else 0.0
             total_net_kw = net_house_kw + cmd_p - active_m_p
             
-            if total_net_kw > 0.1: # Charging
+            if total_net_kw > 0.001: # Charging (at least 1W)
                 acc_ratio = self.get_cc_cv_ratio(simulated_soc)
                 actual_charge_kw = min(total_net_kw * eff_coeff, max_batt_p * acc_ratio)
                 if batt_cap > 0:
                     simulated_soc = min(100.0, simulated_soc + (actual_charge_kw * step_duration / batt_cap * 100.0))
-            elif total_net_kw < -0.1: # Discharging
+            elif total_net_kw < -0.001: # Discharging (at least 1W)
                 actual_discharge_kw = abs(total_net_kw) / eff_coeff
                 if batt_cap > 0:
                     simulated_soc = max(0.0, simulated_soc - (actual_discharge_kw * step_duration / batt_cap * 100.0))
@@ -783,14 +783,11 @@ class StrategyEngine:
                             survival_hours.add(cheapest_bridge)
                             added_bridge = True
                     
-                    if not added_bridge:
-                        cur_hour_label = f"{cur_hour:0>2}:00"
-                        if cur_hour in survival_hours and cur_hour not in natural_hours_names:
-                            res["charge_reason"] = "survival"
-                            res["charge_target_soc"] = 100.0
-                        else:
-                            res["charge_reason"] = "price"
-                        break
+                if len(survival_hours) > len(natural_hours_names):
+                    res["charge_reason"] = "survival"
+                else:
+                    res["charge_reason"] = "price"
+                    
                 target_hours = list(survival_hours)
 
             res["limit_used"] = buy_limit if mode == "buy" else sell_limit
@@ -847,15 +844,22 @@ class StrategyEngine:
                     sim_soc_plan = batt_soc
                     
                     charge_commands = {}
+                    upcoming_p = 0.0
                     for h in target_hours_sorted:
                         if h < cur_hour: continue
                         rem_n = len([x for x in (natural_hours_names if 'natural_hours_names' in locals() else target_hours_sorted) if x >= h]) or 1
                         if target_soc > sim_soc_plan:
                             p = min(max_power, (batt_cap * (target_soc - sim_soc_plan) / 100.0) / rem_n)
                         else: p = 0.0
+                        
                         if h == cur_hour: power_needed = p
+                        if upcoming_p == 0: upcoming_p = p
+                        
                         charge_commands[h] = p
                         sim_soc_plan = min(100.0, sim_soc_plan + (p / batt_cap * 100.0))
+                    
+                    if power_needed == 0:
+                        power_needed = upcoming_p
                     
                     # --- BUY SIMULATION ---
                     sim_range = list(range(cur_hour, max(target_hours_sorted) + 1))
