@@ -22,6 +22,7 @@ class StrategyEngine:
     def __init__(self, manager):
         self.manager = manager
         self._calculating_strategy = False
+        self._strategy_cache = {}
 
     @staticmethod
     def get_cc_cv_ratio(soc):
@@ -459,6 +460,14 @@ class StrategyEngine:
         return simulated_soc, history_log
 
     def get_market_strategy(self, mode="buy"):
+        now = dt_util.now()
+        
+        # 1. Caching Guard (30 second cache to prevent CPU thrashing during power spikes)
+        cache_key = f"market_strategy_{mode}"
+        cached = self._strategy_cache.get(cache_key)
+        if cached and (now - cached["time"]).total_seconds() < 30:
+            return cached["res"]
+
         res = {
             "state": "idle",
             "active_hours": [],
@@ -762,8 +771,10 @@ class StrategyEngine:
                 min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
                 natural_hours_names = set(target_hours)
                 survival_hours = set(target_hours)
-            
-                while True:
+                
+                safety_counter = 0
+                while safety_counter < 48:
+                    safety_counter += 1
                     added_bridge = False
                     commands = {h_cmd: max_power for h_cmd in survival_hours}
                     sim_range = list(range(cur_hour, active_window[1] + 1))
@@ -782,6 +793,9 @@ class StrategyEngine:
                             cheapest_bridge = min(search_space, key=lambda sh: all_prices[sh])
                             survival_hours.add(cheapest_bridge)
                             added_bridge = True
+                    
+                    if not added_bridge:
+                        break
                     
                 if len(survival_hours) > len(natural_hours_names):
                     res["charge_reason"] = "survival"
@@ -1018,6 +1032,7 @@ class StrategyEngine:
                 if res["state"] != "preparing_arbitrage":
                     res["state"] = "idle"
             
+            self._strategy_cache[cache_key] = {"time": now, "res": res}
             return res
         finally:
             self._calculating_strategy = old_calc
