@@ -265,10 +265,16 @@ class StrategyEngine:
                     # If charging (batt_v < 0), this is power we can take back
                     batt_p_flexible = max(0.0, -batt_v)
                 
-                # Total available = (Net) + (Unused Solar) + (Current Battery Charge)
-                # This correctly handles both "Total Load" and "House Only" sensor setups
-                # if we have a separate battery sensor to compensate.
-                initial_power_kw = initial_power_kw + waste_kw + batt_p_flexible
+                # 4. Battery Discharge Budget (v3.3)
+                # If we have a significant energy surplus, allow spending it at an instant rate
+                batt_discharge_allowed = 0.0
+                if initial_budget > 0.5:
+                    max_batt_p = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+                    # Allow full inverter power if surplus > 3kWh, else scale it
+                    batt_discharge_allowed = float(max_batt_p) * min(1.0, float(initial_budget) / 3.0)
+                
+                # Total available = (Net Balance) + (Unused Solar) + (Redirection from Charge) + (Discharge Budget)
+                initial_power_kw = initial_power_kw + waste_kw + batt_p_flexible + batt_discharge_allowed
                 
             available_power_kw = initial_power_kw
             available_gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in p_gen_sensors) + waste_kw
@@ -408,7 +414,8 @@ class StrategyEngine:
                 "efficiency_coefficient": float(eff_coeff or 1.0),
                 "available_power_total_kw": float(initial_power_kw or 0.0),
                 "waste_compensation_kw": float(waste_kw or 0.0),
-                "battery_flexible_kw": float(batt_p_flexible or 0.0)
+                "battery_flexible_kw": float(batt_p_flexible or 0.0),
+                "battery_discharge_budget_kw": float(batt_discharge_allowed or 0.0)
             }
         finally:
             self._calculating_strategy = old_calc

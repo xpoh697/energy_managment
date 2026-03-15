@@ -118,6 +118,7 @@ class EnergyPermissionSensor(BinarySensorEntity):
             "available_power_total_kw": round(budget_res.get("available_power_total_kw", 0.0), 2),
             "waste_compensation_kw": round(budget_res.get("waste_compensation_kw", 0.0), 2),
             "battery_flexible_kw": round(budget_res.get("battery_flexible_kw", 0.0), 2),
+            "battery_discharge_budget_kw": round(budget_res.get("battery_discharge_budget_kw", 0.0), 2),
         }
 
         # Device detection and Status
