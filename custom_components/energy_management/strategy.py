@@ -537,6 +537,11 @@ class StrategyEngine:
             batt_soc, batt_cap, batt_energy_val = self.manager.get_battery_state()
             target_soc = batt_soc
             sim_soc_plan = batt_soc
+
+            def _format_h(h_abs):
+                if h_abs is None: return "Нет данных"
+                d = "Завтра " if h_abs >= 24 else ""
+                return f"{d}{h_abs % 24:02d}:00"
             
             today_type = "weekend" if now.weekday() >= 5 else "weekday"
             tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
@@ -648,7 +653,7 @@ class StrategyEngine:
             global_arb_note = "Нет прибыльного арбитража"
             if max_arb_gain >= threshold:
                 s_h, b_h = best_arb_pair
-                global_arb_note = f"Макс. профит: Прод. {all_sell_prices[s_h]:.2f} ({s_h%24:02d}:00) -> Отк. {all_buy_prices[b_h]:.2f} ({b_h%24:02d}:00), выгода {max_arb_gain:.2f} (порог {threshold:.2f})"
+                global_arb_note = f"Макс. профит: Прод. {all_sell_prices[s_h]:.2f} ({_format_h(s_h)}) -> Отк. {all_buy_prices[b_h]:.2f} ({_format_h(b_h)}), выгода {max_arb_gain:.2f} (порог {threshold:.2f})"
 
             if mode == "buy":
                 res["limit_used"] = buy_limit
@@ -787,7 +792,7 @@ class StrategyEngine:
                         
                         detail = f"Сейчас {cur_p:.2f}. {global_arb_note}"
                         if best_arb_pair[0] is not None and best_arb_pair[0] > cur_hour and all_sell_prices[best_arb_pair[0]] > cur_p + 0.01:
-                             detail += f" | Ждем главного пика в {best_arb_pair[0]%24:02d}:00"
+                             detail += f" | Ждем главного пика в {_format_h(best_arb_pair[0])}"
 
                         res["arbitrage_decision"] = f"{status}: {detail}"
 
@@ -859,10 +864,6 @@ class StrategyEngine:
                         found_periods.append(_format_period(start, prev))
                         start = prev = h
                 found_periods.append(_format_period(start, prev))
-                
-            def _format_hour_simple(h):
-                d = "Завтра " if h >= 24 else "Сегодня "
-                return f"{d}{h % 24:02d}:00"
                 
             # Target & Power Calculation
             power_needed = 0.0
@@ -980,9 +981,9 @@ class StrategyEngine:
                         sell_strategy_note = "Продажа до солнца (стандарт)"
                         if cheapest_h:
                             if actual_gain >= threshold:
-                                sell_strategy_note = f"Арбитраж ВЫГОДЕН: Продажа {cur_sell_p:.2f} -> Откуп {cheap_p:.2f} в {cheapest_h%24:02d}:00 (Профит {actual_gain:.2f} > Порога {threshold:.2f})"
+                                sell_strategy_note = f"Арбитраж ВЫГОДЕН: Продажа {cur_sell_p:.2f} -> Откуп {cheap_p:.2f} в {_format_h(cheapest_h)} (Профит {actual_gain:.2f} > Порога {threshold:.2f})"
                             else:
-                                sell_strategy_note = f"Арбитраж НЕВЫГОДЕН: Продажа {cur_sell_p:.2f} -> Откуп {cheap_p:.2f}. Выгода {actual_gain:.2f} < Порога {threshold:.2f}"
+                                sell_strategy_note = f"Арбитраж НЕВЫГОДЕН: Продажа {cur_sell_p:.2f} -> Откуп {cheap_p:.2f} в {_format_h(cheapest_h)}. Выгода {actual_gain:.2f} < Порога {threshold:.2f}"
                         
                         res["arbitrage_decision"] = f"{res.get('arbitrage_decision', '')} | {sell_strategy_note}"
 
@@ -1020,7 +1021,7 @@ class StrategyEngine:
                                     "available_kwh": round(batt_energy_val, 2),
                                     "reserve_kwh": round(target_soc * batt_cap / 100.0, 2),
                                     "energy_to_wait_kwh": round(max(0.0, (target_soc * batt_cap / 100.0) - batt_energy_val), 2),
-                                    "note": f"Выгодно: продажа по {cur_sell_p}, откуп по {cheap_p} в {cheapest_h%24:02d}:00"
+                                    "note": f"Выгодно: продажа по {cur_sell_p}, откуп по {cheap_p} в {_format_h(cheapest_h)}"
                                 }
 
                     # --- SELL SIMULATION ---
@@ -1046,7 +1047,7 @@ class StrategyEngine:
                 
             res["recommended_power_kw"] = round(min(float(power_needed), max_power), 3)
             res["active_hours"] = target_hours_sorted
-            res["active_hours_formatted"] = ", ".join([_format_hour_simple(h) for h in target_hours_sorted])
+            res["active_hours_formatted"] = ", ".join([_format_h(h) for h in target_hours_sorted])
             res["active_periods"] = ", ".join(found_periods)
             
             # State logic: active > preparing_arbitrage > idle/price_limit_not_met
