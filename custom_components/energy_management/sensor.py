@@ -1629,70 +1629,24 @@ class InverterOperationModeSensor(SensorEntity):
                     "current_soc": batt_soc
                 }
             else:
-                day_type = "weekend" if now.weekday() >= 5 else "weekday"
-                prof_cons = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type)
-                prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
-
-                # --- Forecast Adjustments ---
-                forecast_today_val = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
-                coeff_today = self.manager.get_gen_forecast_coefficient(forecast_today_val, prof_gen, int(cur_hour) + 1, 24)
-                # ----------------------------
-
-                tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
-                prof_cons_tom = self.manager.get_average_profile("consumption_total", self.manager.custom_period, tom_type)
-
-                # --- Forecast Tomorrow Adjustments ---
-                forecast_tom_val = self.manager.get_forecast_value(self.manager.forecast_tomorrow_sensor)
-                coeff_tom = self.manager.get_gen_forecast_coefficient(forecast_tom_val, prof_gen, 0, 24)
-
-                max_batt_power = self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-
-                sim_soc = batt_soc
-                hours_available = (peak_start_hour - int(cur_hour)) if peak_start_hour is not None else (48 - int(cur_hour))
-                charge_log = []
-
-                # Simulating CC/CV Charging behavior hour by hour
-                for h_offset in range(hours_available):
-                    h_step = int(cur_hour) + h_offset
-                    if h_step >= 48:
+                # Use standard simulation engine
+                end_h = peak_start_hour if peak_start_hour is not None else (int(now.hour) + 24)
+                sim_range = list(range(int(now.hour), end_h))
+                sim_range = [h for h in sim_range if h < 48]
+                
+                sim_soc, sim_log = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now)
+                
+                # Determine when target reached for surplus/delay logic
+                target_reached_at = None
+                for i, h_abs in enumerate(sim_range):
+                    is_tom = (h_abs >= 24)
+                    h_key = f"{h_abs % 24:0>2}:59" + (" (Завтра)" if is_tom else "")
+                    if sim_log.get(h_key, 0.0) >= (target_soc - 0.5): # 0.5% tolerance
+                        target_reached_at = i + 1
                         break
-
-                    h_mod = h_step % 24
-
-                    if h_step < 24:
-                        expected_cons = float(prof_cons.get(str(h_mod), 0.0))
-                        expected_gen = float(prof_gen.get(str(h_mod), 0.0)) * coeff_today
-                    else:
-                        expected_cons = float(prof_cons_tom.get(str(h_mod), 0.0))
-                        expected_gen = float(prof_gen.get(str(h_mod), 0.0)) * coeff_tom
-
-                    expected_cons += self.manager.get_active_managed_loads_power(h_offset)
-                    # --------------------------------------------------------
-
-                    net_gen_kw = max(0.0, expected_gen - expected_cons)
-
-                    # Compute max accepted charge power based on simulated SOC (CC/CV phases)
-                    accepted_power_kw = max_batt_power * EnergyProfileManager.get_cc_cv_ratio(sim_soc)
-
-                    # How much energy can we physically push in this hour?
-                    actual_charge_kw = min(net_gen_kw, accepted_power_kw)
-
-                    soc_gained = (actual_charge_kw / batt_cap) * 100.0 if batt_cap > 0 else 0
-
-                    old_soc = sim_soc
-                    sim_soc = min(target_soc, sim_soc + soc_gained)
-
-                    charge_log.append({
-                        "hour": h_step,
-                        "net_solar_kw": round(net_gen_kw, 2),
-                        "bms_limit_kw": round(accepted_power_kw, 2),
-                        "actual_charge_kw": round(actual_charge_kw, 2),
-                        "soc_start": round(old_soc, 1),
-                        "soc_end": round(sim_soc, 1)
-                    })
-
-                    if sim_soc >= target_soc:
-                        break # Reached target early!
+                
+                hours_available = len(sim_range)
+                total_hours_needed = target_reached_at if target_reached_at is not None else hours_available
 
                 # If after the simulation timeline we failed to reach the target (allowing 1% tolerance)
                 late_start_recommended = False
@@ -1700,13 +1654,11 @@ class InverterOperationModeSensor(SensorEntity):
                     is_preparing_for_peak = True
                 elif sim_soc >= (target_soc - 1.0) and peak_start_hour is not None:
                     # We have enough time! Calculate how much extra time we have.
-                    total_hours_needed = len(charge_log)
                     hours_surplus = hours_available - total_hours_needed
                     # If we have surplus hours AND it's not the cheapest time to charge, we can delay
-                    # For a simple heuristic: delay gathering charge until `total_hours_needed` before the peak
                     if hours_surplus > 0:
                         latest_start_hour = peak_start_hour - total_hours_needed
-                        if int(cur_hour) < latest_start_hour:
+                        if int(now.hour) < latest_start_hour:
                             late_start_recommended = True
 
                 if peak_start_hour is None:
@@ -1726,15 +1678,14 @@ class InverterOperationModeSensor(SensorEntity):
                     "hours_available": hours_available,
                     "final_simulated_soc": round(sim_soc, 2),
                     "success": not is_preparing_for_peak if peak_start_hour is not None else True,
-                    "log": charge_log
+                    "log": sim_log
                 }
 
-        formatted_peak = "Нет пика сегодня"
-        if peak_start_hour is not None:
-            if peak_start_hour >= 24:
-                formatted_peak = f"Завтра {peak_start_hour - 24:02d}:00"
-            else:
-                formatted_peak = f"Сегодня {peak_start_hour:02d}:00"
+        day_type = "weekend" if now.weekday() >= 5 else "weekday"
+        prof_cons = self.manager.get_average_profile("consumption_total", self.manager.custom_period, day_type)
+        prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
+
+        formatted_peak = self.manager.strategy_engine._format_h(peak_start_hour)
 
         self._attr_extra_state_attributes = {
             "is_preparing_for_peak": is_preparing_for_peak,
