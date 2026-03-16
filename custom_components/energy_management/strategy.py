@@ -66,7 +66,8 @@ class StrategyEngine:
                     sample_count += 1
         
         if sample_count < 5 or total_gen < 0.1: return 1.0
-        return max(0.70, min(1.0, (total_gen - total_losses) / total_gen))
+        # Clamp to realistic values to avoid "cloudy day panic" in simulations
+        return max(0.85, min(1.0, (total_gen - total_losses) / total_gen))
 
     def get_gen_forecast_coefficient(self, forecast_value, prof_gen, hour_start, hour_end):
         if not forecast_value or forecast_value <= 0.1: return 1.0
@@ -190,6 +191,10 @@ class StrategyEngine:
             # v2.1.5 - Ensure temp_max_forecast is up-to-date
             # Total expected today = actual already produced + remaining forecast
             predicted_total = actual_today + forecast_val
+            # Update the stored max forecast if the new prediction is higher (or initialized)
+            if predicted_total > (self.manager.data.get("temp_max_forecast", 0.0) or 0.0):
+                self.manager.data["temp_max_forecast"] = float(predicted_total)
+            
             # v3.1 - Improved Blended Coefficient logic
             expected_today_total = self.manager.data.get("temp_max_forecast", 0.0) or 0.0
             expected_today_so_far = expected_today_total * fraction_so_far
@@ -524,6 +529,8 @@ class StrategyEngine:
             expected_cons_kw *= self.manager.get_occupancy_coefficient()
             
             # Combine house activities and commands
+            
+            # Combine house activities and commands
             cmd_p = 0.0
             if commands and h_abs in commands:
                 cmd_p = float(commands[h_abs])
@@ -538,7 +545,9 @@ class StrategyEngine:
                 if batt_cap > 0:
                     simulated_soc = min(100.0, simulated_soc + (actual_charge_kw * step_duration / batt_cap * 100.0))
             elif total_net_kw < -0.001: # Discharging (at least 1W)
-                actual_discharge_kw = abs(total_net_kw) / eff_coeff
+                # Apply efficiency but don't be more pessimistic than reality (max 15% loss)
+                sim_eff = max(0.85, eff_coeff)
+                actual_discharge_kw = abs(total_net_kw) / sim_eff
                 if batt_cap > 0:
                     simulated_soc = max(0.0, simulated_soc - (actual_discharge_kw * step_duration / batt_cap * 100.0))
             
