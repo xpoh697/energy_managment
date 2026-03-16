@@ -1,13 +1,14 @@
 import logging
 import json
 import os
-from typing import Any, cast
+from typing import Any, cast, List, Tuple, Dict, Optional
 from datetime import datetime, timedelta
 from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorDeviceClass
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change, async_track_time_interval
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.core import callback
+from homeassistant.core import callback, HomeAssistant
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -20,17 +21,29 @@ from .const import (
     CONF_CONSUMPTION_SENSORS,
     CONF_GENERATION_SENSORS,
     CONF_PRESENCE_SENSORS,
+    CONF_DEDUCT_SENSORS,
+    CONF_GRID_IMPORT_SENSORS,
+    CONF_GRID_EXPORT_SENSORS,
+    CONF_DEDUCT_SETTINGS,
+    CONF_POWER_LOAD_SENSORS,
+    CONF_POWER_GEN_SENSORS,
+    CONF_FORECAST_TODAY_REMAINING,
+    CONF_FORECAST_TOMORROW,
     CONF_CUSTOM_PERIOD,
     CONF_PRICE_BUY,
     CONF_PRICE_SELL,
     CONF_MIN_SOC_BUY,
     CONF_TARGET_SOC_SELL,
     CONF_BATTERY_MAX_POWER,
-    CONF_ACTIVE_SENSOR
+    CONF_ACTIVE_SENSOR,
+    CONF_TOTAL_SYSTEM_COST,
+    CONF_BATTERY_COST,
+    CONF_INVERTER_LOSSES_SENSOR,
+    CONF_PRICE_BUY_LIMIT,
+    CONF_ANOMALY_THRESHOLD
 )
-from .const import *
 from .strategy import StrategyEngine
-from .utils import get_kwh_val, normalize_float, get_price_from_store
+from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
 
 # Legacy aliases for safety during refactoring synchronization
 _get_kwh_val = get_kwh_val
@@ -122,6 +135,77 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class EnergyProfileManager:
+    hass: HomeAssistant
+    entry: ConfigEntry
+    store: Store
+    strategy_engine: 'StrategyEngine'
+    
+    consumption_sensors: set[str]
+    generation_sensors: set[str]
+    deduct_sensors: set[str]
+    grid_import_sensors: set[str]
+    grid_export_sensors: set[str]
+    all_sensors: set[str]
+    
+    power_load_sensors: List[str]
+    power_gen_sensors: List[str]
+    forecast_today_sensor: List[str]
+    forecast_tomorrow_sensor: List[str]
+    
+    battery_soc_sensor: Optional[str]
+    battery_capacity_sensor: Optional[str]
+    battery_power_sensor: Optional[str]
+    grid_power_sensor: Optional[str]
+    
+    presence_sensors: List[str]
+    all_power_sensors: set[str]
+    all_active_sensors: set[str]
+    all_price_sensors: set[str]
+    
+    deduct_settings: Dict[str, Any]
+    settings: Dict[str, Any]
+    sensor_last_values: Dict[str, float]
+    daily_deduct_consumption: Dict[str, float]
+    update_listeners: List[Any]
+    
+    learned_standby_power: Dict[str, float]
+    learned_real_power: Dict[str, float]
+    learned_avg_cycle_power: Dict[str, float]
+    learned_cycle_total_kwh: Dict[str, float]
+    learned_avg_cycle_duration: Dict[str, float]
+    cycle_start_time: Dict[str, datetime]
+    cycle_actual_start_time: Dict[str, datetime]
+    cycle_energy_start: Dict[str, float]
+    last_known_power: Dict[str, float]
+    _sensors_need_baseline: set[str]
+    
+    inverter_losses_sensor: Optional[str]
+    current_losses: float
+    current_consumption_base: float
+    current_consumption_total: float
+    current_generation: float
+    current_grid_import: float
+    current_grid_export: float
+    current_hourly_deduct: float
+    bms_learned_profile: Dict[int, float]
+    current_inverter_mode: str
+    
+    _unsub_state: Any
+    _unsub_time: Any
+    _unsub_power_poll: Any
+    _unsub_periodic_save: Any
+    
+    data: Dict[str, Any]
+    max_days: int
+    custom_period: int
+    
+    price_buy_sensors: List[str]
+    price_sell_sensors: List[str]
+    
+    last_blended_coeff: float
+    current_solar_waste_power: float
+    power_history: List[Dict[str, Any]]
+    
     def __init__(self, hass, entry):
         self.hass = hass
         self.entry = entry
@@ -133,93 +217,107 @@ class EnergyProfileManager:
 
         self.strategy_engine = StrategyEngine(self)
 
-        self.consumption_sensors: set[str] = set(config_data.get(CONF_CONSUMPTION_SENSORS, []) or [])
-        self.generation_sensors: set[str] = set(config_data.get(CONF_GENERATION_SENSORS, []) or [])
-        self.deduct_sensors: set[str] = set(config_data.get(CONF_DEDUCT_SENSORS, []) or [])
-        self.grid_import_sensors: set[str] = set(config_data.get(CONF_GRID_IMPORT_SENSORS, []) or [])
-        self.grid_export_sensors: set[str] = set(config_data.get(CONF_GRID_EXPORT_SENSORS, []) or [])
-        raw_deduct = config_data.get(CONF_DEDUCT_SETTINGS, {})
-        self.deduct_settings: dict[str, Any] = raw_deduct if isinstance(raw_deduct, dict) else {}
-        self.all_sensors: set[str] = self.consumption_sensors | self.generation_sensors | self.deduct_sensors | self.grid_import_sensors | self.grid_export_sensors
+        self.consumption_sensors = set(cast(list, config_data.get(CONF_CONSUMPTION_SENSORS, [])))
+        self.generation_sensors = set(cast(list, config_data.get(CONF_GENERATION_SENSORS, [])))
+        self.deduct_sensors = set(cast(list, config_data.get(CONF_DEDUCT_SENSORS, [])))
+        self.grid_import_sensors = set(cast(list, config_data.get(CONF_GRID_IMPORT_SENSORS, [])))
+        self.grid_export_sensors = set(cast(list, config_data.get(CONF_GRID_EXPORT_SENSORS, [])))
+        raw_deduct = cast(dict, config_data.get(CONF_DEDUCT_SETTINGS, {}))
+        self.deduct_settings = raw_deduct if isinstance(raw_deduct, dict) else {}
+        self.all_sensors = self.consumption_sensors | self.generation_sensors | self.deduct_sensors | self.grid_import_sensors | self.grid_export_sensors
 
-        self.power_load_sensors = config_data.get(CONF_POWER_LOAD_SENSORS, [])
-        self.power_gen_sensors = config_data.get(CONF_POWER_GEN_SENSORS, [])
-        if isinstance(self.power_load_sensors, str): self.power_load_sensors = [self.power_load_sensors]
-        if isinstance(self.power_gen_sensors, str): self.power_gen_sensors = [self.power_gen_sensors]
+        raw_load = config_data.get(CONF_POWER_LOAD_SENSORS, [])
+        self.power_load_sensors = [str(raw_load)] if isinstance(raw_load, str) else cast(List[str], raw_load or [])
+        raw_gen = config_data.get(CONF_POWER_GEN_SENSORS, [])
+        self.power_gen_sensors = [str(raw_gen)] if isinstance(raw_gen, str) else cast(List[str], raw_gen or [])
 
         today_forecasts = config_data.get(CONF_FORECAST_TODAY_REMAINING, [])
-        self.forecast_today_sensor = [today_forecasts] if isinstance(today_forecasts, str) else today_forecasts
+        self.forecast_today_sensor = [str(today_forecasts)] if isinstance(today_forecasts, str) else cast(List[str], today_forecasts or [])
 
         tomorrow_forecasts = config_data.get(CONF_FORECAST_TOMORROW, [])
-        self.forecast_tomorrow_sensor = [tomorrow_forecasts] if isinstance(tomorrow_forecasts, str) else tomorrow_forecasts
-        self.battery_soc_sensor = config_data.get(CONF_BATTERY_SOC)
-        self.battery_capacity_sensor = config_data.get(CONF_BATTERY_CAPACITY)
-        self.battery_power_sensor = config_data.get(CONF_BATTERY_POWER)
-        self.grid_power_sensor = config_data.get(CONF_GRID_POWER)
+        self.forecast_tomorrow_sensor = [str(tomorrow_forecasts)] if isinstance(tomorrow_forecasts, str) else cast(List[str], tomorrow_forecasts or [])
+        raw_soc = config_data.get(CONF_BATTERY_SOC)
+        self.battery_soc_sensor = str(raw_soc) if raw_soc else None
+        raw_cap = config_data.get(CONF_BATTERY_CAPACITY)
+        self.battery_capacity_sensor = str(raw_cap) if raw_cap else None
+        raw_bat_p = config_data.get(CONF_BATTERY_POWER)
+        self.battery_power_sensor = str(raw_bat_p) if raw_bat_p else None
+        raw_grid_p = config_data.get(CONF_GRID_POWER)
+        self.grid_power_sensor = str(raw_grid_p) if raw_grid_p else None
 
         # Presence / occupancy sensors (person.* or binary_sensor.*)
         presence_raw = config_data.get(CONF_PRESENCE_SENSORS, [])
-        self.presence_sensors = [s.strip() for s in ([presence_raw] if isinstance(presence_raw, str) else (presence_raw or [])) if isinstance(s, str)]
+        if isinstance(presence_raw, str):
+            presence_list = [presence_raw]
+        else:
+            presence_list = cast(List[Any], presence_raw or [])
+        self.presence_sensors = [str(s).strip() for s in presence_list if s]
 
-        self.all_power_sensors: set[str] = set()
-        if self.power_load_sensors: self.all_power_sensors.update(self.power_load_sensors)
-        if self.power_gen_sensors: self.all_power_sensors.update(self.power_gen_sensors)
-        if self.battery_power_sensor: self.all_power_sensors.add(self.battery_power_sensor)
-        if self.grid_power_sensor: self.all_power_sensors.add(self.grid_power_sensor)
+        self.all_power_sensors = set()
+        if isinstance(self.power_load_sensors, list):
+            for s in self.power_load_sensors:
+                if s: self.all_power_sensors.add(str(s))
+        if isinstance(self.power_gen_sensors, list):
+            for s in self.power_gen_sensors:
+                if s: self.all_power_sensors.add(str(s))
+        if self.battery_power_sensor is not None:
+            self.all_power_sensors.add(str(self.battery_power_sensor))
+        if self.grid_power_sensor is not None:
+            self.all_power_sensors.add(str(self.grid_power_sensor))
         
         # Adaptive BMS Model: "SOC" -> Max Charge Power (kW)
-        self.bms_learned_profile: dict[int, float] = {}
-        self.current_inverter_mode: str = "sale_pv"
+        self.bms_learned_profile = {}
+        self.current_inverter_mode = "sale_pv"
 
-        self.all_active_sensors: set[str] = set()
-        raw_deduct = config_data.get(CONF_DEDUCT_SETTINGS, {})
-        self.deduct_settings = {}
-        if isinstance(raw_deduct, dict):
-            for s_id, s_conf in raw_deduct.items():
+        self.all_active_sensors = set()
+        raw_deduct_2 = config_data.get(CONF_DEDUCT_SETTINGS, {})
+        if isinstance(raw_deduct_2, dict):
+            for s_id, s_conf in raw_deduct_2.items():
                 if not isinstance(s_conf, dict): continue
-                # Clean nested power/active sensor IDs
-                if CONF_POWER_SENSOR in s_conf:
-                    if isinstance(s_conf[CONF_POWER_SENSOR], str):
-                        p_s = s_conf[CONF_POWER_SENSOR].strip()
-                        s_conf[CONF_POWER_SENSOR] = p_s
-                        self.all_power_sensors.add(p_s)
-                if CONF_ACTIVE_SENSOR in s_conf:
-                    if isinstance(s_conf[CONF_ACTIVE_SENSOR], str):
-                        a_s = s_conf[CONF_ACTIVE_SENSOR].strip()
-                        s_conf[CONF_ACTIVE_SENSOR] = a_s
-                        self.all_active_sensors.add(a_s)
-                self.deduct_settings[s_id.strip()] = s_conf
+                if s_conf.get(CONF_POWER_SENSOR):
+                    p_s = str(s_conf[CONF_POWER_SENSOR]).strip()
+                    s_conf[CONF_POWER_SENSOR] = p_s
+                    self.all_power_sensors.add(p_s)
+                if s_conf.get(CONF_ACTIVE_SENSOR):
+                    a_s = str(s_conf[CONF_ACTIVE_SENSOR]).strip()
+                    s_conf[CONF_ACTIVE_SENSOR] = a_s
+                    self.all_active_sensors.add(a_s)
+                self.deduct_settings[str(s_id).strip()] = s_conf
 
-        self.consumption_sensors = {s.strip() for s in self.consumption_sensors if isinstance(s, str)}
-        self.generation_sensors = {s.strip() for s in self.generation_sensors if isinstance(s, str)}
-        self.deduct_sensors = {s.strip() for s in self.deduct_sensors if isinstance(s, str)}
-        self.grid_import_sensors = {s.strip() for s in self.grid_import_sensors if isinstance(s, str)}
-        self.grid_export_sensors = {s.strip() for s in self.grid_export_sensors if isinstance(s, str)}
+        self.consumption_sensors = {str(s).strip() for s in self.consumption_sensors if s}
+        self.generation_sensors = {str(s).strip() for s in self.generation_sensors if s}
+        self.deduct_sensors = {str(s).strip() for s in self.deduct_sensors if s}
+        self.grid_import_sensors = {str(s).strip() for s in self.grid_import_sensors if s}
+        self.grid_export_sensors = {str(s).strip() for s in self.grid_export_sensors if s}
         
-        if self.battery_soc_sensor and isinstance(self.battery_soc_sensor, str):
-            self.battery_soc_sensor = self.battery_soc_sensor.strip()
-        if self.battery_capacity_sensor and isinstance(self.battery_capacity_sensor, str):
-            self.battery_capacity_sensor = self.battery_capacity_sensor.strip()
-        if self.battery_power_sensor and isinstance(self.battery_power_sensor, str):
-            self.battery_power_sensor = self.battery_power_sensor.strip()
-        if self.grid_power_sensor and isinstance(self.grid_power_sensor, str):
-            self.grid_power_sensor = self.grid_power_sensor.strip()
+        if self.battery_soc_sensor:
+            self.battery_soc_sensor = str(self.battery_soc_sensor).strip()
+        if self.battery_capacity_sensor:
+            self.battery_capacity_sensor = str(self.battery_capacity_sensor).strip()
+        if self.battery_power_sensor:
+            self.battery_power_sensor = str(self.battery_power_sensor).strip()
+        if self.grid_power_sensor:
+            self.grid_power_sensor = str(self.grid_power_sensor).strip()
 
         buy_p = config_data.get(CONF_PRICE_BUY)
         sell_p = config_data.get(CONF_PRICE_SELL)
-        self.price_buy_sensors: list[str] = [str(buy_p)] if buy_p else []
-        self.price_sell_sensors: list[str] = [str(sell_p)] if sell_p else []
+        self.price_buy_sensors = [str(buy_p)] if buy_p and isinstance(buy_p, (str, int, float)) else []
+        self.price_sell_sensors = [str(sell_p)] if sell_p and isinstance(sell_p, (str, int, float)) else []
 
-        self.all_price_sensors: set[str] = set([s for s in (self.price_buy_sensors + self.price_sell_sensors) if s])
+        self.all_price_sensors = set([s for s in (self.price_buy_sensors + self.price_sell_sensors) if s])
 
         self.max_days = 365
-        self.custom_period = config_data.get(CONF_CUSTOM_PERIOD, 14)
+        raw_period = config_data.get(CONF_CUSTOM_PERIOD, 14)
+        try:
+            self.custom_period = int(float(str(raw_period)))
+        except (ValueError, TypeError):
+            self.custom_period = 14
 
         # Internal configuration from UI (Number/Switch defaults handled by platform)
-        self.settings: dict[str, Any] = {}
+        self.settings = {}
 
         # Array to store history of consumption per hour. e.g. "13" -> [1.3, 1.2, 1.5...]
-        self.data: dict[str, Any] = {}
+        self.data = {}
 
         self.current_consumption_base = 0.0
         self.current_consumption_total = 0.0
@@ -227,9 +325,9 @@ class EnergyProfileManager:
         self.current_grid_import = 0.0
         self.current_grid_export = 0.0
         self.current_hourly_deduct = 0.0  # Accumulator for all deduct sensors this hour
-        self.sensor_last_values: dict[str, float] = {}
+        self.sensor_last_values = {}
 
-        self.daily_deduct_consumption: dict[str, float] = {s: 0.0 for s in self.deduct_sensors}
+        self.daily_deduct_consumption = {s: 0.0 for s in self.deduct_sensors}
 
         self.update_listeners = []
         self._unsub_state = None
@@ -239,7 +337,7 @@ class EnergyProfileManager:
 
         # Inverter losses sensor (daily kWh counter that resets at midnight)
         losses_raw = config_data.get(CONF_INVERTER_LOSSES_SENSOR)
-        self.inverter_losses_sensor = losses_raw if losses_raw else None
+        self.inverter_losses_sensor = str(losses_raw) if losses_raw and isinstance(losses_raw, (str, int, float)) else None
         self.current_losses = 0.0  # kWh accumulated this hour
         if self.inverter_losses_sensor:
             self.all_sensors = self.all_sensors | {str(self.inverter_losses_sensor)}
@@ -247,21 +345,21 @@ class EnergyProfileManager:
             self.all_sensors = self.all_sensors | {str(self.battery_power_sensor)}
 
         # Track historical power samples for 5-10 minute average smoothing
-        self.power_history: list[dict[str, Any]] = []
+        self.power_history = []
 
         # Power sensor runtime tracking
-        self.learned_standby_power: dict[str, float] = {}
-        self.learned_real_power: dict[str, float] = {}
-        self.learned_avg_cycle_power: dict[str, float] = {}
-        self.learned_cycle_total_kwh: dict[str, float] = {}
-        self.learned_avg_cycle_duration: dict[str, float] = {}  # In seconds
-        self.cycle_start_time: dict[str, datetime] = {}
-        self.cycle_actual_start_time: dict[str, datetime] = {}
-        self.cycle_energy_start: dict[str, float] = {}
-        self.last_known_power: dict[str, float] = {}
+        self.learned_standby_power = {}
+        self.learned_real_power = {}
+        self.learned_avg_cycle_power = {}
+        self.learned_cycle_total_kwh = {}
+        self.learned_avg_cycle_duration = {}  # In seconds
+        self.cycle_start_time = {}
+        self.cycle_actual_start_time = {}
+        self.cycle_energy_start = {}
+        self.last_known_power = {}
         # Sensors that need to re-establish a baseline on first read after restart
         # (prevents large accumulated deltas from being counted as generation/consumption)
-        self._sensors_need_baseline: set = set()
+        self._sensors_need_baseline = set()
 
         self.current_solar_waste_power = 0.0
         self.last_blended_coeff = 1.0
@@ -297,7 +395,18 @@ class EnergyProfileManager:
         self.learned_avg_cycle_power = self.data.get("learned_avg_cycle_power", {})
         self.learned_cycle_total_kwh = self.data.get("learned_cycle_total_kwh", {})
         self.learned_avg_cycle_duration = self.data.get("learned_avg_cycle_duration", {})
-        self.bms_learned_profile = {int(k): float(v) for k, v in self.data.get("bms_learned_profile", {}).items() if str(k).isdigit() and int(k) >= 50}
+        
+        # Restore BMS learned profile safely
+        bms_raw = self.data.get("bms_learned_profile", {})
+        self.bms_learned_profile = {}
+        if isinstance(bms_raw, dict):
+            for k, v in bms_raw.items():
+                try:
+                    k_int = int(float(str(k)))
+                    if k_int >= 50:
+                        self.bms_learned_profile[k_int] = float(v)
+                except (ValueError, TypeError):
+                    continue
         
         # Restore cycle start times (handle ISO strings or missing)
         saved_starts = self.data.get("cycle_actual_start_time", {})
@@ -474,10 +583,10 @@ class EnergyProfileManager:
                 self._async_state_changed(ev)
 
         monitored_sensors = self.all_sensors | self.all_price_sensors | self.all_power_sensors | self.all_active_sensors
-        if self.battery_soc_sensor: monitored_sensors.add(self.battery_soc_sensor)
-        if self.battery_capacity_sensor: monitored_sensors.add(self.battery_capacity_sensor)
-        if self.forecast_today_sensor: monitored_sensors.update(self.forecast_today_sensor)
-        if self.forecast_tomorrow_sensor: monitored_sensors.update(self.forecast_tomorrow_sensor)
+        if isinstance(self.battery_soc_sensor, str): monitored_sensors.add(self.battery_soc_sensor)
+        if isinstance(self.battery_capacity_sensor, str): monitored_sensors.add(self.battery_capacity_sensor)
+        if isinstance(self.forecast_today_sensor, list): monitored_sensors.update([str(s) for s in self.forecast_today_sensor if s])
+        if isinstance(self.forecast_tomorrow_sensor, list): monitored_sensors.update([str(s) for s in self.forecast_tomorrow_sensor if s])
 
         self._unsub_state = async_track_state_change_event(
             self.hass, list(monitored_sensors), self._async_state_changed
@@ -579,7 +688,7 @@ class EnergyProfileManager:
                     step_delta = (net_saving_kw * p_buy * dt_h) + (grid_export_kw * p_sell * dt_h)
 
                     current_bal = self.data.get("energy_balance", 0.0)
-                    self.data["energy_balance"] = round(current_bal + step_delta, 4)
+                    self.data["energy_balance"] = round_f(current_bal + step_delta, 4)
 
             self.data["last_balance_poll_time"] = now_ts
 
@@ -633,12 +742,12 @@ class EnergyProfileManager:
                 if cur_p is not None:
                     old_real = float(self.learned_real_power.get(sensor_id, cur_p))
                     if settings.get(CONF_IS_CYCLIC):
-                        self.learned_real_power[sensor_id] = round(old_real * 0.9 + float(cur_p) * 0.1, 1)
+                        self.learned_real_power[sensor_id] = round_f(old_real * 0.9 + float(cur_p) * 0.1, 1)
                     else:
                         if float(cur_p) >= old_real:
-                            self.learned_real_power[sensor_id] = round(float(cur_p), 1)
+                            self.learned_real_power[sensor_id] = round_f(float(cur_p), 1)
                         else:
-                            self.learned_real_power[sensor_id] = round(old_real * 0.98 + float(cur_p) * 0.02, 1)
+                            self.learned_real_power[sensor_id] = round_f(old_real * 0.98 + float(cur_p) * 0.02, 1)
                 elif not p_entity:
                     # If active by sensor but NO power sensor, 
                     # use config_kw as fallback for UI display
@@ -651,7 +760,7 @@ class EnergyProfileManager:
                     standby = self.learned_standby_power.get(sensor_id, 15.0)
                     if 0.1 < cur_p < (standby + 5.0):
                         old_s = float(self.learned_standby_power.get(sensor_id, cur_p))
-                        self.learned_standby_power[sensor_id] = round(old_s * 0.95 + float(cur_p) * 0.05, 2)
+                        self.learned_standby_power[sensor_id] = round_f(old_s * 0.95 + float(cur_p) * 0.05, 2)
 
                 # If we just finished a cycle
                 if sensor_id in self.cycle_actual_start_time:
@@ -668,14 +777,14 @@ class EnergyProfileManager:
                         if energy > 0.02 and duration > (1/60.0): # At least 20Wh and 1 minute
                             avg_p_w = (float(energy) * 1000.0) / float(duration)
                             if settings.get(CONF_IS_CYCLIC):
-                                self.learned_real_power[sensor_id] = round(float(avg_p_w), 1)
-                                self.learned_cycle_total_kwh[sensor_id] = round(float(energy), 3)
-                                self.learned_avg_cycle_power[sensor_id] = round(float(avg_p_w), 1)
+                                self.learned_real_power[sensor_id] = round_f(float(avg_p_w), 1)
+                                self.learned_cycle_total_kwh[sensor_id] = round_f(float(energy), 3)
+                                self.learned_avg_cycle_power[sensor_id] = round_f(float(avg_p_w), 1)
                                 
                                 # Update historical duration (EMA)
                                 dur_secs = (last_active - self.cycle_actual_start_time[sensor_id]).total_seconds()
                                 old_dur = float(self.learned_avg_cycle_duration.get(sensor_id, dur_secs))
-                                self.learned_avg_cycle_duration[sensor_id] = round(old_dur * 0.7 + dur_secs * 0.3, 0)
+                                self.learned_avg_cycle_duration[sensor_id] = round_f(old_dur * 0.7 + dur_secs * 0.3, 0)
 
                         self.cycle_actual_start_time.pop(sensor_id, None)
                         self.cycle_energy_start.pop(sensor_id, None)
@@ -689,10 +798,11 @@ class EnergyProfileManager:
             potential_kw = cur_expected_gen * self.last_blended_coeff
 
             soc, _, _ = self.get_battery_state()
+            soc_f = float(soc) if soc is not None else 0.0
             # Waste occurs if battery is near full and we generate less than the panels could potentially give
-            if soc >= 97.0 and potential_kw > (gen_kw + 0.1):
-                waste_kw = potential_kw - gen_kw
-                self.current_solar_waste_power = round(float(waste_kw), 3)
+            if soc_f >= 97.0 and potential_kw > (float(gen_kw) + 0.1):
+                waste_kw = float(potential_kw) - float(gen_kw)
+                self.current_solar_waste_power = round_f(float(waste_kw), 3)
                 # Accumulate kWh (1 min sample)
                 self.data["temp_daily_waste"] = self.data.get("temp_daily_waste", 0.0) + (waste_kw / 60.0)
             else:
@@ -713,14 +823,14 @@ class EnergyProfileManager:
         if not self.power_history:
             return 0.0
         val = sum(float(x.get("load_kw") or 0.0) for x in self.power_history) / len(self.power_history)
-        return round(float(val), 3)
+        return round_f(float(val), 3)
 
     @property
     def avg_gen_kw(self):
         if not self.power_history:
             return 0.0
         val = sum(float(x.get("gen_kw") or 0.0) for x in self.power_history) / len(self.power_history)
-        return round(float(val), 3)
+        return round_f(float(val), 3)
 
     @property
     def avg_batt_kw(self):
@@ -728,7 +838,7 @@ class EnergyProfileManager:
         if not self.power_history:
             return 0.0
         val = sum(float(x.get("batt_kw") or 0.0) for x in self.power_history) / len(self.power_history)
-        return round(float(val), 3)
+        return round_f(float(val), 3)
 
     @property
     def avg_export_kw(self):
@@ -736,7 +846,7 @@ class EnergyProfileManager:
         if not self.power_history:
             return 0.0
         val = sum(x.get("export_kw", 0.0) for x in self.power_history) / len(self.power_history)
-        return round(float(val), 3)
+        return round_f(float(val), 3)
 
     async def _async_periodic_save(self, _now):
         """Periodically persist data to disk between hour-top resets."""
@@ -898,7 +1008,7 @@ class EnergyProfileManager:
                 # Actual cost now
                 actual_net_cost = (h_buy_kwh * (p_buy or 0.0)) - (h_sell_kwh * (p_sell or 0.0))
 
-                total_profit_h = round(baseline_cost - actual_net_cost, 4)
+                total_profit_h = round_f(baseline_cost - actual_net_cost, 4)
 
                 # Persist to "total" category
                 if "savings" not in self.data:
@@ -906,14 +1016,14 @@ class EnergyProfileManager:
                 day_entry = self.data["savings"].setdefault(
                     past_date_str, {"total": 0.0, "solar": 0.0, "arbitrage": 0.0, "sell": 0.0})
 
-                day_entry["total"] = round(day_entry.get("total", 0.0) + total_profit_h, 4)
+                day_entry["total"] = round_f(day_entry.get("total", 0.0) + total_profit_h, 4)
 
                 # Also keep old components as breakdown (for attributes)
                 solar_self = min(gen_h, cons_h)
-                day_entry["solar"]     = round(day_entry.get("solar",     0.0) + (solar_self * (p_buy or 0.0)), 4)
-                day_entry["sell"]      = round(day_entry.get("sell",      0.0) + (h_sell_kwh * (p_sell or 0.0)), 4)
+                day_entry["solar"]     = round_f(day_entry.get("solar",     0.0) + (solar_self * (p_buy or 0.0)), 4)
+                day_entry["sell"]      = round_f(day_entry.get("sell",      0.0) + (h_sell_kwh * (p_sell or 0.0)), 4)
                 # Arbitrage is the remainder
-                day_entry["arbitrage"] = round(day_entry["total"] - day_entry["solar"] - day_entry["sell"], 4)
+                day_entry["arbitrage"] = round_f(day_entry["total"] - day_entry["solar"] - day_entry["sell"], 4)
 
                 # Keep at most 400 days of savings
                 if len(self.data["savings"]) > 400:
@@ -962,8 +1072,8 @@ class EnergyProfileManager:
                     self.data["forecast_history"] = [] # No daily reset needed anymore as we rely on get_todays_profile logic
                                                        # which evaluates hours 0-23
                 self.data["forecast_history"].append({
-                    "actual": round(actual, 3),
-                    "forecast": round(expected, 3),
+                    "actual": round_f(actual, 3),
+                    "forecast": round_f(expected, 3),
                     "date": now.strftime("%Y-%m-%d")
                 })
                 # Keep up to configured max days of history for the coefficient
@@ -1007,32 +1117,49 @@ class EnergyProfileManager:
         await self.async_save()
         self._notify_update()
 
-    def get_active_managed_loads_power(self, hour_offset=0):
-        """Calculate total power of currently active managed loads for simulation."""
-        now = dt_util.now()
-        active_load_kw = 0.0
-        for s_id, s_settings in self.get_setting(CONF_DEDUCT_SETTINGS, {}).items():
-            if self._is_currently_pulling_power(s_id):
-                is_cyclic = s_settings.get(CONF_IS_CYCLIC, False)
-                if is_cyclic and s_id in self.learned_avg_cycle_power:
-                    p_kw = self.learned_avg_cycle_power[s_id] / 1000.0
-                else:
-                    p_kw = self.learned_real_power.get(s_id, s_settings.get("required_kw", 0.0) * 1000.0) / 1000.0
+    def get_managed_load_stats(self, s_id):
+        """Returns (expected_kw, remaining_kwh, is_cyclic, is_running). Single source of truth for Strategy."""
+        settings = self.deduct_settings.get(s_id, {})
+        if not isinstance(settings, dict):
+            return 0.0, 0.0, False, False
 
-                req_kwh = s_settings.get("required_kwh", 0.0)
-                if req_kwh > 0:
-                    remaining = max(0.0, req_kwh - self.daily_deduct_consumption.get(s_id, 0.0))
-                    if p_kw > 0 and (hour_offset + 1) <= (remaining / p_kw):
+        is_cyclic = settings.get(CONF_IS_CYCLIC, False)
+        is_running = s_id in self.cycle_actual_start_time
+        
+        # Predicted kW (peak or reached)
+        # We prefer learned_avg_cycle_power as it contains the real "working" power even when idle
+        learn_w = float(self.learned_avg_cycle_power.get(s_id, 0.0))
+        if learn_w < 100:
+             learn_w = float(self.learned_real_power.get(s_id, 0.0))
+        
+        config_kw = float(settings.get("required_kw", 0.0))
+        expected_kw = max(config_kw, (learn_w / 1000.0) if learn_w > 100 else 0.0)
+        
+        # Remaining energy for today
+        req_kwh = float(settings.get("required_kwh", 0.0))
+        consumed = float(self.daily_deduct_consumption.get(s_id, 0.0))
+        remaining_kwh = max(0.0, req_kwh - consumed)
+
+        return expected_kw, remaining_kwh, is_cyclic, is_running
+
+    def get_active_managed_loads_power(self, hour_offset=0):
+        """Calculate total power of currently active managed loads for simulation (legacy helper)."""
+        active_load_kw = 0.0
+        for s_id in self.deduct_settings:
+            p_kw, rem_kwh, is_cyclic, is_running = self.get_managed_load_stats(s_id)
+            
+            if is_running:
+                if rem_kwh > 0:
+                    # If limited by energy, check if it will finish soon
+                    if p_kw > 0 and (hour_offset + 1) <= (rem_kwh / p_kw):
                         active_load_kw += p_kw
-                elif is_cyclic and s_id in self.cycle_actual_start_time:
-                    # Estimate based on learned duration
-                    start_time = self.cycle_actual_start_time[s_id]
-                    avg_dur = self.learned_avg_cycle_duration.get(s_id, 3600.0) # default 1h
-                    predicted_end = start_time + timedelta(seconds=avg_dur)
-                    if (now + timedelta(hours=hour_offset)) < predicted_end:
-                        active_load_kw += p_kw
-                elif hour_offset == 0:
+                else: 
+                    # If no energy limit (0), count as active until cycle ends
                     active_load_kw += p_kw
+            elif not is_cyclic and hour_offset == 0:
+                # Persistent loads reserve power in current budget
+                active_load_kw += p_kw
+                
         return active_load_kw
 
     def _update_prices_from_sensor(self, entity_id, state_obj):
@@ -1153,7 +1280,7 @@ class EnergyProfileManager:
                     pass
 
             if valid_vals:
-                profile[str(h)] = round(sum(valid_vals) / len(valid_vals), 3)
+                profile[str(h)] = round_f(sum(valid_vals) / len(valid_vals), 3)
             else:
                 profile[str(h)] = 0.0
 
@@ -1309,13 +1436,13 @@ class EnergyProfileManager:
                 if history:
                     last_record = history[-1]
                     val = normalize_float(last_record.get("v") if isinstance(last_record, dict) else last_record)
-                    res[sh] = round(val, 3)
+                    res[sh] = round_f(val, 3)
                 else:
                     res[sh] = 0.0
             elif h == cur_hour:
-                if profile_type == "consumption_base": res[sh] = round(self.current_consumption_base, 3)
-                elif profile_type == "consumption_total": res[sh] = round(self.current_consumption_total, 3)
-                elif profile_type == "generation": res[sh] = round(self.current_generation, 3)
+                if profile_type == "consumption_base": res[sh] = round_f(self.current_consumption_base, 3)
+                elif profile_type == "consumption_total": res[sh] = round_f(self.current_consumption_total, 3)
+                elif profile_type == "generation": res[sh] = round_f(self.current_generation, 3)
                 else: res[sh] = 0.0
             else:
                 res[sh] = 0.0
@@ -1448,7 +1575,7 @@ class EnergyProfileManager:
         Uses learned BMS profile if available, otherwise falls back to theoretical CC/CV model.
         """
         # Try finding the closest learned point (with 2% tolerance)
-        soc_int = int(round(soc))
+        soc_int = int(round_f(soc, 0))
         if soc_int in self.bms_learned_profile:
             return self.bms_learned_profile[soc_int]
         
@@ -1486,7 +1613,7 @@ class EnergyProfileManager:
         # BMS Learning: only if battery is charging significantly
         if avg_batt < -0.1:
             soc, _, _ = self.get_battery_state()
-            soc_int = int(round(float(soc or 0.0)))
+            soc_int = int(round_f(float(soc or 0.0), 0))
             
             # Below 50% we assume Bulk charge (max power). 
             if soc_int < 50:
@@ -1512,17 +1639,17 @@ class EnergyProfileManager:
             
             if current_val is None:
                 # Initial point
-                self.bms_learned_profile[soc_int] = float(round(charge_power_limit, 3))
+                self.bms_learned_profile[soc_int] = round_f(charge_power_limit, 3)
                 return
 
             # Update logic:
             # 1. New Peak: observed charge > learned limit.
             if charge_power_limit > (current_val + 0.05):
-                self.bms_learned_profile[soc_int] = float(round(charge_power_limit, 3))
+                self.bms_learned_profile[soc_int] = round_f(charge_power_limit, 3)
             
             # 2. Potential Throttle (CV phase): observed charge < learned limit.
             elif charge_power_limit < (current_val - 0.1) and avg_export > 0.4:
-                new_val = float(round(current_val * 0.95 + charge_power_limit * 0.05, 3))
+                new_val = round_f(current_val * 0.95 + charge_power_limit * 0.05, 3)
                 self.bms_learned_profile[soc_int] = new_val
 
 class EnergyBaseSensor(SensorEntity):
@@ -1560,7 +1687,7 @@ class ProfileAveragedSensor(EnergyBaseSensor):
             profile = self.manager.get_average_profile("consumption_base", self.days)
         else:
             profile = self.manager.get_average_profile("generation", self.days)
-        return round(sum(profile.values()), 3)
+        return round_f(sum(profile.values()), 3)
 
     @property
     def extra_state_attributes(self):
@@ -1574,7 +1701,7 @@ class ProfileAveragedSensor(EnergyBaseSensor):
                 "base_profile_weekday": base_profile_weekday,
                 "base_profile_weekend": base_profile_weekend,
                 "total_profile": total_profile,
-                "total_daily_average": round(sum(total_profile.values()), 3)
+                "total_daily_average": round_f(sum(total_profile.values()), 3)
             }
         else:
             profile = self.manager.get_average_profile("generation", self.days, "all")
@@ -1673,7 +1800,7 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
         # We consider it "day" if we are within productive hours OR we currently have generation.
         # We include sunset_hour in the inclusive range because the productive period usually ends
         # AT THE END of that hour.
-        is_day = (sunrise_hour <= now.hour <= sunset_hour) or is_gen_active
+        is_day = (int(sunrise_hour) <= now.hour <= int(sunset_hour)) or is_gen_active
 
         if is_day:
             # If we are in "overtime" (sunny but profile says night), predict until end of this hour or profile sunset
@@ -1703,14 +1830,14 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
         self._attr_extra_state_attributes = {
             "prediction_target": target_label,
             "target_hour": f"{target_hour:02d}:00",
-            "current_soc_pct": round(batt_soc, 1),
-            "forecast_income_remaining_kwh": round(f_val, 2),
-            "forecast_raw_kwh": round(f_raw or 0.0, 2),
-            "forecast_coefficient_blended": round(coeff, 3),
-            "efficiency_coefficient": round(eff_coeff, 3),
+            "current_soc_pct": round_f(batt_soc, 1),
+            "forecast_income_remaining_kwh": round_f(f_val, 2),
+            "forecast_raw_kwh": round_f(f_raw or 0.0, 2),
+            "forecast_coefficient_blended": round_f(coeff, 3),
+            "efficiency_coefficient": round_f(eff_coeff, 3),
             "simulation_log": charge_log
         }
-        return round(simulated_soc, 1)
+        return round_f(simulated_soc, 1)
 
     @property
     def extra_state_attributes(self):
@@ -1758,14 +1885,14 @@ class ConsumptionDeviationSensor(EnergyBaseSensor):
         deviation = ((actual_base / expected_so_far) - 1.0) * 100.0
 
         self._attr_extra_state_attributes = {
-            "actual_base_kwh": round(actual_base, 3),
-            "expected_base_kwh": round(expected_so_far, 3),
-            "managed_loads_kwh": round(deduct_sum, 3),
+            "actual_base_kwh": round_f(actual_base, 3),
+            "expected_base_kwh": round_f(expected_so_far, 3),
+            "managed_loads_kwh": round_f(deduct_sum, 3),
             "day_type": day_type,
             "status": "accumulating" if actual_base < 0.1 else "active"
         }
 
-        return round(deviation, 1) if abs(deviation) < 1000 else 0.0
+        return round_f(deviation, 1) if abs(deviation) < 1000 else 0.0
 
 
 class InverterOperationModeSensor(SensorEntity):
@@ -1895,7 +2022,7 @@ class InverterOperationModeSensor(SensorEntity):
                     "hours_needed": total_hours_needed,
                     "hours_surplus": hours_surplus,
                     "hours_available": hours_available,
-                    "final_simulated_soc": round(sim_soc, 2),
+                    "final_simulated_soc": round_f(sim_soc, 2),
                     "ever_fully_charged": ever_fully_charged,
                     "success": ever_fully_charged,
                     "log": sim_log
@@ -1918,7 +2045,7 @@ class InverterOperationModeSensor(SensorEntity):
         
         if batt_soc <= min_soc:
             mode = "bat_emergency"
-            reason = f"Заряд батареи ({round(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
+            reason = f"Заряд батареи ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
         elif is_buying_active:
             mode = "buy"
             reason = f"Активна стратегия ПОКУПКИ"
@@ -1960,7 +2087,7 @@ class InverterOperationModeSensor(SensorEntity):
                     mode = "sale_pv_no_bat"
                     reason = f"Текущая цена {cur_price} и есть профицит Солнца"
                 elif instant_ok:
-                    reason = f"Цена ок, но исторически нет профицита ({round(g_kwh,2)} < {round(c_kwh,2)}). Ждем"
+                    reason = f"Цена ок, но исторически нет профицита ({round_f(g_kwh, 2)} < {round_f(c_kwh, 2)}). Ждем"
                 else:
                     reason = f"Цена ок, но моментально генерация не превышает потребление"
             else:
@@ -2049,14 +2176,14 @@ class LiveHourlySensor(RestoreEntity, SensorEntity):
     @property
     def native_value(self):
         if self.ptype == "consumption":
-            return round(self.manager.current_consumption_base, 3)
-        return round(self.manager.current_generation, 3)
+            return round_f(self.manager.current_consumption_base, 3)
+        return round_f(self.manager.current_generation, 3)
 
     @property
     def extra_state_attributes(self):
         if self.ptype == "consumption":
             return {
-                "total_consumption": round(self.manager.current_consumption_total, 3)
+                "total_consumption": round_f(self.manager.current_consumption_total, 3)
             }
         return {}
 
@@ -2085,7 +2212,7 @@ class TodayProfileSensor(SensorEntity):
     def native_value(self):
         query_type = "consumption_base" if self.ptype == "consumption" else self.ptype
         profile = self.manager.get_todays_profile(query_type)
-        return round(sum(profile.values()), 3)
+        return round_f(sum(profile.values()), 3)
 
     @property
     def extra_state_attributes(self):
@@ -2097,7 +2224,7 @@ class TodayProfileSensor(SensorEntity):
             return {
                 "base_profile": profile,
                 "total_profile": total_profile,
-                "total_daily_sum": round(sum(total_profile.values()), 3)
+                "total_daily_sum": round_f(sum(total_profile.values()), 3)
             }
         return {
             "profile": profile
@@ -2128,7 +2255,7 @@ class EnergyBudgetSensor(SensorEntity):
     @property
     def native_value(self):
         self._calculate()
-        return round(self._state, 3)
+        return round_f(self._state, 3)
 
     @property
     def extra_state_attributes(self):
@@ -2143,9 +2270,9 @@ class EnergyBudgetSensor(SensorEntity):
             def _sr(v, default=0.0):
                 """Safe round."""
                 try:
-                    return round(float(v if v is not None else default), 3)
+                    return round_f(float(v if v is not None else default), 3)
                 except (TypeError, ValueError):
-                    return round(float(default), 3)
+                    return round_f(float(default), 3)
 
             self._state = float(res.get("initial_budget", 0.0) or 0.0)
             self._attrs = {
@@ -2202,7 +2329,7 @@ class MarketStrategySensor(SensorEntity):
         cur_hour = now.hour
 
         def safe_round(val):
-            return round(normalize_float(val), 3)
+            return round_f(normalize_float(val), 3)
 
         today_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["today_prices"].items(), key=lambda item: int(item[0])) if int(k) >= cur_hour}
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
@@ -2247,8 +2374,8 @@ class MarketStrategySensor(SensorEntity):
             "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
             "active_hours": res.get("active_hours_formatted", ""),
             "active_periods": res.get("active_periods", ""),
-            "target_price": round(float(res.get("target_price", 0.0) or 0.0), 3),
-            "limit_used": round(float(res.get("limit_used", 0.0) or 0.0), 3),
+            "target_price": round_f(float(res.get("target_price", 0.0) or 0.0), 3),
+            "limit_used": round_f(float(res.get("limit_used", 0.0) or 0.0), 3),
             "recommended_power_kw": res.get("recommended_power_kw", 0.0),
             "current_mode": current_mode,
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
@@ -2343,29 +2470,37 @@ class SavingsSensor(SensorEntity):
         monthly = {}
         for d, v in savings.items():
             m = d[:7]
-            monthly[m] = round(monthly.get(m, 0.0) + v.get(cat, 0.0), 4)
+            monthly[m] = round_f(monthly.get(m, 0.0) + v.get(cat, 0.0), 4)
 
         daily = {}
         for i in range(30):
             d_str = (now - timedelta(days=i)).strftime("%Y-%m-%d")
             val = _day(d_str)
             if val > 0 or d_str == today_str:
-                daily[d_str] = round(val, 4)
+                daily[d_str] = round_f(val, 4)
 
+        monthly_sorted = sorted(monthly.items())
+        # Slicing via loop to avoid linter confusion with SupportsIndex
+        recent_monthly = []
+        si = max(0, len(monthly_sorted) - 13)
+        for i in range(len(monthly_sorted)):
+            if i >= si:
+                recent_monthly.append(monthly_sorted[i])
+        
         return {
-            "today":          round(today_val,     4),
-            "yesterday":      round(yesterday_val, 4),
-            "last_7_days":    round(last7,   4),
-            "last_30_days":   round(last30,  4),
-            "this_month":     round(this_month, 4),
-            "last_month":     round(last_month, 4),
-            "monthly_totals": {k: round(v, 2) for k, v in sorted(monthly.items())[-13:]},
+            "today":          round_f(today_val,     4),
+            "yesterday":      round_f(yesterday_val, 4),
+            "last_7_days":    round_f(last7,   4),
+            "last_30_days":   round_f(last30,  4),
+            "this_month":     round_f(this_month, 4),
+            "last_month":     round_f(last_month, 4),
+            "monthly_totals": {str(k): round_f(float(v), 2) for k, v in recent_monthly},
             "daily_history":  dict(sorted(daily.items())),
         }
 
     @property
     def native_value(self):
-        return round(self._get_summary().get("last_30_days", 0.0), 2)
+        return round_f(self._get_summary().get("last_30_days", 0.0), 2)
 
     @property
     def extra_state_attributes(self):
@@ -2393,13 +2528,13 @@ class SavingsSensor(SensorEntity):
             y_data = savings_store.get(yest_str,  {})
 
             attrs.update({
-                "solar_benefit_today":     round(t_data.get("solar", 0.0), 4),
-                "arbitrage_benefit_today": round(t_data.get("arbitrage", 0.0), 4),
-                "sell_benefit_today":      round(t_data.get("sell", 0.0), 4),
+                "solar_benefit_today":     round_f(t_data.get("solar", 0.0), 4),
+                "arbitrage_benefit_today": round_f(t_data.get("arbitrage", 0.0), 4),
+                "sell_benefit_today":      round_f(t_data.get("sell", 0.0), 4),
 
-                "solar_benefit_yesterday":     round(y_data.get("solar", 0.0), 4),
-                "arbitrage_benefit_yesterday": round(y_data.get("arbitrage", 0.0), 4),
-                "sell_benefit_yesterday":      round(y_data.get("sell", 0.0), 4),
+                "solar_benefit_yesterday":     round_f(y_data.get("solar", 0.0), 4),
+                "arbitrage_benefit_yesterday": round_f(y_data.get("arbitrage", 0.0), 4),
+                "sell_benefit_yesterday":      round_f(y_data.get("sell", 0.0), 4),
             })
 
         return attrs
@@ -2455,11 +2590,11 @@ class EnergyBalanceSensor(SensorEntity):
         # but usually it's correct enough.
 
         return {
-            "today":      round(today_val, 2),
-            "yesterday":  round(yesterday_val, 2),
-            "week":       round(last_7_days, 2),
-            "month":      round(last_30_days, 2),
-            "lifetime":   round(total_balance, 2),
+            "today":      round_f(today_val, 2),
+            "yesterday":  round_f(yesterday_val, 2),
+            "week":       round_f(last_7_days, 2),
+            "month":      round_f(last_30_days, 2),
+            "lifetime":   round_f(total_balance, 2),
         }
 
     @property
@@ -2511,7 +2646,7 @@ class AnomalyDetectionSensor(SensorEntity):
             return 1.0 # Normal
 
         score = actual_kw / expected
-        return round(score, 2)
+        return round_f(score, 2)
 
     @property
     def extra_state_attributes(self):
@@ -2528,8 +2663,8 @@ class AnomalyDetectionSensor(SensorEntity):
 
         return {
             "status": status,
-            "expected_kw": round(expected, 3),
-            "actual_kw": round(actual_kw, 3),
+            "expected_kw": round_f(expected, 3),
+            "actual_kw": round_f(actual_kw, 3),
             "threshold_multiplier": threshold,
             "anomaly_detected": actual_kw / expected > threshold if expected > 0.05 else False
         }
@@ -2566,7 +2701,7 @@ class PaybackSensor(SensorEntity):
 
         total_saved = self.manager.get_total_savings()
         roi = (total_saved / total_cost) * 100.0
-        return round(roi, 2)
+        return round_f(roi, 2)
 
     @property
     def extra_state_attributes(self):
@@ -2605,20 +2740,20 @@ class PaybackSensor(SensorEntity):
         try:
             battery_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
             if battery_cost > 0 and extra_monthly > 0:
-                payback_years_upgrade = round(float(battery_cost / (extra_monthly * 12)), 2)
-                roi_upgrade = round(float(((extra_monthly * 12) / battery_cost) * 100), 1)
+                payback_years_upgrade = round_f(float(battery_cost / (extra_monthly * 12)), 2)
+                roi_upgrade = round_f(float(((extra_monthly * 12) / battery_cost) * 100), 1)
         except Exception:
             pass
 
         return {
             "total_investment": f"{total_cost} {self._currency}",
-            "cumulative_savings": f"{round(float(total_saved or 0.0), 2)} {self._currency}",
-            "remaining_amount": f"{round(float(remaining or 0.0), 2)} {self._currency}",
-            "average_daily_saving": f"{round(float(avg_daily or 0.0), 2)} {self._currency}",
+            "cumulative_savings": f"{round_f(float(total_saved or 0.0), 2)} {self._currency}",
+            "remaining_amount": f"{round_f(float(remaining or 0.0), 2)} {self._currency}",
+            "average_daily_saving": f"{round_f(float(avg_daily or 0.0), 2)} {self._currency}",
             "estimated_payback_days": days_rem if total_cost > 0 else "N/A",
             "estimated_payback_date": payback_date if total_cost > 0 else "N/A",
             "simulation_days": sim_batt_double.get("days_simulated", 0),
-            "upgrade_batt_cap_kwh": round(float(batt_cap or 0.0), 2),
+            "upgrade_batt_cap_kwh": round_f(float(batt_cap or 0.0), 2),
             "upgrade_batt_cost": f"{battery_cost} {self._currency}",
             "upgrade_potential_benefit": f"+{extra_monthly} {self._currency}/мес",
             "upgrade_payback_years": payback_years_upgrade,
@@ -2650,7 +2785,7 @@ class BatteryDegradationSensor(SensorEntity):
     @property
     def native_value(self):
         # We show the ARBITRAGE threshold cost (1x degradation covers the full cycle)
-        return round(self.manager.get_battery_degradation_cost(), 4)
+        return round_f(self.manager.get_battery_degradation_cost(), 4)
 
     @property
     def extra_state_attributes(self):
@@ -2662,8 +2797,8 @@ class BatteryDegradationSensor(SensorEntity):
         cycles = self.manager.get_setting(CONF_BATTERY_RATED_CYCLES, 6000)
 
         return {
-            "wear_cost_per_kwh_cycle": round(cost_per_kwh, 4),
-            "arbitrage_profit_threshold": round(threshold, 4),
+            "wear_cost_per_kwh_cycle": round_f(cost_per_kwh, 4),
+            "arbitrage_profit_threshold": round_f(threshold, 4),
             "battery_investment": batt_cost,
             "rated_cycles": cycles,
             "note": "arbitrage_note"
@@ -2692,7 +2827,7 @@ class SolarWasteSensor(SensorEntity):
 
     @property
     def native_value(self):
-        return round(self.manager.data.get("temp_daily_waste", 0.0), 3)
+        return round_f(self.manager.data.get("temp_daily_waste", 0.0), 3)
 
     @property
     def extra_state_attributes(self):
@@ -2723,11 +2858,11 @@ class SolarWasteSensor(SensorEntity):
         prof_val = float(prof_gen.get(cur_hour, 0.0))
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
         # Reality check: potential cannot be less than actual generation
-        potential_kw = round(max(prof_val * coeff, self.manager.avg_gen_kw), 3)
+        potential_kw = round_f(max(prof_val * coeff, self.manager.avg_gen_kw), 3)
 
         return {
             "current_waste_kw": self.manager.current_solar_waste_power,
-            "lost_potential_revenue": round(waste_kwh * cur_price, 2),
+            "lost_potential_revenue": round_f(waste_kwh * cur_price, 2),
             "recommendation": rec,
             "potential_power_kw": potential_kw
         }
@@ -2771,7 +2906,7 @@ class BatteryAutonomySensor(SensorEntity):
             return 99.0 # Effectively infinity for the sensor state
 
         hours = energy_ac / load_kw
-        return round(float(hours), 2)
+        return round_f(float(hours), 2)
 
     @property
     def extra_state_attributes(self):
@@ -2798,8 +2933,8 @@ class BatteryAutonomySensor(SensorEntity):
         return {
             "autonomy_to_empty": format_time(total_hours),
             "autonomy_to_reserve": format_time(survival_hours),
-            "current_load_avg_kw": round(float(load_kw), 3),
-            "usable_energy_ac_kwh": round(float(energy_dc * eff), 3),
+            "current_load_avg_kw": round_f(float(load_kw), 3),
+            "usable_energy_ac_kwh": round_f(float(energy_dc * eff), 3),
             "reserve_soc_target": min_soc
         }
 
@@ -2831,7 +2966,7 @@ class GridBalanceSensor(SensorEntity):
             val = get_kwh_val(st)
             if val is not None:
                 # Flip sign: User (+import, -export) -> Component (+export, -import)
-                return round(-float(val), 3)
+                return round_f(-float(val), 3)
 
         # Fallback: calculate from (Gen + Batt - Load)
         load_kw = self.manager.avg_load_kw
@@ -2843,7 +2978,7 @@ class GridBalanceSensor(SensorEntity):
 
         # Conv: positive is export, negative is import
         balance = gen_kw + batt_p - load_kw
-        return round(float(balance), 3)
+        return round_f(float(balance), 3)
 
     @property
     def extra_state_attributes(self):

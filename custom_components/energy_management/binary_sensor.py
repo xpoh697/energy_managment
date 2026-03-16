@@ -11,6 +11,7 @@ from .const import (
     CONF_POWER_SENSOR,
     CONF_ONLY_SOLAR,
 )
+from .utils import get_kwh_val, round_f
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -104,25 +105,25 @@ class EnergyPermissionSensor(BinarySensorEntity):
         attrs = {
             "controlled_entity_id": self.target_sensor_id,
             "status_reason": budget_res.get("permissions_reasons", {}).get(self.target_sensor_id, "Unknown"),
-            "daily_consumption_kwh": round(float(settings.get("required_kwh", 0.0)), 2),
+            "daily_consumption_kwh": round_f(float(settings.get("required_kwh", 0.0)), 2),
             "priority": settings.get("priority", 99),
-            "already_consumed_today_kwh": round(float(consumed_today), 2),
-            "estimated_initial_budget_kwh": round(budget_res.get("initial_budget", 0.0), 3),
-            "forecast_correction_coefficient": round(budget_res.get("forecast_coefficient", 1.0), 3),
+            "already_consumed_today_kwh": round_f(float(consumed_today), 2),
+            "estimated_initial_budget_kwh": round_f(budget_res.get("initial_budget", 0.0), 3),
+            "forecast_correction_coefficient": round_f(budget_res.get("forecast_coefficient", 1.0), 3),
             # Learned power values
-            "learned_peak_power_w": round(learned_kw * 1000.0, 1),
-            "configured_peak_power_w": round(config_kw * 1000.0, 1),
-            "learned_standby_power_w": round(
+            "learned_peak_power_w": round_f(learned_kw * 1000.0, 1),
+            "configured_peak_power_w": round_f(config_kw * 1000.0, 1),
+            "learned_standby_power_w": round_f(
                 self.manager.learned_standby_power.get(self.target_sensor_id, 0.0), 1
             ),
             "is_cyclic": is_cyclic,
             "only_solar_checked": only_solar_free,
-            "available_power_total_kw": round(budget_res.get("available_power_total_kw", 0.0), 2),
-            "available_gen_kw": round(budget_res.get("available_gen_kw", 0.0), 2),
-            "only_solar_threshold_kw": round(float(req_kw) * (0.8 if settings.get("required_kwh", 2.5) == 0 else 0.6) if only_solar_free else 0.0, 2),
-            "waste_compensation_kw": round(budget_res.get("waste_compensation_kw", 0.0), 2),
-            "battery_flexible_kw": round(budget_res.get("battery_flexible_kw", 0.0), 2),
-            "battery_discharge_budget_kw": round(budget_res.get("battery_discharge_budget_kw", 0.0), 2),
+            "available_power_total_kw": round_f(budget_res.get("available_power_total_kw", 0.0), 2),
+            "available_gen_kw": round_f(budget_res.get("available_gen_kw", 0.0), 2),
+            "only_solar_threshold_kw": round_f(float(req_kw) * (0.8 if settings.get("required_kwh", 2.5) == 0 else 0.6) if only_solar_free else 0.0, 2),
+            "waste_compensation_kw": round_f(budget_res.get("waste_compensation_kw", 0.0), 2),
+            "battery_flexible_kw": round_f(budget_res.get("battery_flexible_kw", 0.0), 2),
+            "battery_discharge_budget_kw": round_f(budget_res.get("battery_discharge_budget_kw", 0.0), 2),
         }
 
         # Device detection and Status
@@ -146,14 +147,14 @@ class EnergyPermissionSensor(BinarySensorEntity):
 
         # Only show cyclic attributes for cyclic devices
         if is_cyclic:
-            attrs["learned_avg_cycle_power_w"] = round(
+            attrs["learned_avg_cycle_power_w"] = round_f(
                 self.manager.learned_avg_cycle_power.get(self.target_sensor_id, 0.0), 1
             )
-            attrs["learned_cycle_total_kwh"] = round(
+            attrs["learned_cycle_total_kwh"] = round_f(
                 self.manager.learned_cycle_total_kwh.get(self.target_sensor_id, 0.0), 3
             )
             
-            avg_dur_min = round(self.manager.learned_avg_cycle_duration.get(self.target_sensor_id, 0.0) / 60.0, 1)
+            avg_dur_min = round_f(self.manager.learned_avg_cycle_duration.get(self.target_sensor_id, 0.0) / 60.0, 1)
             attrs["learned_avg_cycle_duration_min"] = avg_dur_min
 
             if self.target_sensor_id in self.manager.cycle_actual_start_time:
@@ -183,7 +184,7 @@ class EnergyPermissionSensor(BinarySensorEntity):
                 except:
                     pass
 
-            self._attrs["current_power_w"] = round(
+            self._attrs["current_power_w"] = round_f(
                 self.manager.last_known_power.get(self.target_sensor_id, 0.0), 1
             )
 

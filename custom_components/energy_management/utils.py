@@ -38,3 +38,11 @@ def get_price_from_store(store: dict, date_str: str, hour: str | int) -> float |
         return normalize_float(val)
     except Exception:
         return None
+
+def round_f(val: Any, precision: int = 2) -> float:
+    """Safely round value to float with precision."""
+    try:
+        v = float(val)
+        return float(f"{v:.{precision}f}")
+    except (ValueError, TypeError):
+        return 0.0
