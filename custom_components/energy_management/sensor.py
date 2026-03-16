@@ -1426,42 +1426,51 @@ class EnergyProfileManager:
 
     def _update_bms_learned_profile(self, now):
         """Analyze stable power history to learn BMS charging limits."""
-        if len(self.power_history) < 5: return
-        # Condition 1: Inverter Mode must be one that prioritizes charging
-        if self.current_inverter_mode not in ["sale_pv", "buy"]: return
+        # Condition 0: Stability - need at least 10 full samples (10 minutes)
+        if len(self.power_history) < 10: return
+        
+        # Condition 1: Inverter Mode must be purely solar-priority
+        # Avoid "buy" mode because grid charge limits might be lower than BMS limits
+        if self.current_inverter_mode not in ["sale_pv"]: return 
+
+        # Condition 2: Continuous surplus (No gaps in export for the last 10 minutes)
+        # This ensures we are not learning during "cloudy gaps" or intermittent loads
+        if not all((x.get("export_kw", 0.0) > 0.05) for x in self.power_history):
+            return
 
         avg_export = float(self.avg_export_kw)
         avg_batt = float(self.avg_batt_kw) # avg_batt < 0 means charging
         
-        # BMS Learning: only if battery is charging (batt_kw < -0.1)
-        # We need significant export to be sure it's a BMS limit, not a solar shortage.
+        # BMS Learning: only if battery is charging significantly
         if avg_batt < -0.1:
             soc, _, _ = self.get_battery_state()
-            soc_int = int(round(float(soc)))
+            soc_int = int(round(float(soc or 0.0)))
             
             # Below 50% we assume Bulk charge (max power). 
-            # Morning data is often shaded or has low solar elevation, leading to false limits.
             if soc_int < 50:
                 if soc_int in self.bms_learned_profile:
                     self.bms_learned_profile.pop(soc_int)
                 return
 
+            # Significant export check (> 0.5 kW) to be absolutely sure battery 
+            # is the only thing limiting the charge power.
+            if avg_export < 0.5:
+                return
+
             charge_power_limit = abs(avg_batt)
-            
             current_val = self.bms_learned_profile.get(soc_int)
+            
             if current_val is None:
-                # No learned data yet, initialize from theoretical model if export exists
-                if avg_export > 0.1:
-                    self.bms_learned_profile[soc_int] = float(round(charge_power_limit, 3))
+                # Initial point
+                self.bms_learned_profile[soc_int] = float(round(charge_power_limit, 3))
                 return
 
             # Update logic:
-            # 1. New Peak: observed charge > learned limit. Learn it if there's even a small export.
-            if charge_power_limit > (current_val + 0.05) and avg_export > 0.1:
+            # 1. New Peak: observed charge > learned limit.
+            if charge_power_limit > (current_val + 0.05):
                 self.bms_learned_profile[soc_int] = float(round(charge_power_limit, 3))
             
             # 2. Potential Throttle (CV phase): observed charge < learned limit.
-            # ONLY decay if we have massive export (> 400W). This prevents "cloudy weather decay".
             elif charge_power_limit < (current_val - 0.1) and avg_export > 0.4:
                 new_val = float(round(current_val * 0.95 + charge_power_limit * 0.05, 3))
                 self.bms_learned_profile[soc_int] = new_val
