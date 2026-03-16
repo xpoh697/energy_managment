@@ -23,7 +23,7 @@
           "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
           "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
           "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)",
-          "grid_power": "Real-time Grid Power (signed: + export, - import)"
+          "grid_power": "Real-time Grid Power (signed: + import, - export)"
         }
       },
       "deduct_settings": {
@@ -83,7 +83,7 @@
           "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
           "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
           "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)",
-          "grid_power": "Real-time Grid Power (signed: + export, - import)"
+          "grid_power": "Real-time Grid Power (signed: + import, - export)"
         }
       },
       "deduct_settings": {

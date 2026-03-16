@@ -517,10 +517,13 @@ class EnergyProfileManager:
 
         grid_p = 0.0
         if self.grid_power_sensor:
-            grid_p = get_kwh_val(self.hass.states.get(self.grid_power_sensor)) or 0.0
+            raw_grid = get_kwh_val(self.hass.states.get(self.grid_power_sensor)) or 0.0
+            # User sensor: + import, - export. 
+            # Our internal convention: + export, - import.
+            grid_p = -float(raw_grid)
 
         # Export calculation: prioritizing real grid sensor if available.
-        # Standard convention: Export (selling) is positive, Import (buying) is negative.
+        # Component convention: Export (selling) is positive, Import (buying) is negative.
         real_export = max(0.0, float(grid_p))
         calc_export = max(0.0, float(gen_kw) + float(batt_p) - float(load_kw))
 
@@ -2822,7 +2825,8 @@ class GridBalanceSensor(SensorEntity):
             st = self.manager.hass.states.get(self.manager.grid_power_sensor)
             val = get_kwh_val(st)
             if val is not None:
-                return round(float(val), 3)
+                # Flip sign: User (+import, -export) -> Component (+export, -import)
+                return round(-float(val), 3)
 
         # Fallback: calculate from (Gen + Batt - Load)
         load_kw = self.manager.avg_load_kw
