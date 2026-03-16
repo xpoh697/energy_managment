@@ -25,6 +25,7 @@ from .const import (
     CONF_TARGET_SOC_BUY,
     CONF_DYNAMIC_SOC_SELL,
     CONF_DYNAMIC_SOC_BUY,
+    CONF_PRIORITY,
     DOMAIN
 )
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
@@ -325,10 +326,16 @@ class StrategyEngine:
                 cur_price_buy = strategy_res.get("today_prices", {}).get(str(cur_hour))
 
             reserved_by = []
-            d_settings = dict(getattr(man, "deduct_settings", {}))
-            for s_id in d_settings:
+            # Sort loads by Priority (lower value = higher priority)
+            # This ensures budget reservation happens in the correct order.
+            sorted_items = sorted(
+                man.deduct_settings.items(),
+                key=lambda x: x[1].get(CONF_PRIORITY, 1) if isinstance(x[1], dict) else 1
+            )
+            
+            for s_id, s_conf in sorted_items:
                 s_id_s = str(s_id)
-                s_conf = dict(d_settings.get(s_id_s, {}))
+                s_conf = dict(s_conf if isinstance(s_conf, dict) else {})
                 expected_kw, rem_kwh, is_cyclic, _ = man.get_managed_load_stats(s_id_s)
                 e_kw = float(expected_kw)
                 
@@ -372,7 +379,7 @@ class StrategyEngine:
                     permissions_reasons[s_id_s] = f"Лимит исчерпан ({available_budget:.2f} < 0.1)"
                 else:
                     permissions[s_id_s] = True
-                    permissions_reasons[s_id_s] = f"Ок ({available_budget:.2f} доступно{price_suffix})"
+                    permissions_reasons[s_id_s] = f"Ок ({available_budget:.2f} кВт·ч доступно{price_suffix})"
                     
                     # Reservation logic:
                     # - Non-cyclic (boilers/heaters): Reservation is always active.
