@@ -273,7 +273,7 @@ class EnergyProfileManager:
         self.learned_avg_cycle_power = self.data.get("learned_avg_cycle_power", {})
         self.learned_cycle_total_kwh = self.data.get("learned_cycle_total_kwh", {})
         self.learned_avg_cycle_duration = self.data.get("learned_avg_cycle_duration", {})
-        self.bms_learned_profile = {int(k): float(v) for k, v in self.data.get("bms_learned_profile", {}).items() if str(k).isdigit()}
+        self.bms_learned_profile = {int(k): float(v) for k, v in self.data.get("bms_learned_profile", {}).items() if str(k).isdigit() and int(k) >= 50}
         
         # Restore cycle start times (handle ISO strings or missing)
         saved_starts = self.data.get("cycle_actual_start_time", {})
