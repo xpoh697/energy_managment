@@ -915,14 +915,16 @@ class StrategyEngine:
                     target_soc = base_target
                     
                     budget_data_sell = {}
+                    expected_night_s = 0.0
+                    eff_coeff_val = 1.0
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         budget_data_raw = self.get_budget_and_permissions(man.custom_period, skip_strategy_check=True)
                         if budget_data_raw:
                             budget_data_sell = budget_data_raw
                             expected_night_s = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
                             eff_coeff_val = float(normalize_float(budget_data_sell.get("efficiency_coefficient", 1.0)))
-                        min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
                         
+                        min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
                         expected_night_from_batt = float(expected_night_s / eff_coeff_val if eff_coeff_val > 0.1 else expected_night_s)
                         ai_soc_reserve = float((expected_night_from_batt / b_cap * 100.0) + min_soc_reserve)
                         
