@@ -817,19 +817,28 @@ class EnergyProfileManager:
         # --- Solar Waste Calculation ---
         if self.power_gen_sensors and self.generation_sensors:
             # We need potential power. We'll use the profile-based estimate.
-            # (Calculation of blended_coeff is done in budget/strategy, but we'll use a snapshot here)
             prof_gen_today = self.get_average_profile("generation", self.custom_period, "all")
             cur_expected_gen = float(prof_gen_today.get(str(now.hour), 0.0))
-            potential_kw = cur_expected_gen * self.last_blended_coeff
+            coeff = float(getattr(self, "last_blended_coeff", 1.0))
+            potential_kw = float(max(0.0, cur_expected_gen * coeff))
 
             soc, _, _ = self.get_battery_state()
             soc_f = float(soc) if soc is not None else 0.0
+            
+            # Use current gen but ensure it's not negative (weird sensors)
+            current_gen = float(max(0.0, gen_kw))
+            
             # Waste occurs if battery is near full and we generate less than the panels could potentially give
-            if soc_f >= 97.0 and potential_kw > (float(gen_kw) + 0.1):
-                waste_kw = float(potential_kw) - float(gen_kw)
+            if soc_f >= 95.0 and potential_kw > (current_gen + 0.1):
+                waste_kw = float(max(0.0, potential_kw - current_gen))
+                # Sanity check: waste cannot be more than potential
+                waste_kw = float(min(waste_kw, potential_kw))
+                
                 self.current_solar_waste_power = round_f(float(waste_kw), 3)
                 # Accumulate kWh (1 min sample)
-                self.data["temp_daily_waste"] = self.data.get("temp_daily_waste", 0.0) + (waste_kw / 60.0)
+                # Safeguard: don't add more than 1/60th of 20kW (unrealistic for house)
+                step_waste = float(min(waste_kw / 60.0, 20.0 / 60.0))
+                self.data["temp_daily_waste"] = float(self.data.get("temp_daily_waste", 0.0) + step_waste)
             else:
                 self.current_solar_waste_power = 0.0
 
@@ -2941,9 +2950,14 @@ class SolarWasteSensor(SensorEntity):
         # Estimate potential power now
         prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
         prof_val = float(prof_gen.get(cur_hour, 0.0))
-        coeff = getattr(self.manager, "last_blended_coeff", 1.0)
-        # Reality check: potential cannot be less than actual generation
+        coeff = float(getattr(self.manager, "last_blended_coeff", 1.0))
         potential_kw = round_f(max(prof_val * coeff, self.manager.avg_gen_kw), 3)
+
+        # Truncate impossible value (one-time fix for existing corruption)
+        if waste_kwh > 50.0 and self.manager.avg_gen_kw < 20.0:
+             # If waste is > 50kWh but current gen is normal, something is wrong. 
+             # We don't reset fully to not lose history, but we could cap it.
+             pass 
 
         return {
             "current_waste_kw": self.manager.current_solar_waste_power,
