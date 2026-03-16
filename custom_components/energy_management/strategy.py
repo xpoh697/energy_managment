@@ -152,8 +152,9 @@ class StrategyEngine:
         days_to_sim = min(30, max_idx - 1)
         if days_to_sim <= 0:
             return {
-                "days_simulated": 0,
-                "extra_savings": 0.0,
+                "sell_simulation": {},
+                "arbitrage_buyback": {},
+                "analyzed_window": "Неизвестно",
                 "monthly_estimate": 0.0
             }
 
@@ -620,7 +621,9 @@ class StrategyEngine:
             sell_limit = float(man.get_setting(CONF_PRICE_SELL_LIMIT, 5.0))
             tolerance = float(man.get_setting(CONF_PRICE_TOLERANCE, 0.1))
             eff = float(eff_coeff)
-            active_window = (0, 47) if tomorrow_prices else (0, 23)
+            active_window = (cur_hour, 47) if tomorrow_prices else (cur_hour, 23)
+            # End the window at :59 for clarity
+            res["analyzed_window"] = f"До {self._format_h(active_window[1]).replace(':00', ':59')}"
             
             target_hours = []
             target_price = 0.0
@@ -810,7 +813,17 @@ class StrategyEngine:
                         
                         res["arbitrage_decision"] = f"{status}: {detail}"
 
-            target_hours = [int(h) for h in target_hours if int(h) >= cur_hour]
+            target_hours = sorted([int(h) for h in target_hours if int(h) >= cur_hour])
+            
+            # Apply 12h gap truncation: only plan for the immediate block of peaks
+            if target_hours:
+                truncated = [target_hours[0]]
+                for i in range(1, len(target_hours)):
+                    if target_hours[i] - target_hours[i-1] <= 12:
+                        truncated.append(target_hours[i])
+                    else:
+                        break
+                target_hours = truncated
 
             # Survival Logic
             if mode == "buy" and b_cap > 0 and man.get_setting(CONF_DYNAMIC_SOC_BUY, True) and active_window:
@@ -999,7 +1012,8 @@ class StrategyEngine:
 
                     # --- SELL SIMULATION ---
                     sim_range = list(range(cur_hour, int(active_window[1]) + 1))
-                    sim_commands = {int(h): -max_p for h in target_hours_sorted if h >= cur_hour}
+                    # Use the actual calculated power_needed for the simulation, not just raw max_p
+                    sim_commands = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
                     _, sim_log = self.run_soc_simulation(b_soc, sim_range, now, sim_commands)
                     
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else cur_hour
