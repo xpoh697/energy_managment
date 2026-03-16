@@ -447,9 +447,12 @@ class StrategyEngine:
                                 available_gen_kw = float(available_gen_kw) - max(0.0, (stat_kw * 0.6) - actual_load_p)
                         else:
                             # Pre-emptive blocking mode (waiting for thermostat to kick in)
-                            available_power_kw = float(available_power_kw) - float(stat_kw)
-                            if only_solar_free and not is_free_price:
-                                available_gen_kw = float(available_gen_kw) - (float(stat_kw) * 0.6)
+                            # v4.7 - Only pre-reserve persistent loads. 
+                            # Cyclic loads don't reserve kW until they actually start.
+                            if not is_cyclic:
+                                available_power_kw = float(available_power_kw) - float(stat_kw)
+                                if only_solar_free and not is_free_price:
+                                    available_gen_kw = float(available_gen_kw) - (float(stat_kw) * 0.6)
                 else:
                     # BLOCK reasons
                     if gen_bottleneck:

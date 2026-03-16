@@ -134,9 +134,13 @@ class EnergyPermissionSensor(BinarySensorEntity):
                 status = "Работает (Принудительно)" # (Manual Overrun)
         else:
             if self._is_on:
-                status = "Зарезервировано" # (Reserved/Waiting)
+                if is_cyclic:
+                    status = "Разрешено (ожидает запуска)"
+                else:
+                    status = "Зарезервировано"
             else:
-                status = "Ожидание" # (IDLE/Standby)
+                # v4.8 - More informative restricted state
+                status = "Ожидание (запрещено)" if not is_cyclic else "Ожидание солнца/цены"
         
         attrs["device_status"] = status
 
