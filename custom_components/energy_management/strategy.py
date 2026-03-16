@@ -358,7 +358,7 @@ class StrategyEngine:
                     power_bottleneck = True
 
                 price_suffix = " (Беспл. цена)" if is_free_price else ""
-                if consumed >= req_kwh:
+                if req_kwh > 0 and consumed >= req_kwh:
                     permissions[s_id_s] = False
                     permissions_reasons[s_id_s] = f"Норма выполнена ({consumed:.2f}/{req_kwh}{price_suffix})"
                 elif power_bottleneck:
