@@ -149,16 +149,23 @@ class EnergyProfileManager:
         self.bms_learned_profile: dict[int, float] = {}
         self.current_inverter_mode: str = "sale_pv"
 
+        self.all_active_sensors: set[str] = set()
         raw_deduct = config_data.get(CONF_DEDUCT_SETTINGS, {})
         self.deduct_settings = {}
         if isinstance(raw_deduct, dict):
             for s_id, s_conf in raw_deduct.items():
-                # Clean nested power sensor IDs
-                if isinstance(s_conf, dict) and CONF_POWER_SENSOR in s_conf:
+                if not isinstance(s_conf, dict): continue
+                # Clean nested power/active sensor IDs
+                if CONF_POWER_SENSOR in s_conf:
                     if isinstance(s_conf[CONF_POWER_SENSOR], str):
                         p_s = s_conf[CONF_POWER_SENSOR].strip()
                         s_conf[CONF_POWER_SENSOR] = p_s
                         self.all_power_sensors.add(p_s)
+                if CONF_ACTIVE_SENSOR in s_conf:
+                    if isinstance(s_conf[CONF_ACTIVE_SENSOR], str):
+                        a_s = s_conf[CONF_ACTIVE_SENSOR].strip()
+                        s_conf[CONF_ACTIVE_SENSOR] = a_s
+                        self.all_active_sensors.add(a_s)
                 self.deduct_settings[s_id.strip()] = s_conf
 
         self.consumption_sensors = {s.strip() for s in self.consumption_sensors if isinstance(s, str)}
@@ -442,7 +449,7 @@ class EnergyProfileManager:
                 ev = MockEvent({"entity_id": entity_id, "new_state": state_obj})
                 self._async_state_changed(ev)
 
-        monitored_sensors = self.all_sensors | self.all_price_sensors | self.all_power_sensors
+        monitored_sensors = self.all_sensors | self.all_price_sensors | self.all_power_sensors | self.all_active_sensors
         if self.battery_soc_sensor: monitored_sensors.add(self.battery_soc_sensor)
         if self.battery_capacity_sensor: monitored_sensors.add(self.battery_capacity_sensor)
         if self.forecast_today_sensor: monitored_sensors.update(self.forecast_today_sensor)
@@ -546,21 +553,35 @@ class EnergyProfileManager:
         # --- Power Learning & Cycle Tracking ---
         for sensor_id, settings in self.deduct_settings.items():
             if not isinstance(settings, dict): continue
+
+            # 1. Determine activity state
+            is_active = False
+            cur_p = None
+            
+            # Check binary active sensor first if configured
+            active_entity = settings.get(CONF_ACTIVE_SENSOR)
+            if active_entity:
+                st_active = self.hass.states.get(active_entity)
+                if st_active:
+                    is_active = st_active.state in ("on", "true", "active")
+
+            # Check power sensor (for learning and as fallback for activity)
             p_entity = settings.get(CONF_POWER_SENSOR)
-            if not p_entity: continue
-
-            p_state = self.hass.states.get(p_entity)
-            if not p_state or p_state.state in ("unknown", "unavailable"): continue
-
-            try:
-                cur_p = float(str(p_state.state).replace(',', '.'))
-                if p_state.attributes.get("unit_of_measurement") == "kW":
-                    cur_p *= 1000.0
-                self.last_known_power[sensor_id] = cur_p
-            except ValueError: continue
-
-            standby = self.learned_standby_power.get(sensor_id, 15.0)
-            is_active = cur_p > (standby + 10.0)
+            if p_entity:
+                p_state = self.hass.states.get(p_entity)
+                if p_state and p_state.state not in ("unknown", "unavailable"):
+                    try:
+                        cur_p = float(str(p_state.state).replace(',', '.'))
+                        if p_state.attributes.get("unit_of_measurement") == "kW":
+                            cur_p *= 1000.0
+                        self.last_known_power[sensor_id] = cur_p
+                        
+                        # Fallback to power-based detection if no dedicated active sensor
+                        if not active_entity:
+                            standby = self.learned_standby_power.get(sensor_id, 15.0)
+                            is_active = cur_p > (standby + 10.0)
+                    except ValueError:
+                        cur_p = None
 
             if is_active:
                 # Still active -> push forward the "last seen active" time for grace period
@@ -571,24 +592,29 @@ class EnergyProfileManager:
                     self.cycle_actual_start_time[sensor_id] = now
                     self.cycle_energy_start[sensor_id] = self.daily_deduct_consumption.get(sensor_id, 0.0)
 
-                # Active Power Learning (EMA)
-                old_real = float(self.learned_real_power.get(sensor_id, cur_p))
-                if settings.get(CONF_IS_CYCLIC):
-                    # For cyclic, we use a slow EMA as it might have different phases
-                    self.learned_real_power[sensor_id] = round(old_real * 0.9 + float(cur_p) * 0.1, 1)
-                else:
-                    # For non-cyclic (Boiler, etc), we want the stable peak power observed
-                    if float(cur_p) >= old_real:
-                        # Instant jump to new higher peak
-                        self.learned_real_power[sensor_id] = round(float(cur_p), 1)
+                # Active Power Learning (ONLY if we have a real power sensor)
+                if cur_p is not None:
+                    old_real = float(self.learned_real_power.get(sensor_id, cur_p))
+                    if settings.get(CONF_IS_CYCLIC):
+                        self.learned_real_power[sensor_id] = round(old_real * 0.9 + float(cur_p) * 0.1, 1)
                     else:
-                        # Very slow decay if current is lower (to filter ramps and capture steady "on" state)
-                        self.learned_real_power[sensor_id] = round(old_real * 0.98 + float(cur_p) * 0.02, 1)
+                        if float(cur_p) >= old_real:
+                            self.learned_real_power[sensor_id] = round(float(cur_p), 1)
+                        else:
+                            self.learned_real_power[sensor_id] = round(old_real * 0.98 + float(cur_p) * 0.02, 1)
+                elif not p_entity:
+                    # If active by sensor but NO power sensor, 
+                    # use config_kw as fallback for UI display
+                    config_kw = float(settings.get("required_kw", 0.0)) * 1000.0
+                    if config_kw > 0:
+                        self.last_known_power[sensor_id] = config_kw
             else:
-                # Standby Power Learning (Slow EMA)
-                if 0.1 < cur_p < (standby + 5.0):
-                    old_s = float(self.learned_standby_power.get(sensor_id, cur_p))
-                    self.learned_standby_power[sensor_id] = round(old_s * 0.95 + float(cur_p) * 0.05, 2)
+                # Standby Power Learning (Only if power sensor is idle)
+                if cur_p is not None:
+                    standby = self.learned_standby_power.get(sensor_id, 15.0)
+                    if 0.1 < cur_p < (standby + 5.0):
+                        old_s = float(self.learned_standby_power.get(sensor_id, cur_p))
+                        self.learned_standby_power[sensor_id] = round(old_s * 0.95 + float(cur_p) * 0.05, 2)
 
                 # If we just finished a cycle
                 if sensor_id in self.cycle_actual_start_time:
@@ -1286,8 +1312,20 @@ class EnergyProfileManager:
     def _is_currently_pulling_power(self, sensor_id: str) -> bool:
         """Return True if the device currently has an active cycle (pulling power above standby)."""
         settings = self.deduct_settings.get(sensor_id, {})
-        p_sensor = settings.get(CONF_POWER_SENSOR) if isinstance(settings, dict) else None
+        if not isinstance(settings, dict): return False
+
+        # 1. Official 'Active' sensor (Binary Sensor) takes precedence
+        active_sensor = settings.get(CONF_ACTIVE_SENSOR)
+        if active_sensor:
+            st = self.hass.states.get(active_sensor)
+            if st:
+                if st.state in ("on", "true", "active"):
+                    return True
+                if st.state in ("off", "false", "inactive"):
+                    return False
         
+        # 2. Traditional power-based detection (Fallback)
+        p_sensor = settings.get(CONF_POWER_SENSOR)
         standby = self.learned_standby_power.get(sensor_id, 15.0)
         
         if not p_sensor:

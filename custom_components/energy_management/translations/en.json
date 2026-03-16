@@ -28,7 +28,8 @@
         "data": {
           "priority": "Priority (1 = highest)",
           "required_kwh": "Required Energy per day (kWh)",
-          "required_kw": "Device Power (kW)"
+          "required_kw": "Device Power (kW)",
+          "active_sensor": "Active Detection Sensor (binary_sensor)"
         }
       },
       "investment_settings": {
@@ -78,7 +79,8 @@
           "priority": "1. Priority (lower = higher priority)",
           "required_kwh": "2. Required Energy per day (kWh)",
           "required_kw": "3. Peak Device Power (kW)",
-          "only_solar_or_negative_price": "4. ONLY from solar (reserves 60% of device Power from free gen by priority) or price <= 0"
+          "only_solar_or_negative_price": "4. ONLY from solar (reserves 60% of device Power from free gen by priority) or price <= 0",
+          "active_sensor": "8. Active Detection Sensor (binary_sensor)"
         }
       },
       "investment_settings": {

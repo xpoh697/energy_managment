@@ -34,7 +34,8 @@
           "required_kw": "Device Power (kW)",
           "power_sensor": "Instant Power Sensor (W or kW)",
           "active_hold_time": "Cycle Hold Time (min)",
-          "is_cyclic": "Is this a cyclic device? (Washing machine/Dishwasher)"
+          "is_cyclic": "Is this a cyclic device? (Washing machine/Dishwasher)",
+          "active_sensor": "Active Detection Sensor (binary_sensor)"
         }
       },
       "investment_settings": {
@@ -91,7 +92,8 @@
           "only_solar_or_negative_price": "4. ONLY from solar (reserves 60% of device Power from free gen by priority) or price <= 0",
           "power_sensor": "5. Instant Power Sensor (W or kW)",
           "active_hold_time": "6. Cycle Hold Time (min)",
-          "is_cyclic": "7. Is this a cyclic device? (Washing machine/Dishwasher)"
+          "is_cyclic": "7. Is this a cyclic device? (Washing machine/Dishwasher)",
+          "active_sensor": "8. Active Detection Sensor (binary_sensor)"
         }
       },
       "investment_settings": {

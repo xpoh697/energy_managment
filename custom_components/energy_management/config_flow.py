@@ -32,6 +32,7 @@ from .const import (
     CONF_ACTIVE_HOLD_TIME,
     CONF_IS_CYCLIC,
     CONF_ONLY_SOLAR,
+    CONF_ACTIVE_SENSOR,
 )
 
 
@@ -150,6 +151,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
                 CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
                 CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
+                CONF_ACTIVE_SENSOR: user_input.get(CONF_ACTIVE_SENSOR),
             }
             self._user_input["deduct_settings_index"] += 1
             return await self.async_step_deduct_settings()
@@ -166,6 +168,9 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             vol.Optional(CONF_ACTIVE_HOLD_TIME, default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
             vol.Optional(CONF_IS_CYCLIC, default=False): bool,
+            vol.Optional(CONF_ACTIVE_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="binary_sensor")
+            ),
         }
 
         # Nice clean name for display
@@ -342,6 +347,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
                 CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
                 CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
+                CONF_ACTIVE_SENSOR: user_input.get(CONF_ACTIVE_SENSOR),
             }
             self._user_input["deduct_settings_index"] += 1
             return await self.async_step_deduct_settings()
@@ -359,6 +365,9 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             ),
             vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15)): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
             vol.Optional(CONF_IS_CYCLIC, default=existing.get(CONF_IS_CYCLIC, False)): bool,
+            vol.Optional(CONF_ACTIVE_SENSOR, default=existing.get(CONF_ACTIVE_SENSOR)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="binary_sensor")
+            ),
         }
 
         sensor_display = current_sensor.replace("sensor.", "").replace("_", " ").title()
