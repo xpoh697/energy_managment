@@ -165,9 +165,14 @@ class StrategyEngine:
         max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
         
         total_extra_saved = 0.0
+        actual_baseline_savings = 0.0
+        hours_simulated = 0
+        days_with_data = 0
         
         for d_back in range(1, days_to_sim + 1):
             sim_soc = 50.0 
+            day_has_data = False
+            day_sim_saved = 0.0
             
             for h_idx in range(24):
                 c_h_rec = man.data.get("consumption_total", {}).get(str(h_idx), [])
@@ -175,6 +180,10 @@ class StrategyEngine:
                 
                 date_str = (now - timedelta(days=d_back)).strftime("%Y-%m-%d")
                 p_buy = float(man.get_price("buy", date_str, h_idx) or 0.0)
+                p_sell = float(man.get_price("sell", date_str, h_idx) or 0.0)
+                
+                if p_buy <= 0: # Skip hours without prices
+                    continue
                 
                 if d_back > len(c_h_rec) or d_back > len(g_h_rec):
                     continue
@@ -202,20 +211,33 @@ class StrategyEngine:
                     
                     sim_cost = float(max(0.0, needed - from_batt_ac) * p_buy)
                 
-                total_extra_saved += float((c_h * p_buy) - sim_cost)
+                # Add solar selling profit if any
+                excess = float(max(0.0, net - (charge_kw / eff if net > 0 else 0.0)))
+                sell_profit = float(excess * p_sell)
                 
-        actual_total_savings = 0.0
-        for d_back in range(1, days_to_sim + 1):
-            d_str = (now - timedelta(days=d_back)).strftime("%Y-%m-%d")
-            day_savings = man.data.get("savings", {}).get(d_str, {})
-            if isinstance(day_savings, dict):
-                actual_total_savings += float(day_savings.get("total", 0.0))
-            
-        improvement = max(0.0, total_extra_saved - actual_total_savings)
+                day_sim_saved += float((c_h * p_buy) - sim_cost + sell_profit)
+                day_has_data = True
+                hours_simulated += 1
+
+            if day_has_data:
+                total_extra_saved += day_sim_saved
+                days_with_data += 1
+                
+                # Add baseline from recorded data for THIS day
+                d_str = (now - timedelta(days=d_back)).strftime("%Y-%m-%d")
+                day_rec = man.data.get("savings", {}).get(d_str, {})
+                if isinstance(day_rec, dict):
+                    # We compare against (solar + sell) savings. 
+                    # Arbitrage is harder to simulate accurately without full strategy run,
+                    # but larger battery always helps solar/sell.
+                    rec_val = float(day_rec.get("solar", 0.0)) + float(day_rec.get("sell", 0.0))
+                    actual_baseline_savings += rec_val
+
+        improvement = max(0.0, total_extra_saved - actual_baseline_savings)
         return {
-            "days_simulated": days_to_sim,
+            "days_simulated": days_with_data,
             "extra_savings": round_f(improvement, 2),
-            "monthly_estimate": round_f(improvement * (30 / days_to_sim), 2) if days_to_sim > 0 else 0.0
+            "monthly_estimate": round_f(improvement * (30 / days_with_data), 2) if days_with_data > 0 else 0.0
         }
 
     def get_budget_and_permissions(self, days_for_profile=14, skip_strategy_check=False):
