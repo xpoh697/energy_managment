@@ -329,7 +329,7 @@ class StrategyEngine:
             for s_id in d_settings:
                 s_id_s = str(s_id)
                 s_conf = dict(d_settings.get(s_id_s, {}))
-                expected_kw, _, _, _ = man.get_managed_load_stats(s_id_s)
+                expected_kw, rem_kwh, is_cyclic, _ = man.get_managed_load_stats(s_id_s)
                 e_kw = float(expected_kw)
                 
                 only_solar = bool(s_conf.get(CONF_ONLY_SOLAR, False))
@@ -373,10 +373,17 @@ class StrategyEngine:
                 else:
                     permissions[s_id_s] = True
                     permissions_reasons[s_id_s] = f"Ок ({available_budget:.2f} доступно{price_suffix})"
-                    available_budget -= float(e_kw * (1.0 - (now.minute / 60.0)))
-                    available_power_kw -= e_kw
-                    available_gen_kw -= e_kw
-                    reserved_by.append(s_id_s)
+                    
+                    # Reservation logic:
+                    # - Non-cyclic (boilers/heaters): Reservation is always active.
+                    # - Cyclic (washers/dishwashers): Reserve ONLY if already started (is_pulling).
+                    # This allows several cyclic loads to have 'OK' status without blocking each other
+                    # before a human actually presses the START button.
+                    if not is_cyclic or is_pulling:
+                        available_budget -= float(e_kw * (1.0 - (now.minute / 60.0)))
+                        available_power_kw -= e_kw
+                        available_gen_kw -= e_kw
+                        reserved_by.append(s_id_s)
                     
             return {
                 "initial_budget": float(initial_budget or 0.0),
