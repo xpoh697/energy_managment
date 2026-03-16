@@ -1620,22 +1620,35 @@ class EnergyProfileManager:
 
     def _update_bms_learned_profile(self, now):
         """Analyze stable power history to learn BMS charging limits."""
-        # Condition 0: Stability - need at least 10 full samples (10 minutes)
-        if len(self.power_history) < 10: return
+        # Condition 0: Stability - need at least 5 samples (5 minutes)
+        if len(self.power_history) < 5: return
         
-        # Condition 1: Inverter Mode must be purely solar-priority
-        # Avoid "buy" mode because grid charge limits might be lower than BMS limits
-        if self.current_inverter_mode not in ["sale_pv"]: return 
+        # Condition 1: Only learn during solar priority mode (sale_pv)
+        # to avoid learning grid charger limits or mixed priorities.
+        if self.current_inverter_mode != "sale_pv": return 
 
-        # Condition 2: Continuous surplus (No gaps in export for the last 10 minutes)
-        # This ensures we are not learning during "cloudy gaps" or intermittent loads
-        if not all((x.get("export_kw", 0.0) > 0.05) for x in self.power_history):
-            return
+        # We analyze the last 5 samples for learning
+        hist_list = list(self.power_history)
+        relevant_history = hist_list[-5:]
 
-        avg_export = float(self.avg_export_kw)
-        avg_batt = float(self.avg_batt_kw) # avg_batt < 0 means charging
+        # Condition 2: Continuous theoretical or real surplus
+        for x in relevant_history:
+            # gen + batt - load = surplus. 
+            # Note: batt_kw is negative when charging (-0.6 kW)
+            # 1.37 (PV) + (-0.6 Charge) - 0.49 (Load) = 0.28 kW surplus
+            theoretical_surplus = float(x.get("gen_kw", 0.0)) + float(x.get("batt_kw", 0.0)) - float(x.get("load_kw", 0.0))
+            
+            # real_export is derived from grid_p (which is -raw_grid)
+            # if raw_grid is -176W, internal grid_p is +176W (export)
+            real_export = float(x.get("grid_kw", 0.0))
+            
+            # Even 10W of surplus is enough to know battery is not hungry for more
+            if max(theoretical_surplus, real_export) < 0.01: 
+                return
+
+        avg_batt = sum(float(x.get("batt_kw") or 0.0) for x in relevant_history) / len(relevant_history)
         
-        # BMS Learning: only if battery is charging significantly
+        # BMS Learning: only if battery is charging significantly ( > 100W)
         if avg_batt < -0.1:
             soc, _, _ = self.get_battery_state()
             soc_int = int(round_f(float(soc or 0.0), 0))
@@ -1646,36 +1659,19 @@ class EnergyProfileManager:
                     self.bms_learned_profile.pop(soc_int)
                 return
 
-            # Check if we have real grid export to confirm battery saturation.
-            # If we don't have a grid sensor, we fall back to calculated avg_export.
-            # If we have a grid sensor, we use the 'grid_kw' from history for higher precision.
-            grid_surplus = avg_export
-            if self.grid_power_sensor:
-                # Average grid_kw from history (should be > 0 for export)
-                grid_surplus = sum(x.get("grid_kw", 0.0) for x in self.power_history) / len(self.power_history)
-
-            # Significant export check (> 0.5 kW) to be absolutely sure battery 
-            # is the only thing limiting the charge power.
-            if grid_surplus < 0.5:
-                return
-
             charge_power_limit = abs(avg_batt)
-            current_val = self.bms_learned_profile.get(soc_int)
             
-            if current_val is None:
-                # Initial point
-                self.bms_learned_profile[soc_int] = round_f(charge_power_limit, 3)
-                return
-
-            # Update logic:
-            # 1. New Peak: observed charge > learned limit.
-            if charge_power_limit > (current_val + 0.05):
+            # Save or Update learned point with weighted average for smoothing
+            old_val = self.bms_learned_profile.get(soc_int)
+            if old_val:
+                # 1/10 weight for the new sample to filter out spikes
+                new_val = (old_val * 9 + charge_power_limit) / 10.0
+                self.bms_learned_profile[soc_int] = round_f(new_val, 3)
+            else:
                 self.bms_learned_profile[soc_int] = round_f(charge_power_limit, 3)
             
-            # 2. Potential Throttle (CV phase): observed charge < learned limit.
-            elif charge_power_limit < (current_val - 0.1) and avg_export > 0.4:
-                new_val = round_f(current_val * 0.95 + charge_power_limit * 0.05, 3)
-                self.bms_learned_profile[soc_int] = new_val
+            # Profile point updated successfully
+            return
 
 class UniversalPriceSensor(SensorEntity):
     """Exposes 48-hour price data with price_today/price_tomorrow attributes for templates."""
@@ -1815,10 +1811,19 @@ class BMSLearnedProfileSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        sorted_profile = {str(k): v for k, v in sorted(self.manager.bms_learned_profile.items())}
+        profile = self.manager.bms_learned_profile
+        sorted_profile = {str(k): v for k, v in sorted(profile.items())}
+        
+        # Calculate some stats for the user
+        max_p = max(profile.values()) if profile else 0.0
+        min_p = min(profile.values()) if profile else 0.0
+        
         return {
             "profile": sorted_profile,
-            "learned_points_count": len(sorted_profile)
+            "learned_points_count": len(sorted_profile),
+            "max_charge_power_observed": max_p,
+            "min_charge_power_observed": min_p,
+            "last_update": self.manager.now.isoformat() if profile else None
         }
 
 
