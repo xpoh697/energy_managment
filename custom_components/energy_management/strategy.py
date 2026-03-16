@@ -4,6 +4,13 @@ from datetime import datetime, timedelta
 from typing import Any
 from homeassistant.util import dt as dt_util
 
+from .const import (
+    CONF_BATTERY_COST, 
+    CONF_BATTERY_RATED_CYCLES,
+    CONF_MIN_SOC_BUY,
+    CONF_ACTIVE_SENSOR,
+    DOMAIN
+)
 from .const import *
 from .utils import get_kwh_val, normalize_float, get_price_from_store
 
@@ -348,6 +355,7 @@ class StrategyEngine:
                     if available_gen_kw < (req_kw * 0.8):
                         gen_bottleneck = True
 
+                needed = 0.0
                 if req_kwh == 0:
                     # Dynamic load logic
                     if available_budget > 0 and not power_bottleneck and not gen_bottleneck:
@@ -367,37 +375,60 @@ class StrategyEngine:
                         permissions[sensor_id] = False
 
                 # v3.8 - Unified Pool Reservation and Reporting Logic (RELY on Active Sensor/Power)
+                # v3.9.1 - Refined Reservation Logic (Binary Sensor Support)
                 if permissions.get(sensor_id):
-                    if req_kw > 0.0:
-                        # 1. Update text info
-                        friendly_name = settings.get("name", sensor_id.split('.')[-1])
-                        status_tag = "Работает" if is_currently_pulling_now else "Зарезервировано"
-                        reserved_by.append(f"{friendly_name} ({status_tag})")
-                        
-                        # 2. Set reason text
-                        if req_kwh == 0:
-                            b_val = round(max(0.0, float(available_budget)), 2)
-                            g_val = round(max(0.0, float(available_power_kw)), 2)
-                            main_reason = "Разрешено" if is_currently_pulling_now else "Разрешено (Старт)"
-                            permissions_reasons[sensor_id] = f"{main_reason}: Динамическая (Бюджет {b_val} кВт*ч, Ток {g_val} кВт){price_suffix}"
-                        elif needed > 0:
-                            n_val = round(float(needed), 2)
-                            main_reason = "Разрешено" if is_currently_pulling_now else "Разрешено (Старт)"
-                            permissions_reasons[sensor_id] = f"{main_reason}: Норма {n_val} кВт*ч из профицита{price_suffix}"
+                    # For status reporting
+                    friendly_name = settings.get("name", sensor_id.split('.')[-1])
+                    
+                    # Determine if we should reserve power "greedily"
+                    has_active_sensor = bool(settings.get(CONF_ACTIVE_SENSOR))
+                    # We reserve FULL power if:
+                    # 1. Device is already running (always protect)
+                    # 2. Device has NO active sensor (we must block others to let it start at ANY time)
+                    # 3. Device HAS a sensor and it's ON (already handled by #1 mostly)
+                    # 4. Device HAS a sensor but its daily goal isn't met (optional, but user asked for "only if active")
+                    
+                    should_reserve_full = (needed > 0 or req_kwh == 0)
+                    if has_active_sensor and not is_currently_pulling_now:
+                        should_reserve_full = False
+                    
+                    # Update status tag based on reservation level
+                    if is_currently_pulling_now:
+                        status_tag = "Работает"
+                    elif should_reserve_full:
+                        status_tag = "Зарезервировано"
+                    else:
+                        status_tag = "Разрешено (Ожидание)"
+                    
+                    reserved_by.append(f"{friendly_name} ({status_tag})")
+                    
+                    # 2. Set reason text
+                    if req_kwh == 0:
+                        b_val = round(max(0.0, float(available_budget)), 2)
+                        g_val = round(max(0.0, float(available_power_kw)), 2)
+                        permissions_reasons[sensor_id] = f"{status_tag}: Динамическая (Бюджет {b_val} кВт*ч, Запас {g_val} кВт){price_suffix}"
+                    elif needed > 0:
+                        n_val = round(float(needed), 2)
+                        permissions_reasons[sensor_id] = f"{status_tag}: Норма {n_val} кВт*ч из профицита{price_suffix}"
+                    else:
+                        permissions_reasons[sensor_id] = f"{status_tag}: Сверх нормы (Профицит)"
 
-                        # 3. Reserve power in pools for the NEXT load in priority loop
-                        # If device is active, some of its power is already in load_kw (via the meter)
-                        # but we want to reserve the FULL req_kw in case it ramps back up (thermostat/cycle)
+                    # 3. Power Reservation logic
+                    if req_kw > 0.0:
                         actual_load_p = float(self.manager.last_known_power.get(sensor_id, 0.0)) / 1000.0
+                        
                         if is_currently_pulling_now:
+                            # Protect current run (reserve difference between rated and actual if actual is lower)
                             p_to_reserve = max(0.0, req_kw - actual_load_p)
                             available_power_kw = float(available_power_kw) - p_to_reserve
                             if only_solar_free and not is_free_price:
                                 available_gen_kw = float(available_gen_kw) - max(0.0, (req_kw * 0.6) - actual_load_p)
-                        else:
+                        elif should_reserve_full:
+                            # Blocking mode: reserve full power to let it start safely
                             available_power_kw = float(available_power_kw) - float(req_kw)
                             if only_solar_free and not is_free_price:
                                 available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
+                        # Else: DO NOT reserve anything, leave power for others!
                 else:
                     # BLOCK reasons
                     if gen_bottleneck:
