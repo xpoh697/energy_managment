@@ -655,25 +655,30 @@ class EnergyProfileManager:
 
                 # If we just finished a cycle
                 if sensor_id in self.cycle_actual_start_time:
-                    duration = (now - self.cycle_actual_start_time[sensor_id]).total_seconds() / 3600.0
-                    energy = self.daily_deduct_consumption.get(sensor_id, 0.0) - self.cycle_energy_start.get(sensor_id, 0.0)
+                    # v4.4 - Improved Cycle termination with grace period
+                    # We only terminate if the device hasn't been seen active for some time
+                    # cycle_start_time stores the "last seen active" timestamp
+                    last_active = self.cycle_start_time.get(sensor_id)
+                    grace_timeout = now - timedelta(minutes=5)
+                    
+                    if last_active and last_active < grace_timeout:
+                        duration = (last_active - self.cycle_actual_start_time[sensor_id]).total_seconds() / 3600.0
+                        energy = self.daily_deduct_consumption.get(sensor_id, 0.0) - self.cycle_energy_start.get(sensor_id, 0.0)
 
-                    if energy > 0.02 and duration > (1/60.0): # At least 20Wh and 1 minute
-                        avg_p_w = (float(energy) * 1000.0) / float(duration)
-                        if settings.get(CONF_IS_CYCLIC):
-                            self.learned_real_power[sensor_id] = round(float(avg_p_w), 1)
-                        # For non-cyclic, we DON'T overwrite with average, as average is skewed by thermostat OFF time
-                        if settings.get(CONF_IS_CYCLIC):
-                            self.learned_cycle_total_kwh[sensor_id] = round(float(energy), 3)
-                            self.learned_avg_cycle_power[sensor_id] = round(float(avg_p_w), 1)
-                            
-                            # Update historical duration (EMA)
-                            dur_secs = (now - self.cycle_actual_start_time[sensor_id]).total_seconds()
-                            old_dur = float(self.learned_avg_cycle_duration.get(sensor_id, dur_secs))
-                            self.learned_avg_cycle_duration[sensor_id] = round(old_dur * 0.7 + dur_secs * 0.3, 0)
+                        if energy > 0.02 and duration > (1/60.0): # At least 20Wh and 1 minute
+                            avg_p_w = (float(energy) * 1000.0) / float(duration)
+                            if settings.get(CONF_IS_CYCLIC):
+                                self.learned_real_power[sensor_id] = round(float(avg_p_w), 1)
+                                self.learned_cycle_total_kwh[sensor_id] = round(float(energy), 3)
+                                self.learned_avg_cycle_power[sensor_id] = round(float(avg_p_w), 1)
+                                
+                                # Update historical duration (EMA)
+                                dur_secs = (last_active - self.cycle_actual_start_time[sensor_id]).total_seconds()
+                                old_dur = float(self.learned_avg_cycle_duration.get(sensor_id, dur_secs))
+                                self.learned_avg_cycle_duration[sensor_id] = round(old_dur * 0.7 + dur_secs * 0.3, 0)
 
-                    self.cycle_actual_start_time.pop(sensor_id, None)
-                    self.cycle_energy_start.pop(sensor_id, None)
+                        self.cycle_actual_start_time.pop(sensor_id, None)
+                        self.cycle_energy_start.pop(sensor_id, None)
 
         # --- Solar Waste Calculation ---
         if self.power_gen_sensors and self.generation_sensors:

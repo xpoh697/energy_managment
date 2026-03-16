@@ -9,6 +9,9 @@ from .const import (
     CONF_BATTERY_RATED_CYCLES,
     CONF_MIN_SOC_BUY,
     CONF_ACTIVE_SENSOR,
+    CONF_IS_CYCLIC,
+    CONF_ONLY_SOLAR,
+    CONF_PRICE_BUY_LIMIT,
     DOMAIN
 )
 from .const import *
@@ -230,9 +233,26 @@ class StrategyEngine:
             occ_coeff = self.manager.get_occupancy_coefficient()
             
             # Use 'consumption_base' for budget to avoid subtracting managed loads that we are currently deciding upon
+            # v4.6 - Differentiated Reserve: Base + Persistent Loads
             expected_today = self.manager.get_expected_remaining("consumption_base", days_for_profile) * occ_coeff
             expected_night = self.manager.get_expected_night("consumption_base", days_for_profile) * occ_coeff
-            expected_consumption = expected_today + expected_night
+            
+            # Add statistical consumption for Persistent loads (Boiler, etc) to ensure they are backed up
+            # even if not currently running.
+            managed_reserve = 0.0
+            for s_id, s_conf in self.manager.deduct_settings.items():
+                if not isinstance(s_conf, dict): continue
+                if s_conf.get(CONF_IS_CYCLIC):
+                    # For cyclic: reserve energy ONLY if running
+                    if self.manager.cycle_actual_start_time.get(s_id):
+                        rem_kwh = max(0.0, float(s_conf.get("required_kwh", 2.0)) - float(self.manager.daily_deduct_consumption.get(s_id, 0.0)))
+                        managed_reserve += rem_kwh
+                else:
+                    # For persistent: ALWAYS reserve remaining daily requirement based on stats/config
+                    rem_kwh = max(0.0, float(s_conf.get("required_kwh", 2.0)) - float(self.manager.daily_deduct_consumption.get(s_id, 0.0)))
+                    managed_reserve += rem_kwh
+
+            expected_consumption = expected_today + expected_night + managed_reserve
             
             # Solar remainder: distribute total forecast by profile but strictly for remaining time
             fraction_left_this_hour = 1.0 - (now.minute / 60.0)
@@ -374,25 +394,23 @@ class StrategyEngine:
                     else:
                         permissions[sensor_id] = False
 
-                # v3.8 - Unified Pool Reservation and Reporting Logic (RELY on Active Sensor/Power)
-                # v3.9.1 - Refined Reservation Logic (Binary Sensor Support)
+                # v4.0 - Advanced Reservation Logic (Cyclic vs Persistent)
                 if permissions.get(sensor_id):
                     # For status reporting
                     friendly_name = settings.get("name", sensor_id.split('.')[-1])
+                    is_cyclic = bool(settings.get(CONF_IS_CYCLIC, False))
                     
-                    # Determine if we should reserve power "greedily"
-                    has_active_sensor = bool(settings.get(CONF_ACTIVE_SENSOR))
-                    # We reserve FULL power if:
-                    # 1. Device is already running (always protect)
-                    # 2. Device has NO active sensor (we must block others to let it start at ANY time)
-                    # 3. Device HAS a sensor and it's ON (already handled by #1 mostly)
-                    # 4. Device HAS a sensor but its daily goal isn't met (optional, but user asked for "only if active")
-                    
-                    should_reserve_full = (needed > 0 or req_kwh == 0)
-                    if has_active_sensor and not is_currently_pulling_now:
-                        should_reserve_full = False
-                    
-                    # Update status tag based on reservation level
+                    # 1. Determine reservation requirement
+                    # Cyclic loads only reserve when RUNNING.
+                    # Persistent loads (Boilers) reserve while ALLOWED to keep room for thermostat.
+                    should_reserve_full = False
+                    if is_currently_pulling_now:
+                        should_reserve_full = True
+                    elif not is_cyclic:
+                        # For boilers/AC - reserve if goal is not met OR if dynamic (req_kwh==0)
+                        should_reserve_full = (needed > 0 or req_kwh == 0)
+
+                    # 2. Update status tag
                     if is_currently_pulling_now:
                         status_tag = "Работает"
                     elif should_reserve_full:
@@ -402,7 +420,7 @@ class StrategyEngine:
                     
                     reserved_by.append(f"{friendly_name} ({status_tag})")
                     
-                    # 2. Set reason text
+                    # 3. Set reason text
                     if req_kwh == 0:
                         b_val = round(max(0.0, float(available_budget)), 2)
                         g_val = round(max(0.0, float(available_power_kw)), 2)
@@ -413,22 +431,25 @@ class StrategyEngine:
                     else:
                         permissions_reasons[sensor_id] = f"{status_tag}: Сверх нормы (Профицит)"
 
-                    # 3. Power Reservation logic
-                    if req_kw > 0.0:
+                    # 4. Power Reservation Execution
+                    if req_kw > 0.0 and should_reserve_full:
+                        # Use stats for persistent loads if available
+                        learn_w = float(self.manager.learned_avg_cycle_power.get(sensor_id, 0.0))
+                        stat_kw = (learn_w / 1000.0) if (not is_cyclic and learn_w > 100.0) else req_kw
+                        
                         actual_load_p = float(self.manager.last_known_power.get(sensor_id, 0.0)) / 1000.0
                         
                         if is_currently_pulling_now:
-                            # Protect current run (reserve difference between rated and actual if actual is lower)
-                            p_to_reserve = max(0.0, req_kw - actual_load_p)
+                            # Protect current run (reserve difference between expected/stat and current usage)
+                            p_to_reserve = max(0.0, stat_kw - actual_load_p)
                             available_power_kw = float(available_power_kw) - p_to_reserve
                             if only_solar_free and not is_free_price:
-                                available_gen_kw = float(available_gen_kw) - max(0.0, (req_kw * 0.6) - actual_load_p)
-                        elif should_reserve_full:
-                            # Blocking mode: reserve full power to let it start safely
-                            available_power_kw = float(available_power_kw) - float(req_kw)
+                                available_gen_kw = float(available_gen_kw) - max(0.0, (stat_kw * 0.6) - actual_load_p)
+                        else:
+                            # Pre-emptive blocking mode (waiting for thermostat to kick in)
+                            available_power_kw = float(available_power_kw) - float(stat_kw)
                             if only_solar_free and not is_free_price:
-                                available_gen_kw = float(available_gen_kw) - (float(req_kw) * 0.6)
-                        # Else: DO NOT reserve anything, leave power for others!
+                                available_gen_kw = float(available_gen_kw) - (float(stat_kw) * 0.6)
                 else:
                     # BLOCK reasons
                     if gen_bottleneck:
@@ -556,12 +577,36 @@ class StrategyEngine:
             # Combine house activities and commands
             
             # Combine house activities and commands
+            # Combined house activities and commands
             cmd_p = 0.0
             if commands and h_abs in commands:
                 cmd_p = float(commands[h_abs])
             
             net_house_kw = expected_gen_kw - expected_cons_kw
-            active_m_p = self.manager.get_active_managed_loads_power(i) if not is_tom else 0.0
+            
+            # v4.5 - Differentiated Load Reservation in Simulation
+            active_m_p = 0.0
+            if not is_tom:
+                # For today, check what is actually running or needs reservation
+                for s_id, settings in self.manager.deduct_settings.items():
+                    if not isinstance(settings, dict): continue
+                    
+                    is_cyclic = settings.get(CONF_IS_CYCLIC, False)
+                    is_running = self.manager.cycle_actual_start_time.get(s_id) is not None
+                    
+                    # LOGIC: 
+                    # 1. If NOT cyclic (Boiler, AC) -> ALWAYS reserve based on learned/required power
+                    # 2. If IS cyclic -> reserve ONLY if it's currently running
+                    if not is_cyclic:
+                        learn_w = float(self.manager.learned_real_power.get(s_id, 0.0))
+                        req_kw = float(settings.get("required_kw", 0.0))
+                        active_m_p += max(req_kw, (learn_w / 1000.0) if learn_w > 100 else 0.0)
+                    elif is_running:
+                        # For cyclic loads that are running, reserve their learned cycle power
+                        learn_w = float(self.manager.learned_avg_cycle_power.get(s_id, 0.0))
+                        req_kw = float(settings.get("required_kw", 0.0))
+                        active_m_p += max(req_kw, (learn_w / 1000.0))
+            
             total_net_kw = net_house_kw + cmd_p - active_m_p
             
             if total_net_kw > 0.001: # Charging (at least 1W)
@@ -1004,6 +1049,14 @@ class StrategyEngine:
                         "projected_soc_at_end_pct": round(sim_log.get(key_end, sim_soc_plan), 1)
                     }
                 else: # sell
+                    # Initial defaults for robustness
+                    budget_data = {}
+                    eff_coeff = self.get_efficiency_coefficient() or 1.0
+                    arb_gain = 0.0
+                    cheap_h_back = None
+                    cheap_p_back = 0.0
+                    cur_p = normalize_float(today_prices.get(str(cur_hour), 0.0))
+                    
                     base_target = self.manager.get_setting(CONF_TARGET_SOC_SELL, 20.0)
                     target_soc = base_target
                     
@@ -1016,74 +1069,38 @@ class StrategyEngine:
                         expected_night_from_batt = expected_night / eff_coeff if eff_coeff > 0 else expected_night
                         ai_soc_reserve = (expected_night_from_batt / batt_cap * 100.0) + min_soc_reserve
                         
-                        # Decision logic: 
-                        # Is selling now (and buying back at cheap hour) better than saving for tomorrow's morning consumption?
-                        cur_p = normalize_float(today_prices.get(str(cur_hour), 0.0))
-
-                        
-                        cheap_p_back, _ = get_best_buyback(cur_hour)
-                        # Profit if we sell now and buy back
+                        # v4.3 - Arbitrage Decision Logic (Initialized)
+                        cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
                         arb_gain = (cur_p - cheap_p_back) * eff_coeff - deg_cost
                         
-                        # "Holding" gain = saving money on future purchase at standard buy limit
-                        hold_gain = (buy_limit - cur_p) # simplified, if holding saves us from buying at buy_limit later
-                        
-                        if arb_gain > 0.05: # Arbitrage is clearly better (adjustable margin)
+                        if arb_gain >= 0.05: # Arbitrage is profitable
                             target_soc = base_target
                             res["arbitrage_decision"] += " | Цель: Продажа (Арбитраж выгоднее хранения)"
                         else:
+                            # Guard nightly consumption if arbitrage is not worth it
                             target_soc = max(base_target, ai_soc_reserve)
                             res["arbitrage_decision"] += " | Цель: Хранение (До солнца)"
                     
                     target_soc = min(100.0, target_soc)
-                    if len(target_hours) > 0:
-                        # --- DUAL STRATEGY ARBITRAGE ANALYSIS ---
-                        # Strategy 1: Last until Solar
-                        # We only need to keep enough for tonight's consumption
-                        # Strategy 2: Last until next Cheap Hour (Buyback)
-                        # Identify the cheapest buyback hour and price
-                        
-                        full_buy_prices = {}
-                        buy_prices_today = self.manager.data.get("prices_buy", {}).get(today_str, {})
-                        buy_prices_tom = self.manager.data.get("prices_buy", {}).get(tomorrow_str, {})
-                        for h, p in buy_prices_today.items():
-                            try: full_buy_prices[int(h)] = float(str(p).replace(',', '.'))
-                            except ValueError: continue
-                        for h, p in buy_prices_tom.items():
-                            try: full_buy_prices[int(h) + 24] = float(str(p).replace(',', '.'))
-                            except ValueError: continue
-                            
-                        # Find cheapest buyback after current sell hours
-                        future_buy = {h: p for h, p in full_buy_prices.items() if h > max(target_hours)}
-                        cheapest_h = min(future_buy, key=future_buy.get) if future_buy else None
-                        cheap_p = future_buy[cheapest_h] if cheapest_h else 999.0
-                        
-                        cur_sell_p = today_prices.get(str(cur_hour), 0.0)
-                        try: cur_sell_p = float(str(cur_sell_p).replace(',', '.'))
-                        except ValueError: cur_sell_p = 0.0
-                        
-                        # Gain = (Sell Price - Buy Price) * Efficiency
-                        threshold = min_p if min_p >= deg_cost else (2 * deg_cost)
-                        raw_diff = (cur_sell_p - cheap_p)
-                        actual_gain = raw_diff * eff_coeff
-                        
-                        sell_strategy_note = "Продажа до солнца (стандарт)"
-                        if cheapest_h:
-                            if actual_gain >= threshold:
-                                sell_strategy_note = f"Арбитраж ВЫГОДЕН: Продажа {cur_sell_p:.2f} -> Откуп {cheap_p:.2f} в {self._format_h(cheapest_h)} (Профит {actual_gain:.2f} > Порога {threshold:.2f})"
-                            else:
-                                sell_strategy_note = f"Арбитраж НЕВЫГОДЕН: Продажа {cur_sell_p:.2f} -> Откуп {cheap_p:.2f} в {self._format_h(cheapest_h)}. Выгода {actual_gain:.2f} < Порога {threshold:.2f}"
-                        
-                        res["arbitrage_decision"] = f"{res.get('arbitrage_decision', '')} | {sell_strategy_note}"
+                    
+                    # Project available energy for peaks (including solar)
+                    forecast_rem = budget_data.get("forecast_val", 0.0)
+                    delta_available = (batt_energy_val + forecast_rem) - (target_soc * batt_cap / 100.0)
+                    
+                    # Calculate recommended power for peaks
+                    power_needed = max(0.0, (delta_available * eff_coeff) / len(target_hours)) if target_hours else 0.0
 
-                        delta_available = batt_energy_val - (target_soc * batt_cap / 100.0)
-                        power_needed = max(0.0, (delta_available * eff_coeff) / len(target_hours))
+                    # --- DUAL STRATEGY NOTE ---
+                    sell_strategy_note = "Продажа до солнца (стандарт)"
+                    if cheap_h_back:
+                        if arb_gain >= 0.05:
+                            sell_strategy_note = f"Арбитраж ВЫГОДЕН: Продажа {cur_p:.2f} -> Откуп {cheap_p_back:.2f} в {self._format_h(cheap_h_back)} (Профит {arb_gain:.2f})"
+                        else:
+                            sell_strategy_note = f"Арбитраж НЕВЫГОДЕН: Продажа {cur_p:.2f} -> Откуп {cheap_p_back:.2f} в {self._format_h(cheap_h_back)}. Выгода {arb_gain:.2f} < Порога"
+                    
+                    res["arbitrage_decision"] = f"{res.get('arbitrage_decision', '')} | {sell_strategy_note}"
 
                     # --- BUYBACK OPPORTUNITY (ARBITRAGE) ---
-                    # Find cheapest buy price in the window
-                    buy_prices = all_prices # all_prices contains buy prices for 'buy' mode, but here we are in 'sell' mode.
-                    # Wait, all_prices here depends on 'mode'. If mode=='sell', all_prices are sell prices.
-                    # We need BUY prices to check for buyback.
                     buy_prices_today = self.manager.data.get("prices_buy", {}).get(today_str, {})
                     buy_prices_tom = self.manager.data.get("prices_buy", {}).get(tomorrow_str, {})
                     full_buy_prices = {}
@@ -1098,11 +1115,7 @@ class StrategyEngine:
                         cheapest_h = min([h for h in full_buy_prices if h > max(target_hours or [cur_hour])], key=lambda h: full_buy_prices[h], default=None)
                         if cheapest_h is not None:
                             cheap_p = full_buy_prices[cheapest_h]
-                            cur_sell_p = today_prices.get(str(cur_hour), 0.0)
-                            try: cur_sell_p = float(str(cur_sell_p).replace(',', '.'))
-                            except ValueError: cur_sell_p = 0.0
-                            
-                            buy_limit = self.manager.get_setting(CONF_PRICE_BUY_LIMIT, 0.0)
+                            cur_sell_p = normalize_float(today_prices.get(str(cur_hour), 0.0))
                             if (cur_sell_p - cheap_p) * eff_coeff >= deg_cost:
                                 res["arbitrage_buyback"] = {
                                     "opportunity": True,
@@ -1130,8 +1143,8 @@ class StrategyEngine:
                     
                     res["sell_simulation"] = {
                         "projected_soc_at_start_pct": round(batt_soc, 1),
-                        "projected_soc_after_sale_pct": round(sim_log.get(key_after, batt_soc), 1),
-                        "projected_soc_morning_pct": round(sim_log.get(key_morning, sim_log.get("08:00 (Завтра)", 0.0)), 1)
+                        "projected_soc_after_sale_pct": round(float(sim_log.get(key_after, batt_soc)), 1),
+                        "projected_soc_morning_pct": round(float(sim_log.get(key_morning, sim_log.get("08:00 (Завтра)", 0.0))), 1)
                     }
                 
             res["recommended_power_kw"] = round(min(float(power_needed), max_power), 3)
