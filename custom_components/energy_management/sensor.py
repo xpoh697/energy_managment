@@ -40,7 +40,10 @@ from .const import (
     CONF_BATTERY_COST,
     CONF_INVERTER_LOSSES_SENSOR,
     CONF_PRICE_BUY_LIMIT,
-    CONF_ANOMALY_THRESHOLD
+    CONF_ANOMALY_THRESHOLD,
+    CONF_POWER_SENSOR,
+    CONF_IS_CYCLIC,
+    CONF_ACTIVE_HOLD_TIME
 )
 from .strategy import StrategyEngine
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
@@ -96,6 +99,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     entities.append(InverterOperationModeSensor(manager, "Inverter Mode Command"))
     entities.append(ConsumptionDeviationSensor(manager, "Отклонение потребления (бытовое)"))
+
+    if manager.price_buy_sensors:
+        entities.append(UniversalPriceSensor(manager, "buy", "Buy Price 48h"))
+    if manager.price_sell_sensors:
+        entities.append(UniversalPriceSensor(manager, "sell", "Sell Price 48h"))
 
     if has_generation:
         entities.append(BatteryEndOfDaySOCSensor(manager, "Прогноз заряда (ближайший)"))
@@ -1651,6 +1659,56 @@ class EnergyProfileManager:
             elif charge_power_limit < (current_val - 0.1) and avg_export > 0.4:
                 new_val = round_f(current_val * 0.95 + charge_power_limit * 0.05, 3)
                 self.bms_learned_profile[soc_int] = new_val
+
+class UniversalPriceSensor(SensorEntity):
+    """Exposes 48-hour price data with price_today/price_tomorrow attributes for templates."""
+    def __init__(self, manager, mode, name):
+        self.manager = manager
+        self.mode = mode
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.entry_id}_{mode}_price_48h"
+        self._attr_icon = "mdi:cash-clock"
+        self._attr_native_unit_of_measurement = "/kWh"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        now = dt_util.now()
+        today = now.strftime("%Y-%m-%d")
+        return self.manager.get_price(self.mode, today, now.hour)
+
+    @property
+    def extra_state_attributes(self):
+        """Standard array format for external automation/templates."""
+        now = dt_util.now()
+        today_str = now.strftime("%Y-%m-%d")
+        tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        def build_array(date_str):
+            prices_dict = self.manager.data.get(f"prices_{self.mode}", {}).get(date_str, {})
+            arr = []
+            for h, p in sorted(prices_dict.items(), key=lambda x: int(x[0])):
+                # Start time in ISO format for template compatibility
+                start_dt = dt_util.parse_datetime(f"{date_str}T{int(h):0>2}:00:00")
+                if start_dt:
+                    arr.append({
+                        "start": start_dt.isoformat(),
+                        "price": float(p)
+                    })
+            return arr
+
+        return {
+            "price_today": build_array(today_str),
+            "price_tomorrow": build_array(tomorrow_str)
+        }
 
 class EnergyBaseSensor(SensorEntity):
     """Base class for Energy Management sensors to reduce boilerplate."""
