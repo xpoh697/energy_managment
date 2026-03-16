@@ -1776,80 +1776,78 @@ class InverterOperationModeSensor(SensorEntity):
         # SOC
         batt_soc, batt_cap, _ = self.manager.get_battery_state(soc_default=100.0)
 
-        # Prep for peak
+        # Prep for peak (Market Strategy based)
         target_hours = sell_strategy.get("active_hours", [])
         peak_start_hour = None
+        now_h = now.hour
         for h in sorted(target_hours):
-            if h > int(cur_hour):
+            if h > now_h:
                 peak_start_hour = h
                 break
 
         is_preparing_for_peak = False
-        bms_debug = {"status": "Not evaluated"}
+        target_soc = self.manager.get_setting(CONF_TARGET_SOC_SELL, 100.0)
+        bms_debug = {"status": "Ожидание данных"}
 
         if batt_cap <= 0:
             bms_debug = {"status": "Не задана емкость батареи"}
         else:
-            try: from .const import CONF_TARGET_SOC_SELL
-            except ImportError: CONF_TARGET_SOC_SELL = "target_soc_sell"
-            target_soc = self.manager.get_setting(CONF_TARGET_SOC_SELL, 100.0)
-
-            if batt_soc >= target_soc:
+            if batt_soc >= (target_soc - 0.5):
                 bms_debug = {
-                    "status": "Батарея уже заряжена до целевого уровня",
+                    "status": "Батарея уже заряжена",
                     "target_soc": target_soc,
                     "current_soc": batt_soc
                 }
+                is_preparing_for_peak = False
             else:
-                # Use standard simulation engine
-                end_h = peak_start_hour if peak_start_hour is not None else (int(now.hour) + 24)
-                sim_range = list(range(int(now.hour), end_h))
+                # Run simulation to check time needed to reach target SOC
+                end_h = peak_start_hour if peak_start_hour is not None else (now_h + 24)
+                sim_range = list(range(now_h, end_h))
                 sim_range = [h for h in sim_range if h < 48]
                 
                 sim_soc, sim_log = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now)
                 
-                # Determine when target reached for surplus/delay logic
-                target_reached_at = None
+                target_reached_idx = None
+                ever_fully_charged = False
                 for i, h_abs in enumerate(sim_range):
                     is_tom = (h_abs >= 24)
                     h_key = f"{h_abs % 24:0>2}:59" + (" (Завтра)" if is_tom else "")
-                    if sim_log.get(h_key, 0.0) >= (target_soc - 0.5): # 0.5% tolerance
-                        target_reached_at = i + 1
-                        break
-                
+                    s_val = sim_log.get(h_key, 0.0)
+                    if s_val >= (target_soc - 0.5):
+                        if target_reached_idx is None: target_reached_idx = i + 1
+                        ever_fully_charged = True
+
                 hours_available = len(sim_range)
-                total_hours_needed = target_reached_at if target_reached_at is not None else hours_available
+                total_hours_needed = target_reached_idx if target_reached_idx is not None else hours_available
+                hours_surplus = max(0, hours_available - total_hours_needed)
 
-                # If after the simulation timeline we failed to reach the target (allowing 1% tolerance)
-                late_start_recommended = False
-                if sim_soc < (target_soc - 1.0) and peak_start_hour is not None:
-                    is_preparing_for_peak = True
-                elif sim_soc >= (target_soc - 1.0) and peak_start_hour is not None:
-                    # We have enough time! Calculate how much extra time we have.
-                    hours_surplus = hours_available - total_hours_needed
-                    # If we have surplus hours AND it's not the cheapest time to charge, we can delay
-                    if hours_surplus > 0:
+                if peak_start_hour is not None:
+                    if not ever_fully_charged:
+                        # We won't reach target SOC by the time peak starts
+                        is_preparing_for_peak = True
+                        sim_status = "Внимание: АКБ не успеет зарядиться к Пику!"
+                    else:
+                        # We can reach target SOC. Check if we can wait (if we have a surplus of time)
                         latest_start_hour = peak_start_hour - total_hours_needed
-                        if int(now.hour) < latest_start_hour:
-                            late_start_recommended = True
-
-                if peak_start_hour is None:
-                    sim_status = "Прогноз заряда до конца дня (пиков нет)"
-                elif is_preparing_for_peak:
-                    sim_status = "Внимание: Подготовка к Пику"
-                elif late_start_recommended:
-                    sim_status = "Зарядка отложена (ждем дешевых часов)"
-                    is_preparing_for_peak = False # Don't block battery usage yet
+                        if now_h < latest_start_hour:
+                            sim_status = f"Зарядка отложена (хватит {total_hours_needed}ч, еще {hours_surplus}ч запас)"
+                            is_preparing_for_peak = False
+                        else:
+                            sim_status = "Штатный заряд к пику"
+                            is_preparing_for_peak = True
                 else:
-                    sim_status = "Штатный заряд к пику"
-                    is_preparing_for_peak = True # We are in the critical charging window, block discharging!
+                    sim_status = "Прогноз заряда (пиков нет)"
+                    is_preparing_for_peak = False
 
                 bms_debug = {
                     "status": sim_status,
                     "target_soc": target_soc,
+                    "hours_needed": total_hours_needed,
+                    "hours_surplus": hours_surplus,
                     "hours_available": hours_available,
                     "final_simulated_soc": round(sim_soc, 2),
-                    "success": not is_preparing_for_peak if peak_start_hour is not None else True,
+                    "ever_fully_charged": ever_fully_charged,
+                    "success": ever_fully_charged,
                     "log": sim_log
                 }
 
@@ -1866,36 +1864,34 @@ class InverterOperationModeSensor(SensorEntity):
 
         # State Machine Logic
         mode = "sale_pv" # Default
-        reason = "Значения по умолчанию (нет особых условий рынка или заряда)"
-
+        reason = "Значения по умолчанию"
+        
         if batt_soc <= min_soc:
             mode = "bat_emergency"
-            reason = f"Заряд батареи ({round(batt_soc, 1)}%) <= Критического минимума ({min_soc}%)"
+            reason = f"Заряд батареи ({round(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
         elif is_buying_active:
             mode = "buy"
-            reason = f"Активна стратегия ПОКУПКИ (Смотри сенсор Market BUY Strategy)"
+            reason = f"Активна стратегия ПОКУПКИ"
         elif is_selling_active:
             mode = "sale_pv_bat"
-            reason = f"Активна стратегия ПРОДАЖИ (Смотри сенсор Market SELL Strategy)"
+            reason = f"Активна стратегия ПРОДАЖИ"
         elif cur_price is not None and cur_price < price_stop_sell:
             mode = "stop_sale"
-            reason = f"Текущая цена ({cur_price}) < Порога блокировки продажи ({price_stop_sell})"
+            reason = f"Цена ({cur_price}) < Порога блокировки ({price_stop_sell})"
         elif cur_price is not None and cur_price >= price_sell_only_pv and not is_preparing_for_peak:
-            if int(cur_hour) < sale_pv_no_bat_max_hour:
+            # STRICT adherence to max hour restriction
+            if now_h < sale_pv_no_bat_max_hour:
                 instant_ok = True
                 if self.manager.power_history:
-                    # Use properties for average load/gen over the recent history (~10 mins)
                     avg_load_kw = self.manager.avg_load_kw
                     avg_gen_kw = self.manager.avg_gen_kw
-
                     if getattr(self.manager, "power_load_sensors", []) and getattr(self.manager, "power_gen_sensors", []):
-                        if avg_gen_kw <= avg_load_kw + 0.1: # Require at least 100W of actual surplus average to flip to sell mode
+                        if avg_gen_kw <= avg_load_kw + 0.1:
                             instant_ok = False
                     elif getattr(self.manager, "power_gen_sensors", []):
                         if avg_gen_kw < 0.1:
                             instant_ok = False
                 else:
-                    # Fallback if no history yet
                     if getattr(self.manager, "power_load_sensors", []) and getattr(self.manager, "power_gen_sensors", []):
                         load_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_load_sensors)
                         gen_kw = sum((get_kwh_val(self.manager.hass.states.get(s)) or 0.0) for s in self.manager.power_gen_sensors)
@@ -1906,16 +1902,15 @@ class InverterOperationModeSensor(SensorEntity):
                         if gen_kw < 0.1:
                             instant_ok = False
 
-                # Also check profile. We only want to sell if historically this hour yields more than we consume
-                h_mod = str(int(cur_hour) % 24)
+                h_mod = str(now_h % 24)
                 c_kwh = float(prof_cons.get(h_mod, 0.0)) if 'prof_cons' in locals() else 0.0
                 g_kwh = float(prof_gen.get(h_mod, 0.0)) if 'prof_gen' in locals() else 0.0
 
                 if instant_ok and g_kwh >= c_kwh:
                     mode = "sale_pv_no_bat"
-                    reason = f"Текущая цена ({cur_price}) >= Порога продажи PV ({price_sell_only_pv}) и есть профицит Солнца"
+                    reason = f"Текущая цена {cur_price} и есть профицит Солнца"
                 elif instant_ok:
-                    reason = f"Цена ок, но исторически нет профицита Солнца в этот час. Ждем"
+                    reason = f"Цена ок, но исторически нет профицита ({round(g_kwh,2)} < {round(c_kwh,2)}). Ждем"
                 else:
                     reason = f"Цена ок, но моментально генерация не превышает потребление"
             else:
