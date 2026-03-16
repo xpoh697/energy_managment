@@ -11,6 +11,23 @@ from homeassistant.core import callback
 from homeassistant.const import UnitOfEnergy
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
+from .const import (
+    DOMAIN,
+    CONF_GRID_POWER,
+    CONF_BATTERY_POWER,
+    CONF_BATTERY_SOC,
+    CONF_BATTERY_CAPACITY,
+    CONF_CONSUMPTION_SENSORS,
+    CONF_GENERATION_SENSORS,
+    CONF_PRESENCE_SENSORS,
+    CONF_CUSTOM_PERIOD,
+    CONF_PRICE_BUY,
+    CONF_PRICE_SELL,
+    CONF_MIN_SOC_BUY,
+    CONF_TARGET_SOC_SELL,
+    CONF_BATTERY_MAX_POWER,
+    CONF_ACTIVE_SENSOR
+)
 from .const import *
 from .strategy import StrategyEngine
 from .utils import get_kwh_val, normalize_float, get_price_from_store
@@ -97,6 +114,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(SolarWasteSensor(manager, "Упущенная солнечная энергия"))
         entities.append(BMSLearnedProfileSensor(manager))
 
+    # Real-time Grid Interaction
+    entities.append(GridBalanceSensor(manager, "Текущий баланс сети"))
+
     async_add_entities(entities)
 
 
@@ -135,6 +155,7 @@ class EnergyProfileManager:
         self.battery_soc_sensor = config_data.get(CONF_BATTERY_SOC)
         self.battery_capacity_sensor = config_data.get(CONF_BATTERY_CAPACITY)
         self.battery_power_sensor = config_data.get(CONF_BATTERY_POWER)
+        self.grid_power_sensor = config_data.get(CONF_GRID_POWER)
 
         # Presence / occupancy sensors (person.* or binary_sensor.*)
         presence_raw = config_data.get(CONF_PRESENCE_SENSORS, [])
@@ -144,6 +165,7 @@ class EnergyProfileManager:
         if self.power_load_sensors: self.all_power_sensors.update(self.power_load_sensors)
         if self.power_gen_sensors: self.all_power_sensors.update(self.power_gen_sensors)
         if self.battery_power_sensor: self.all_power_sensors.add(self.battery_power_sensor)
+        if self.grid_power_sensor: self.all_power_sensors.add(self.grid_power_sensor)
         
         # Adaptive BMS Model: "SOC" -> Max Charge Power (kW)
         self.bms_learned_profile: dict[int, float] = {}
@@ -180,6 +202,8 @@ class EnergyProfileManager:
             self.battery_capacity_sensor = self.battery_capacity_sensor.strip()
         if self.battery_power_sensor and isinstance(self.battery_power_sensor, str):
             self.battery_power_sensor = self.battery_power_sensor.strip()
+        if self.grid_power_sensor and isinstance(self.grid_power_sensor, str):
+            self.grid_power_sensor = self.grid_power_sensor.strip()
 
         buy_p = config_data.get(CONF_PRICE_BUY)
         sell_p = config_data.get(CONF_PRICE_SELL)
@@ -491,12 +515,22 @@ class EnergyProfileManager:
         if self.battery_power_sensor:
             batt_p = get_kwh_val(self.hass.states.get(self.battery_power_sensor)) or 0.0
 
+        grid_p = 0.0
+        if self.grid_power_sensor:
+            grid_p = get_kwh_val(self.hass.states.get(self.grid_power_sensor)) or 0.0
+
+        # Export calculation: prioritizing real grid sensor if available.
+        # Standard convention: Export (selling) is positive, Import (buying) is negative.
+        real_export = max(0.0, float(grid_p))
+        calc_export = max(0.0, float(gen_kw) + float(batt_p) - float(load_kw))
+
         self.power_history.append({
             "time": now, 
             "load_kw": float(load_kw), 
             "gen_kw": float(gen_kw),
             "batt_kw": float(batt_p),
-            "export_kw": max(0.0, float(gen_kw) + float(batt_p) - float(load_kw))
+            "grid_kw": float(grid_p),
+            "export_kw": real_export if self.grid_power_sensor else calc_export
         })
 
         self._update_bms_learned_profile(now)
@@ -1452,9 +1486,17 @@ class EnergyProfileManager:
                     self.bms_learned_profile.pop(soc_int)
                 return
 
+            # Check if we have real grid export to confirm battery saturation.
+            # If we don't have a grid sensor, we fall back to calculated avg_export.
+            # If we have a grid sensor, we use the 'grid_kw' from history for higher precision.
+            grid_surplus = avg_export
+            if self.grid_power_sensor:
+                # Average grid_kw from history (should be > 0 for export)
+                grid_surplus = sum(x.get("grid_kw", 0.0) for x in self.power_history) / len(self.power_history)
+
             # Significant export check (> 0.5 kW) to be absolutely sure battery 
             # is the only thing limiting the charge power.
-            if avg_export < 0.5:
+            if grid_surplus < 0.5:
                 return
 
             charge_power_limit = abs(avg_batt)
@@ -2751,6 +2793,56 @@ class BatteryAutonomySensor(SensorEntity):
             "current_load_avg_kw": round(float(load_kw), 3),
             "usable_energy_ac_kwh": round(float(energy_dc * eff), 3),
             "reserve_soc_target": min_soc
+        }
+
+class GridBalanceSensor(SensorEntity):
+    """Real-time grid balance (Import/Export)."""
+    def __init__(self, manager, name):
+        self.manager = manager
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.entry_id}_grid_balance"
+        self._attr_icon = "mdi:transmission-tower"
+        self._attr_native_unit_of_measurement = "kW"
+        self._attr_device_class = SensorDeviceClass.POWER
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Energy AI",
+            model="Energy Trader System",
+        )
+
+    async def async_added_to_hass(self):
+        self.manager.register_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self):
+        # We try to use the real grid sensor first
+        if self.manager.grid_power_sensor:
+            st = self.manager.hass.states.get(self.manager.grid_power_sensor)
+            val = get_kwh_val(st)
+            if val is not None:
+                return round(float(val), 3)
+
+        # Fallback: calculate from (Gen + Batt - Load)
+        load_kw = self.manager.avg_load_kw
+        gen_kw = self.manager.avg_gen_kw
+        batt_p = 0.0
+        if self.manager.battery_power_sensor:
+            batt_st = self.manager.hass.states.get(self.manager.battery_power_sensor)
+            batt_p = get_kwh_val(batt_st) or 0.0
+
+        # Conv: positive is export, negative is import
+        balance = gen_kw + batt_p - load_kw
+        return round(float(balance), 3)
+
+    @property
+    def extra_state_attributes(self):
+        mode = "Calculated" if not self.manager.grid_power_sensor else "Direct Sensor"
+        return {
+            "measurement_method": mode,
+            "sensor_id": self.manager.grid_power_sensor or "None",
+            "convention": "Positive = Export, Negative = Import"
         }
 
 

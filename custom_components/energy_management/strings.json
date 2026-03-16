@@ -22,20 +22,23 @@
           "presence_sensors": "Presence Sensors (person.* / binary_sensor.* / zone.home)",
           "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
           "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
-          "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)"
+          "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)",
+          "grid_power": "Real-time Grid Power (signed: + export, - import)"
         }
       },
       "deduct_settings": {
         "title": "Settings for: {sensor_name}",
         "description": "Set parameters for this manageable load device (sensor).\n\n**Hint:** Set Required Energy to '0' if the device absorbs ANY available surplus energy without a fixed daily quota.\n**Power (kW)** is used to strictly limit the device from running if current solar generation is less than consumption (preventing battery drain. 0 = ignore).",
         "data": {
-          "priority": "Priority (1 = highest)",
-          "required_kwh": "Required Energy per day (kWh)",
-          "required_kw": "Device Power (kW)",
-          "power_sensor": "Instant Power Sensor (W or kW)",
-          "active_hold_time": "Cycle Hold Time (min)",
-          "is_cyclic": "Is this a cyclic device? (Washing machine/Dishwasher)",
-          "active_sensor": "Active Detection Sensor (binary_sensor)"
+          "name": "Name (for Permission Sensor)",
+          "priority": "1. Priority (lower = higher priority)",
+          "required_kwh": "2. Required Energy per day (kWh)",
+          "required_kw": "3. Peak Device Power (kW)",
+          "only_solar_or_negative_price": "4. ONLY from solar (reserves 60% of device Power from free gen by priority) or price <= 0",
+          "power_sensor": "5. Instant Power Sensor (W or kW)",
+          "active_hold_time": "6. Cycle Hold Time (min)",
+          "is_cyclic": "7. Is this a cyclic device? (Washing machine/Dishwasher)",
+          "active_sensor": "8. Active Detection Sensor (binary_sensor)"
         }
       },
       "investment_settings": {
@@ -79,13 +82,15 @@
           "presence_sensors": "Presence Sensors (person.* / binary_sensor.* / zone.home)",
           "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
           "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
-          "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)"
+          "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)",
+          "grid_power": "Real-time Grid Power (signed: + export, - import)"
         }
       },
       "deduct_settings": {
         "title": "Settings for: {sensor_name}",
         "description": "Set parameters for this manageable load device (sensor).\n\n**Hint 1:** Set Required Energy to '0' if the device absorbs ANY available surplus energy without a fixed daily quota.\n**Hint 2:** Power (kW) is used to strictly limit the device from running if current solar generation is less than consumption (preventing battery drain. 0 = ignore).",
         "data": {
+          "name": "Name (for Permission Sensor)",
           "priority": "1. Priority (lower = higher priority)",
           "required_kwh": "2. Required Energy per day (kWh)",
           "required_kw": "3. Peak Device Power (kW)",
@@ -174,6 +179,9 @@
       },
       "bms_learned_profile": {
         "name": "BMS Learned Charge Profile"
+      },
+      "grid_balance": {
+        "name": "Live Grid Balance"
       }
     },
     "number": {

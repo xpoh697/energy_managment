@@ -22,7 +22,8 @@
           "presence_sensors": "Датчики присутствия (person.* / binary_sensor.* / zone.home)",
           "inverter_losses_sensor": "Сенсор потерь инвертора (дневной счётчик кВт·ч, необязательно)",
           "grid_import_sensors": "Сенсоры Импорта из сети (кВт·ч, суммарные)",
-          "grid_export_sensors": "Сенсоры Экспорта в сеть (кВт·ч, суммарные)"
+          "grid_export_sensors": "Сенсоры Экспорта в сеть (кВт·ч, суммарные)",
+          "grid_power": "Сенсор моментальной мощности сети (+ экспорт, - импорт)"
         }
       },
       "deduct_settings": {
@@ -81,7 +82,8 @@
           "presence_sensors": "Датчики присутствия (person.* / binary_sensor.* / zone.home)",
           "inverter_losses_sensor": "Сенсор потерь инвертора (дневной счётчик кВт·ч, необязательно)",
           "grid_import_sensors": "Сенсоры Импорта из сети (кВт·ч, суммарные)",
-          "grid_export_sensors": "Сенсоры Экспорта в сеть (кВт·ч, суммарные)"
+          "grid_export_sensors": "Сенсоры Экспорта в сеть (кВт·ч, суммарные)",
+          "grid_power": "Сенсор моментальной мощности сети (+ экспорт, - импорт)"
         }
       },
       "deduct_settings": {
@@ -183,6 +185,9 @@
       },
       "bms_learned_profile": {
         "name": "Обученный профиль заряда BMS"
+      },
+      "grid_balance": {
+        "name": "Текущий баланс сети"
       },
       "solar_waste": {
         "state_attributes": {

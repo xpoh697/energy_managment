@@ -33,6 +33,7 @@ from .const import (
     CONF_IS_CYCLIC,
     CONF_ONLY_SOLAR,
     CONF_ACTIVE_SENSOR,
+    CONF_GRID_POWER,
 )
 
 
@@ -101,6 +102,9 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_BATTERY_POWER): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
+                vol.Optional(CONF_GRID_POWER): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 vol.Optional(CONF_PRICE_BUY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -157,21 +161,42 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_deduct_settings()
 
         # Build schema for a SINGLE sensor
-        schema_dict = {
-            vol.Optional("name", default=current_sensor.split('.')[-1].replace('_', ' ').title()): str,
-            vol.Required("priority", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-            vol.Required("required_kwh", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
-            vol.Required("required_kw", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
-            vol.Optional(CONF_ONLY_SOLAR, default=False): bool,
-            vol.Optional(CONF_POWER_SENSOR): selector.EntitySelector(
+        if current_sensor in self._user_input.get(CONF_DEDUCT_SETTINGS, {}):
+            existing = self._user_input[CONF_DEDUCT_SETTINGS][current_sensor]
+            schema_dict[vol.Optional("name", default=existing.get("name", current_sensor.split('.')[-1].replace('_', ' ').title()))] = str
+            schema_dict[vol.Required("priority", default=existing.get("priority", 1))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=100))
+            schema_dict[vol.Required("required_kwh", default=existing.get("required_kwh", 0.0))] = vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0))
+            schema_dict[vol.Required("required_kw", default=existing.get("required_kw", 0.0))] = vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0))
+            schema_dict[vol.Optional(CONF_ONLY_SOLAR, default=existing.get(CONF_ONLY_SOLAR, False))] = bool
+            
+            p_val = existing.get(CONF_POWER_SENSOR)
+            schema_dict[vol.Optional(CONF_POWER_SENSOR, default=p_val) if p_val else vol.Optional(CONF_POWER_SENSOR)] = selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_ACTIVE_HOLD_TIME, default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
-            vol.Optional(CONF_IS_CYCLIC, default=False): bool,
-            vol.Optional(CONF_ACTIVE_SENSOR): selector.EntitySelector(
+            )
+            
+            schema_dict[vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=120))
+            schema_dict[vol.Optional(CONF_IS_CYCLIC, default=existing.get(CONF_IS_CYCLIC, False))] = bool
+            
+            a_val = existing.get(CONF_ACTIVE_SENSOR)
+            schema_dict[vol.Optional(CONF_ACTIVE_SENSOR, default=a_val) if a_val else vol.Optional(CONF_ACTIVE_SENSOR)] = selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="binary_sensor")
-            ),
-        }
+            )
+        else:
+            schema_dict = {
+                vol.Optional("name", default=current_sensor.split('.')[-1].replace('_', ' ').title()): str,
+                vol.Required("priority", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                vol.Required("required_kwh", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
+                vol.Required("required_kw", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
+                vol.Optional(CONF_ONLY_SOLAR, default=False): bool,
+                vol.Optional(CONF_POWER_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_ACTIVE_HOLD_TIME, default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+                vol.Optional(CONF_IS_CYCLIC, default=False): bool,
+                vol.Optional(CONF_ACTIVE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="binary_sensor")
+                ),
+            }
 
         # Nice clean name for display
         sensor_display = current_sensor.replace("sensor.", "").replace("_", " ").title()
@@ -274,7 +299,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain="sensor")
             )
 
-        for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_BATTERY_POWER, CONF_PRICE_BUY, CONF_PRICE_SELL]:
+        for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_BATTERY_POWER, CONF_GRID_POWER, CONF_PRICE_BUY, CONF_PRICE_SELL]:
             val = get_str(key)
             if val:
                 schema_dict[vol.Optional(key, default=val)] = selector.EntitySelector(
@@ -354,21 +379,25 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
 
         existing = self._user_input.get(CONF_DEDUCT_SETTINGS, {}).get(current_sensor, {})
         
-        schema_dict = {
-            vol.Optional("name", default=existing.get("name", current_sensor.split('.')[-1].replace('_', ' ').title())): str,
-            vol.Required("priority", default=existing.get("priority", 1)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-            vol.Required("required_kwh", default=existing.get("required_kwh", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
-            vol.Required("required_kw", default=existing.get("required_kw", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
-            vol.Optional(CONF_ONLY_SOLAR, default=existing.get(CONF_ONLY_SOLAR, False)): bool,
-            vol.Optional(CONF_POWER_SENSOR, default=existing.get(CONF_POWER_SENSOR)): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15)): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
-            vol.Optional(CONF_IS_CYCLIC, default=existing.get(CONF_IS_CYCLIC, False)): bool,
-            vol.Optional(CONF_ACTIVE_SENSOR, default=existing.get(CONF_ACTIVE_SENSOR)): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="binary_sensor")
-            ),
-        }
+        schema_dict = {}
+        schema_dict[vol.Optional("name", default=existing.get("name", current_sensor.split('.')[-1].replace('_', ' ').title()))] = str
+        schema_dict[vol.Required("priority", default=existing.get("priority", 1))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=100))
+        schema_dict[vol.Required("required_kwh", default=existing.get("required_kwh", 0.0))] = vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0))
+        schema_dict[vol.Required("required_kw", default=existing.get("required_kw", 0.0))] = vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0))
+        schema_dict[vol.Optional(CONF_ONLY_SOLAR, default=existing.get(CONF_ONLY_SOLAR, False))] = bool
+        
+        p_val = existing.get(CONF_POWER_SENSOR)
+        schema_dict[vol.Optional(CONF_POWER_SENSOR, default=p_val) if p_val else vol.Optional(CONF_POWER_SENSOR)] = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor")
+        )
+        
+        schema_dict[vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=120))
+        schema_dict[vol.Optional(CONF_IS_CYCLIC, default=existing.get(CONF_IS_CYCLIC, False))] = bool
+        
+        a_val = existing.get(CONF_ACTIVE_SENSOR)
+        schema_dict[vol.Optional(CONF_ACTIVE_SENSOR, default=a_val) if a_val else vol.Optional(CONF_ACTIVE_SENSOR)] = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="binary_sensor")
+        )
 
         sensor_display = current_sensor.replace("sensor.", "").replace("_", " ").title()
 
