@@ -515,7 +515,7 @@ class StrategyEngine:
         man: Any = self.manager
         
         cache_key = f"market_strategy_{mode}"
-        cached = man._strategy_cache.get(cache_key)
+        cached = self._strategy_cache.get(cache_key)
         if cached and (now - cached["time"]).total_seconds() < 30:
             return cached["res"]
 
@@ -991,7 +991,7 @@ class StrategyEngine:
                 if res.get("state") != "preparing_arbitrage":
                     res["state"] = "idle"
             
-            man._strategy_cache[cache_key] = {"time": now, "res": res}
+            self._strategy_cache[cache_key] = {"time": now, "res": res}
             return res
         finally:
             self._calculating_strategy = old_calc

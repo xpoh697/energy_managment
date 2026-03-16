@@ -40,10 +40,17 @@ from .const import (
     CONF_BATTERY_COST,
     CONF_INVERTER_LOSSES_SENSOR,
     CONF_PRICE_BUY_LIMIT,
+    CONF_PRICE_SELL_LIMIT,
+    CONF_ARBITRAGE_MIN_PROFIT,
+    CONF_BATTERY_RATED_CYCLES,
     CONF_ANOMALY_THRESHOLD,
     CONF_POWER_SENSOR,
     CONF_IS_CYCLIC,
-    CONF_ACTIVE_HOLD_TIME
+    CONF_ACTIVE_HOLD_TIME,
+    CONF_ONLY_SOLAR,
+    CONF_TARGET_SOC_BUY,
+    CONF_DYNAMIC_SOC_BUY,
+    CONF_DYNAMIC_SOC_SELL
 )
 from .strategy import StrategyEngine
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
@@ -100,9 +107,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities.append(InverterOperationModeSensor(manager, "Inverter Mode Command"))
     entities.append(ConsumptionDeviationSensor(manager, "Отклонение потребления (бытовое)"))
 
-    if manager.price_buy_sensors:
+    if getattr(manager, 'price_buy_sensors', []):
         entities.append(UniversalPriceSensor(manager, "buy", "Buy Price 48h"))
-    if manager.price_sell_sensors:
+    if getattr(manager, 'price_sell_sensors', []):
         entities.append(UniversalPriceSensor(manager, "sell", "Sell Price 48h"))
 
     if has_generation:
@@ -202,6 +209,16 @@ class EnergyProfileManager:
     _unsub_time: Any
     _unsub_power_poll: Any
     _unsub_periodic_save: Any
+
+    @property
+    def now(self) -> datetime:
+        """Centralized time source."""
+        return dt_util.now()
+
+    @property
+    def day_type(self) -> str:
+        """Determines if today is a weekday or weekend."""
+        return "weekend" if self.now.weekday() >= 5 else "weekday"
     
     data: Dict[str, Any]
     max_days: int
@@ -1695,13 +1712,18 @@ class UniversalPriceSensor(SensorEntity):
         def build_array(date_str):
             prices_dict = self.manager.data.get(f"prices_{self.mode}", {}).get(date_str, {})
             arr = []
-            for h, p in sorted(prices_dict.items(), key=lambda x: int(x[0])):
+            if not isinstance(prices_dict, dict):
+                return []
+            
+            for h, p in sorted(prices_dict.items(), key=lambda x: int(x[0]) if str(x[0]).isdigit() else 99):
+                if not str(h).isdigit():
+                    continue
                 # Start time in ISO format for template compatibility
                 start_dt = dt_util.parse_datetime(f"{date_str}T{int(h):0>2}:00:00")
                 if start_dt:
                     arr.append({
                         "start": start_dt.isoformat(),
-                        "price": float(p)
+                        "price": float(normalize_float(p))
                     })
             return arr
 
