@@ -1041,9 +1041,9 @@ class StrategyEngine:
                     num_peaks_left = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
                     
                     # Recommended power: Total available / hours left to sell
-                    # But if we are NOT in peak, power is 0.0 (waiting)
+                    # Calculations are done even if NOT in peak to show potential in UI
                     power_peak = available_sell_ac / num_peaks_left
-                    power_needed = float(max(0.0, power_peak)) if is_in_peak else 0.0
+                    power_needed = float(max(0.0, power_peak))
                     
                     # Floor calculation (to maintain 23% at 8 AM)
                     occ_coeff = float(man.get_occupancy_coefficient())
@@ -1118,7 +1118,13 @@ class StrategyEngine:
                         "projected_soc_morning_pct": float(round_f(soc_morning, 1))
                     }
                 
-            res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
+            # Use current peak power only if we are actually in a peak hour
+            # Otherwise show 0 as real command, but attributes will show the potential
+            real_cmd_p = power_needed if (mode == "sell" and cur_hour in target_hours_sorted) else 0.0
+            if mode == "buy" and cur_hour in target_hours_sorted:
+                real_cmd_p = power_needed
+
+            res["recommended_power_kw"] = float(round_f(min(float(real_cmd_p), max_p), 3))
             res["active_hours"] = target_hours_sorted
             res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in target_hours_sorted])
             res["active_periods"] = ", ".join(found_periods)
