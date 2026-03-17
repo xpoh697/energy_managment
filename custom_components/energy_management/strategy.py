@@ -979,6 +979,7 @@ class StrategyEngine:
                     cur_p_f = float(normalize_float(today_prices.get(str(cur_hour), 0.0)))
                     
                     base_target = float(man.get_setting(CONF_TARGET_SOC_SELL, 20.0))
+                    occ_coeff = float(man.get_occupancy_coefficient())
                     
                     budget_data_sell = {}
                     eff_coeff_val = 1.0
@@ -991,7 +992,7 @@ class StrategyEngine:
                     # Correct reserve for House needs: Now -> Midnight -> 08:00 AM Tomorrow
                     rem_cons_today = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
                     avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
-                    cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, 8))
+                    cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, 8)) * occ_coeff
                     
                     # Also include tomorrow morning solar until 08:00 AM in the budget
                     avg_prof_gen = man.get_average_profile("generation", man.custom_period, "all")
@@ -1046,8 +1047,6 @@ class StrategyEngine:
                     power_needed = float(max(0.0, power_peak))
                     
                     # Floor calculation (to maintain 23% at 8 AM)
-                    occ_coeff = float(man.get_occupancy_coefficient())
-                    cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, 8)) * occ_coeff
                     net_night_ac = max(0.0, cons_night_morning - morning_solar_ac)
                     ai_soc_midnight_floor = target_8am_soc + (net_night_ac / eff / b_cap * 100.0)
                     
