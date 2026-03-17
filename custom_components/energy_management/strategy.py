@@ -721,7 +721,8 @@ class StrategyEngine:
                 def is_profitable(price, hour):
                     cheap_p_back, cheap_h = get_best_buyback(hour)
                     if cheap_h is None: return False, 0.0, 999.0, None
-                    gain = float((price - cheap_p_back) * eff)
+                    # gain = (Sale Price - Buyback Price) * Efficiency - Degradation Cost
+                    gain = float((price - cheap_p_back) * eff - deg_cost)
                     return gain >= threshold, gain, cheap_p_back, cheap_h
 
                 raw_peaks_today = get_peaks(today_prices, True, 0.0, tolerance)
@@ -1015,18 +1016,24 @@ class StrategyEngine:
                     total_solar_to_8am = rem_solar_today + morning_solar_ac
                     
                     # AC energy available to sell (Pool - Needs)
-                    # Pool = Energy in battery (AC equivalent) + Total Solar
-                    # Needs = Total Consumption + Energy to keep target_8am_soc (AC equivalent)
+                    # 3. Availability and Power Recommendation
+                    # Energy pool (AC) for the rest of today and tomorrow morning
                     pool_ac = (batt_energy_val * eff) + total_solar_to_8am
+                    # Energy mandatory for house and the 8 AM target floor
                     needs_ac = total_cons_to_8am + (target_8am_soc * b_cap / 100.0 * eff)
                     
                     available_sell_ac = float(max(0.0, pool_ac - needs_ac))
                     
-                    num_peaks = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
-                    power_needed = available_sell_ac / num_peaks
+                    # Determine if we are in one of the selected Peak Hours
+                    is_in_peak = bool(cur_hour in target_hours_sorted)
+                    num_peaks_left = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
                     
-                    # Stop SOC for the command (floor at the END of sale)
-                    # To have 23% at 8 AM, we need: 23% + (Net Night Consumption from midnight to 8 AM)
+                    # Recommended power: Total available / hours left to sell
+                    # But if we are NOT in peak, power is 0.0 (waiting)
+                    power_peak = available_sell_ac / num_peaks_left
+                    power_needed = float(max(0.0, power_peak)) if is_in_peak else 0.0
+                    
+                    # Floor calculation (to maintain 23% at 8 AM)
                     occ_coeff = float(man.get_occupancy_coefficient())
                     cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, 8)) * occ_coeff
                     net_night_ac = max(0.0, cons_night_morning - morning_solar_ac)
@@ -1034,27 +1041,19 @@ class StrategyEngine:
                     
                     target_soc = float(max(base_target, ai_soc_midnight_floor))
                     
-                    cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
-                    arb_gain = float((cur_p_f - cheap_p_back) * eff_coeff_val - deg_cost)
-                    
+                    # Arbitrage decision for UI
+                    # Decision tag for target_soc: Only active if we are in a peak
                     decision_tag = f"Лимит: {target_8am_soc:.0f}% на утро"
-                    if arb_gain >= threshold:
-                        decision_tag = "Арбитраж (Выгоднее хранения)"
+                    if is_in_peak:
+                        p_b_back, h_b_back = get_best_buyback(cur_hour)
+                        cur_arb_gain = float((cur_p_f - p_b_back) * eff_coeff_val - deg_cost)
+                        if cur_arb_gain >= threshold:
+                            decision_tag = "Арбитраж (Активен)"
                     
-                    res["arbitrage_decision"] = decision_tag
+                    # Combine local decision with the global best opportunity found
+                    res["arbitrage_decision"] = f"{decision_tag} | {global_arb_note}"
                     target_soc = float(min(100.0, target_soc))
-                    
-                    # 3. Final calculations check
                     delta_available_dc = available_sell_ac / eff
-                    
-                    sell_strategy_note = "Продажа излишков"
-                    if cheap_h_back is not None:
-                        if arb_gain >= threshold:
-                            sell_strategy_note = f"Арбитраж: Продажа по {cur_p_f:.2f} -> Откуп по {cheap_p_back:.2f} в {self._format_h(cheap_h_back)}"
-                        else:
-                            sell_strategy_note = f"Арбитраж не выгоден (Профит {arb_gain:.2f})"
-                    
-                    res["arbitrage_decision"] = f"{res.get('arbitrage_decision', '')} | {sell_strategy_note}"
 
                     # --- SELL SIMULATION ---
                     # Extend simulation to tomorrow morning (8:00 AM) or end of peaks, whichever is later
