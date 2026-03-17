@@ -1055,16 +1055,16 @@ class StrategyEngine:
                     # Arbitrage decision for UI
                     # Rule: Arbitrage is ONLY beneficial if profit > threshold 
                     # AND it is better than just "saving for free solar tomorrow"
-                    # If solar tomorrow is NOT excess, replacement cost is effectively the potential loss of solar self-consumption.
+                    
+                    p_bb, h_bb = get_best_buyback(cur_hour) 
+                    gain_vs_buyback = 0.0
+                    if h_bb is not None:
+                         gain_vs_buyback = float((cur_p_f - p_bb) * eff - deg_cost)
                     
                     decision_tag = f"Лимит: {target_8am_soc:.0f}% на утро"
                     arbitrage_is_best = False
                     
                     if is_in_peak:
-                        p_b_back, h_b_back = get_best_buyback(cur_hour)
-                        # Profit vs Buyback
-                        gain_vs_buyback = float((cur_p_f - p_b_back) * eff - deg_cost)
-                        
                         # Is it better than solar?
                         # If solar is excess, replacement is free (0.0). If not, we'd rather keep it.
                         if gain_vs_buyback >= threshold:
@@ -1079,6 +1079,14 @@ class StrategyEngine:
                     # If NOT, we MUST stay above ai_soc_midnight_floor (e.g. 23%)
                     target_soc = float(base_target if arbitrage_is_best else max(base_target, ai_soc_midnight_floor))
                     
+                    # Ensure global_arb_note is always consistent
+                    best_buy_p, best_buy_h = get_best_buyback(cur_hour)
+                    if best_buy_h is not None:
+                        pot_gain = (cur_p_f - best_buy_p) * eff - deg_cost
+                        global_arb_note = f"Откуп в {self._format_h(best_buy_h)} ({pot_gain:.2f})"
+                    else:
+                        global_arb_note = "Нет окна откупа"
+
                     res["arbitrage_decision"] = f"{decision_tag} | {global_arb_note}"
                     target_soc = float(min(100.0, target_soc))
                     delta_available_dc = available_sell_ac / eff
@@ -1125,11 +1133,9 @@ class StrategyEngine:
                         "reserve_kwh": float(round_f(target_8am_soc * b_cap / 100.0, 2)),
                         "energy_to_wait_kwh": float(round_f(total_cons_to_8am, 2))
                     }
-                    if is_in_peak:
-                        p_bb, h_bb = get_best_buyback(cur_hour)
-                        if h_bb is not None and (gain_vs_buyback >= threshold):
-                            res["arbitrage_buyback"]["power_kw"] = max_p
-                            res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
+                    if h_bb is not None and (gain_vs_buyback >= threshold):
+                        res["arbitrage_buyback"]["power_kw"] = max_p
+                        res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
                 
             # Use current peak power only if we are actually in a peak hour
             # Otherwise show 0 as real command, but attributes will show the potential
