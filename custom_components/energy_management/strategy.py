@@ -1038,7 +1038,7 @@ class StrategyEngine:
                     arb_gain = float((cur_p_f - cheap_p_back) * eff_coeff_val - deg_cost)
                     
                     decision_tag = f"Лимит: {target_8am_soc:.0f}% на утро"
-                    if arb_gain >= 0.05:
+                    if arb_gain >= threshold:
                         decision_tag = "Арбитраж (Выгоднее хранения)"
                     
                     res["arbitrage_decision"] = decision_tag
@@ -1049,7 +1049,7 @@ class StrategyEngine:
                     
                     sell_strategy_note = "Продажа излишков"
                     if cheap_h_back is not None:
-                        if arb_gain >= 0.05:
+                        if arb_gain >= threshold:
                             sell_strategy_note = f"Арбитраж: Продажа по {cur_p_f:.2f} -> Откуп по {cheap_p_back:.2f} в {self._format_h(cheap_h_back)}"
                         else:
                             sell_strategy_note = f"Арбитраж не выгоден (Профит {arb_gain:.2f})"
