@@ -389,6 +389,11 @@ class EnergyProfileManager:
         self.current_solar_waste_power = 0.0
         self.last_blended_coeff = 1.0
         self._profile_cache = {}
+        
+        self.fixed_strategy_data = {
+            "buy": {"id": -1, "power": 0.0, "target_soc": 0.0},
+            "sell": {"id": -1, "power": 0.0, "target_soc": 0.0}
+        }
 
     def set_max_days(self, days):
         self.max_days = days
@@ -1604,7 +1609,31 @@ class EnergyProfileManager:
 
     def get_market_strategy(self, mode="buy"):
         """Complex market strategy solver."""
-        return self.strategy_engine.get_market_strategy(mode)
+        res = self.strategy_engine.get_market_strategy(mode)
+        
+        # Fixing logic: capture power and target_soc ONLY at the start of the window
+        now = dt_util.now()
+        cur_hour = now.hour
+        is_active = res.get("state") == "active"
+        active_hours = res.get("active_hours", [])
+        
+        if is_active and active_hours:
+            # We use the first hour of the future block as a stable ID for the window
+            upcoming = [h for h in active_hours if h >= cur_hour]
+            if upcoming:
+                window_id = upcoming[0]
+                stored = self.fixed_strategy_data.get(mode, {"id": -1})
+                if stored["id"] != window_id:
+                    self.fixed_strategy_data[mode] = {
+                        "id": window_id,
+                        "power": float(res.get("recommended_power_kw", 0.0)),
+                        "target_soc": float(res.get("target_soc", 0.0))
+                    }
+        else:
+            # Reset values once window is no longer active
+            self.fixed_strategy_data[mode] = {"id": -1, "power": 0.0, "target_soc": 0.0}
+            
+        return res
 
     def get_battery_charge_limit_kw(self, soc):
         """Returns the maximum possible charge power (kW) for a given SOC.
@@ -2121,13 +2150,29 @@ class InverterOperationModeSensor(SensorEntity):
         mode = "sale_pv" # Default
         reason = "Значения по умолчанию"
         
+        # Fixed values for attributes and protection
+        fixed_buy = self.manager.fixed_strategy_data["buy"]
+        fixed_sell = self.manager.fixed_strategy_data["sell"]
+        
+        target_reached = False
+        # Safety: check if battery reached the target specified at window START
+        # Sale stops if battery <= target_soc; Buy stops if battery >= target_soc
+        if is_selling_active and fixed_sell["id"] != -1:
+            if batt_soc <= fixed_sell["target_soc"]:
+                target_reached = True
+                reason = f"Достигнут целевой заряд (Продажа: {fixed_sell['target_soc']}%)"
+        elif is_buying_active and fixed_buy["id"] != -1:
+            if batt_soc >= fixed_buy["target_soc"]:
+                target_reached = True
+                reason = f"Достигнут целевой заряд (Закуп: {fixed_buy['target_soc']}%)"
+
         if batt_soc <= min_soc:
             mode = "bat_emergency"
             reason = f"Заряд батареи ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
-        elif is_buying_active:
+        elif is_buying_active and not target_reached:
             mode = "buy"
             reason = f"Активна стратегия ПОКУПКИ"
-        elif is_selling_active:
+        elif is_selling_active and not target_reached:
             mode = "sale_pv_bat"
             reason = f"Активна стратегия ПРОДАЖИ"
         elif cur_price is not None and cur_price < price_stop_sell:
@@ -2174,6 +2219,9 @@ class InverterOperationModeSensor(SensorEntity):
         if mode == "buy":
             self._attr_extra_state_attributes["charge_target_soc"] = buy_strategy.get("charge_target_soc", 100.0)
             self._attr_extra_state_attributes["charge_reason"] = buy_strategy.get("charge_reason", "price")
+
+        self._attr_extra_state_attributes["power"] = fixed_buy["power"] if is_buying_active else (fixed_sell["power"] if is_selling_active else 0.0)
+        self._attr_extra_state_attributes["target_soc"] = fixed_buy["target_soc"] if is_buying_active else (fixed_sell["target_soc"] if is_selling_active else 0.0)
 
         debug_info = f" [Buy:{is_buying_active}, Sell:{is_selling_active}, P:{cur_price}, Stop:{price_stop_sell}]"
         self._attr_extra_state_attributes["mode_reason"] = reason + debug_info
