@@ -539,7 +539,8 @@ class StrategyEngine:
                     simulated_soc = float(min(100.0, simulated_soc + (actual_charge_kw * step_duration / b_cap_f * 100.0)))
             elif total_net_kw < -0.001: 
                 sim_eff = float(max(0.85, eff_coeff))
-                actual_discharge_kw = float(abs(total_net_kw) / sim_eff)
+                # Cap discharge power by battery physical limits
+                actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
                 if b_cap_f > 0.1:
                     simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
             
