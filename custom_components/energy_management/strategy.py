@@ -1143,6 +1143,7 @@ class StrategyEngine:
             if mode == "buy" and cur_hour in target_hours_sorted:
                 real_cmd_p = power_needed
 
+            res["planned_peak_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
             res["recommended_power_kw"] = float(round_f(min(float(real_cmd_p), max_p), 3))
             res["active_hours"] = target_hours_sorted
             res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in target_hours_sorted])

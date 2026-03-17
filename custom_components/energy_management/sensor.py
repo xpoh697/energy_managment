@@ -2452,6 +2452,7 @@ class MarketStrategySensor(SensorEntity):
             "target_price": round_f(float(res.get("target_price", 0.0) or 0.0), 3),
             "limit_used": round_f(float(res.get("limit_used", 0.0) or 0.0), 3),
             "recommended_power_kw": res.get("recommended_power_kw", 0.0),
+            "planned_peak_power_kw": res.get("planned_peak_power_kw", 0.0),
             "current_mode": current_mode,
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "prices_today": today_fmt,
