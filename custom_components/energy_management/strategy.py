@@ -224,15 +224,28 @@ class StrategyEngine:
                 total_extra_saved += day_sim_saved
                 days_with_data += 1
                 
-                # Add baseline from recorded data for THIS day
-                d_str = (now - timedelta(days=d_back)).strftime("%Y-%m-%d")
-                day_rec = man.data.get("savings", {}).get(d_str, {})
-                if isinstance(day_rec, dict):
-                    # We compare against (solar + sell) savings. 
-                    # Arbitrage is harder to simulate accurately without full strategy run,
-                    # but larger battery always helps solar/sell.
-                    rec_val = float(day_rec.get("solar", 0.0)) + float(day_rec.get("sell", 0.0))
-                    actual_baseline_savings += rec_val
+                # Simulated baseline with EXISTING battery
+                day_baseline_saved = 0.0
+                sim_soc_base = 50.0
+                for h_idx_b in range(24):
+                    try:
+                        c_h_b = float(normalize_float(c_h_rec[-d_back].get("v") if isinstance(c_h_rec[-d_back], dict) else c_h_rec[-d_back]))
+                        g_h_b = float(normalize_float(g_h_rec[-d_back].get("v") if isinstance(g_h_rec[-d_back], dict) else g_h_rec[-d_back])) * pv_multiplier
+                        
+                        net_b = g_h_b - c_h_b
+                        cost_b = 0.0
+                        if net_b > 0:
+                            ch_b = min(net_b * eff, max_batt_p)
+                            if b_cap > 0.1: sim_soc_base = min(100.0, sim_soc_base + (ch_b / b_cap * 100.0))
+                            cost_b = -max(0.0, net_b - (ch_b / eff)) * p_sell # Income
+                        else:
+                            nd_b = abs(net_b)
+                            fb_b = min(nd_b, sim_soc_base * b_cap / 100.0) if b_cap > 0.1 else 0.0
+                            if b_cap > 0.1: sim_soc_base = max(0.0, sim_soc_base - (fb_b / b_cap * 100.0))
+                            cost_b = max(0.0, nd_b - (fb_b * eff)) * p_buy
+                        day_baseline_saved += (c_h_b * p_buy) - cost_b
+                    except: continue
+                actual_baseline_savings += day_baseline_saved
 
         improvement = max(0.0, total_extra_saved - actual_baseline_savings)
         return {
