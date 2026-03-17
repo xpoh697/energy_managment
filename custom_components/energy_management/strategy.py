@@ -1117,6 +1117,20 @@ class StrategyEngine:
                         "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
                         "projected_soc_morning_pct": float(round_f(soc_morning, 1))
                     }
+                    
+                    # Arbitrage details for UI attributes
+                    res["arbitrage_buyback"] = {
+                        "power_kw": 0.0,
+                        "note": "Нет выгодного окна для откупа" if not arbitrage_is_best else "",
+                        "available_kwh": float(round_f(available_sell_ac, 2)),
+                        "reserve_kwh": float(round_f(target_8am_soc * b_cap / 100.0, 2)),
+                        "energy_to_wait_kwh": float(round_f(total_cons_to_8am, 2))
+                    }
+                    if is_in_peak:
+                        p_bb, h_bb = get_best_buyback(cur_hour)
+                        if h_bb is not None and (gain_vs_buyback >= threshold):
+                            res["arbitrage_buyback"]["power_kw"] = max_p
+                            res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
                 
             # Use current peak power only if we are actually in a peak hour
             # Otherwise show 0 as real command, but attributes will show the potential
