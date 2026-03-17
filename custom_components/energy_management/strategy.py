@@ -943,15 +943,33 @@ class StrategyEngine:
                     
                     # --- BUY SIMULATION ---
                     if target_hours_sorted:
-                        sim_range = list(range(cur_hour, max(target_hours_sorted) + 1))
+                        # Extend to tomorrow morning (8:00 AM) or end of peaks
+                        sim_end_h = max(32, max(target_hours_sorted) + 1)
+                        sim_range = list(range(cur_hour, sim_end_h))
                         _, sim_log = self.run_soc_simulation(b_soc, sim_range, now, charge_commands)
                         
+                        # 1. Projected SOC at START of the first buy hour
+                        first_h_buy = min(t for t in target_hours_sorted if t >= cur_hour)
+                        if first_h_buy > cur_hour:
+                            prev_h = first_h_buy - 1
+                            key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                            soc_at_start = float(sim_log.get(key_start, b_soc))
+                        else:
+                            soc_at_start = b_soc
+
+                        # 2. Projected SOC AFTER the last buy hour
                         last_h_buy = max(target_hours_sorted)
                         key_end = f"{last_h_buy % 24:02d}:59" + (" (Завтра)" if last_h_buy >= 24 else "")
+                        soc_at_end = float(sim_log.get(key_end, b_soc))
+                        
+                        # 3. Projected SOC TOMORROW MORNING (08:00 AM)
+                        key_morning = "07:59 (Завтра)"
+                        soc_morning = float(sim_log.get(key_morning, soc_at_end))
                         
                         res["buy_simulation"] = {
-                            "projected_soc_at_start_pct": float(round_f(b_soc, 1)),
-                            "projected_soc_at_end_pct": float(round_f(float(sim_log.get(key_end, sim_soc_plan)), 1))
+                            "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
+                            "projected_soc_at_end_pct": float(round_f(soc_at_end, 1)),
+                            "projected_soc_morning_pct": float(round_f(soc_morning, 1))
                         }
                 else: # sell
                     # Initial defaults for robustness

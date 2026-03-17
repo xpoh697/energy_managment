@@ -2491,7 +2491,8 @@ class MarketStrategySensor(SensorEntity):
         else: # buy
             attrs.update({
                 "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
-                "projected_soc_at_buy_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
+                "projected_soc_after_buy": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
+                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
             })
 
         return attrs
