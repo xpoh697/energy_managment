@@ -1015,6 +1015,18 @@ class StrategyEngine:
                     rem_solar_today = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
                     total_solar_to_8am = rem_solar_today + morning_solar_ac
                     
+                    # Replacement Cost Logic: 
+                    # If we sell now, and tomorrow morning we have EXCESS solar (more than house needs), 
+                    # then the "cost" of that energy is 0 (it would have been sold anyway).
+                    # But if tomorrow we will be short on solar, then selling now means we lose "free" energy.
+                    tomorrow_solar_total = f_tom
+                    tomorrow_cons_total = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_type).values())) * occ_coeff
+                    solar_is_excess = bool(tomorrow_solar_total > tomorrow_cons_total + 2.0) # 2kWh buffer
+                    
+                    # If solar is NOT excess, selling now is only worth it if (Sale - Buyback) > threshold
+                    # AND (Sale - 0) > threshold is not the only metric; we might prefer saving it.
+                    solar_replacement_cost = 0.0 if solar_is_excess else 999.0 # Placeholder: if not excess, very high hurdle
+                    
                     # AC energy available to sell (Pool - Needs)
                     # 3. Availability and Power Recommendation
                     # Energy pool (AC) for the rest of today and tomorrow morning
@@ -1042,15 +1054,32 @@ class StrategyEngine:
                     target_soc = float(max(base_target, ai_soc_midnight_floor))
                     
                     # Arbitrage decision for UI
-                    # Decision tag for target_soc: Only active if we are in a peak
+                    # Rule: Arbitrage is ONLY beneficial if profit > threshold 
+                    # AND it is better than just "saving for free solar tomorrow"
+                    # If solar tomorrow is NOT excess, replacement cost is effectively the potential loss of solar self-consumption.
+                    
                     decision_tag = f"Лимит: {target_8am_soc:.0f}% на утро"
+                    arbitrage_is_best = False
+                    
                     if is_in_peak:
                         p_b_back, h_b_back = get_best_buyback(cur_hour)
-                        cur_arb_gain = float((cur_p_f - p_b_back) * eff_coeff_val - deg_cost)
-                        if cur_arb_gain >= threshold:
-                            decision_tag = "Арбитраж (Активен)"
+                        # Profit vs Buyback
+                        gain_vs_buyback = float((cur_p_f - p_b_back) * eff - deg_cost)
+                        
+                        # Is it better than solar?
+                        # If solar is excess, replacement is free (0.0). If not, we'd rather keep it.
+                        if gain_vs_buyback >= threshold:
+                            if solar_is_excess:
+                                decision_tag = "Арбитраж (Выгоднее солнца)"
+                                arbitrage_is_best = True
+                            else:
+                                decision_tag = "Экономия (Солнце завтра ценнее)"
+                                arbitrage_is_best = False
                     
-                    # Combine local decision with the global best opportunity found
+                    # If arbitrage is best, we can go down to base_target (e.g. 13%)
+                    # If NOT, we MUST stay above ai_soc_midnight_floor (e.g. 23%)
+                    target_soc = float(base_target if arbitrage_is_best else max(base_target, ai_soc_midnight_floor))
+                    
                     res["arbitrage_decision"] = f"{decision_tag} | {global_arb_note}"
                     target_soc = float(min(100.0, target_soc))
                     delta_available_dc = available_sell_ac / eff
