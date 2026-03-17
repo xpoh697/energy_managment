@@ -1160,6 +1160,7 @@ class StrategyEngine:
             res["active_hours"] = target_hours_sorted
             res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in target_hours_sorted])
             res["active_periods"] = ", ".join(found_periods)
+            res["target_soc"] = float(round_f(target_soc, 1))
             
             if cur_hour in target_hours_sorted and power_needed > 0.01:
                 res["state"] = "active"
