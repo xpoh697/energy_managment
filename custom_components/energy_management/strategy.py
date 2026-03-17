@@ -510,11 +510,9 @@ class StrategyEngine:
             if is_tom:
                 expected_gen_kw = float(hist_hour_gen / total_hist_gen * f_tom * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
             else:
-                rem_sum = float(sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(now.hour, 24)))
-                if rem_sum > 0.1:
-                    expected_gen_kw = float(hist_hour_gen / rem_sum * f_today * blended_coeff)
-                else:
-                    expected_gen_kw = float(hist_hour_gen / total_hist_gen * f_today * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
+                # Distribution of TOTAL day forecast across the hour's share of total history
+                # This ensures total day sum = f_today, and remaining sum = f_today * (rem_hist / total_hist)
+                expected_gen_kw = float(hist_hour_gen / total_hist_gen * f_today * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
                 
                 if i == 0 and not is_tom:
                     cur_actual_gen = float(getattr(man, "avg_gen_kw", 0.0))
@@ -994,6 +992,14 @@ class StrategyEngine:
                     avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
                     cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, 8))
                     
+                    # Also include tomorrow morning solar until 08:00 AM in the budget
+                    avg_prof_gen = man.get_average_profile("generation", man.custom_period, "all")
+                    gen_night_morning = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(0, 8))
+                    f_tom_raw = man.get_forecast_value(man.forecast_tomorrow_sensor)
+                    f_tom = float(f_tom_raw) if f_tom_raw is not None else 0.0
+                    total_hist_gen_val = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(24))
+                    morning_solar_ac = f_tom * (gen_night_morning / total_hist_gen_val) if total_hist_gen_val > 0.1 else 0.0
+                    
                     full_needed_until_sunrise = rem_cons_today + cons_night_morning
                     min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
@@ -1015,8 +1021,9 @@ class StrategyEngine:
                     target_soc = float(min(100.0, target_soc))
                     
                     # 3. Accurate Availability Math (DC equivalent)
+                    # Include today's remaining solar AND tomorrow morning's solar in the POOL
                     forecast_rem = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
-                    pool_dc = batt_energy_val + (forecast_rem * eff)
+                    pool_dc = batt_energy_val + (forecast_rem * eff) + (morning_solar_ac * eff)
                     needed_dc = (full_needed_until_sunrise / eff) + (min_soc_reserve * b_cap / 100.0)
                     
                     delta_available_dc = float(max(0.0, pool_dc - needed_dc))
@@ -1028,9 +1035,9 @@ class StrategyEngine:
                     sell_strategy_note = "Продажа излишков"
                     if cheap_h_back is not None:
                         if arb_gain >= 0.05:
-                            sell_strategy_note = f"Арбитраж: Продажа {cur_p_f:.2f} -> Откуп {cheap_p_back:.2f} в {self._format_h(cheap_h_back)}"
+                            sell_strategy_note = f"Арбитраж: Продажа по {cur_p_f:.2f} -> Откуп по {cheap_p_back:.2f} в {self._format_h(cheap_h_back)}"
                         else:
-                            sell_strategy_note = f"Арбитраж не выгоден ({arb_gain:.2f})"
+                            sell_strategy_note = f"Арбитраж не выгоден (Профит {arb_gain:.2f})"
                     
                     res["arbitrage_decision"] = f"{res.get('arbitrage_decision', '')} | {sell_strategy_note}"
 
