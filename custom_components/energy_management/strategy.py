@@ -1004,8 +1004,14 @@ class StrategyEngine:
                     min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
                     
-                    # ai_soc_reserve: SOC % needed to reach morning with min_soc_reserve left
-                    ai_soc_reserve = float((full_needed_until_sunrise / eff / b_cap * 100.0) + min_soc_reserve)
+                    # Reservation for House needs: 10% buffer + Min SOC Floor (13% in your case)
+                    house_buffer_pct = 10.0
+                    min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
+                    eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
+                    
+                    # ai_soc_reserve: SOC % floor to reach morning with min_soc_reserve left
+                    # User requested: Floor + 10% Buffer
+                    ai_soc_reserve = float(min_soc_reserve + house_buffer_pct)
                     
                     # Ensure we never sell below survival reserve
                     target_soc = float(max(base_target, ai_soc_reserve))
@@ -1013,7 +1019,7 @@ class StrategyEngine:
                     cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
                     arb_gain = float((cur_p_f - cheap_p_back) * eff_coeff_val - deg_cost)
                     
-                    decision_tag = "Защита (Лимит до солнца)"
+                    decision_tag = "Защита (Лимит 10% + Остаток)"
                     if arb_gain >= 0.05:
                         decision_tag = "Арбитраж (Выгоднее хранения)"
                     
@@ -1024,7 +1030,9 @@ class StrategyEngine:
                     # Include today's remaining solar AND tomorrow morning's solar in the POOL
                     forecast_rem = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
                     pool_dc = batt_energy_val + (forecast_rem * eff) + (morning_solar_ac * eff)
-                    needed_dc = (full_needed_until_sunrise / eff) + (min_soc_reserve * b_cap / 100.0)
+                    
+                    # We 'reserve' the energy equivalent to our floor in DC
+                    needed_dc = (target_soc * b_cap / 100.0) / eff
                     
                     delta_available_dc = float(max(0.0, pool_dc - needed_dc))
                     
