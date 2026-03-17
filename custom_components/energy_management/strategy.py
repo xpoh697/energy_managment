@@ -1004,41 +1004,46 @@ class StrategyEngine:
                     min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
                     
-                    # Reservation for House needs: 10% buffer + Min SOC Floor (13% in your case)
-                    house_buffer_pct = 10.0
-                    min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
-                    eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
+                    # House survivability: Target SOC at 08:00 AM (e.g. 13% un-reducible + 10% buffer = 23%)
+                    target_8am_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + 10.0
                     
-                    # ai_soc_reserve: SOC % floor to reach morning with min_soc_reserve left
-                    # User requested: Floor + 10% Buffer
-                    ai_soc_reserve = float(min_soc_reserve + house_buffer_pct)
+                    # AC Balance until 08:00 AM
+                    rem_cons_today = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
+                    total_cons_to_8am = rem_cons_today + cons_night_morning
                     
-                    # Ensure we never sell below survival reserve
-                    target_soc = float(max(base_target, ai_soc_reserve))
+                    rem_solar_today = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
+                    total_solar_to_8am = rem_solar_today + morning_solar_ac
+                    
+                    # AC energy available to sell (Pool - Needs)
+                    # Pool = Energy in battery (AC equivalent) + Total Solar
+                    # Needs = Total Consumption + Energy to keep target_8am_soc (AC equivalent)
+                    pool_ac = (batt_energy_val * eff) + total_solar_to_8am
+                    needs_ac = total_cons_to_8am + (target_8am_soc * b_cap / 100.0 * eff)
+                    
+                    available_sell_ac = float(max(0.0, pool_ac - needs_ac))
+                    
+                    num_peaks = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
+                    power_needed = available_sell_ac / num_peaks
+                    
+                    # Stop SOC for the command (floor at the END of sale)
+                    # To have 23% at 8 AM, we need: 23% + (Net Night Consumption from midnight to 8 AM)
+                    net_night_ac = max(0.0, cons_night_morning - morning_solar_ac)
+                    ai_soc_midnight_floor = target_8am_soc + (net_night_ac / eff / b_cap * 100.0)
+                    
+                    target_soc = float(max(base_target, ai_soc_midnight_floor))
                     
                     cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
                     arb_gain = float((cur_p_f - cheap_p_back) * eff_coeff_val - deg_cost)
                     
-                    decision_tag = "Защита (Лимит 10% + Остаток)"
+                    decision_tag = f"Лимит: {target_8am_soc:.0f}% на утро"
                     if arb_gain >= 0.05:
                         decision_tag = "Арбитраж (Выгоднее хранения)"
                     
                     res["arbitrage_decision"] = decision_tag
                     target_soc = float(min(100.0, target_soc))
                     
-                    # 3. Accurate Availability Math (DC equivalent)
-                    # Include today's remaining solar AND tomorrow morning's solar in the POOL
-                    forecast_rem = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
-                    pool_dc = batt_energy_val + (forecast_rem * eff) + (morning_solar_ac * eff)
-                    
-                    # We 'reserve' the energy equivalent to our floor in DC
-                    needed_dc = (target_soc * b_cap / 100.0) / eff
-                    
-                    delta_available_dc = float(max(0.0, pool_dc - needed_dc))
-                    
-                    # 4. Calculate recommended power for peaks (AC side)
-                    num_peaks = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
-                    power_needed = float(max(0.0, (delta_available_dc * eff) / num_peaks))
+                    # 3. Final calculations check
+                    delta_available_dc = available_sell_ac / eff
                     
                     sell_strategy_note = "Продажа излишков"
                     if cheap_h_back is not None:
