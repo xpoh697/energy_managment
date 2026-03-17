@@ -980,52 +980,57 @@ class StrategyEngine:
                     cur_p_f = float(normalize_float(today_prices.get(str(cur_hour), 0.0)))
                     
                     base_target = float(man.get_setting(CONF_TARGET_SOC_SELL, 20.0))
-                    target_soc = base_target
                     
                     budget_data_sell = {}
-                    expected_night_s = 0.0
                     eff_coeff_val = 1.0
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         budget_data_raw = self.get_budget_and_permissions(man.custom_period, skip_strategy_check=True)
                         if budget_data_raw:
                             budget_data_sell = budget_data_raw
-                            expected_night_s = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
                             eff_coeff_val = float(normalize_float(budget_data_sell.get("efficiency_coefficient", 1.0)))
                         
-                        min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
-                        expected_night_from_batt = float(expected_night_s / eff_coeff_val if eff_coeff_val > 0.1 else expected_night_s)
-                        ai_soc_reserve = float((expected_night_from_batt / b_cap * 100.0) + min_soc_reserve)
-                        
-                        cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
-                        arb_gain = float((cur_p_f - cheap_p_back) * eff_coeff_val - deg_cost)
-                        
-                        decision_tag = "Нет данных"
-                        if arb_gain >= 0.05: # Arbitrage is profitable
-                            target_soc = base_target
-                            decision_tag = "Цель: Продажа (Арбитраж выгоднее хранения)"
-                        else:
-                            # Guard nightly consumption if arbitrage is not worth it
-                            target_soc = float(max(base_target, ai_soc_reserve))
-                            decision_tag = "Цель: Хранение (До солнца)"
-                        
-                        res["arbitrage_decision"] = decision_tag
+                    # Correct reserve for House needs: Now -> Midnight -> 08:00 AM Tomorrow
+                    rem_cons_today = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
+                    avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
+                    cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, 8))
                     
+                    full_needed_until_sunrise = rem_cons_today + cons_night_morning
+                    min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
+                    eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
+                    
+                    # ai_soc_reserve: SOC % needed to reach morning with min_soc_reserve left
+                    ai_soc_reserve = float((full_needed_until_sunrise / eff / b_cap * 100.0) + min_soc_reserve)
+                    
+                    # Ensure we never sell below survival reserve
+                    target_soc = float(max(base_target, ai_soc_reserve))
+                    
+                    cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
+                    arb_gain = float((cur_p_f - cheap_p_back) * eff_coeff_val - deg_cost)
+                    
+                    decision_tag = "Защита (Лимит до солнца)"
+                    if arb_gain >= 0.05:
+                        decision_tag = "Арбитраж (Выгоднее хранения)"
+                    
+                    res["arbitrage_decision"] = decision_tag
                     target_soc = float(min(100.0, target_soc))
                     
-                    # Project available energy for peaks (including solar)
+                    # 3. Accurate Availability Math (DC equivalent)
                     forecast_rem = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
-                    delta_available = float((batt_energy_val + forecast_rem) - (target_soc * b_cap / 100.0))
+                    pool_dc = batt_energy_val + (forecast_rem * eff)
+                    needed_dc = (full_needed_until_sunrise / eff) + (min_soc_reserve * b_cap / 100.0)
                     
-                    # Calculate recommended power for peaks
-                    num_peaks = len([h for h in target_hours if h >= cur_hour]) or 1
-                    power_needed = float(max(0.0, (delta_available * eff) / num_peaks))
+                    delta_available_dc = float(max(0.0, pool_dc - needed_dc))
                     
-                    sell_strategy_note = "Продажа до солнца (стандарт)"
+                    # 4. Calculate recommended power for peaks (AC side)
+                    num_peaks = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
+                    power_needed = float(max(0.0, (delta_available_dc * eff) / num_peaks))
+                    
+                    sell_strategy_note = "Продажа излишков"
                     if cheap_h_back is not None:
-                        if arb_gain >= threshold:
-                            sell_strategy_note = f"Арбитраж ВЫГОДЕН: Продажа {cur_p_f:.2f} -> Откуп {cheap_p_back:.2f} в {self._format_h(cheap_h_back)} (Профит {arb_gain:.2f})"
+                        if arb_gain >= 0.05:
+                            sell_strategy_note = f"Арбитраж: Продажа {cur_p_f:.2f} -> Откуп {cheap_p_back:.2f} в {self._format_h(cheap_h_back)}"
                         else:
-                            sell_strategy_note = f"Арбитраж НЕВЫГОДЕН: Продажа {cur_p_f:.2f} -> Откуп {cheap_p_back:.2f} в {self._format_h(cheap_h_back)}. Выгода {arb_gain:.2f} < Порога"
+                            sell_strategy_note = f"Арбитраж не выгоден ({arb_gain:.2f})"
                     
                     res["arbitrage_decision"] = f"{res.get('arbitrage_decision', '')} | {sell_strategy_note}"
 
