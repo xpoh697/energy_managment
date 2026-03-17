@@ -2158,9 +2158,9 @@ class InverterOperationModeSensor(SensorEntity):
                 c_kwh = float(prof_cons.get(h_mod, 0.0)) if 'prof_cons' in locals() else 0.0
                 g_kwh = float(prof_gen.get(h_mod, 0.0)) if 'prof_gen' in locals() else 0.0
 
-                if (instant_ok and g_kwh >= c_kwh) or (batt_soc >= 98.5 and instant_ok):
+                if instant_ok and g_kwh >= c_kwh:
                     mode = "sale_pv_no_bat"
-                    reason = f"Продажа солнца: SOC {round_f(batt_soc,1)}% и есть излишки"
+                    reason = f"Текущая цена {cur_price} и есть профицит Солнца"
                 elif instant_ok:
                     reason = f"Цена ок, но исторически нет профицита ({round_f(g_kwh, 2)} < {round_f(c_kwh, 2)}). Ждем"
                 else:
