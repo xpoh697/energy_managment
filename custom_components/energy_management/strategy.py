@@ -1011,21 +1011,37 @@ class StrategyEngine:
                     res["arbitrage_decision"] = f"{res.get('arbitrage_decision', '')} | {sell_strategy_note}"
 
                     # --- SELL SIMULATION ---
-                    sim_range = list(range(cur_hour, int(active_window[1]) + 1))
+                    # Extend simulation to tomorrow morning (8:00 AM) or end of peaks, whichever is later
+                    # 31 is the end of the 07:00-08:00 hour tomorrow
+                    sim_end_h = max(32, int(active_window[1]) + 1)
+                    sim_range = list(range(cur_hour, sim_end_h))
+                    
                     # Use the actual calculated power_needed for the simulation, not just raw max_p
                     sim_commands = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
                     _, sim_log = self.run_soc_simulation(b_soc, sim_range, now, sim_commands)
                     
+                    # 1. Projected SOC at START of the first peak
+                    first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else cur_hour
+                    if first_h_sell > cur_hour:
+                        prev_h = first_h_sell - 1
+                        key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                        soc_at_start = float(sim_log.get(key_start, b_soc))
+                    else:
+                        soc_at_start = b_soc
+                        
+                    # 2. Projected SOC AFTER the last peak
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else cur_hour
                     key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
+                    soc_after = float(sim_log.get(key_after, b_soc))
                     
-                    morning_h = 32 if last_h_sell < 24 else 47
-                    key_morning = f"{morning_h % 24:02d}:59" + (" (Завтра)" if morning_h >= 24 else "")
-                    
+                    # 3. Projected SOC TOMORROW MORNING (08:00 AM)
+                    key_morning = "07:59 (Завтра)"
+                    soc_morning = float(sim_log.get(key_morning, soc_after))
+
                     res["sell_simulation"] = {
-                        "projected_soc_at_start_pct": float(round_f(b_soc, 1)),
-                        "projected_soc_after_sale_pct": float(round_f(float(sim_log.get(key_after, b_soc)), 1)),
-                        "projected_soc_morning_pct": float(round_f(float(sim_log.get(key_morning, sim_log.get("07:59 (Завтра)", 0.0))), 1))
+                        "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
+                        "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
+                        "projected_soc_morning_pct": float(round_f(soc_morning, 1))
                     }
                 
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
