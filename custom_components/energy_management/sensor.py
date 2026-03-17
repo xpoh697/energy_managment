@@ -827,8 +827,11 @@ class EnergyProfileManager:
             # Use current gen but ensure it's not negative (weird sensors)
             current_gen = float(max(0.0, gen_kw))
             
-            # Waste occurs if battery is near full and we generate less than the panels could potentially give
-            if soc_f >= 95.0 and potential_kw > (current_gen + 0.1):
+            # Waste occurs if battery is near full, we are NOT exporting (throttled),
+            # and we generate less than the panels could potentially give
+            is_exporting = float(grid_p) > 0.1 if self.grid_power_sensor else False
+            
+            if soc_f >= 95.0 and not is_exporting and potential_kw > (current_gen + 0.1):
                 waste_kw = float(max(0.0, potential_kw - current_gen))
                 # Sanity check: waste cannot be more than potential
                 waste_kw = float(min(waste_kw, potential_kw))
