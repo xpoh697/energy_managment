@@ -520,8 +520,8 @@ class StrategyEngine:
                         expected_gen_kw = cur_actual_gen
             
             p_cons = prof_cons_tom if is_tom else prof_cons_today
-            expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0)))
-            expected_cons_kw *= float(man.get_occupancy_coefficient())
+            occ_coeff = float(man.get_occupancy_coefficient())
+            expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
             
             cmd_p = 0.0
             if commands and h_abs in commands:
@@ -1008,8 +1008,8 @@ class StrategyEngine:
                     target_8am_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + 10.0
                     
                     # AC Balance until 08:00 AM
-                    rem_cons_today = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
-                    total_cons_to_8am = rem_cons_today + cons_night_morning
+                    # budget_data_sell.get("expected_consumption") ALREADY includes both today's remaining AND night until 8 AM
+                    total_cons_to_8am = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
                     
                     rem_solar_today = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
                     total_solar_to_8am = rem_solar_today + morning_solar_ac
@@ -1027,6 +1027,8 @@ class StrategyEngine:
                     
                     # Stop SOC for the command (floor at the END of sale)
                     # To have 23% at 8 AM, we need: 23% + (Net Night Consumption from midnight to 8 AM)
+                    occ_coeff = float(man.get_occupancy_coefficient())
+                    cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, 8)) * occ_coeff
                     net_night_ac = max(0.0, cons_night_morning - morning_solar_ac)
                     ai_soc_midnight_floor = target_8am_soc + (net_night_ac / eff / b_cap * 100.0)
                     
