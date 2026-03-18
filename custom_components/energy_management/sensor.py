@@ -1795,6 +1795,13 @@ class UniversalPriceSensor(SensorEntity):
         )
 
     async def async_added_to_hass(self):
+        # Use the currency configured in HA Settings → System → General
+        try:
+            currency = self.hass.config.currency
+            if currency:
+                self._attr_native_unit_of_measurement = f"{currency}/kWh"
+        except Exception:
+            pass
         self.manager.register_listener(self.async_write_ha_state)
 
     @property
