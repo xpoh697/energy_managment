@@ -56,6 +56,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.services.async_register(DOMAIN, "export_data", handle_export_data)
     hass.services.async_register(DOMAIN, "import_data", handle_import_data)
+
+    # Register service to reset BMS profile
+    async def handle_reset_bms(call):
+        manager.data["bms_learned_profile"] = {}
+        manager.bms_learned_profile = {}
+        await manager.store.async_save(manager.data)
+        manager._notify_update()
+        _LOGGER.info("Learned BMS profile has been reset.")
+
+    hass.services.async_register(DOMAIN, "reset_bms_profile", handle_reset_bms)
     
     # Reload integration on options change
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
@@ -75,7 +85,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await manager.async_stop()
         hass.data[DOMAIN].pop(entry.entry_id)
     if not hass.data[DOMAIN]:
-        hass.services.async_remove(DOMAIN, "reset_data")
+        for service in ["reset_data", "reset_bms_profile", "export_data", "import_data"]:
+            hass.services.async_remove(DOMAIN, service)
         
     return unload_ok
 

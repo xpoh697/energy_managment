@@ -26,3 +26,8 @@ import_data:
       example: "/config/energy_management_backup.json"
       selector:
         text:
+
+reset_bms_profile:
+  name: Сбросить профиль заряда BMS
+  description: Очищает накопленную статистику кривой заряда батареи (BMS profile), позволяя системе обучиться заново.
+  fields: {}
