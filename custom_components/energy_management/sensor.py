@@ -2437,6 +2437,7 @@ class EnergyBudgetSensor(SensorEntity):
                 "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
                 "debug_actual_today": _sr(res.get("debug_actual_today")),
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
+                "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
