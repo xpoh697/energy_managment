@@ -834,31 +834,44 @@ class EnergyProfileManager:
 
         # --- Solar Waste Calculation ---
         if self.power_gen_sensors and self.generation_sensors:
-            # We need potential power. We'll use the profile-based estimate.
+            # Use today's forecast distributed by profile (Solcast/Forecast.solar aware)
+            # instead of just historical averages, because forecast knows about clouds.
+            f_today = float(self.get_forecast_value(self.forecast_today_sensor) or 0.0)
             prof_gen_today = self.get_average_profile("generation", self.custom_period, "all")
-            cur_expected_gen = float(prof_gen_today.get(str(now.hour), 0.0))
-            coeff = float(getattr(self, "last_blended_coeff", 1.0))
-            potential_kw = float(max(0.0, cur_expected_gen * coeff))
-
+            cur_hour = now.hour
+            
+            # Cumulative hist gen from now until 23:59
+            hist_rem = sum(float(prof_gen_today.get(str(h), 0.0)) for h in range(cur_hour, 24))
+            cur_hist = float(prof_gen_today.get(str(cur_hour), 0.0))
+            
+            # Potential for this hour based on TODAY'S weather forecast
+            if hist_rem > 0.1:
+                potential_kw = float(f_today * (cur_hist / hist_rem))
+            else:
+                potential_kw = 0.0
+            
             soc, _, _ = self.get_battery_state()
             soc_f = float(soc) if soc is not None else 0.0
-            
-            # Use current gen but ensure it's not negative (weird sensors)
             current_gen = float(max(0.0, gen_kw))
             
-            # Waste occurs if battery is near full, we are NOT exporting (throttled),
-            # and we generate less than the panels could potentially give
-            is_exporting = float(grid_p) > 0.1 if self.grid_power_sensor else False
+            # Ensure potential doesn't drop below actual if we are doing better than forecast
+            potential_kw = float(max(potential_kw, current_gen))
             
-            if soc_f >= 95.0 and not is_exporting and potential_kw > (current_gen + 0.1):
+            # Waste occurs if: 
+            # 1. Battery is full (>= 95%) 
+            # 2. We are NOT exporting (throttled/limited)
+            # 3. We are NOT importing (House load is fully covered by PV)
+            is_exporting = float(grid_p) > 0.1 if self.grid_power_sensor else False
+            is_importing = float(grid_p) < -0.1 if self.grid_power_sensor else False
+            
+            if soc_f >= 95.0 and not is_exporting and not is_importing and potential_kw > (current_gen + 0.1):
                 waste_kw = float(max(0.0, potential_kw - current_gen))
-                # Sanity check: waste cannot be more than potential
-                waste_kw = float(min(waste_kw, potential_kw))
+                # Sanity check: cap waste at 20kW
+                waste_kw = float(min(waste_kw, 20.0))
                 
                 self.current_solar_waste_power = round_f(float(waste_kw), 3)
                 # Accumulate kWh (1 min sample)
-                # Safeguard: don't add more than 1/60th of 20kW (unrealistic for house)
-                step_waste = float(min(waste_kw / 60.0, 20.0 / 60.0))
+                step_waste = float(waste_kw / 60.0)
                 self.data["temp_daily_waste"] = float(self.data.get("temp_daily_waste", 0.0) + step_waste)
             else:
                 self.current_solar_waste_power = 0.0

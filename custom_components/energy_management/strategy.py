@@ -373,8 +373,19 @@ class StrategyEngine:
                 gen_kw = float(sum((get_kwh_val(man.hass.states.get(str(s)) or None) or 0.0) for s in p_gen_s))
                 
                 initial_power_kw = float(gen_kw - load_kw)
-                potential_gen = float(max(gen_kw, cur_hist_val * blended_coeff))
+
+                # Potential generation from Forecast (Today remaining distributed by profile)
+                # This ensures we don't start boilers on cloudy days just because "history says it's sunny".
+                f_today = float(man.get_forecast_value(man.forecast_today_sensor) or 0.0)
+                hist_rem = sum(float(p_gen.get(str(h), 0.0)) for h in range(cur_hour, 24))
+                f_potential = float(f_today * (cur_hist_val / hist_rem)) if hist_rem > 0.1 else 0.0
+                
+                potential_gen = float(max(gen_kw, f_potential))
                 waste_kw = float(max(0.0, potential_gen - gen_kw))
+
+                # If we are importing, we aren't wasting solar surplus
+                if initial_power_kw < -0.1:
+                    waste_kw = 0.0
                 
                 if man.battery_power_sensor:
                     st_batt = man.hass.states.get(str(man.battery_power_sensor))
