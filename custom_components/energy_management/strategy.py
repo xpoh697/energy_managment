@@ -332,11 +332,14 @@ class StrategyEngine:
             expected_night = float(man.get_expected_night("consumption_base", days_for_profile)) * occ_coeff
             expected_consumption = float(expected_today + expected_night)
             
-            fraction_left_h = float(1.0 - (now.minute / 60.0))
+            # Current historical value (used for waste/potential detection)
             cur_hist_val = float(normalize_float(p_gen.get(str(cur_hour), 0.0)))
-            hist_rem = float((cur_hist_val * fraction_left_h) + sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(cur_hour + 1, 24)))
-            
-            solar_remaining = float(forecast_val_adjusted * (hist_rem / total_hist_gen)) if total_hist_gen > 0.1 else 0.0
+
+            # 1. Solar Remaining
+            # Important: forecast_val (from man.forecast_today_sensor) typically already 
+            # represents the REMAINING solar for the day. 
+            # Multiplying by (hist_rem / total_hist_gen) would cause a double-reduction.
+            solar_remaining = float(forecast_val_adjusted or 0.0)
             
             initial_budget = float(solar_remaining + (b_energy_f - (min_soc * b_cap_f / 100.0)) - expected_consumption)
             available_budget = initial_budget
@@ -539,13 +542,20 @@ class StrategyEngine:
 
             hist_hour_gen = float(normalize_float(prof_gen.get(h_str, 0.0)))
             if is_tom:
+                # For tomorrow, always use full day history as baseline (starts at 00:00)
                 expected_gen_kw = float(hist_hour_gen / total_hist_gen * f_tom * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
             else:
-                # Distribution of TOTAL day forecast across the hour's share of total history
-                # This ensures total day sum = f_today, and remaining sum = f_today * (rem_hist / total_hist)
-                expected_gen_kw = float(hist_hour_gen / total_hist_gen * f_today * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
+                # DISTRIBUTION FIX: Use only the FUTURE part of historical profile for distribution
+                # because f_today typically represents the REMAINING solar from NOW.
+                if 'hist_rem_today' not in locals():
+                    cur_h = int(now.hour)
+                    hist_rem_today = float(sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(cur_h, 24)))
+                    if hist_rem_today < 0.1: hist_rem_today = total_hist_gen # Fallback
+
+                expected_gen_kw = float(hist_hour_gen / hist_rem_today * f_today * blended_coeff) if hist_rem_today > 0.1 else hist_hour_gen
                 
-                if i == 0 and not is_tom:
+                if i == 0:
+                    # Current actual power is often more accurate than profile for the first hour
                     cur_actual_gen = float(getattr(man, "avg_gen_kw", 0.0))
                     if cur_actual_gen > expected_gen_kw:
                         expected_gen_kw = cur_actual_gen

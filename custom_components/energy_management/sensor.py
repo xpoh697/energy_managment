@@ -2428,20 +2428,15 @@ class EnergyBudgetSensor(SensorEntity):
             self._attrs = {
                 "permissions": res.get("permissions", {}),
                 "permissions_reasons": res.get("permissions_reasons", {}),
-                "forecast_remaining_kwh": _sr(res.get("forecast_val")),
-                "forecast_raw_kwh": _sr(res.get("forecast_raw")),
-                "forecast_coefficient_blended": _sr(res.get("forecast_coefficient", 1.0), 1.0),
-                "forecast_coefficient_history": _sr(res.get("forecast_hist_coefficient", 1.0), 1.0),
-                "forecast_coefficient_today": _sr(res.get("forecast_today_coefficient", 1.0), 1.0),
+                "forecast_remaining_adjusted_kwh": _sr(res.get("forecast_val")),
                 "battery_energy_kwh": _sr(res.get("batt_energy_val")),
                 "expected_consumption_kwh": _sr(res.get("expected_consumption")),
+                "forecast_coefficient": _sr(res.get("forecast_coefficient", 1.0), 1.0),
+                "forecast_coefficient_today": _sr(res.get("forecast_today_coefficient", 1.0), 1.0),
                 "occupancy_coefficient": _sr(res.get("occupancy_coefficient", 1.0), 1.0),
-                "occupancy_persons_home": self.manager.get_current_occupancy() if self.manager.presence_sensors else "N/A",
                 "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
                 "debug_actual_today": _sr(res.get("debug_actual_today")),
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
-                "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
-                "debug_fraction_so_far": _sr(res.get("debug_fraction_so_far")),
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
