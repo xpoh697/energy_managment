@@ -303,9 +303,12 @@ class StrategyEngine:
                 today_coeff = float(max(0.2, min(predicted_total / expected_today_total, 2.0)))
             
             # C. Blended Coeff: Weighted average of Today vs History
-            # We trust today's data more as the day progresses (fraction_so_far).
-            # The 'base' to blend with is the Historical Performance, not an ideal 1.0.
-            blended_coeff = float((today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far)))
+            # We trust today's data more as the day progresses (using the external forecast's own timing).
+            external_progress = 1.0 - (forecast_val / expected_today_total) if expected_today_total > 0.1 else fraction_so_far
+            external_progress = max(0.0, min(external_progress, 1.0))
+            
+            # Use a blend of history and today's yield performance
+            blended_coeff = float((today_coeff * external_progress) + (hist_coeff * (1.0 - external_progress)))
             
             # Safety guards
             blended_coeff = float(max(0.3, min(blended_coeff, 1.5)))
@@ -452,12 +455,12 @@ class StrategyEngine:
                 "forecast_coefficient": float(blended_coeff or 1.0),
                 "forecast_hist_coefficient": float(hist_coeff or 1.0),
                 "forecast_today_coefficient": float(today_coeff or 1.0),
-                "batt_energy_val": float(b_energy_f or 0.0),
-                "expected_consumption": float(expected_consumption or 0.0),
                 "debug_actual_today": float(actual_today or 0.0),
                 "debug_expected_today_total": float(expected_today_total or 0.0),
-                "debug_expected_today_so_far": float(expected_today_total * fraction_so_far),
-                "debug_fraction_so_far": float(fraction_so_far or 0.0),
+                "debug_expected_today_so_far": float(expected_today_total - forecast_val),
+                "debug_fraction_so_far": float(external_progress if 'external_progress' in locals() else fraction_so_far),
+                "batt_energy_val": float(b_energy_f or 0.0),
+                "expected_consumption": float(expected_consumption or 0.0),
                 "occupancy_coefficient": float(occ_coeff or 1.0),
                 "efficiency_coefficient": float(eff_coeff or 1.0),
                 "available_power_total_kw": float(initial_power_kw or 0.0),
