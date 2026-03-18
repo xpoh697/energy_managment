@@ -1321,9 +1321,10 @@ class EnergyProfileManager:
             try:
                 val = float(state_obj.state)
                 now = dt_util.now()
-                d_str = now.strftime("%Y-%m-%d")
-                h_str = str(now.hour)
-                res = {d_str: {h_str: val}}
+                # Populate 24h for today and 24h for tomorrow if it's a fixed price sensor
+                for d_off in [0, 1]:
+                    d_str = (now + timedelta(days=d_off)).strftime("%Y-%m-%d")
+                    res[d_str] = {str(h): val for h in range(24)}
             except ValueError:
                 pass
 
