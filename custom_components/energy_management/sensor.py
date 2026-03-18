@@ -459,6 +459,20 @@ class EnergyProfileManager:
             except:
                 pass
 
+        saved_last_active = self.data.get("cycle_start_time", {})
+        for s_id, start_str in saved_last_active.items():
+            try:
+                self.cycle_start_time[s_id] = dt_util.parse_datetime(start_str)
+            except:
+                pass
+
+        saved_energy_start = self.data.get("cycle_energy_start", {})
+        for s_id, val in saved_energy_start.items():
+            try:
+                self.cycle_energy_start[s_id] = float(val)
+            except:
+                pass
+
         if "generation" not in self.data:
             self.data["generation"] = {str(i): [] for i in range(24)}
         if "consumption_total" not in self.data:
@@ -519,6 +533,12 @@ class EnergyProfileManager:
         self.data["learned_avg_cycle_duration"] = self.learned_avg_cycle_duration
         self.data["cycle_actual_start_time"] = {
             s_id: dt.isoformat() for s_id, dt in self.cycle_actual_start_time.items()
+        }
+        self.data["cycle_start_time"] = {
+            s_id: dt.isoformat() for s_id, dt in self.cycle_start_time.items()
+        }
+        self.data["cycle_energy_start"] = {
+            s_id: val for s_id, val in self.cycle_energy_start.items()
         }
         self.data["bms_learned_profile"] = self.bms_learned_profile
         self.data["sensor_last_values"] = self.sensor_last_values
@@ -774,10 +794,18 @@ class EnergyProfileManager:
 
             if is_active:
                 # Still active -> push forward the "last seen active" time for grace period
+                last_active_before = self.cycle_start_time.get(sensor_id)
                 self.cycle_start_time[sensor_id] = now
 
-                # If this is the start of a new cycle
-                if sensor_id not in self.cycle_actual_start_time:
+                # If this is the start of a new cycle OR there was a significant gap (e.g. > 1h)
+                # which means the previous cycle wasn't closed properly (e.g. sensor dropout or restart)
+                is_new_cycle = sensor_id not in self.cycle_actual_start_time
+                if not is_new_cycle and last_active_before:
+                    gap = (now - last_active_before).total_seconds()
+                    if gap > 3600: # 1 hour
+                        is_new_cycle = True
+
+                if is_new_cycle:
                     self.cycle_actual_start_time[sensor_id] = now
                     self.cycle_energy_start[sensor_id] = self.daily_deduct_consumption.get(sensor_id, 0.0)
 
@@ -811,7 +839,15 @@ class EnergyProfileManager:
                     # We only terminate if the device hasn't been seen active for some time
                     # cycle_start_time stores the "last seen active" timestamp
                     last_active = self.cycle_start_time.get(sensor_id)
-                    grace_timeout = now - timedelta(minutes=5)
+                    
+                    # Use configurable hold time from settings
+                    hold_min = int(settings.get(CONF_ACTIVE_HOLD_TIME, 5))
+                    grace_timeout = now - timedelta(minutes=hold_min)
+                    
+                    # Robustness fallback: if last_active is missing (e.g. after update/settings change)
+                    # use actual start time to allow termination if it's already old enough.
+                    if not last_active:
+                        last_active = self.cycle_actual_start_time.get(sensor_id)
                     
                     if last_active and last_active < grace_timeout:
                         duration = (last_active - self.cycle_actual_start_time[sensor_id]).total_seconds() / 3600.0

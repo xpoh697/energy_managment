@@ -10,6 +10,7 @@ from .const import (
     CONF_IS_CYCLIC,
     CONF_POWER_SENSOR,
     CONF_ONLY_SOLAR,
+    CONF_ACTIVE_SENSOR,
 )
 from .utils import get_kwh_val, round_f
 
@@ -167,6 +168,13 @@ class EnergyPermissionSensor(BinarySensorEntity):
                     attrs["predicted_cycle_end_time"] = end_dt.strftime("%H:%M:%S")
 
         self._attrs = attrs
+
+        # Add active sensor info if configured
+        active_ent = settings.get(CONF_ACTIVE_SENSOR)
+        if active_ent:
+            self._attrs["configured_active_sensor"] = active_ent
+            st_active = self.manager.hass.states.get(active_ent)
+            self._attrs["active_sensor_state"] = st_active.state if st_active else "unknown"
 
         # Add current power only if configured
         if settings.get(CONF_POWER_SENSOR):
