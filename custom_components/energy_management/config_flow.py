@@ -39,7 +39,99 @@ from .const import (
 
 from homeassistant.core import callback
 
-class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class EnergyManagementFlowMixin:
+    """Helper for shared steps between Config and Options flows."""
+    async def _async_step_deduct_settings_logic(self, user_input=None):
+        """Shared logic for both flows to handle sensor settings looping."""
+        errors = {}
+        deduct_sensors = self._user_input.get(CONF_DEDUCT_SENSORS, [])
+
+        if "deduct_settings_index" not in self._user_input:
+            self._user_input["deduct_settings_index"] = 0
+            if CONF_DEDUCT_SETTINGS not in self._user_input:
+                self._user_input[CONF_DEDUCT_SETTINGS] = {}
+            
+        idx = self._user_input["deduct_settings_index"]
+
+        if idx >= len(deduct_sensors):
+            self._user_input.pop("deduct_settings_index", None)
+            if hasattr(self, "async_step_investment_settings"):
+                return await self.async_step_investment_settings()
+            return self.async_show_form(step_id="user")
+
+        current_sensor = deduct_sensors[idx]
+
+        if user_input is not None:
+            self._user_input[CONF_DEDUCT_SETTINGS][current_sensor] = {
+                "name": user_input.get("name", current_sensor.split('.')[-1].replace('_', ' ').title()),
+                "priority": user_input.get("priority", 1),
+                "required_kwh": user_input.get("required_kwh", 0.0),
+                "required_kw": user_input.get("required_kw", 0.0),
+                CONF_ONLY_SOLAR: user_input.get(CONF_ONLY_SOLAR, False),
+                CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
+                CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
+                CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
+                CONF_ACTIVE_SENSOR: user_input.get(CONF_ACTIVE_SENSOR),
+            }
+            self._user_input["deduct_settings_index"] += 1
+            return await self._async_step_deduct_settings_logic()
+
+        # Search hierarchically: Flow edits (highest) > Entry Options > Entry Data (lowest)
+        all_settings = {}
+        
+        entry = getattr(self, "config_entry", None)
+        if entry:
+            if entry.data:
+                all_settings.update(entry.data.get(CONF_DEDUCT_SETTINGS, {}))
+            if entry.options:
+                all_settings.update(entry.options.get(CONF_DEDUCT_SETTINGS, {}))
+
+        # Flow edits overlap (contains merged data/options + current edits)
+        all_settings.update(self._user_input.get(CONF_DEDUCT_SETTINGS, {}))
+
+        existing = all_settings.get(current_sensor, {})
+        if not isinstance(existing, dict):
+            existing = {}
+
+        def get_saved_str(key):
+            val = existing.get(key)
+            if not val or val == "undefined": return None
+            if isinstance(val, (list, tuple)): return str(val[0]) if val else None
+            return str(val)
+
+        sensor_display = current_sensor.replace("sensor.", "").replace("_", " ").title()
+        
+        schema_dict = {
+            vol.Optional("name", default=existing.get("name", sensor_display)): str,
+            vol.Required("priority", default=existing.get("priority", 1)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+            vol.Required("required_kwh", default=existing.get("required_kwh", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
+            vol.Required("required_kw", default=existing.get("required_kw", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
+            vol.Optional(CONF_ONLY_SOLAR, default=existing.get(CONF_ONLY_SOLAR, False)): bool,
+        }
+
+        # Power Sensor Selector
+        p_val = get_saved_str(CONF_POWER_SENSOR)
+        schema_dict[vol.Optional(CONF_POWER_SENSOR, default=p_val) if p_val else vol.Optional(CONF_POWER_SENSOR)] = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor")
+        )
+
+        schema_dict[vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=120))
+        schema_dict[vol.Optional(CONF_IS_CYCLIC, default=existing.get(CONF_IS_CYCLIC, False))] = bool
+
+        # Active Sensor Selector
+        a_val = get_saved_str(CONF_ACTIVE_SENSOR)
+        schema_dict[vol.Optional(CONF_ACTIVE_SENSOR, default=a_val) if a_val else vol.Optional(CONF_ACTIVE_SENSOR)] = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="binary_sensor")
+        )
+
+        return self.async_show_form(
+            step_id="deduct_settings",
+            data_schema=vol.Schema(schema_dict),
+            errors=errors,
+            description_placeholders={"sensor_name": sensor_display}
+        )
+
+class EnergyManagementConfigFlow(config_entries.ConfigFlow, EnergyManagementFlowMixin, domain=DOMAIN):
     """Handle a config flow for Energy Management."""
 
     VERSION = 1
@@ -129,82 +221,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_deduct_settings(self, user_input=None):
         """Handle settings for deducted sensors (Priority and Energy)."""
-        errors = {}
-        deduct_sensors = self._user_input.get(CONF_DEDUCT_SENSORS, [])
-
-        if "deduct_settings_index" not in self._user_input:
-            self._user_input["deduct_settings_index"] = 0
-            if CONF_DEDUCT_SETTINGS not in self._user_input:
-                self._user_input[CONF_DEDUCT_SETTINGS] = {}
-            
-        idx = self._user_input["deduct_settings_index"]
-
-        if idx >= len(deduct_sensors):
-            # Clean up temporary index
-            self._user_input.pop("deduct_settings_index", None)
-            return await self.async_step_investment_settings()
-
-        current_sensor = deduct_sensors[idx]
-
-        if user_input is not None:
-            # Save settings for this sensor
-            self._user_input[CONF_DEDUCT_SETTINGS][current_sensor] = {
-                "name": user_input.get("name", current_sensor.split('.')[-1].replace('_', ' ').title()),
-                "priority": user_input.get("priority", 1),
-                "required_kwh": user_input.get("required_kwh", 0.0),
-                "required_kw": user_input.get("required_kw", 0.0),
-                CONF_ONLY_SOLAR: user_input.get(CONF_ONLY_SOLAR, False),
-                CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
-                CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
-                CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
-                CONF_ACTIVE_SENSOR: user_input.get(CONF_ACTIVE_SENSOR),
-            }
-            self._user_input["deduct_settings_index"] += 1
-            return await self.async_step_deduct_settings()
-
-        # Build schema for this sensor
-        existing = self._user_input.get(CONF_DEDUCT_SETTINGS, {}).get(current_sensor, {})
-        if not isinstance(existing, dict):
-            existing = {}
-
-        # Helper to safely extract string values for EntitySelectors
-        def get_saved_str(key):
-            val = existing.get(key)
-            if not val or val == "undefined": return None
-            if isinstance(val, (list, tuple)): return str(val[0]) if val else None
-            return str(val)
-
-        sensor_display = current_sensor.replace("sensor.", "").replace("_", " ").title()
-        
-        # Build schema using a more stable pattern
-        schema_dict = {
-            vol.Optional("name", default=existing.get("name", sensor_display)): str,
-            vol.Required("priority", default=existing.get("priority", 1)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-            vol.Required("required_kwh", default=existing.get("required_kwh", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
-            vol.Required("required_kw", default=existing.get("required_kw", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
-            vol.Optional(CONF_ONLY_SOLAR, default=existing.get(CONF_ONLY_SOLAR, False)): bool,
-        }
-
-        # Selectors
-        p_val = get_saved_str(CONF_POWER_SENSOR)
-        schema_dict[vol.Optional(CONF_POWER_SENSOR, default=p_val) if p_val else vol.Optional(CONF_POWER_SENSOR)] = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="sensor")
-        )
-
-        schema_dict[vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=120))
-        schema_dict[vol.Optional(CONF_IS_CYCLIC, default=existing.get(CONF_IS_CYCLIC, False))] = bool
-
-        a_val = get_saved_str(CONF_ACTIVE_SENSOR)
-        schema_dict[vol.Optional(CONF_ACTIVE_SENSOR, default=a_val) if a_val else vol.Optional(CONF_ACTIVE_SENSOR)] = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="binary_sensor")
-        )
-
-        return self.async_show_form(
-            step_id="deduct_settings",
-            data_schema=vol.Schema(schema_dict),
-            errors=errors,
-            description_placeholders={"sensor_name": sensor_display}
-        )
+        return await self._async_step_deduct_settings_logic(user_input)
 
     async def async_step_investment_settings(self, user_input=None):
         """Handle investment and ROI settings."""
@@ -226,7 +243,7 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
         )
 
-class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
+class EnergyManagementOptionsFlow(config_entries.OptionsFlow, EnergyManagementFlowMixin):
     """Handle options flow."""
 
     def __init__(self, config_entry):
@@ -343,78 +360,5 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
         )
 
     async def async_step_deduct_settings(self, user_input=None):
-        """Handle settings for deducted sensors in options flow."""
-        errors = {}
-        deduct_sensors = self._user_input.get(CONF_DEDUCT_SENSORS, [])
-
-        if "deduct_settings_index" not in self._user_input:
-            self._user_input["deduct_settings_index"] = 0
-            if CONF_DEDUCT_SETTINGS not in self._user_input:
-                self._user_input[CONF_DEDUCT_SETTINGS] = {}
-            
-        idx = self._user_input["deduct_settings_index"]
-
-        if idx >= len(deduct_sensors):
-            self._user_input.pop("deduct_settings_index", None)
-            return await self.async_step_investment_settings()
-
-        current_sensor = deduct_sensors[idx]
-
-        if user_input is not None:
-            self._user_input[CONF_DEDUCT_SETTINGS][current_sensor] = {
-                "name": user_input.get("name", current_sensor.split('.')[-1].replace('_', ' ').title()),
-                "priority": user_input.get("priority", 1),
-                "required_kwh": user_input.get("required_kwh", 0.0),
-                "required_kw": user_input.get("required_kw", 0.0),
-                CONF_ONLY_SOLAR: user_input.get(CONF_ONLY_SOLAR, False),
-                CONF_POWER_SENSOR: user_input.get(CONF_POWER_SENSOR),
-                CONF_ACTIVE_HOLD_TIME: user_input.get(CONF_ACTIVE_HOLD_TIME, 15),
-                CONF_IS_CYCLIC: user_input.get(CONF_IS_CYCLIC, False),
-                CONF_ACTIVE_SENSOR: user_input.get(CONF_ACTIVE_SENSOR),
-            }
-            self._user_input["deduct_settings_index"] += 1
-            return await self.async_step_deduct_settings()
-
-        # Build schema for this sensor
-        existing = self._user_input.get(CONF_DEDUCT_SETTINGS, {}).get(current_sensor, {})
-        if not isinstance(existing, dict):
-            existing = {}
-
-        # Helper to safely extract string values for EntitySelectors
-        def get_saved_str(key):
-            val = existing.get(key)
-            if not val or val == "undefined": return None
-            if isinstance(val, (list, tuple)): return str(val[0]) if val else None
-            return str(val)
-
-        sensor_display = current_sensor.replace("sensor.", "").replace("_", " ").title()
-        
-        # Build schema using a more stable pattern
-        schema_dict = {
-            vol.Optional("name", default=existing.get("name", sensor_display)): str,
-            vol.Required("priority", default=existing.get("priority", 1)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-            vol.Required("required_kwh", default=existing.get("required_kwh", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
-            vol.Required("required_kw", default=existing.get("required_kw", 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
-            vol.Optional(CONF_ONLY_SOLAR, default=existing.get(CONF_ONLY_SOLAR, False)): bool,
-        }
-
-        # Selectors
-        p_val = get_saved_str(CONF_POWER_SENSOR)
-        schema_dict[vol.Optional(CONF_POWER_SENSOR, default=p_val) if p_val else vol.Optional(CONF_POWER_SENSOR)] = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="sensor")
-        )
-
-        schema_dict[vol.Optional(CONF_ACTIVE_HOLD_TIME, default=existing.get(CONF_ACTIVE_HOLD_TIME, 15))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=120))
-        schema_dict[vol.Optional(CONF_IS_CYCLIC, default=existing.get(CONF_IS_CYCLIC, False))] = bool
-
-        a_val = get_saved_str(CONF_ACTIVE_SENSOR)
-        schema_dict[vol.Optional(CONF_ACTIVE_SENSOR, default=a_val) if a_val else vol.Optional(CONF_ACTIVE_SENSOR)] = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="binary_sensor")
-        )
-
-        return self.async_show_form(
-            step_id="deduct_settings",
-            data_schema=vol.Schema(schema_dict),
-            errors=errors,
-            description_placeholders={"sensor_name": sensor_display}
-        )
+        """Handle settings for deducted sensors (Priority and Energy)."""
+        return await self._async_step_deduct_settings_logic(user_input)
