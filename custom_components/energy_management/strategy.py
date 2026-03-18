@@ -778,9 +778,14 @@ class StrategyEngine:
                     wt_filtered = {h: p for h, p in today_prices.items() if float(normalize_float(p)) <= buy_limit or (dynamic_buy_ai and is_buy_profitable_arb(float(normalize_float(p)), int(h)))}
                     wom_filtered = {h: p for h, p in tomorrow_prices.items() if float(normalize_float(p)) <= buy_limit or (dynamic_buy_ai and is_buy_profitable_arb(float(normalize_float(p)), int(h) + 24))}
                     
-                    peaks_today = get_peaks(wt_filtered, False, 999.0, tolerance)
-                    peaks_tom = get_peaks(wom_filtered, False, 999.0, tolerance)
-                    combined = peaks_today + peaks_tom
+                    if not dynamic_buy_ai:
+                        # Use all hours meeting the limit
+                        combined = [(int(h), float(p)) for h, p in today_prices.items() if float(normalize_float(p)) <= buy_limit]
+                        combined += [(int(h) + 24, float(p)) for h, p in tomorrow_prices.items() if float(normalize_float(p)) <= buy_limit]
+                    else:
+                        peaks_today = get_peaks(wt_filtered, False, 999.0, tolerance)
+                        peaks_tom = get_peaks(wom_filtered, False, 999.0, tolerance)
+                        combined = peaks_today + peaks_tom
                     
                     if combined:
                         target_hours = [int(h) for h, p in combined]
@@ -814,17 +819,22 @@ class StrategyEngine:
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
-                    peaks_today = []
-                    for h, p in raw_peaks_today:
-                        ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h))
-                        if float(normalize_float(p)) >= sell_limit or (dynamic_sell_ai and ok_arb):
-                            peaks_today.append((int(h), float(normalize_float(p))))
-                            
-                    peaks_tom = []
-                    for h, p in raw_peaks_tom:
-                        ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h) + 24)
-                        if float(normalize_float(p)) >= sell_limit or (dynamic_sell_ai and ok_arb):
-                            peaks_tom.append((int(h) + 24, float(normalize_float(p))))
+                    if not dynamic_sell_ai:
+                        # Use all hours meeting the limit
+                        peaks_today = [(int(h), float(p)) for h, p in today_prices.items() if float(normalize_float(p)) >= sell_limit]
+                        peaks_tom = [(int(h) + 24, float(p)) for h, p in tomorrow_prices.items() if float(normalize_float(p)) >= sell_limit]
+                    else:
+                        peaks_today = []
+                        for h, p in raw_peaks_today:
+                            ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h))
+                            if float(normalize_float(p)) >= sell_limit or ok_arb: # when AI is on, any arb or limit peak is ok
+                                peaks_today.append((int(h), float(normalize_float(p))))
+                                
+                        peaks_tom = []
+                        for h, p in raw_peaks_tom:
+                            ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h) + 24)
+                            if float(normalize_float(p)) >= sell_limit or ok_arb:
+                                peaks_tom.append((int(h) + 24, float(normalize_float(p))))
                     
                     if not peaks_today and not peaks_tom:
                         res["state"] = "price_limit_not_met"
