@@ -545,11 +545,15 @@ class StrategyEngine:
                 target_kwh = float(s_conf.get("required_kwh", 2.0))
                 
                 if day_sim_consumed.get(s_id_s, 0.0) < target_kwh:
+                    only_solar = bool(s_conf.get(CONF_ONLY_SOLAR, False))
                     p_draw = 0.0
                     if sc_is_running and not is_tom:
                         p_draw = float(p_kw)
                     elif not bool(s_conf.get(CONF_IS_CYCLIC, False)):
                         p_draw = float(p_kw)
+                    
+                    if only_solar and expected_gen_kw < float(p_draw * 0.5):
+                        p_draw = 0.0 # Solar only loads don't run at night/cloudy in sim
                     
                     if p_draw > 0.001:
                         active_m_p += p_draw
@@ -1103,6 +1107,22 @@ class StrategyEngine:
                     rem_solar_today = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
                     total_solar_to_8am = rem_solar_today + morning_solar_ac
                     
+                    # Also count energy for non-solar-only managed loads until 8 AM
+                    # These loads WILL drain the battery at night, unlike ONLY_SOLAR loads.
+                    managed_needed_8am = 0.0
+                    sorted_loads = man.deduct_settings.items()
+                    for s_id, s_conf in sorted_loads:
+                        if not isinstance(s_conf, dict): continue
+                        if bool(s_conf.get(CONF_ONLY_SOLAR, False)):
+                            continue # Solar-only loads don't drain batt at night
+                        
+                        _, rem_kwh, is_cyclic, _ = man.get_managed_load_stats(str(s_id))
+                        # Today's remaining
+                        managed_needed_8am += float(rem_kwh)
+                        # Tomorrow 0-8 AM (entire required amount for non-cyclic)
+                        if not bool(s_conf.get(CONF_IS_CYCLIC, False)):
+                            managed_needed_8am += float(s_conf.get("required_kwh", 2.0))
+                    
                     # Replacement Cost Logic: 
                     # If we sell now, and tomorrow morning we have EXCESS solar (more than house needs), 
                     # then the "cost" of that energy is 0 (it would have been sold anyway).
@@ -1120,7 +1140,7 @@ class StrategyEngine:
                     # Energy pool (AC) for the rest of today and tomorrow morning
                     pool_ac = (batt_energy_val * eff) + total_solar_to_8am
                     # Energy mandatory for house and the 8 AM target floor
-                    needs_ac = total_cons_to_8am + (target_8am_soc * b_cap / 100.0 * eff)
+                    needs_ac = total_cons_to_8am + managed_needed_8am + (target_8am_soc * b_cap / 100.0 * eff)
                     
                     available_sell_ac = float(max(0.0, pool_ac - needs_ac))
                     
