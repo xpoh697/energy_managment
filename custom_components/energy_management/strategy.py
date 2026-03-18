@@ -774,8 +774,9 @@ class StrategyEngine:
                         if not future_sell: return False
                         return float((max(future_sell) - buy_p) * eff) >= threshold
 
-                    wt_filtered = {h: p for h, p in today_prices.items() if float(normalize_float(p)) <= buy_limit or is_buy_profitable_arb(float(normalize_float(p)), int(h))}
-                    wom_filtered = {h: p for h, p in tomorrow_prices.items() if float(normalize_float(p)) <= buy_limit or is_buy_profitable_arb(float(normalize_float(p)), int(h) + 24)}
+                    dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
+                    wt_filtered = {h: p for h, p in today_prices.items() if float(normalize_float(p)) <= buy_limit or (dynamic_buy_ai and is_buy_profitable_arb(float(normalize_float(p)), int(h)))}
+                    wom_filtered = {h: p for h, p in tomorrow_prices.items() if float(normalize_float(p)) <= buy_limit or (dynamic_buy_ai and is_buy_profitable_arb(float(normalize_float(p)), int(h) + 24))}
                     
                     peaks_today = get_peaks(wt_filtered, False, 999.0, tolerance)
                     peaks_tom = get_peaks(wom_filtered, False, 999.0, tolerance)
@@ -787,7 +788,7 @@ class StrategyEngine:
                         res["target_price"] = target_price
                         
                         is_arb_window = any(is_buy_profitable_arb(p, h) for h, p in combined)
-                        if not any(float(normalize_float(p)) <= buy_limit for h, p in combined) or is_arb_window:
+                        if dynamic_buy_ai and (not any(float(normalize_float(p)) <= buy_limit for h, p in combined) or is_arb_window):
                             res["state"] = "preparing_arbitrage"
                 res["arbitrage_decision"] = global_arb_note
             else: # sell
@@ -812,16 +813,17 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
+                    dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     peaks_today = []
                     for h, p in raw_peaks_today:
                         ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h))
-                        if float(normalize_float(p)) >= sell_limit or ok_arb:
+                        if float(normalize_float(p)) >= sell_limit or (dynamic_sell_ai and ok_arb):
                             peaks_today.append((int(h), float(normalize_float(p))))
                             
                     peaks_tom = []
                     for h, p in raw_peaks_tom:
                         ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h) + 24)
-                        if float(normalize_float(p)) >= sell_limit or ok_arb:
+                        if float(normalize_float(p)) >= sell_limit or (dynamic_sell_ai and ok_arb):
                             peaks_tom.append((int(h) + 24, float(normalize_float(p))))
                     
                     if not peaks_today and not peaks_tom:
@@ -829,7 +831,7 @@ class StrategyEngine:
                         res["multi_cycle"] = "Не предвидится"
                         res["arbitrage_decision"] = "Нет ценового окна"
                     else:
-                        if not any(p >= sell_limit for h, p in peaks_today + peaks_tom):
+                        if dynamic_sell_ai and not any(p >= sell_limit for h, p in peaks_today + peaks_tom):
                             res["state"] = "preparing_arbitrage"
                         
                         if peaks_today and peaks_tom:
@@ -999,9 +1001,10 @@ class StrategyEngine:
                     if peak_hour is not None and (best_peak_p - cheapest_buy_in_window) * eff >= strict_threshold:
                         is_strict_arb = True
                     
+                    dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
                     if negative_hours:
                         target_soc = 100.0
-                    elif is_strict_arb:
+                    elif dynamic_buy_ai and is_strict_arb:
                         # ADAPTIVE TARGET: Only buy what the sun won't provide until the peak starts
                         # Run a 'dry' simulation to see what SOC we hit by peak_hour WITHOUT buying from grid
                         sim_range_dry = list(range(cur_hour, int(peak_hour)))
@@ -1013,7 +1016,7 @@ class StrategyEngine:
                             target_soc = float(min(100.0, 100.0 - sun_gain))
                         else:
                             target_soc = 100.0
-                    elif man.get_setting(CONF_DYNAMIC_SOC_BUY, True):
+                    elif dynamic_buy_ai:
                         budget_data = self.get_budget_and_permissions(man.custom_period, skip_strategy_check=True)
                         if budget_data:
                             expected_night_val = budget_data.get("expected_consumption", 0.0)
@@ -1154,10 +1157,13 @@ class StrategyEngine:
                     # 3. Availability and Power Recommendation
                     # Energy pool (AC) for the rest of today and tomorrow morning
                     pool_ac = (batt_energy_val * eff) + total_solar_to_8am
-                    # Energy mandatory for house and the 8 AM target floor
-                    needs_ac = total_cons_to_8am + managed_needed_8am + (target_8am_soc * b_cap / 100.0 * eff)
-                    
-                    available_sell_ac = float(max(0.0, pool_ac - needs_ac))
+                    if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                        # Energy mandatory for house and the 8 AM target floor
+                        needs_ac = total_cons_to_8am + managed_needed_8am + (target_8am_soc * b_cap / 100.0 * eff)
+                        available_sell_ac = float(max(0.0, pool_ac - needs_ac))
+                    else:
+                        # Simple mode: energy above target SOC is sellable
+                        available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
                     
                     # Determine if we are in one of the selected Peak Hours
                     is_in_peak = bool(cur_hour in target_hours_sorted)
@@ -1199,7 +1205,10 @@ class StrategyEngine:
                     
                     # If arbitrage is best, we can go down to base_target (e.g. 13%)
                     # If NOT, we MUST stay above ai_soc_midnight_floor (e.g. 23%)
-                    target_soc = float(base_target if arbitrage_is_best else max(base_target, ai_soc_midnight_floor))
+                    if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                        target_soc = float(base_target if arbitrage_is_best else max(base_target, ai_soc_midnight_floor))
+                    else:
+                        target_soc = base_target
                     
                     # Ensure global_arb_note is always consistent
                     best_buy_p, best_buy_h = get_best_buyback(cur_hour)
@@ -1209,7 +1218,10 @@ class StrategyEngine:
                     else:
                         global_arb_note = "Нет окна откупа"
 
-                    res["arbitrage_decision"] = f"{decision_tag} | {global_arb_note}"
+                    if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                        res["arbitrage_decision"] = f"{decision_tag} | {global_arb_note}"
+                    else:
+                        res["arbitrage_decision"] = "Ручной режим (AI выкл.)"
                     target_soc = float(min(100.0, target_soc))
                     delta_available_dc = available_sell_ac / eff
 
