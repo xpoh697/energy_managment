@@ -274,27 +274,42 @@ class StrategyEngine:
             hist_gen_so_far = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(cur_hour + 1)))
             total_hist_gen = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(24)))
             
-            # Historical forecast vs real average
-            hist_coeff = float(forecast_val / total_hist_gen) if total_hist_gen > 0.1 else 1.0
+            # --- Improved Performance Coefficients (v4.0) ---
+            # A. Calculate Historical Average Performance from history list
+            hist_recs = man.data.get("forecast_history", [])
+            perf_list = []
+            for rec in hist_recs:
+                act = float(rec.get("actual", 0))
+                fct = float(rec.get("forecast", 0))
+                if fct > 0.1:
+                    perf_list.append(max(0.3, min(act / fct, 1.5)))
+            
+            hist_coeff = float(sum(perf_list) / len(perf_list)) if perf_list else 1.0
             actual_today = float(man.data.get("temp_daily_gen", 0.0) or 0.0)
             
             fraction_so_far = float(hist_gen_so_far / total_hist_gen) if total_hist_gen > 0.1 else 0.0
             predicted_total = float(actual_today + forecast_val)
-            # Update the stored max forecast if the new prediction is higher (or initialized)
+            
+            # temp_max_forecast: High-water mark for the day's forecast
             if predicted_total > (self.manager.data.get("temp_max_forecast", 0.0) or 0.0):
                 self.manager.data["temp_max_forecast"] = float(predicted_total)
             
-            # v3.1 - Improved Blended Coefficient
-            expected_today_total = float(man.data.get("temp_max_forecast", 0.0) or 0.0)
-            expected_today_so_far = float(expected_today_total * fraction_so_far)
+            expected_today_total = float(man.data.get("temp_max_forecast", 0.0) or 0.1)
             
-            performance_coeff = 1.0
-            if expected_today_so_far > 0.1:
-                performance_coeff = float(actual_today / expected_today_so_far)
-                performance_coeff = float(max(0.2, min(performance_coeff, 2.0)))
+            # B. Today's Performance (Current Estimate vs Morning Promise)
+            # This avoids 'timing shift' errors because it doesn't care about the hourly distribution curves.
+            today_coeff = 1.0
+            if expected_today_total > 0.5:
+                today_coeff = float(max(0.2, min(predicted_total / expected_today_total, 2.0)))
             
-            today_coeff = performance_coeff
-            blended_coeff = float((performance_coeff * fraction_so_far) + (1.0 * (1.0 - fraction_so_far)))
+            # C. Blended Coeff: Weighted average of Today vs History
+            # We trust today's data more as the day progresses (fraction_so_far).
+            # The 'base' to blend with is the Historical Performance, not an ideal 1.0.
+            blended_coeff = float((today_coeff * fraction_so_far) + (hist_coeff * (1.0 - fraction_so_far)))
+            
+            # Safety guards
+            blended_coeff = float(max(0.3, min(blended_coeff, 1.5)))
+            
             man.last_blended_coeff = blended_coeff
             forecast_val_adjusted = float(forecast_val * blended_coeff)
                 
