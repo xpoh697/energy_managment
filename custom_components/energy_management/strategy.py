@@ -383,8 +383,12 @@ class StrategyEngine:
                 potential_gen = float(max(gen_kw, f_potential))
                 waste_kw = float(max(0.0, potential_gen - gen_kw))
 
-                # If we are importing, we aren't wasting solar surplus
-                if initial_power_kw < -0.1:
+                # Special fix: Solar waste is only possible in 'stop_sale' mode or if we are not importing.
+                # If we are in 'sale_pv' mode, any surplus is exported, so no "waste" occurs.
+                is_stop_sale = getattr(man, "current_inverter_mode", "") == "stop_sale"
+                
+                # If we are importing or NOT in stop_sale, we aren't wasting solar surplus
+                if initial_power_kw < -0.1 or not is_stop_sale:
                     waste_kw = 0.0
                 
                 if man.battery_power_sensor:

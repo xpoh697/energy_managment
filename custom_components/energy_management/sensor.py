@@ -858,13 +858,15 @@ class EnergyProfileManager:
             potential_kw = float(max(potential_kw, current_gen))
             
             # Waste occurs if: 
-            # 1. Battery is full (>= 95%) 
-            # 2. We are NOT exporting (throttled/limited)
-            # 3. We are NOT importing (House load is fully covered by PV)
+            # 1. Inverter is in 'stop_sale' mode (explicitly refusing to sell)
+            # 2. Battery is full (>= 95%) 
+            # 3. We are NOT exporting (throttled/limited)
+            # 4. We are NOT importing (House load is fully covered by PV)
+            is_stop_sale = getattr(self, "current_inverter_mode", "") == "stop_sale"
             is_exporting = float(grid_p) > 0.1 if self.grid_power_sensor else False
             is_importing = float(grid_p) < -0.1 if self.grid_power_sensor else False
             
-            if soc_f >= 95.0 and not is_exporting and not is_importing and potential_kw > (current_gen + 0.1):
+            if is_stop_sale and soc_f >= 95.0 and not is_exporting and not is_importing and potential_kw > (current_gen + 0.1):
                 waste_kw = float(max(0.0, potential_kw - current_gen))
                 # Sanity check: cap waste at 20kW
                 waste_kw = float(min(waste_kw, 20.0))
