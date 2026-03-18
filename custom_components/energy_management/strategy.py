@@ -302,17 +302,20 @@ class StrategyEngine:
             if expected_today_total > 0.5:
                 today_coeff = float(max(0.2, min(predicted_total / expected_today_total, 2.0)))
             
-            # --- Curtailment Correction (v4.1) ---
-            # If we are in 'stop_sale' mode (export forbidden), the inverter chokes PV panels
-            # to match local load. In this case, 'actual_today' is artificially low.
-            is_curtailed = getattr(man, "current_inverter_mode", "") == "stop_sale"
-            if is_curtailed and today_coeff < 1.0:
-                # If we suspect curtailment, we trust the history or raw forecast more 
-                # than today's "choked" performance.
-                old_today = today_coeff
-                today_coeff = max(today_coeff, hist_coeff, 1.0)
-                if abs(today_coeff - old_today) > 0.01:
-                    _LOGGER.debug(f"[Strategy] Curtailment detected (mode={man.current_inverter_mode}). Corrected today_coeff: {old_today:.2f} -> {today_coeff:.2f}")
+            # --- Curtailment Correction (v4.2) ---
+            # The inverter only chokes PV panels in 'stop_sale' mode if there is "no room for energy"
+            # (i.e., battery is full or nearly full).
+            is_stop_sale = getattr(man, "current_inverter_mode", "") == "stop_sale"
+            if is_stop_sale and today_coeff < 1.0:
+                # Check if battery is full enough to cause curtailment
+                b_soc_cur, _, _ = man.get_battery_state()
+                if b_soc_cur > 95:
+                    # We suspect curtailment because export is forbidden AND battery is full.
+                    # In this case, frozen high-water performance (or at least 1.0/history) is used.
+                    old_today = today_coeff
+                    today_coeff = max(today_coeff, hist_coeff, 1.0)
+                    if abs(today_coeff - old_today) > 0.01:
+                        _LOGGER.debug(f"[Strategy] Curtailment detected (mode=stop_sale, SOC={b_soc_cur}%). Corrected today_coeff: {old_today:.2f} -> {today_coeff:.2f}")
 
             # C. Blended Coeff: Weighted average of Today vs History
             # We trust today's data more as the day progresses (using the external forecast's own timing).
