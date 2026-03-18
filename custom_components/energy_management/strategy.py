@@ -705,7 +705,12 @@ class StrategyEngine:
                 best_h = min(options, key=lambda k: options[k])
                 return float(options[best_h]), int(best_h)
 
-            best_arb_pair = (-1, -1)
+            # Find the absolute best buy hour for use in simulation windows
+            _bb_options = [h for h in all_buy_prices if h >= cur_hour]
+            _bb_h = min(_bb_options, key=lambda h: all_buy_prices[h]) if _bb_options else None
+            best_buy_pair = (all_buy_prices[_bb_h], _bb_h) if _bb_h is not None else (999.0, None)
+
+            best_arb_pair = (None, None)
             max_arb_gain = -999.0
             for h_s, p_s in all_sell_prices.items():
                 if int(h_s) < cur_hour: continue
@@ -849,7 +854,7 @@ class StrategyEngine:
                         elif cur_gain >= threshold: status = "Продажа (Арбитраж)"
                         
                         detail = f"Сейчас {cur_p_f:.2f}. {global_arb_note}"
-                        if best_arb_pair[0] is not None and best_arb_pair[0] > cur_hour and all_sell_prices[best_arb_pair[0]] > cur_p_f + 0.01:
+                        if best_arb_pair[0] is not None and best_arb_pair[0] > cur_hour and all_sell_prices.get(best_arb_pair[0], 0) > cur_p_f + 0.01:
                              detail += f" | Ждем главного пика в {self._format_h(best_arb_pair[0])}"
                         
                         res["arbitrage_decision"] = f"{status}: {detail}"
@@ -867,7 +872,10 @@ class StrategyEngine:
                 target_hours = truncated
 
             # Survival Logic
-            if mode == "buy" and b_cap > 0 and man.get_setting(CONF_DYNAMIC_SOC_BUY, True) and active_window:
+            if mode == "buy" and b_cap > 0 and man.get_setting(CONF_DYNAMIC_SOC_BUY, True):
+                # Adaptive active_window for buy mode: current hour until next sell peak for the arbitrage window
+                active_window = (best_buy_pair[1], best_arb_pair[0]) if best_arb_pair[0] is not None else (best_buy_pair[1], int(best_buy_pair[1] or 0) + 1)
+                
                 min_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
                 natural_hours_names = set(target_hours)
                 survival_hours = set(target_hours)
@@ -876,8 +884,10 @@ class StrategyEngine:
                 while safety_counter < 48:
                     safety_counter += 1
                     added_bridge = False
+                    # Plan simulation from actual start of charging until next significant sell peak
+                    _win_end = int(best_arb_pair[0]) if best_arb_pair[0] is not None and int(best_arb_pair[0]) > cur_hour else int(max(all_buy_prices.keys()) if all_buy_prices else 23)
+                    sim_range = list(range(cur_hour, _win_end + 1))
                     commands = {h_cmd: max_p for h_cmd in survival_hours}
-                    sim_range = list(range(cur_hour, int(active_window[1]) + 1))
                     _, log = self.run_soc_simulation(b_soc, sim_range, now, commands)
                     
                     violation_hour = None
