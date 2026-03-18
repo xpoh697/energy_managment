@@ -3186,8 +3186,8 @@ class GridBalanceSensor(SensorEntity):
             st = self.manager.hass.states.get(self.manager.grid_power_sensor)
             val = get_kwh_val(st)
             if val is not None:
-                # Flip sign: User (+import, -export) -> Component (+export, -import)
-                return round_f(-float(val), 3)
+                # Return direct value (assuming +import, -export as requested)
+                return round_f(float(val), 3)
 
         # Fallback: calculate from (Gen + Batt - Load)
         load_kw = self.manager.avg_load_kw
@@ -3197,8 +3197,8 @@ class GridBalanceSensor(SensorEntity):
             batt_st = self.manager.hass.states.get(self.manager.battery_power_sensor)
             batt_p = get_kwh_val(batt_st) or 0.0
 
-        # Conv: positive is export, negative is import
-        balance = gen_kw + batt_p - load_kw
+        # Conv (User): positive is import, negative is export
+        balance = load_kw - (gen_kw + batt_p)
         return round_f(float(balance), 3)
 
     @property
@@ -3207,7 +3207,7 @@ class GridBalanceSensor(SensorEntity):
         return {
             "measurement_method": mode,
             "sensor_id": self.manager.grid_power_sensor or "None",
-            "convention": "Positive = Export, Negative = Import"
+            "convention": "Positive = Import, Negative = Export (+беру, -отдаю)"
         }
 
 
