@@ -219,6 +219,20 @@ class EnergyProfileManager:
     def day_type(self) -> str:
         """Determines if today is a weekday or weekend."""
         return "weekend" if self.now.weekday() >= 5 else "weekday"
+
+    @property
+    def avg_load_kw(self) -> float:
+        """Retrieve smoothed load power (last 10m)."""
+        if not self.power_history:
+            return 0.0
+        return sum(s.get("load_kw", 0.0) for s in self.power_history) / len(self.power_history)
+
+    @property
+    def avg_gen_kw(self) -> float:
+        """Retrieve smoothed generation power (last 10m)."""
+        if not self.power_history:
+            return 0.0
+        return sum(s.get("gen_kw", 0.0) for s in self.power_history) / len(self.power_history)
     
     data: Dict[str, Any]
     max_days: int
@@ -2166,12 +2180,22 @@ class InverterOperationModeSensor(SensorEntity):
                 target_reached = True
                 reason = f"Достигнут целевой заряд (Закуп: {fixed_buy['target_soc']}%)"
 
-        if batt_soc <= min_soc:
-            mode = "bat_emergency"
-            reason = f"Заряд батареи ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
-        elif is_buying_active and not target_reached:
+        # 1. Buy Priority (even over emergency)
+        if is_buying_active and not target_reached:
             mode = "buy"
             reason = f"Активна стратегия ПОКУПКИ"
+        # 2. Battery Emergency (Low SOC) — only discharges for PV surplus if available
+        elif batt_soc <= min_soc:
+            avg_load_kw = self.manager.avg_load_kw
+            avg_gen_kw = self.manager.avg_gen_kw
+            
+            if avg_gen_kw > (avg_load_kw + 0.1):
+                mode = "sale_pv"
+                reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), но есть излишек солнца ({round_f(avg_gen_kw - avg_load_kw, 2)} кВт)"
+            else:
+                mode = "bat_emergency"
+                reason = f"Заряд батареи ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
+        # 3. Market Sale
         elif is_selling_active and not target_reached:
             mode = "sale_pv_bat"
             reason = f"Активна стратегия ПРОДАЖИ"
