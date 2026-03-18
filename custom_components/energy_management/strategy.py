@@ -1,5 +1,5 @@
-"""Strategy Engine for Energy Management."""
 import logging
+_LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
 from homeassistant.util import dt as dt_util
@@ -118,9 +118,9 @@ class StrategyEngine:
                 l_val = float(normalize_float(l_v))
                 
                 if g_val > 0.01:
-                    sum_g = float(sum_g + g_val)
-                    sum_l = float(sum_l + l_val)
-                    smp_count = int(smp_count + 1)
+                    sum_g += g_val
+                    sum_l += l_val
+                    smp_count += 1
         
         if smp_count < 5 or sum_g < 0.1:
             return 1.0
@@ -302,6 +302,18 @@ class StrategyEngine:
             if expected_today_total > 0.5:
                 today_coeff = float(max(0.2, min(predicted_total / expected_today_total, 2.0)))
             
+            # --- Curtailment Correction (v4.1) ---
+            # If we are in 'stop_sale' mode (export forbidden), the inverter chokes PV panels
+            # to match local load. In this case, 'actual_today' is artificially low.
+            is_curtailed = getattr(man, "current_inverter_mode", "") == "stop_sale"
+            if is_curtailed and today_coeff < 1.0:
+                # If we suspect curtailment, we trust the history or raw forecast more 
+                # than today's "choked" performance.
+                old_today = today_coeff
+                today_coeff = max(today_coeff, hist_coeff, 1.0)
+                if abs(today_coeff - old_today) > 0.01:
+                    _LOGGER.debug(f"[Strategy] Curtailment detected (mode={man.current_inverter_mode}). Corrected today_coeff: {old_today:.2f} -> {today_coeff:.2f}")
+
             # C. Blended Coeff: Weighted average of Today vs History
             # We trust today's data more as the day progresses (using the external forecast's own timing).
             external_progress = 1.0 - (forecast_val / expected_today_total) if expected_today_total > 0.1 else fraction_so_far
