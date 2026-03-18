@@ -456,7 +456,7 @@ class StrategyEngine:
                 "expected_consumption": float(expected_consumption or 0.0),
                 "debug_actual_today": float(actual_today or 0.0),
                 "debug_expected_today_total": float(expected_today_total or 0.0),
-                "debug_expected_today_so_far": float(expected_today_so_far or 0.0),
+                "debug_expected_today_so_far": float(expected_today_total * fraction_so_far),
                 "debug_fraction_so_far": float(fraction_so_far or 0.0),
                 "occupancy_coefficient": float(occ_coeff or 1.0),
                 "efficiency_coefficient": float(eff_coeff or 1.0),
