@@ -1037,8 +1037,8 @@ class StrategyEngine:
                     min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
                     
-                    # House survivability: Target SOC at 08:00 AM (e.g. 13% un-reducible + 10% buffer = 23%)
-                    target_8am_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + 10.0
+                    # House survivability: Target SOC at 08:00 AM (e.g. 13% un-reducible + 15% buffer = 28%)
+                    target_8am_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + 15.0
                     
                     # AC Balance until 08:00 AM
                     # budget_data_sell.get("expected_consumption") ALREADY includes both today's remaining AND night until 8 AM
