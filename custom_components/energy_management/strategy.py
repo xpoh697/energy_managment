@@ -938,16 +938,37 @@ class StrategyEngine:
                 if mode == "buy":
                     base_target = float(man.get_setting(CONF_TARGET_SOC_BUY, 100.0))
                     
-                    is_p_arb = False
-                    if not negative_hours:
-                        def is_buy_profitable_arb_local(buy_p, hour):
-                            future_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > hour]
-                            if not future_sell: return False
-                            return float((max(future_sell) - buy_p) * eff) >= threshold
-                        is_p_arb = any(is_buy_profitable_arb_local(all_buy_prices[h], h) for h in target_hours_sorted)
-
-                    if negative_hours or is_p_arb: 
+                    is_strict_arb = False
+                    # Only buy for arbitrage if profit covers DOUBLE battery wear (charging + discharging)
+                    strict_threshold = max(threshold, 2 * deg_cost)
+                    
+                    # 1. Look for future sell peaks (arbitrage opportunities)
+                    future_sell_peaks = sorted([h for h, p in all_sell_prices.items() if h > cur_hour])
+                    best_peak_p = 0.0
+                    peak_hour = None
+                    if future_sell_peaks:
+                        best_peak_p = max(all_sell_prices[h] for h in future_sell_peaks)
+                        peak_hour = [h for h in future_sell_peaks if all_sell_prices[h] == best_peak_p][0]
+                    
+                    # 2. Check if pre-charging from current grid price is profitable against this peak
+                    cheapest_buy_in_window = min(float(all_buy_prices[h]) for h in target_hours_sorted if h >= cur_hour) if target_hours_sorted else 999.0
+                    if peak_hour is not None and (best_peak_p - cheapest_buy_in_window) * eff >= strict_threshold:
+                        is_strict_arb = True
+                    
+                    if negative_hours:
                         target_soc = 100.0
+                    elif is_strict_arb:
+                        # ADAPTIVE TARGET: Only buy what the sun won't provide until the peak starts
+                        # Run a 'dry' simulation to see what SOC we hit by peak_hour WITHOUT buying from grid
+                        sim_range_dry = list(range(cur_hour, int(peak_hour)))
+                        if sim_range_dry:
+                            expected_soc_at_peak, _ = self.run_soc_simulation(b_soc, sim_range_dry, now, commands=None)
+                            # We want to be at 100% at peak_hour. 
+                            # If solar alone gives us 20% gain, we only need to buy up to 80% now.
+                            sun_gain = max(0.0, expected_soc_at_peak - b_soc)
+                            target_soc = float(min(100.0, 100.0 - sun_gain))
+                        else:
+                            target_soc = 100.0
                     elif man.get_setting(CONF_DYNAMIC_SOC_BUY, True):
                         budget_data = self.get_budget_and_permissions(man.custom_period, skip_strategy_check=True)
                         if budget_data:
