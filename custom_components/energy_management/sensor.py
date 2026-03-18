@@ -856,11 +856,22 @@ class EnergyProfileManager:
                         if energy > 0.02 and duration > (1/60.0): # At least 20Wh and 1 minute
                             avg_p_w = (float(energy) * 1000.0) / float(duration)
                             if settings.get(CONF_IS_CYCLIC):
-                                self.learned_real_power[sensor_id] = round_f(float(avg_p_w), 1)
-                                self.learned_cycle_total_kwh[sensor_id] = round_f(float(energy), 3)
-                                self.learned_avg_cycle_power[sensor_id] = round_f(float(avg_p_w), 1)
+                                # Use EMA (Exponential Moving Average) to smooth learning
+                                # This prevents wild jumps in predictions due to one unusual cycle.
                                 
-                                # Update historical duration (EMA)
+                                # 1. Learned Real Power (used for availability forecasts)
+                                old_rp = float(self.learned_real_power.get(sensor_id, avg_p_w))
+                                self.learned_real_power[sensor_id] = round_f(old_rp * 0.7 + avg_p_w * 0.3, 1)
+                                
+                                # 2. Learned Cycle Total kWh
+                                old_kwh = float(self.learned_cycle_total_kwh.get(sensor_id, energy))
+                                self.learned_cycle_total_kwh[sensor_id] = round_f(old_kwh * 0.7 + energy * 0.3, 3)
+                                
+                                # 3. Learned Avg Cycle Power (used for UI display)
+                                old_ap = float(self.learned_avg_cycle_power.get(sensor_id, avg_p_w))
+                                self.learned_avg_cycle_power[sensor_id] = round_f(old_ap * 0.7 + avg_p_w * 0.3, 1)
+                                
+                                # 4. Update historical duration (EMA)
                                 dur_secs = (last_active - self.cycle_actual_start_time[sensor_id]).total_seconds()
                                 old_dur = float(self.learned_avg_cycle_duration.get(sensor_id, dur_secs))
                                 self.learned_avg_cycle_duration[sensor_id] = round_f(old_dur * 0.7 + dur_secs * 0.3, 0)
@@ -1164,6 +1175,13 @@ class EnergyProfileManager:
             self.data["last_reset_date"] = now.strftime("%Y-%m-%d")
             # Clear managed loads daily counters
             for s in self.daily_deduct_consumption:
+                # v4.5 - Support for midnight-crossing cycles
+                # If we are in the middle of a cycle, preserve what we've already counted today
+                # by setting the cycle start energy to a negative offset.
+                if s in self.cycle_energy_start:
+                    yesterday_acc = self.daily_deduct_consumption.get(s, 0.0) - self.cycle_energy_start.get(s, 0.0)
+                    self.cycle_energy_start[s] = -yesterday_acc
+                
                 self.daily_deduct_consumption[s] = 0.0
             
             # Record current balance as start-of-day baseline for the "Energy Wallet"
