@@ -2307,7 +2307,7 @@ class InverterOperationModeSensor(SensorEntity):
                 else:
                     reason = f"Цена ок, но моментально генерация не превышает потребление"
             else:
-                 reason = f"Блокировка sale_pv_no_bat: ограничение по времени (до {sale_pv_no_bat_max_hour}:00)"
+                 reason = f"Блокировка sale_pv_no_bat: ограничение по времени (до {int(sale_pv_no_bat_max_hour):02d}:00)"
 
         if mode == "buy":
             self._attr_extra_state_attributes["charge_target_soc"] = buy_strategy.get("charge_target_soc", 100.0)
