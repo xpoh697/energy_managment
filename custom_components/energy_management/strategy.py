@@ -1198,7 +1198,7 @@ class StrategyEngine:
                             natural_morning_soc = float(baseline_log.get(key_morning_sim, b_soc))
                         
                         # 2. Available energy is the extra above target_morning_soc
-                        extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc - 2.0) # 2% extra safety
+                        extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc)
                         available_sell_ac = float((extra_soc_pct * b_cap / 100.0) * eff)
                     else:
                         # Simple mode: energy above target SOC is sellable
@@ -1219,7 +1219,7 @@ class StrategyEngine:
                     # Floor calculation: SOC needed NOW to have target_morning_soc at Sunrise
                     # This must account for ALL needs (House + Managed - Solar) until then.
                     res_cons_dc = max(0.0, (total_cons_to_sunrise + managed_needed_sunrise) / eff - (total_solar_to_sunrise / 0.98))
-                    ai_soc_floor_reserve = target_morning_soc + (res_cons_dc / b_cap * 100.0) + 2.0 # +2% safety
+                    ai_soc_floor_reserve = target_morning_soc + (res_cons_dc / b_cap * 100.0)
                     
                     target_soc = float(max(base_target, ai_soc_floor_reserve))
                     
