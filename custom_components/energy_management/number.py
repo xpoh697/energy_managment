@@ -15,7 +15,8 @@ from .const import (
     CONF_TARGET_SOC_SELL,
     CONF_MIN_SOC_BUY,
     CONF_SALE_PV_NO_BAT_MAX_HOUR,
-    CONF_ARBITRAGE_MIN_PROFIT
+    CONF_ARBITRAGE_MIN_PROFIT,
+    CONF_SOC_BUFFER
 )
 
 async def async_setup_entry(hass, entry, async_add_entities):
