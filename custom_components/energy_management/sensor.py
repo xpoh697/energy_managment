@@ -2562,22 +2562,7 @@ class MarketStrategySensor(SensorEntity):
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
         # Determine the user-friendly mode string
-        current_mode = "Ожидание"
-        state = res.get("state", "idle")
-        active_hours = res.get("active_hours", [])
-
-        if state == "active":
-            rec_p = res.get("recommended_power_kw", 0.0)
-            if self.mode == "buy":
-                reason = res.get("charge_reason", "price")
-                if rec_p <= 0:
-                    current_mode = "Ожидание (Заряжено)"
-                elif reason == "survival":
-                    current_mode = "Зарядка (Экстренно)"
-                else:
-                    current_mode = "Зарядка (Дешевая цена)"
-            else:
-            current_mode = res.get("current_mode_text", "Ожидание")
+        current_mode = res.get("current_mode_text", "Ожидание")
 
         attrs = {
             "analyzed_window": res.get("analyzed_window", "Неизвестно"),
