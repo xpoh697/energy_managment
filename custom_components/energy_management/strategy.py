@@ -664,6 +664,15 @@ class StrategyEngine:
         
             res["today_prices"] = today_prices
             res["tomorrow_prices"] = tomorrow_prices
+
+            # Common data for all modes
+            avg_prof_gen = man.get_average_profile("generation", man.custom_period, "all")
+            sunrise_h = 8 # default fallback
+            for h in range(4, 12):
+                if float(normalize_float(avg_prof_gen.get(str(h), 0.0))) > 0.1:
+                    sunrise_h = h
+                    break
+            res["sunrise_hour"] = sunrise_h
             
             batt_soc, batt_cap, batt_energy_val = man.get_battery_state()
             b_soc = float(batt_soc)
@@ -1113,13 +1122,6 @@ class StrategyEngine:
                             budget_data_sell = budget_data_raw
                             eff_coeff_val = float(normalize_float(budget_data_sell.get("efficiency_coefficient", 1.0)))
                         
-                    # Dynamic sunrise detection: Find first hour tomorrow with generation > 0.1 kWh
-                    avg_prof_gen = man.get_average_profile("generation", man.custom_period, "all")
-                    sunrise_h = 8 # default fallback
-                    for h in range(4, 12):
-                        if float(normalize_float(avg_prof_gen.get(str(h), 0.0))) > 0.1:
-                            sunrise_h = h
-                            break
                     
                     # Correct reserve for House needs: Now -> Midnight -> Sunrise Tomorrow
                     rem_cons_today = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
@@ -1204,7 +1206,6 @@ class StrategyEngine:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
 
-                    res["sunrise_hour"] = sunrise_h  # Add to root for easier access
                     num_peaks_left = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
                     
                     # Determine if we are in one of the selected Peak Hours
