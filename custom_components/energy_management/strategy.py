@@ -1129,10 +1129,15 @@ class StrategyEngine:
                     # House survivability: Target SOC at 08:00 AM (e.g. 13% un-reducible + 15% buffer = 28%)
                     soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
                     
-                    # Adaptive buffer: 0% in morning (4-13), full buffer otherwise (evening/night)
-                    is_morning_solar = (4 <= cur_hour <= 13) and (man.get_expected_remaining("generation") > 0.5)
-                    active_buffer = 0.0 if is_morning_solar else soc_buffer_val
+                    # Adaptive buffer: 0% ONLY if ALL sale hours are in morning/day (4-13) with solar.
+                    # If any sale happens late (like 18:00), we MUST keep the buffer to survive the night.
+                    is_evening_sale = any(h > 13 for h in target_hours_sorted) if target_hours_sorted else True
+                    has_solar_coming = man.get_expected_remaining("generation") > 0.5
                     
+                    active_buffer = soc_buffer_val
+                    if not is_evening_sale and has_solar_coming:
+                        active_buffer = 0.0
+
                     target_8am_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + active_buffer
                     
                     # AC Balance until 08:00 AM
