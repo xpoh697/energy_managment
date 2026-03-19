@@ -406,7 +406,18 @@ class StrategyEngine:
                 initial_power_kw = float(initial_power_kw + waste_kw + batt_p_flexible + batt_discharge_allowed)
                 
             available_power_kw = initial_power_kw
-            available_gen_kw = float(sum((get_kwh_val(man.hass.states.get(str(s)) or None) or 0.0) for s in p_gen_s)) + waste_kw
+            
+            # --- Only Solar Logic Enhancement (v4.5.4) ---
+            # available_gen_kw should be the CURRENT solar surplus (Solar - Base House Load)
+            # Base House Load = Total Load - Managed Loads currently running
+            current_managed_load_kw = 0.0
+            for s_id in man.deduct_settings:
+                if man._is_currently_pulling_power(str(s_id)):
+                    current_managed_load_kw += float(man.learned_real_power.get(str(s_id), 0.0)) / 1000.0
+            
+            base_house_load = max(0.0, float(load_kw - current_managed_load_kw))
+            available_gen_kw = float(gen_kw - base_house_load) + waste_kw
+            gen_surplus_initial = available_gen_kw
             
             cur_price_buy = None
             if not skip_strategy_check:
@@ -477,6 +488,7 @@ class StrategyEngine:
                     if not is_cyclic or is_pulling:
                         available_budget -= float(e_kw * (1.0 - (now.minute / 60.0)))
                         available_power_kw -= e_kw
+                        # Subtraction ensures next devices in loop see less solar
                         available_gen_kw -= e_kw
                         reserved_by.append(s_id_s)
                     
@@ -498,7 +510,10 @@ class StrategyEngine:
                 "occupancy_coefficient": float(occ_coeff or 1.0),
                 "efficiency_coefficient": float(eff_coeff or 1.0),
                 "available_power_total_kw": float(initial_power_kw or 0.0),
-                "available_gen_kw": float(available_gen_kw or 0.0),
+                "available_gen_kw": float(available_gen_kw or 0.0), # Remaining surplus after loop
+                "available_gen_surplus_initial": float(gen_surplus_initial or 0.0),
+                "reserved_by": reserved_by,
+                "sunrise_hour": int(res_sunrise if 'res_sunrise' in locals() else 8),
                 "waste_compensation_kw": float(waste_kw or 0.0),
                 "battery_flexible_kw": float(batt_p_flexible or 0.0),
                 "battery_discharge_budget_kw": float(batt_discharge_allowed or 0.0)
@@ -1332,13 +1347,30 @@ class StrategyEngine:
             res["active_periods"] = ", ".join(found_periods)
             res["target_soc"] = float(round_f(target_soc, 1))
             
-            if cur_hour in target_hours_sorted and power_needed > 0.01:
-                res["state"] = "active"
-            elif not target_hours_sorted:
-                res["state"] = "price_limit_not_met"
-            else:
-                if res.get("state") != "preparing_arbitrage":
-                    res["state"] = "idle"
+            # Mode Detection Logic (Moved from sensor.py for better centralization)
+            cur_mode_text = "Ожидание"
+            state = res.get("state")
+            if state == "active":
+                if mode == "buy":
+                    cur_mode_text = "Экстренная зарядка" if res.get("charge_reason") == "survival" else "Активная зарядка"
+                else:
+                    rec_p = float(res.get("recommended_power_kw", 0.0) or 0.0)
+                    cur_mode_text = "Ожидание (Пусто)" if rec_p <= 0 else "Активная продажа"
+            elif state == "preparing_arbitrage":
+                cur_mode_text = "Ожидание арбитража"
+            elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not target_hours_sorted:
+                cur_mode_text = "Нет ценового окна"
+            elif state == "idle":
+                if mode == "buy" and res.get("charge_reason") == "survival":
+                    cur_mode_text = "Ожидание (Экстренно)"
+                elif mode == "sell":
+                    arb_dec = str(res.get("arbitrage_decision", ""))
+                    if "Арбитраж" in arb_dec:
+                        cur_mode_text = "Ожидание (Арбитраж)"
+                    else:
+                        cur_mode_text = "Ожидание (Пик цены)"
+            
+            res["current_mode_text"] = cur_mode_text
             
             self._strategy_cache[cache_key] = {"time": now, "res": res}
             return res

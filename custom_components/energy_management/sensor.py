@@ -2577,24 +2577,7 @@ class MarketStrategySensor(SensorEntity):
                 else:
                     current_mode = "Зарядка (Дешевая цена)"
             else:
-                if rec_p <= 0:
-                    current_mode = "Ожидание (Пусто)"
-                else:
-                    current_mode = "Активная продажа"
-        elif state == "preparing_arbitrage":
-            current_mode = "Ожидание арбитража"
-        elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not active_hours:
-            current_mode = "Нет ценового окна"
-        elif state == "idle":
-            if self.mode == "buy" and res.get("charge_reason") == "survival":
-                current_mode = "Ожидание (Экстренно)"
-            elif self.mode == "sell":
-                if "Арбитраж" in res.get("arbitrage_decision", ""):
-                    current_mode = "Ожидание (Арбитраж)"
-                else:
-                    current_mode = "Ожидание (Пик цены)"
-            else:
-                current_mode = "Ожидание"
+            current_mode = res.get("current_mode_text", "Ожидание")
 
         attrs = {
             "analyzed_window": res.get("analyzed_window", "Неизвестно"),

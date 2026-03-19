@@ -119,12 +119,15 @@ class EnergyPermissionSensor(BinarySensorEntity):
             ),
             "is_cyclic": is_cyclic,
             "only_solar_checked": only_solar_free,
+            "sunrise_hour": budget_res.get("sunrise_hour", 8),
             "available_power_total_kw": round_f(budget_res.get("available_power_total_kw", 0.0), 2),
             "available_gen_kw": round_f(budget_res.get("available_gen_kw", 0.0), 2),
+            "available_gen_surplus_initial_kw": round_f(budget_res.get("available_gen_surplus_initial", 0.0), 2),
             "only_solar_threshold_kw": round_f(float(req_kw) * (0.8 if settings.get("required_kwh", 2.5) == 0 else 0.6) if only_solar_free else 0.0, 2),
             "waste_compensation_kw": round_f(budget_res.get("waste_compensation_kw", 0.0), 2),
             "battery_flexible_kw": round_f(budget_res.get("battery_flexible_kw", 0.0), 2),
             "battery_discharge_budget_kw": round_f(budget_res.get("battery_discharge_budget_kw", 0.0), 2),
+            "reserved_by": budget_res.get("reserved_by", []),
         }
 
         # Device detection and Status
