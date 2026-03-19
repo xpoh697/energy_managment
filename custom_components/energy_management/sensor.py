@@ -48,9 +48,9 @@ from .const import (
     CONF_IS_CYCLIC,
     CONF_ACTIVE_HOLD_TIME,
     CONF_ONLY_SOLAR,
-    CONF_TARGET_SOC_BUY,
     CONF_DYNAMIC_SOC_BUY,
-    CONF_DYNAMIC_SOC_SELL
+    CONF_DYNAMIC_SOC_SELL,
+    CONF_SOC_BUFFER
 )
 from .strategy import StrategyEngine
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
