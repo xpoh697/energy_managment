@@ -1217,7 +1217,10 @@ class StrategyEngine:
                     # But if tomorrow we will be short on solar, then selling now means we lose "free" energy.
                     tomorrow_solar_total = f_tom
                     tomorrow_cons_total = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_type).values())) * occ_coeff
-                    solar_is_excess = bool(tomorrow_solar_total > tomorrow_cons_total + 2.0) # 2kWh buffer
+                    
+                    # Tomorrow's deficit: how much house energy we won't cover by sun tomorrow
+                    tomorrow_deficit = max(0.0, tomorrow_cons_total - tomorrow_solar_total)
+                    solar_is_excess = bool(tomorrow_solar_total > tomorrow_cons_total + 1.0) # 1kWh buffer
                     
                     # PRECISE SIMULATION-BASED CALCULATION (v4.5)
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
@@ -1265,7 +1268,8 @@ class StrategyEngine:
                     
                     # Floor calculation: SOC needed NOW to have target_morning_soc at Sunrise
                     # This must account for ALL needs (House + Managed - Solar) until then.
-                    res_cons_dc = max(0.0, (total_cons_to_sunrise + managed_needed_sunrise) / eff - (total_solar_to_sunrise / 0.98))
+                    # Dynamic reserve: Night Cons + Managed Loads + Tomorrow's PV Deficit
+                    res_cons_dc = max(0.0, (total_cons_to_sunrise + managed_needed_sunrise + tomorrow_deficit) / eff - (total_solar_to_sunrise / 0.98))
                     ai_soc_floor_reserve = target_morning_soc + (res_cons_dc / b_cap * 100.0)
                     
                     target_soc = float(max(base_target, ai_soc_floor_reserve))
