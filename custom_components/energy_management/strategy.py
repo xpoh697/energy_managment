@@ -654,9 +654,13 @@ class StrategyEngine:
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
             
-            p_st = dict(man.data.get(f"prices_{mode}", {}))
-            today_prices = dict(p_st.get(today_str, {}))
-            tomorrow_prices = dict(p_st.get(tomorrow_str, {}))
+            try:
+                p_st = dict(man.data.get(f"prices_{mode}", {}))
+                today_prices = dict(p_st.get(today_str, {}))
+                tomorrow_prices = dict(p_st.get(tomorrow_str, {}))
+            except Exception as e:
+                _LOGGER.error(f"Error fetching prices in MarketStrategy: {e}")
+                return res
         
             res["today_prices"] = today_prices
             res["tomorrow_prices"] = tomorrow_prices
@@ -1189,15 +1193,9 @@ class StrategyEngine:
                         # Find natural SOC at sunrise (last point in sim_log or exact hour)
                         natural_morning_soc = b_soc
                         if baseline_log:
-                            # Look for the last record or specific sunrise hour
-                            target_time_str = f"{sunrise_h-1:02d}:59"
-                            for entry in reversed(baseline_log):
-                                if target_time_str in entry.get("time", ""):
-                                    natural_morning_soc = float(entry.get("soc", b_soc))
-                                    break
-                            else:
-                                # Fallback to the very last entry in the log
-                                natural_morning_soc = float(baseline_log[-1].get("soc", b_soc))
+                            # Use the exact key format from run_soc_simulation
+                            key_morning_sim = f"{sunrise_h-1:02d}:59 (Завтра)"
+                            natural_morning_soc = float(baseline_log.get(key_morning_sim, b_soc))
                         
                         # 2. Available energy is the extra above target_morning_soc
                         extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc - 2.0) # 2% extra safety
