@@ -599,7 +599,11 @@ class StrategyEngine:
                 # because f_today typically represents the REMAINING solar from NOW.
                 if 'hist_rem_today' not in locals():
                     cur_h = int(now.hour)
-                    hist_rem_today = float(sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(cur_h, 24)))
+                    # Use fractional weighting for the current hour to prevent jumps at the turn of the hour
+                    hist_cur_h = float(normalize_float(prof_gen.get(str(cur_h), 0.0)))
+                    hist_rest_today = float(sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(cur_h + 1, 24)))
+                    hist_rem_today = (hist_cur_h * fraction_left_h1) + hist_rest_today
+                    
                     if hist_rem_today < 0.1: hist_rem_today = total_hist_gen # Fallback
 
                 expected_gen_kw = float(hist_hour_gen / hist_rem_today * f_today * blended_coeff) if hist_rem_today > 0.1 else hist_hour_gen
