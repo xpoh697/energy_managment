@@ -1341,9 +1341,14 @@ class StrategyEngine:
                 
             # Use current peak power only if we are actually in a peak hour
             # Otherwise show 0 as real command, but attributes will show the potential
-            real_cmd_p = power_needed if (mode == "sell" and cur_hour in target_hours_sorted) else 0.0
-            if mode == "buy" and cur_hour in target_hours_sorted:
+            in_peak = bool(cur_hour in target_hours_sorted)
+            real_cmd_p = power_needed if (mode == "sell" and in_peak) else 0.0
+            if mode == "buy" and in_peak:
                 real_cmd_p = power_needed
+            
+            # STATE TRANSITION FIX: If we have power and we are in peak, we are ACTIVE
+            if in_peak and power_needed > 0.01:
+                res["state"] = "active"
 
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
             res["active_hours"] = target_hours_sorted
