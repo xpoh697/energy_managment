@@ -1179,25 +1179,35 @@ class StrategyEngine:
                     tomorrow_cons_total = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_type).values())) * occ_coeff
                     solar_is_excess = bool(tomorrow_solar_total > tomorrow_cons_total + 2.0) # 2kWh buffer
                     
-                    # If solar is NOT excess, selling now is only worth it if (Sale - Buyback) > threshold
-                    # AND (Sale - 0) > threshold is not the only metric; we might prefer saving it.
-                    solar_replacement_cost = 0.0 if solar_is_excess else 999.0 # Placeholder: if not excess, very high hurdle
-                    
-                    # CONSERVATIVE DC-BASED CALCULATION
-                    # available_sell_ac = (Pool_DC - Needs_DC) * eff
+                    # PRECISE SIMULATION-BASED CALCULATION (v4.5)
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # Energy pool (DC): Current Energy + Solar (converted to DC)
-                        # Note: Solar usually comes via MPPT (high efficiency ~98%)
-                        pool_dc = batt_energy_val + (total_solar_to_sunrise / 0.98)
+                        # 1. Run Baseline Simulation (zero sales) to see 'natural' morning SOC
+                        sim_end_h = max(24 + sunrise_h, int(active_window[1]) + 1)
+                        sim_range = range(cur_hour, sim_end_h)
+                        _, baseline_log = self.run_soc_simulation(b_soc, sim_range, now, {})
                         
-                        # Needs (DC): House/Managed (AC)/eff + 2% safety + Target Reserve
-                        needs_dc = (total_cons_to_sunrise + managed_needed_sunrise) / eff + (b_cap * 0.02) + (target_morning_soc * b_cap / 100.0)
+                        # Find natural SOC at sunrise (last point in sim_log or exact hour)
+                        natural_morning_soc = b_soc
+                        if baseline_log:
+                            # Look for the last record or specific sunrise hour
+                            target_time_str = f"{sunrise_h-1:02d}:59"
+                            for entry in reversed(baseline_log):
+                                if target_time_str in entry.get("time", ""):
+                                    natural_morning_soc = float(entry.get("soc", b_soc))
+                                    break
+                            else:
+                                # Fallback to the very last entry in the log
+                                natural_morning_soc = float(baseline_log[-1].get("soc", b_soc))
                         
-                        available_sell_dc = max(0.0, pool_dc - needs_dc)
-                        available_sell_ac = float(available_sell_dc * eff)
+                        # 2. Available energy is the extra above target_morning_soc
+                        extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc - 2.0) # 2% extra safety
+                        available_sell_ac = float((extra_soc_pct * b_cap / 100.0) * eff)
                     else:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
+
+                    res["sunrise_hour"] = sunrise_h  # Add to root for easier access
+                    num_peaks_left = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
                     
                     # Determine if we are in one of the selected Peak Hours
                     is_in_peak = bool(cur_hour in target_hours_sorted)

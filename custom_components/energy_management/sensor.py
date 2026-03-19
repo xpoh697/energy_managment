@@ -2606,6 +2606,7 @@ class MarketStrategySensor(SensorEntity):
             "recommended_power_kw": res.get("recommended_power_kw", 0.0),
             "current_mode": current_mode,
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
+            "sunrise_hour": res.get("sunrise_hour", 0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt
         }
