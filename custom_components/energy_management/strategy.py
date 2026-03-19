@@ -1078,7 +1078,17 @@ class StrategyEngine:
                     charge_commands = {}
                     upcoming_p = 0.0
                     for h in target_hours_sorted:
-                        rem_n_val = len([x for x in target_hours_sorted if x >= h])
+                        upcoming = [x for x in target_hours_sorted if x >= h]
+                        block_len = 0
+                        if upcoming:
+                            block_len = 1
+                            for i in range(1, len(upcoming)):
+                                if upcoming[i] == upcoming[i-1] + 1:
+                                    block_len += 1
+                                else:
+                                    break
+                        
+                        rem_n_val = float(block_len)
                         if h == cur_hour:
                             # Use actual remaining time in minutes for the current hour
                             rem_n_val = (rem_n_val - 1) + (60 - now.minute) / 60.0
@@ -1230,8 +1240,19 @@ class StrategyEngine:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
 
-                    num_peaks_left_raw = len([h for h in target_hours_sorted if h >= cur_hour])
-                    if cur_hour in target_hours_sorted:
+                    upcoming = [h for h in target_hours_sorted if h >= cur_hour]
+                    block_len = 0
+                    if upcoming:
+                        block_len = 1
+                        for i in range(1, len(upcoming)):
+                            if upcoming[i] == upcoming[i-1] + 1:
+                                block_len += 1
+                            else:
+                                break
+                    
+                    num_peaks_left_raw = float(block_len)
+                    is_in_peak = bool(cur_hour in target_hours_sorted)
+                    if is_in_peak:
                         # Use remaining minutes for more stable power calculation
                         num_peaks_left = max(0.1, (num_peaks_left_raw - 1) + (60 - now.minute) / 60.0)
                     else:
