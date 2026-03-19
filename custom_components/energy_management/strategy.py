@@ -1391,7 +1391,16 @@ class StrategyEngine:
                     cur_mode_text = "Экстренная зарядка" if res.get("charge_reason") == "survival" else "Активная зарядка"
                 else:
                     rec_p = float(res.get("recommended_power_kw", 0.0) or 0.0)
-                    cur_mode_text = "Ожидание (Пусто)" if rec_p <= 0 else "Активная продажа"
+                    if rec_p <= 0:
+                        if "Экономия" in decision_tag:
+                            cur_mode_text = "Ожидание (Экономия)"
+                        else:
+                            cur_mode_text = "Ожидание (Пусто)"
+                    else:
+                        tag = "Консервативно"
+                        if arbitrage_is_best:
+                            tag = "Арбитраж" if "Арбитраж" in decision_tag else "Излишки солнца"
+                        cur_mode_text = f"Активная продажа ({tag})"
             elif state == "preparing_arbitrage":
                 cur_mode_text = "Ожидание арбитража"
             elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not target_hours_sorted:
@@ -1401,7 +1410,9 @@ class StrategyEngine:
                     cur_mode_text = "Ожидание (Экстренно)"
                 elif mode == "sell":
                     arb_dec = str(res.get("arbitrage_decision", ""))
-                    if "Арбитраж" in arb_dec:
+                    if "Экономия" in arb_dec:
+                        cur_mode_text = "Ожидание (Экономия заряда)"
+                    elif "Арбитраж" in arb_dec:
                         cur_mode_text = "Ожидание (Арбитраж)"
                     else:
                         cur_mode_text = "Ожидание (Пик цены)"
