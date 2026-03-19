@@ -450,6 +450,15 @@ class EnergyProfileManager:
                     self.bms_learned_profile[k_int] = float(v)
                 except (ValueError, TypeError):
                     continue
+            
+            # One-time cleanup for monotonicity (ensures the profile is physically sound)
+            if self.bms_learned_profile:
+                socs = sorted(self.bms_learned_profile.keys())
+                for i in range(len(socs) - 2, -1, -1):
+                    s_low = socs[i]
+                    s_high = socs[i+1]
+                    if self.bms_learned_profile[s_low] < self.bms_learned_profile[s_high]:
+                        self.bms_learned_profile[s_low] = self.bms_learned_profile[s_high]
         
         # Restore cycle start times (handle ISO strings or missing)
         saved_starts = self.data.get("cycle_actual_start_time", {})
@@ -1727,13 +1736,32 @@ class EnergyProfileManager:
         """Returns the maximum possible charge power (kW) for a given SOC.
         Uses learned BMS profile if available, otherwise falls back to theoretical CC/CV model.
         """
-        # Try finding the closest learned point (with 2% tolerance)
         soc_int = int(round_f(soc, 0))
+        
+        # 1. Exact match in learned profile
         if soc_int in self.bms_learned_profile:
             return self.bms_learned_profile[soc_int]
         
-        # Fallback to user-defined max battery power
-        return float(self.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
+        # 2. Heuristic: Interpolate between known points or use boundaries
+        known_socs = sorted(self.bms_learned_profile.keys())
+        if known_socs:
+            if soc_int < known_socs[0]:
+                return self.bms_learned_profile[known_socs[0]]
+            if soc_int > known_socs[-1]:
+                return self.bms_learned_profile[known_socs[-1]]
+            
+            # Interpolation (linear)
+            for i in range(len(known_socs) - 1):
+                s1, s2 = known_socs[i], known_socs[i+1]
+                if s1 < soc_int < s2:
+                    p1, p2 = self.bms_learned_profile[s1], self.bms_learned_profile[s2]
+                    ratio = (soc_int - s1) / (s2 - s1)
+                    return round_f(p1 + (p2 - p1) * ratio, 3)
+
+        # 3. Fallback to theoretical CC/CV model or user-defined max
+        max_p = float(self.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
+        ratio = self.get_cc_cv_ratio(soc)
+        return round_f(max_p * ratio, 3)
 
     def get_budget_and_permissions(self, days_for_profile=14, skip_strategy_check=False):
         """Analyze current day state and return permissions for heavy loads."""
@@ -1747,22 +1775,23 @@ class EnergyProfileManager:
     def _update_bms_learned_profile(self, now):
         """Analyze stable power history to learn BMS charging limits.
         Following USER logic:
-        1. Mode must be 'sale_pv'.
-        2. Must have stable EXPORT to grid (avg 5 min > 100W) -> Battery is full/refusing power.
-        3. Update profile in BOTH directions based on observed limit.
+        1. Mode must be 'sale_pv' (exporting) or 'stop_sale' (curtailing).
+        2. Must have stable EXPORT/SURPLUS to grid (avg 5 min > 500W) -> Battery is refusing power.
+        3. Update profile while enforcing monotonicity (P(S1) >= P(S2) if S1 < S2).
         """
         # Condition 0: Stability - need at least 5 samples (5 minutes)
         if len(self.power_history) < 5: return
         
-        # Condition 1: Only learn during solar priority mode (sale_pv)
-        if self.current_inverter_mode != "sale_pv": return 
+        # Condition 1: Only learn during solar priority modes
+        if self.current_inverter_mode not in ("sale_pv", "stop_sale"):
+            return 
 
         hist_list = list(self.power_history)
         relevant_history = hist_list[-5:]
 
-        # Condition 2: Average real export to grid > 100W (0.1 kW)
+        # Condition 2: Average real export to grid > 500W (0.5 kW)
         avg_export = sum(float(x.get("grid_kw", 0.0)) for x in relevant_history) / len(relevant_history)
-        if avg_export < 0.1: # Not enough surplus to be sure it's a BMS limit
+        if avg_export < 0.5: # Sufficient surplus is needed to confirm it's a BMS limit
             return
 
         # Condition 3: Battery is charging (batt_kw is negative)
@@ -1781,7 +1810,17 @@ class EnergyProfileManager:
                 # Use light smoothing (weight 1/5)
                 new_val = (old_val * 4 + charge_power_limit) / 5.0
                 self.bms_learned_profile[soc_int] = round_f(new_val, 3)
-                return
+                
+                # --- Monotonicity Enforcement ---
+                # 1. Downward pass: SOC < current must have AT LEAST this power
+                for s in range(soc_int - 1, -1, -1):
+                    if s in self.bms_learned_profile and self.bms_learned_profile[s] < new_val:
+                        self.bms_learned_profile[s] = new_val
+                
+                # 2. Upward pass: SOC > current must have AT MOST this power
+                for s in range(soc_int + 1, 101):
+                    if s in self.bms_learned_profile and self.bms_learned_profile[s] > new_val:
+                        self.bms_learned_profile[s] = new_val
 
 class UniversalPriceSensor(SensorEntity):
     """Exposes 48-hour price data with price_today/price_tomorrow attributes for templates."""
