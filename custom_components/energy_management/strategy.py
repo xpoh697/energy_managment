@@ -1231,12 +1231,14 @@ class StrategyEngine:
                         # Is it better than solar?
                         # If solar is excess, replacement is free (0.0). If not, we'd rather keep it.
                         if gain_vs_buyback >= threshold:
-                            if solar_is_excess:
-                                decision_tag = "Арбитраж (Выгоднее солнца)"
-                                arbitrage_is_best = True
-                            else:
-                                decision_tag = "Экономия (Солнце завтра ценнее)"
-                                arbitrage_is_best = False
+                            decision_tag = "Арбитраж (Цена выгоднее выкупа)"
+                            arbitrage_is_best = True
+                        elif solar_is_excess:
+                            decision_tag = "Продажа излишков (Солнца завтра много)"
+                            arbitrage_is_best = True
+                        else:
+                            decision_tag = "Экономия (Солнца мало, откупа нет)"
+                            arbitrage_is_best = False
                     
                     # If arbitrage is best, we can go down to base_target (e.g. 13%)
                     # If NOT, we MUST stay above ai_soc_floor_reserve (e.g. 23%)
