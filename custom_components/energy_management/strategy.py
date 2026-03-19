@@ -1078,8 +1078,13 @@ class StrategyEngine:
                     charge_commands = {}
                     upcoming_p = 0.0
                     for h in target_hours_sorted:
+                        rem_n_val = len([x for x in target_hours_sorted if x >= h])
+                        if h == cur_hour:
+                            # Use actual remaining time in minutes for the current hour
+                            rem_n_val = (rem_n_val - 1) + (60 - now.minute) / 60.0
+                        rem_n = max(0.1, rem_n_val)
+
                         if h < cur_hour: continue
-                        rem_n = len([x for x in target_hours_sorted if x >= h]) or 1
                         if target_soc > sim_soc_plan:
                             p = float(min(max_p, (b_cap * (target_soc - sim_soc_plan) / 100.0) / rem_n))
                         else: p = 0.0
@@ -1225,11 +1230,12 @@ class StrategyEngine:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
 
-                    num_peaks_left = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
-                    
-                    # Determine if we are in one of the selected Peak Hours
-                    is_in_peak = bool(cur_hour in target_hours_sorted)
-                    num_peaks_left = len([h for h in target_hours_sorted if h >= cur_hour]) or 1
+                    num_peaks_left_raw = len([h for h in target_hours_sorted if h >= cur_hour])
+                    if cur_hour in target_hours_sorted:
+                        # Use remaining minutes for more stable power calculation
+                        num_peaks_left = max(0.1, (num_peaks_left_raw - 1) + (60 - now.minute) / 60.0)
+                    else:
+                        num_peaks_left = float(num_peaks_left_raw) or 1.0
                     
                     # Recommended power: Total available / hours left to sell
                     # Calculations are done even if NOT in peak to show potential in UI
