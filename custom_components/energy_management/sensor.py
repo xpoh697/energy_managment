@@ -801,8 +801,12 @@ class EnergyProfileManager:
                 # which means the previous cycle wasn't closed properly (e.g. sensor dropout or restart)
                 is_new_cycle = sensor_id not in self.cycle_actual_start_time
                 if not is_new_cycle and last_active_before:
+                    # v4.9 - Dynamic gap detection. If gap > hold_min * 2, assume it's a new cycle.
+                    # This prevents merging cycles after a long HA restart or a machine pause.
+                    hold_min = int(settings.get(CONF_ACTIVE_HOLD_TIME, 5))
+                    gap_limit = max(600, hold_min * 120) # At least 10 min or 2x hold_min
                     gap = (now - last_active_before).total_seconds()
-                    if gap > 3600: # 1 hour
+                    if gap > gap_limit: 
                         is_new_cycle = True
 
                 if is_new_cycle:

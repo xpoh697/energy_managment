@@ -1126,7 +1126,13 @@ class StrategyEngine:
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
                     
                     # House survivability: Target SOC at 08:00 AM (e.g. 13% un-reducible + 15% buffer = 28%)
-                    target_8am_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + 15.0
+                    soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
+                    
+                    # Adaptive buffer: 0% in morning (4-13), full buffer otherwise (evening/night)
+                    is_morning_solar = (4 <= cur_hour <= 13) and (man.get_expected_remaining("generation") > 0.5)
+                    active_buffer = 0.0 if is_morning_solar else soc_buffer_val
+                    
+                    target_8am_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + active_buffer
                     
                     # AC Balance until 08:00 AM
                     # budget_data_sell.get("expected_consumption") ALREADY includes both today's remaining AND night until 8 AM
@@ -1184,11 +1190,12 @@ class StrategyEngine:
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
                     
-                    # Floor calculation (to maintain 23% at 8 AM)
-                    net_night_ac = max(0.0, cons_night_morning - morning_solar_ac)
-                    ai_soc_midnight_floor = target_8am_soc + (net_night_ac / eff / b_cap * 100.0)
+                    # Floor calculation: SOC needed NOW to have target_8am_soc at 08:00 AM
+                    # This must account for ALL needs (House + Managed - Solar) until then.
+                    res_cons_ac = float(max(0.0, total_cons_to_8am + managed_needed_8am - total_solar_to_8am))
+                    ai_soc_floor_reserve = target_8am_soc + (res_cons_ac / eff / b_cap * 100.0)
                     
-                    target_soc = float(max(base_target, ai_soc_midnight_floor))
+                    target_soc = float(max(base_target, ai_soc_floor_reserve))
                     
                     # Arbitrage decision for UI
                     # Rule: Arbitrage is ONLY beneficial if profit > threshold 
@@ -1214,9 +1221,9 @@ class StrategyEngine:
                                 arbitrage_is_best = False
                     
                     # If arbitrage is best, we can go down to base_target (e.g. 13%)
-                    # If NOT, we MUST stay above ai_soc_midnight_floor (e.g. 23%)
+                    # If NOT, we MUST stay above ai_soc_floor_reserve (e.g. 23%)
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        target_soc = float(base_target if arbitrage_is_best else max(base_target, ai_soc_midnight_floor))
+                        target_soc = float(base_target if arbitrage_is_best else max(base_target, ai_soc_floor_reserve))
                     else:
                         target_soc = base_target
                     
@@ -1274,8 +1281,11 @@ class StrategyEngine:
                         "power_kw": 0.0,
                         "note": "Нет выгодного окна для откупа" if not arbitrage_is_best else "",
                         "available_kwh": float(round_f(available_sell_ac, 2)),
+                        "soc_buffer_pct": float(soc_buffer_val),
+                        "target_8am_soc_pct": float(target_8am_soc),
                         "reserve_kwh": float(round_f(target_8am_soc * b_cap / 100.0, 2)),
-                        "energy_to_wait_kwh": float(round_f(total_cons_to_8am, 2))
+                        "energy_to_wait_kwh": float(round_f(total_cons_to_8am, 2)),
+                        "ai_floor_soc_pct": float(round_f(ai_soc_floor_reserve, 1)),
                     }
                     if h_bb is not None and (gain_vs_buyback >= threshold):
                         res["arbitrage_buyback"]["power_kw"] = max_p

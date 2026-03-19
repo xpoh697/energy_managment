@@ -167,6 +167,11 @@
           }
         }
       }
+    },
+    "number": {
+      "soc_buffer": {
+        "name": "Morning SOC Buffer (%)"
+      }
     }
   }
 }

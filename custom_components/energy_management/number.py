@@ -34,6 +34,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EnergyProfileNumber(manager, CONF_TARGET_SOC_BUY, "Target SOC Buy", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up", 100.0),
         EnergyProfileNumber(manager, CONF_TARGET_SOC_SELL, "Target SOC Sell", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
         EnergyProfileNumber(manager, CONF_MIN_SOC_BUY, "Min Survival SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
+        EnergyProfileNumber(manager, CONF_SOC_BUFFER, "Morning SOC Buffer", PERCENTAGE, 0.0, 50.0, 1.0, "mdi:battery-plus", 15.0),
         EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Max Hour for Sell PV Only", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
     ]
     
