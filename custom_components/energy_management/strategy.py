@@ -1109,28 +1109,32 @@ class StrategyEngine:
                             budget_data_sell = budget_data_raw
                             eff_coeff_val = float(normalize_float(budget_data_sell.get("efficiency_coefficient", 1.0)))
                         
-                    # Correct reserve for House needs: Now -> Midnight -> 08:00 AM Tomorrow
+                    # Dynamic sunrise detection: Find first hour tomorrow with generation > 0.1 kWh
+                    avg_prof_gen = man.get_average_profile("generation", man.custom_period, "all")
+                    sunrise_h = 8 # default fallback
+                    for h in range(4, 12):
+                        if float(normalize_float(avg_prof_gen.get(str(h), 0.0))) > 0.1:
+                            sunrise_h = h
+                            break
+                    
+                    # Correct reserve for House needs: Now -> Midnight -> Sunrise Tomorrow
                     rem_cons_today = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
                     avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
-                    cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, 8)) * occ_coeff
+                    cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, sunrise_h)) * occ_coeff
                     
-                    # Also include tomorrow morning solar until 08:00 AM in the budget
-                    avg_prof_gen = man.get_average_profile("generation", man.custom_period, "all")
-                    gen_night_morning = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(0, 8))
+                    # Also include tomorrow morning solar until sunrise in the budget
+                    gen_night_morning = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(0, sunrise_h))
                     f_tom_raw = man.get_forecast_value(man.forecast_tomorrow_sensor)
                     f_tom = float(f_tom_raw) if f_tom_raw is not None else 0.0
                     total_hist_gen_val = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(24))
                     morning_solar_ac = f_tom * (gen_night_morning / total_hist_gen_val) if total_hist_gen_val > 0.1 else 0.0
                     
-                    full_needed_until_sunrise = rem_cons_today + cons_night_morning
-                    min_soc_reserve = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
                     
-                    # House survivability: Target SOC at 08:00 AM (e.g. 13% un-reducible + 15% buffer = 28%)
+                    # House survivability: Target SOC at Sunrise (e.g. 13% un-reducible + 15% buffer = 28%)
                     soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
                     
-                    # Adaptive buffer: 0% ONLY if ALL sale hours are in morning/day (4-13) with solar.
-                    # If any sale happens late (like 18:00), we MUST keep the buffer to survive the night.
+                    # Adaptive buffer: 0% ONLY if ALL sale hours are in morning/day (sunrise_h-13) with solar.
                     is_evening_sale = any(h > 13 for h in target_hours_sorted) if target_hours_sorted else True
                     has_solar_coming = man.get_expected_remaining("generation") > 0.5
                     
@@ -1138,18 +1142,22 @@ class StrategyEngine:
                     if not is_evening_sale and has_solar_coming:
                         active_buffer = 0.0
 
-                    target_8am_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + active_buffer
+                    target_morning_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + active_buffer
                     
-                    # AC Balance until 08:00 AM
+                    # AC Balance until Sunrise tomorrow
                     # budget_data_sell.get("expected_consumption") ALREADY includes both today's remaining AND night until 8 AM
-                    total_cons_to_8am = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
+                    # We adjust it precisely to our sunrise_h
+                    comp_cons_to_8am = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
+                    # If sunrise is e.g. 6AM instead of 8AM, we subtract 6-8AM from budget
+                    diff_range = range(min(sunrise_h, 8), max(sunrise_h, 8))
+                    diff_kwh = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in diff_range) * occ_coeff
+                    total_cons_to_sunrise = comp_cons_to_8am - diff_kwh if sunrise_h < 8 else comp_cons_to_8am + diff_kwh
                     
                     rem_solar_today = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
-                    total_solar_to_8am = rem_solar_today + morning_solar_ac
+                    total_solar_to_sunrise = rem_solar_today + morning_solar_ac
                     
-                    # Also count energy for non-solar-only managed loads until 8 AM
-                    # These loads WILL drain the battery at night, unlike ONLY_SOLAR loads.
-                    managed_needed_8am = 0.0
+                    # Also count energy for non-solar-only managed loads until sunrise
+                    managed_needed_sunrise = 0.0
                     sorted_loads = man.deduct_settings.items()
                     for s_id, s_conf in sorted_loads:
                         if not isinstance(s_conf, dict): continue
@@ -1158,10 +1166,10 @@ class StrategyEngine:
                         
                         _, rem_kwh, is_cyclic, _ = man.get_managed_load_stats(str(s_id))
                         # Today's remaining
-                        managed_needed_8am += float(rem_kwh)
+                        managed_needed_sunrise += float(rem_kwh)
                         # Tomorrow 0-8 AM (entire required amount for non-cyclic)
                         if not bool(s_conf.get(CONF_IS_CYCLIC, False)):
-                            managed_needed_8am += float(s_conf.get("required_kwh", 2.0))
+                            managed_needed_sunrise += float(s_conf.get("required_kwh", 2.0))
                     
                     # Replacement Cost Logic: 
                     # If we sell now, and tomorrow morning we have EXCESS solar (more than house needs), 
@@ -1175,14 +1183,18 @@ class StrategyEngine:
                     # AND (Sale - 0) > threshold is not the only metric; we might prefer saving it.
                     solar_replacement_cost = 0.0 if solar_is_excess else 999.0 # Placeholder: if not excess, very high hurdle
                     
-                    # AC energy available to sell (Pool - Needs)
-                    # 3. Availability and Power Recommendation
-                    # Energy pool (AC) for the rest of today and tomorrow morning
-                    pool_ac = (batt_energy_val * eff) + total_solar_to_8am
+                    # CONSERVATIVE DC-BASED CALCULATION
+                    # available_sell_ac = (Pool_DC - Needs_DC) * eff
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # Energy mandatory for house and the 8 AM target floor
-                        needs_ac = total_cons_to_8am + managed_needed_8am + (target_8am_soc * b_cap / 100.0 * eff)
-                        available_sell_ac = float(max(0.0, pool_ac - needs_ac))
+                        # Energy pool (DC): Current Energy + Solar (converted to DC)
+                        # Note: Solar usually comes via MPPT (high efficiency ~98%)
+                        pool_dc = batt_energy_val + (total_solar_to_sunrise / 0.98)
+                        
+                        # Needs (DC): House/Managed (AC)/eff + 2% safety + Target Reserve
+                        needs_dc = (total_cons_to_sunrise + managed_needed_sunrise) / eff + (b_cap * 0.02) + (target_morning_soc * b_cap / 100.0)
+                        
+                        available_sell_dc = max(0.0, pool_dc - needs_dc)
+                        available_sell_ac = float(available_sell_dc * eff)
                     else:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
@@ -1196,10 +1208,10 @@ class StrategyEngine:
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
                     
-                    # Floor calculation: SOC needed NOW to have target_8am_soc at 08:00 AM
+                    # Floor calculation: SOC needed NOW to have target_morning_soc at Sunrise
                     # This must account for ALL needs (House + Managed - Solar) until then.
-                    res_cons_ac = float(max(0.0, total_cons_to_8am + managed_needed_8am - total_solar_to_8am))
-                    ai_soc_floor_reserve = target_8am_soc + (res_cons_ac / eff / b_cap * 100.0)
+                    res_cons_dc = max(0.0, (total_cons_to_sunrise + managed_needed_sunrise) / eff - (total_solar_to_sunrise / 0.98))
+                    ai_soc_floor_reserve = target_morning_soc + (res_cons_dc / b_cap * 100.0) + 2.0 # +2% safety
                     
                     target_soc = float(max(base_target, ai_soc_floor_reserve))
                     
@@ -1212,7 +1224,7 @@ class StrategyEngine:
                     if h_bb is not None:
                          gain_vs_buyback = float((cur_p_f - p_bb) * eff - deg_cost)
                     
-                    decision_tag = f"Лимит: {target_8am_soc:.0f}% на утро"
+                    decision_tag = f"Лимит: {target_morning_soc:.0f}% на {sunrise_h:02d}:00"
                     arbitrage_is_best = False
                     
                     if is_in_peak:
@@ -1249,9 +1261,8 @@ class StrategyEngine:
                     delta_available_dc = available_sell_ac / eff
 
                     # --- SELL SIMULATION ---
-                    # Extend simulation to tomorrow morning (8:00 AM) or end of peaks, whichever is later
-                    # 31 is the end of the 07:00-08:00 hour tomorrow
-                    sim_end_h = max(32, int(active_window[1]) + 1)
+                    # Extend simulation to tomorrow morning (Sunrise) or end of peaks, whichever is later
+                    sim_end_h = max(24 + sunrise_h, int(active_window[1]) + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     
                     # Use the actual calculated power_needed for the simulation, not just raw max_p
@@ -1272,8 +1283,8 @@ class StrategyEngine:
                     key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
                     soc_after = float(sim_log.get(key_after, b_soc))
                     
-                    # 3. Projected SOC TOMORROW MORNING (08:00 AM)
-                    key_morning = "07:59 (Завтра)"
+                    # 3. Projected SOC TOMORROW MORNING (at Dynamic Sunrise)
+                    key_morning = f"{sunrise_h-1:02d}:59 (Завтра)"
                     soc_morning = float(sim_log.get(key_morning, soc_after))
 
                     res["sell_simulation"] = {
@@ -1288,9 +1299,9 @@ class StrategyEngine:
                         "note": "Нет выгодного окна для откупа" if not arbitrage_is_best else "",
                         "available_kwh": float(round_f(available_sell_ac, 2)),
                         "soc_buffer_pct": float(soc_buffer_val),
-                        "target_8am_soc_pct": float(target_8am_soc),
-                        "reserve_kwh": float(round_f(target_8am_soc * b_cap / 100.0, 2)),
-                        "energy_to_wait_kwh": float(round_f(total_cons_to_8am, 2)),
+                        "target_8am_soc_pct": float(target_morning_soc),
+                        "reserve_kwh": float(round_f(target_morning_soc * b_cap / 100.0, 2)),
+                        "energy_to_wait_kwh": float(round_f(total_cons_to_sunrise, 2)),
                         "ai_floor_soc_pct": float(round_f(ai_soc_floor_reserve, 1)),
                     }
                     if h_bb is not None and (gain_vs_buyback >= threshold):
