@@ -1249,7 +1249,17 @@ class StrategyEngine:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
 
-                               num_peaks_left_raw = float(block_len)
+                    upcoming = [h for h in target_hours_sorted if h >= cur_hour]
+                    block_len = 0
+                    if upcoming:
+                        block_len = 1
+                        for i in range(1, len(upcoming)):
+                            if upcoming[i] == upcoming[i-1] + 1:
+                                block_len += 1
+                            else:
+                                break
+                    
+                    num_peaks_left_raw = float(block_len)
                     is_in_peak = bool(cur_hour in target_hours_sorted)
                     if is_in_peak:
                         # Use remaining minutes for more stable power calculation
