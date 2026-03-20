@@ -1338,13 +1338,16 @@ class StrategyEngine:
                     res_cons_base_dc = max(0.0, (total_cons_to_sunrise + base_deficit_tomorrow) / eff - (total_solar_to_sunrise / 0.98))
                     ai_soc_floor_base = target_morning_soc + (res_cons_base_dc / b_cap * 100.0)
                     
-                    # 2. Daily calculation: Calculate reserve until morning based on SIMULATION
-                    # We use 'natural_morning_soc' which already accounts for everything (unmanaged + managed in profile)
+                    # 2. Daily calculation: Simplified reserve
                     sim_natural_drop = max(0.0, float(b_soc - natural_morning_soc))
                     ai_soc_floor_reserve = float(target_morning_soc + sim_natural_drop)
                     
-                    # Safety cross-check: Ensure reserve is at least as high as base protection
-                    ai_soc_floor_reserve = max(ai_soc_floor_reserve, ai_soc_floor_base)
+                    # We no longer add more insurance on top if user has a decent buffer
+                    if active_buffer > 5.0:
+                         ai_soc_floor_reserve = target_morning_soc + sim_natural_drop
+                    else:
+                         # For low buffer scenarios, we still keep the house needs check
+                         ai_soc_floor_reserve = max(ai_soc_floor_reserve, ai_soc_floor_base)
                     
                     # Arbitrage math for the Gatekeeper logic
                     p_bb, h_bb = get_best_buyback(cur_hour) 
