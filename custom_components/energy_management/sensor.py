@@ -1763,8 +1763,8 @@ class EnergyProfileManager:
             st = self.hass.states.get(fsensor)
             if not st: continue
             
-            # 1. Check for Solcast standard: Analysis -> intervals
-            analysis = st.attributes.get("Analysis", {})
+            # 1. Check for Solcast standard: Analysis or analysis -> intervals
+            analysis = st.attributes.get("Analysis") or st.attributes.get("analysis")
             intervals = None
             if isinstance(analysis, dict):
                 intervals = analysis.get("intervals")
@@ -1810,7 +1810,7 @@ class EnergyProfileManager:
                         h_idx = dt_local.hour
                         
                     # Value field (Solcast uses 'pv_estimate' or 'estimate')
-                    val = item.get("pv_estimate") or item.get("estimate") or item.get("value") or item.get("amount") or 0.0
+                    val = item.get("pv_estimate") or item.get("estimate") or item.get("pv_estimate10") or item.get("estimate10") or item.get("value") or item.get("amount") or 0.0
                     
                     res[str(h_idx)] += float(val)
                     found_data = True
