@@ -1700,7 +1700,14 @@ class EnergyProfileManager:
             if not entity_id: return default
             entity_id = entity_id[0]
 
-        st = self.hass.states.get(str(entity_id))
+        eid_str = str(entity_id)
+        # Try direct numeric conversion first (for fixed values in config)
+        try:
+            return float(eid_str.replace(",", "."))
+        except ValueError:
+            pass
+
+        st = self.hass.states.get(eid_str)
         if not st or st.state in ("unknown", "unavailable", "None"):
             return default
 
