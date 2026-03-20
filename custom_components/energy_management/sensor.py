@@ -283,12 +283,19 @@ class EnergyProfileManager:
         tomorrow_forecasts = config_data.get(CONF_FORECAST_TOMORROW, [])
         self.forecast_tomorrow_sensor = [str(tomorrow_forecasts)] if isinstance(tomorrow_forecasts, str) else cast(List[str], tomorrow_forecasts or [])
         raw_soc = config_data.get(CONF_BATTERY_SOC)
+        if isinstance(raw_soc, list): raw_soc = raw_soc[0] if raw_soc else None
         self.battery_soc_sensor = str(raw_soc) if raw_soc else None
+        
         raw_cap = config_data.get(CONF_BATTERY_CAPACITY)
+        if isinstance(raw_cap, list): raw_cap = raw_cap[0] if raw_cap else None
         self.battery_capacity_sensor = str(raw_cap) if raw_cap else None
+        
         raw_bat_p = config_data.get(CONF_BATTERY_POWER)
+        if isinstance(raw_bat_p, list): raw_bat_p = raw_bat_p[0] if raw_bat_p else None
         self.battery_power_sensor = str(raw_bat_p) if raw_bat_p else None
+        
         raw_grid_p = config_data.get(CONF_GRID_POWER)
+        if isinstance(raw_grid_p, list): raw_grid_p = raw_grid_p[0] if raw_grid_p else None
         self.grid_power_sensor = str(raw_grid_p) if raw_grid_p else None
 
         # Presence / occupancy sensors (person.* or binary_sensor.*)
