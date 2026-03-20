@@ -1797,10 +1797,6 @@ class EnergyProfileManager:
             for item in intervals:
                 if not isinstance(item, dict): continue
                 
-                # DIAGNOSTICS: Capture structure of the very first interval item
-                if items_processed == 0:
-                    self.data["debug_sample_keys"] = list(item.keys())
-                    self.data["debug_interval_sample"] = str(item)
                 items_processed += 1
                 
                 try:
@@ -2707,11 +2703,7 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
                 "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
                 "forecast_distribution": res.get("forecast_distribution", {}),
-                "forecast_dist_source": res.get("forecast_dist_source", "historical"),
-                "debug_forecast_sensors": res.get("debug_forecast_sensors", []),
-                "debug_sample_keys": res.get("debug_sample_keys", []),
-                "debug_interval_sample": res.get("debug_interval_sample", "EMPTY"),
-                "debug_raw_attributes_sample": res.get("debug_raw_attributes_sample", "EMPTY")
+                "forecast_dist_source": res.get("forecast_dist_source", "historical")
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
