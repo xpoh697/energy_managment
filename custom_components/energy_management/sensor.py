@@ -1765,10 +1765,16 @@ class EnergyProfileManager:
             
             # 1. Check for Solcast standard: Analysis -> intervals
             analysis = st.attributes.get("Analysis", {})
-            intervals = analysis.get("intervals") if isinstance(analysis, dict) else None
+            intervals = None
+            if isinstance(analysis, dict):
+                intervals = analysis.get("intervals")
             
             if not intervals:
-                # Fallback: check NordPool-like list in attributes (Forecast.Solar sometimes uses this)
+                # 2. Check top level intervals
+                intervals = st.attributes.get("intervals")
+            
+            if not intervals:
+                # 3. Fallback: Forecast.Solar uses 'forecast' or 'hourly'
                 intervals = st.attributes.get("forecast") or st.attributes.get("hourly")
             
             if not isinstance(intervals, list): continue
@@ -1780,22 +1786,31 @@ class EnergyProfileManager:
                 p_start = item.get("period_start") or item.get("datetime") or item.get("time")
                 if not p_start: continue
                 
-                # Extract date and hour
                 try:
-                    # Format: 2026-03-20T10:30:00+01:00
-                    if "T" in str(p_start):
-                        d_part, t_part = str(p_start).split("T")
+                    # Handle both strings and native datetime objects
+                    if isinstance(p_start, datetime):
+                        dt_val = p_start
+                    else:
+                        dt_val = dt_util.parse_datetime(str(p_start))
+                    
+                    if not dt_val:
+                        # Manual string split fallback
+                        p_str = str(p_start)
+                        d_part = p_str.split("T")[0].split(" ")[0]
                         if d_part != target_date_str: continue
+                        h_idx = int(p_str.split("T" if "T" in p_str else " ")[1][:2])
+                    else:
+                        # Use Home Assistant's local time if available
+                        dt_local = dt_util.as_local(dt_val)
+                        if dt_local.strftime("%Y-%m-%d") != target_date_str: continue
+                        h_idx = dt_local.hour
                         
-                        hour_str = t_part[:2]
-                        h_idx = int(hour_str)
-                        
-                        # Value field (Solcast uses 'pv_estimate' or 'estimate')
-                        val = item.get("pv_estimate") or item.get("estimate") or item.get("value") or 0.0
-                        
-                        res[str(h_idx)] += float(val)
-                        found_data = True
-                except (ValueError, IndexError):
+                    # Value field (Solcast uses 'pv_estimate' or 'estimate')
+                    val = item.get("pv_estimate") or item.get("estimate") or item.get("value") or item.get("amount") or 0.0
+                    
+                    res[str(h_idx)] += float(val)
+                    found_data = True
+                except (ValueError, IndexError, TypeError):
                     continue
                     
         return res if found_data else {}
