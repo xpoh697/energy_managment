@@ -1761,7 +1761,13 @@ class EnergyProfileManager:
 
         for fsensor in sensor_list:
             st = self.hass.states.get(fsensor)
-            if not st: continue
+            if not st: 
+                self.data["debug_raw_attributes_sample"] = f"SENSOR_NOT_FOUND: {fsensor}"
+                continue
+            
+            # DIAGNOSTICS: Store raw attributes of the sensor
+            attrs_str = str(st.attributes)[:500] # First 500 chars to avoid bloat
+            self.data["debug_raw_attributes_sample"] = attrs_str
             
             items_processed = 0
             # 1. Check for Solcast standard: Analysis or analysis -> intervals
@@ -1776,13 +1782,16 @@ class EnergyProfileManager:
             
             if not intervals:
                 # 3. Solcast specialized keys
-                intervals = st.attributes.get("forecast_today") or st.attributes.get("forecast_total") or st.attributes.get("detailed_forecast")
+                intervals = st.attributes.get("forecast_today") or st.attributes.get("forecast_total") or st.attributes.get("detailed_forecast") or st.attributes.get("forecast_tomorrow")
             
             if not intervals:
                 # 4. Fallback: Forecast.Solar uses 'forecast' or 'hourly'
-                intervals = st.attributes.get("forecast") or st.attributes.get("hourly")
+                intervals = (st.attributes.get("forecast") or st.attributes.get("hourly"))
             
-            if not isinstance(intervals, list): continue
+            # DIAGNOSTICS: If we have attributes but no intervals, log why
+            if not isinstance(intervals, list): 
+                self.data["debug_interval_sample"] = f"NO_LIST_FOUND (type={type(intervals)})"
+                continue
             
             for item in intervals:
                 if not isinstance(item, dict): continue

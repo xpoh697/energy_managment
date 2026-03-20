@@ -535,6 +535,7 @@ class StrategyEngine:
                 "forecast_dist_source": dist_source,
                 "debug_sample_keys": man.data.get("debug_sample_keys", []),
                 "debug_interval_sample": man.data.get("debug_interval_sample", ""),
+                "debug_raw_attributes_sample": man.data.get("debug_raw_attributes_sample", ""),
                 "debug_forecast_sensors": man.forecast_today_hourly_sensor,
                 "debug_fraction_so_far": float(external_progress if 'external_progress' in locals() else fraction_so_far),
                 "batt_energy_val": float(b_energy_f or 0.0),
