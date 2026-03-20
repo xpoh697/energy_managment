@@ -272,16 +272,16 @@ class EnergyProfileManager:
         self.power_gen_sensors = [str(raw_gen)] if isinstance(raw_gen, str) else cast(List[str], raw_gen or [])
 
         today_forecasts = config_data.get(CONF_FORECAST_TODAY_REMAINING, [])
-        self.forecast_today_sensor = [str(today_forecasts)] if isinstance(today_forecasts, str) else cast(List[str], today_forecasts or [])
+        self.forecast_today_sensor = [str(today_forecasts).strip()] if isinstance(today_forecasts, str) else [str(s).strip() for s in (today_forecasts or []) if s]
 
         # Use local import as safety fallback for mysterious NameError in some HA environments
         from .const import CONF_FORECAST_TODAY_HOURLY
         
         today_hourly = config_data.get(CONF_FORECAST_TODAY_HOURLY, [])
-        self.forecast_today_hourly_sensor = [str(today_hourly)] if isinstance(today_hourly, str) else cast(List[str], today_hourly or [])
+        self.forecast_today_hourly_sensor = [str(today_hourly).strip()] if isinstance(today_hourly, str) else [str(s).strip() for s in (today_hourly or []) if s]
 
         tomorrow_forecasts = config_data.get(CONF_FORECAST_TOMORROW, [])
-        self.forecast_tomorrow_sensor = [str(tomorrow_forecasts)] if isinstance(tomorrow_forecasts, str) else cast(List[str], tomorrow_forecasts or [])
+        self.forecast_tomorrow_sensor = [str(tomorrow_forecasts).strip()] if isinstance(tomorrow_forecasts, str) else [str(s).strip() for s in (tomorrow_forecasts or []) if s]
         raw_soc = config_data.get(CONF_BATTERY_SOC)
         if isinstance(raw_soc, list): raw_soc = raw_soc[0] if raw_soc else None
         self.battery_soc_sensor = str(raw_soc) if raw_soc else None
