@@ -281,15 +281,18 @@ class StrategyEngine:
             day_idx = man.day_type
             p_gen = dict(man.get_average_profile("generation", eff_period, "all"))
             
-            # Use hourly distribution if available
             dist = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
+            dist_source = "historical"
             if dist:
+                dist_source = "forecast_hourly"
                 # Use Solcast curve if available
                 hist_gen_so_far = float(sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour + 1)))
                 total_hist_gen = float(sum(float(dist.get(str(h), 0.0)) for h in range(24)))
+                active_dist = dist
             else:
                 hist_gen_so_far = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(cur_hour + 1)))
                 total_hist_gen = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(24)))
+                active_dist = p_gen
             
             # --- Improved Performance Coefficients (v4.0) ---
             # A. Calculate Historical Average Performance from history list
@@ -528,6 +531,8 @@ class StrategyEngine:
                 "debug_actual_today": float(actual_today or 0.0),
                 "debug_expected_today_total": float(expected_today_total or 0.0),
                 "debug_expected_today_so_far": float(expected_today_total - forecast_val),
+                "forecast_distribution": active_dist,
+                "forecast_dist_source": dist_source,
                 "debug_fraction_so_far": float(external_progress if 'external_progress' in locals() else fraction_so_far),
                 "batt_energy_val": float(b_energy_f or 0.0),
                 "expected_consumption": float(expected_consumption or 0.0),

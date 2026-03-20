@@ -7,7 +7,7 @@ In the Integration Configuration (via Home Assistant UI), you will see two field
 - **Tariff: Grid Buying Price**
 - **Tariff: Grid Selling Price**
 
-You can provide a single sensor for each.
+You can provide a **single sensor** or a **list of sensors** for each. If a list is provided, the integration will aggregate price data from all sources (useful for combining multiple regions or providers).
 
 ## Supported Sensor Format
 The integration's *"Universal Price Extractor"* is designed to parse the popular formats used by European energy exchanges (like Nordpool, ENTSO-E, Octopuss, etc.).
