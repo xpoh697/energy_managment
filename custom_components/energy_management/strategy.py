@@ -1328,9 +1328,9 @@ class StrategyEngine:
                     else:
                         target_soc = float(max(base_target, ai_soc_floor_reserve))
                     
-                    # If arbitrage is profitable, we can go down to base_target anyway
-                    if arbitrage_is_best and result_is_profitable:
-                        target_soc = base_target
+                    # Note: We no longer override target_soc with base_target for arbitrage
+                    # to ensure the safety floor (reserve + buffer) is preserved in any case,
+                    # as per user's survival priority.
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         target_soc = float(target_soc)
