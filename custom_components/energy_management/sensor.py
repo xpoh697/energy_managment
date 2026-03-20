@@ -2316,11 +2316,24 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "stop_sale"
             reason = f"Цена ({cur_price}) < Порога блокировки ({price_stop_sell})"
         elif cur_price is not None and cur_price >= price_sell_only_pv and not is_preparing_for_peak:
-            if now_h < sale_pv_no_bat_max_hour:
+            avg_load = self.manager.avg_load_kw if not is_forecast else 0.5
+            avg_gen = self.manager.avg_gen_kw if not is_forecast else 0.0
+            floor_soc = sell_strategy.get("arbitrage_buyback", {}).get("ai_floor_soc_pct", min_soc)
+            
+            has_surplus = bool(avg_gen > (avg_load + 0.1))
+            has_enough_energy = bool(batt_soc >= floor_soc)
+            is_before_limit = bool(now_h < sale_pv_no_bat_max_hour)
+            
+            if has_surplus and has_enough_energy and is_before_limit:
                 mode = "sale_pv_no_bat"
-                reason = "Цена ок и разрешена продажа только солнца"
+                reason = "Разрешена продажа только солнца"
             else:
-                reason = f"Блокировка sale_pv_no_bat: ограничение по времени"
+                if not has_surplus:
+                    reason = f"Блокировка sale_pv_no_bat: нет избытка генерации ({round_f(avg_gen, 2)} <= {round_f(avg_load, 2)})"
+                elif not has_enough_energy:
+                    reason = f"Блокировка sale_pv_no_bat: низкий заряд ({round_f(batt_soc, 1)}% < {round_f(floor_soc, 1)}%)"
+                else:
+                    reason = f"Блокировка sale_pv_no_bat: ограничение по времени"
 
         attrs = {}
         if not is_forecast:
