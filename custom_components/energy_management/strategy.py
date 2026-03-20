@@ -1284,16 +1284,19 @@ class StrategyEngine:
                     else:
                         num_peaks_left = float(num_peaks_left_raw) or 1.0
                     
-                    # --- TWO-STEP SAFETY CHECK ---
+                    # --- TWO-STEP SAFETY CHECK (Refined v4.6) ---
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
                     # This check only uses consumption_base (no managed loads) for the long horizon.
                     res_cons_base_dc = max(0.0, (total_cons_to_sunrise + base_deficit_tomorrow) / eff - (total_solar_to_sunrise / 0.98))
                     ai_soc_floor_base = target_morning_soc + (res_cons_base_dc / b_cap * 100.0)
                     
-                    # 2. Daily calculation: Calculate surplus until morning based on FULL profile (simulation)
-                    # res_cons_full_dc is the reserve considering managed loads for the immediate horizon (tonight).
-                    res_cons_full_dc = max(0.0, (total_cons_to_sunrise + managed_needed_sunrise) / eff - (total_solar_to_sunrise / 0.98))
-                    ai_soc_floor_reserve = target_morning_soc + (res_cons_full_dc / b_cap * 100.0)
+                    # 2. Daily calculation: Calculate reserve until morning based on SIMULATION
+                    # We use 'natural_morning_soc' which already accounts for everything (unmanaged + managed in profile)
+                    sim_natural_drop = max(0.0, float(b_soc - natural_morning_soc))
+                    ai_soc_floor_reserve = float(target_morning_soc + sim_natural_drop)
+                    
+                    # Safety cross-check: Ensure reserve is at least as high as base protection
+                    ai_soc_floor_reserve = max(ai_soc_floor_reserve, ai_soc_floor_base)
                     
                     # Arbitrage math for the Gatekeeper logic
                     p_bb, h_bb = get_best_buyback(cur_hour) 
