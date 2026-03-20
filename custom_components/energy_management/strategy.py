@@ -868,7 +868,7 @@ class StrategyEngine:
                     if res.get("state") == "preparing_arbitrage":
                         if is_arb_window:
                             s_h, b_h = best_arb_pair
-                            res["arbitrage_decision"] = f"Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f} {currency}/кВт·ч"
+                            res["arbitrage_decision"] = f"[V2] Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f} {currency}/кВт·ч"
                         else:
                             res["arbitrage_decision"] = "Заряд для обеспечения дома (Survival)"
                     else:
@@ -980,7 +980,7 @@ class StrategyEngine:
                         if best_arb_pair[0] is not None and best_arb_pair[0] > cur_hour and all_sell_prices.get(best_arb_pair[0], 0) > cur_p_f + 0.01:
                              detail += f" | Ждем главного пика в {self._format_h(best_arb_pair[0])}"
                         
-                        res["arbitrage_decision"] = f"{status}: {detail}"
+                        res["arbitrage_decision"] = f"[V2] {status}: {detail}"
 
             target_hours = sorted([int(h) for h in target_hours if int(h) >= cur_hour])
             
