@@ -533,6 +533,7 @@ class StrategyEngine:
                 "debug_expected_today_so_far": float(expected_today_total - forecast_val),
                 "forecast_distribution": active_dist,
                 "forecast_dist_source": dist_source,
+                "debug_forecast_sensors": man.forecast_today_hourly_sensor,
                 "debug_fraction_so_far": float(external_progress if 'external_progress' in locals() else fraction_so_far),
                 "batt_energy_val": float(b_energy_f or 0.0),
                 "expected_consumption": float(expected_consumption or 0.0),

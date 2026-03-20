@@ -1774,7 +1774,11 @@ class EnergyProfileManager:
                 intervals = st.attributes.get("intervals")
             
             if not intervals:
-                # 3. Fallback: Forecast.Solar uses 'forecast' or 'hourly'
+                # 3. Solcast specialized keys
+                intervals = st.attributes.get("forecast_today") or st.attributes.get("forecast_total") or st.attributes.get("detailed_forecast")
+            
+            if not intervals:
+                # 4. Fallback: Forecast.Solar uses 'forecast' or 'hourly'
                 intervals = st.attributes.get("forecast") or st.attributes.get("hourly")
             
             if not isinstance(intervals, list): continue
@@ -2677,7 +2681,8 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
                 "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
                 "forecast_distribution": res.get("forecast_distribution", {}),
-                "forecast_dist_source": res.get("forecast_dist_source", "historical")
+                "forecast_dist_source": res.get("forecast_dist_source", "historical"),
+                "debug_forecast_sensors": res.get("debug_forecast_sensors", [])
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
