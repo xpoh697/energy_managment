@@ -1803,40 +1803,42 @@ class EnergyProfileManager:
                 items_processed += 1
                 
                 try:
-                # Solcast uses 'period_start', Forecast.Solar might use 'datetime' or 'time'
-                p_start = item.get("period_start") or item.get("datetime") or item.get("time")
-                if not p_start: continue
-                
-                try:
-                    # Handle both strings and native datetime objects
-                    if isinstance(p_start, datetime):
-                        dt_val = p_start
-                    else:
-                        dt_val = dt_util.parse_datetime(str(p_start))
+                    # Solcast uses 'period_start', Forecast.Solar might use 'datetime' or 'time'
+                    p_start = item.get("period_start") or item.get("datetime") or item.get("time")
+                    if not p_start: continue
                     
-                    if not dt_val:
-                        # Manual string split fallback
-                        p_str = str(p_start)
-                        d_part = p_str.split("T")[0].split(" ")[0]
-                        if d_part != target_date_str: continue
-                        h_idx = int(p_str.split("T" if "T" in p_str else " ")[1][:2])
-                    else:
-                        # Use Home Assistant's local time if available
-                        dt_local = dt_util.as_local(dt_val)
-                        if dt_local.strftime("%Y-%m-%d") != target_date_str: continue
-                        h_idx = dt_local.hour
+                    try:
+                        # Handle both strings and native datetime objects
+                        if isinstance(p_start, datetime):
+                            dt_val = p_start
+                        else:
+                            dt_val = dt_util.parse_datetime(str(p_start))
                         
-                    # Value field (Aggressive search)
-                    val = 0.0
-                    v_keys = ["pv_estimate", "estimate", "pv_estimate10", "estimate10", "value", "amount", "kwh", "energy", "pv"]
-                    for k in v_keys:
-                        if k in item:
-                            val = item[k]
-                            break
-                    
-                    res[str(h_idx)] += float(val or 0.0)
-                    found_data = True
-                except (ValueError, IndexError, TypeError):
+                        if not dt_val:
+                            # Manual string split fallback
+                            p_str = str(p_start)
+                            d_part = p_str.split("T")[0].split(" ")[0]
+                            if d_part != target_date_str: continue
+                            h_idx = int(p_str.split("T" if "T" in p_str else " ")[1][:2])
+                        else:
+                            # Use Home Assistant's local time if available
+                            dt_local = dt_util.as_local(dt_val)
+                            if dt_local.strftime("%Y-%m-%d") != target_date_str: continue
+                            h_idx = dt_local.hour
+                            
+                        # Value field (Aggressive search)
+                        val = 0.0
+                        v_keys = ["pv_estimate", "estimate", "pv_estimate10", "estimate10", "value", "amount", "kwh", "energy", "pv"]
+                        for k in v_keys:
+                            if k in item:
+                                val = item[k]
+                                break
+                        
+                        res[str(h_idx)] += float(val or 0.0)
+                        found_data = True
+                    except (ValueError, IndexError, TypeError):
+                        continue
+                except Exception:
                     continue
                     
         return res if found_data else {}
