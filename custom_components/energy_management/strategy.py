@@ -868,7 +868,7 @@ class StrategyEngine:
                     if res.get("state") == "preparing_arbitrage":
                         if is_arb_window:
                             s_h, b_h = best_arb_pair
-                            res["arbitrage_decision"] = f"[V2] Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f} (Sell: {self.manager.price_sell_sensors})"
+                            res["arbitrage_decision"] = f"[V2] Заряд для {self._format_h(s_h)} (Gain {max_arb_gain:.2f}): {all_sell_prices.get(s_h, 0):.2f}*{eff:.2f} - {all_buy_prices.get(b_h, 0):.2f} - {deg_cost:.2f}"
                         else:
                             res["arbitrage_decision"] = "Заряд для обеспечения дома (Survival)"
                     else:
