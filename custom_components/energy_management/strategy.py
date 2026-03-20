@@ -1389,6 +1389,7 @@ class StrategyEngine:
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
                     # Ensure global_arb_note is always consistent
+                    best_buy_p, best_buy_h = get_best_buyback(cur_hour)
                     if best_buy_h is not None:
                         pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
                         global_arb_note = f"Откуп в {self._format_h(best_buy_h)} (выгода {pot_gain_val:.2f})"
@@ -1464,7 +1465,14 @@ class StrategyEngine:
 
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
             # Only show hours that actually have planned power
-            actual_active = [h for h in target_hours_sorted if charge_commands.get(h, 0.0) > 0.01]
+            if mode == "buy":
+                actual_active = [h for h in target_hours_sorted if charge_commands.get(h, 0.0) > 0.01]
+            else:
+                actual_active = [h for h in target_hours_sorted if power_needed > 0.01 and h == cur_hour]
+                # For sell mode, we also want to show the future peaks that are planned
+                if not actual_active and power_needed > 0.01:
+                    actual_active = [h for h in target_hours_sorted if h >= cur_hour]
+
             res["active_hours"] = actual_active
             res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active])
             res["active_periods"] = ", ".join(found_periods)
