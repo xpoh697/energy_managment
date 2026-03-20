@@ -765,6 +765,8 @@ class StrategyEngine:
             min_p_v = man.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
             min_p = float(min_p_v) if min_p_v is not None else 0.0
             threshold = float(max(min_p, 2.0 * deg_cost))
+            
+            currency = getattr(self.manager.hass.config, "currency", "EUR") or "EUR"
 
             def get_best_buyback(after_h):
                 options = {int(h): float(p) for h, p in all_buy_prices.items() if int(h) > int(after_h)}
@@ -792,7 +794,7 @@ class StrategyEngine:
             if max_arb_gain >= threshold:
                 s_h, b_h = best_arb_pair
                 if s_h is not None and b_h is not None:
-                    global_arb_note = f"Арбитраж: Продажа в {self._format_h(s_h)} (по {all_sell_prices[s_h]:.2f}), выгода {max_arb_gain:.2f}/кВт·ч"
+                    global_arb_note = f"Арбитраж: Продажа в {self._format_h(s_h)} (по {all_sell_prices[s_h]:.2f}), выгода {max_arb_gain:.2f} {currency}/кВт·ч"
 
 
             if mode == "buy":
@@ -832,7 +834,7 @@ class StrategyEngine:
                     if res.get("state") == "preparing_arbitrage":
                         if is_arb_window:
                             s_h, b_h = best_arb_pair
-                            res["arbitrage_decision"] = f"Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f}/кВт·ч"
+                            res["arbitrage_decision"] = f"Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f} {currency}/кВт·ч"
                         else:
                             res["arbitrage_decision"] = "Заряд для обеспечения дома (Survival)"
                     else:
