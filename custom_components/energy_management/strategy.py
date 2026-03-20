@@ -1247,10 +1247,22 @@ class StrategyEngine:
                     
                     # PRECISE SIMULATION-BASED CALCULATION (v4.5)
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # 1. Run Baseline Simulation (zero sales) to see 'natural' morning SOC
+                        # 1. Run Baseline Simulation (including profitable buy-backs before sunrise)
                         sim_end_h = max(24 + sunrise_h, int(active_window[1]) + 1)
                         sim_range = range(cur_hour, sim_end_h)
-                        _, baseline_log = self.run_soc_simulation(b_soc, sim_range, now, {})
+                        
+                        # Add predicted buy-backs to the baseline so we 'see' them in the morning projection
+                        baseline_commands = {}
+                        if best_buy_pair[1] is not None and best_buy_pair[1] < sunrise_h:
+                            # If the absolute best buy window is before sunrise, assume we'll use it
+                            # We can be more sophisticated by checking all profitable hours
+                            for h_b, p_b in all_buy_prices.items():
+                                if h_b < sunrise_h and h_b > cur_hour:
+                                    # If this hour is profitable for arbitrage from current peak
+                                    if (cur_p_f - p_b) * eff - deg_cost >= threshold:
+                                        baseline_commands[int(h_b)] = float(max_p) # Assume max charge power
+                        
+                        _, baseline_log = self.run_soc_simulation(b_soc, sim_range, now, baseline_commands)
                         
                         # Find natural SOC at sunrise (last point in sim_log or exact hour)
                         natural_morning_soc = b_soc
