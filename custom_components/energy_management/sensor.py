@@ -1763,6 +1763,7 @@ class EnergyProfileManager:
             st = self.hass.states.get(fsensor)
             if not st: continue
             
+            items_processed = 0
             # 1. Check for Solcast standard: Analysis or analysis -> intervals
             analysis = st.attributes.get("Analysis") or st.attributes.get("analysis")
             intervals = None
@@ -1809,11 +1810,21 @@ class EnergyProfileManager:
                         if dt_local.strftime("%Y-%m-%d") != target_date_str: continue
                         h_idx = dt_local.hour
                         
-                    # Value field (Solcast uses 'pv_estimate' or 'estimate')
-                    val = item.get("pv_estimate") or item.get("estimate") or item.get("pv_estimate10") or item.get("estimate10") or item.get("value") or item.get("amount") or 0.0
+                    # Value field (Aggressive search)
+                    val = 0.0
+                    v_keys = ["pv_estimate", "estimate", "pv_estimate10", "estimate10", "value", "amount", "kwh", "energy", "pv"]
+                    for k in v_keys:
+                        if k in item:
+                            val = item[k]
+                            break
                     
-                    res[str(h_idx)] += float(val)
+                    res[str(h_idx)] += float(val or 0.0)
                     found_data = True
+                    
+                    # Store sample keys for first found interval
+                    if items_processed == 0:
+                        self.data["debug_sample_keys"] = list(item.keys())
+                    items_processed += 1
                 except (ValueError, IndexError, TypeError):
                     continue
                     
