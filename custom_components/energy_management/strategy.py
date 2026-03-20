@@ -1157,8 +1157,6 @@ class StrategyEngine:
                     power_needed = charge_commands.get(cur_hour, 0.0)
                     upcoming_p = next((p for h, p in charge_commands.items() if p > 0), 0.0)
                     
-                    if power_needed == 0:
-                        power_needed = upcoming_p
                     
                     # --- BUY SIMULATION ---
                     if target_hours_sorted:
