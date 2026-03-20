@@ -1127,34 +1127,35 @@ class StrategyEngine:
                     sim_soc_plan = b_soc
                     
                     charge_commands = {}
-                    upcoming_p = 0.0
-                    for h in target_hours_sorted:
-                        upcoming = [x for x in target_hours_sorted if x >= h]
-                        block_len = 0
-                        if upcoming:
-                            block_len = 1
-                            for i in range(1, len(upcoming)):
-                                if upcoming[i] == upcoming[i-1] + 1:
-                                    block_len += 1
-                                else:
-                                    break
-                        
-                        rem_n_val = float(block_len)
-                        if h == cur_hour:
-                            # Use actual remaining time in minutes for the current hour
-                            rem_n_val = (rem_n_val - 1) + (60 - now.minute) / 60.0
-                        rem_n = max(0.1, rem_n_val)
+                    charge_commands = {int(h): 0.0 for h in target_hours_sorted if h >= cur_hour}
+                    if target_hours_sorted:
+                        # 1. Calculate how much kWh we roughly need to add
+                        # We use 110% of the theoretical gap to be safe (cover base consumption during charge)
+                        theoretical_gap_kwh = max(0.0, (target_soc - b_soc) / 100.0 * b_cap)
+                        energy_to_buy = theoretical_gap_kwh * 1.1
 
-                        if h < cur_hour: continue
-                        if target_soc > sim_soc_plan:
-                            p = float(min(max_p, (b_cap * (target_soc - sim_soc_plan) / 100.0) / rem_n))
-                        else: p = 0.0
-                        
-                        if h == cur_hour: power_needed = p
-                        if upcoming_p == 0: upcoming_p = p
-                        
-                        charge_commands[int(h)] = p
-                        sim_soc_plan = float(min(100.0, sim_soc_plan + (p / b_cap * 100.0))) 
+                        # 2. Sort available hours by price (cheapest first)
+                        pool = [h for h in target_hours_sorted if h >= cur_hour]
+                        pool_sorted = sorted(pool, key=lambda h: all_buy_prices[h])
+
+                        # 3. Waterfall allocation
+                        rem_buy = energy_to_buy
+                        for h in pool_sorted:
+                            if rem_buy <= 0: break
+                            # Capacity of this hour in kWh
+                            h_factor = 1.0
+                            if h == cur_hour:
+                                h_factor = max(0.1, (60 - now.minute) / 60.0)
+                            
+                            h_cap_kwh = max_p * h_factor
+                            take_kwh = min(rem_buy, h_cap_kwh)
+                            
+                            # Required power (kW)
+                            charge_commands[int(h)] = take_kwh / h_factor
+                            rem_buy -= take_kwh
+
+                    power_needed = charge_commands.get(cur_hour, 0.0)
+                    upcoming_p = next((p for h, p in charge_commands.items() if p > 0), 0.0)
                     
                     if power_needed == 0:
                         power_needed = upcoming_p
