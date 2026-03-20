@@ -970,7 +970,7 @@ class StrategyEngine:
                         # Arbitrage note for the sensor
                         cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
                         cur_p_f = float(normalize_float(today_prices.get(str(cur_hour), 0.0)))
-                        cur_gain = float((cur_p_f - cheap_p_back) * eff - deg_cost)
+                        cur_gain = float(cur_p_f * eff - cheap_p_back - deg_cost)
                         
                         status = "Ожидание"
                         if cur_p_f >= sell_limit: status = "Продажа (Лимит)"
@@ -1294,7 +1294,7 @@ class StrategyEngine:
                             for h_b, p_b in all_buy_prices.items():
                                 if h_b < sunrise_h and h_b > cur_hour:
                                     # If this hour is profitable for arbitrage from current peak
-                                    if (cur_p_f - p_b) * eff - deg_cost >= threshold:
+                                    if cur_p_f * eff - p_b - deg_cost >= threshold:
                                         baseline_commands[int(h_b)] = float(max_p) # Assume max charge power
                         
                         _, baseline_log = self.run_soc_simulation(b_soc, sim_range, now, baseline_commands)
@@ -1349,7 +1349,7 @@ class StrategyEngine:
                     p_bb, h_bb = get_best_buyback(cur_hour) 
                     gain_vs_buyback = 0.0
                     if h_bb is not None:
-                         gain_vs_buyback = float((cur_p_f - p_bb) * eff - deg_cost)
+                         gain_vs_buyback = float(cur_p_f * eff - p_bb - deg_cost)
                     
                     decision_tag = f"Лимит: {target_morning_soc:.0f}% на {sunrise_h:02d}:00"
                     arbitrage_is_best = False
@@ -1391,7 +1391,7 @@ class StrategyEngine:
                     # Ensure global_arb_note is always consistent
                     best_buy_p, best_buy_h = get_best_buyback(cur_hour)
                     if best_buy_h is not None:
-                        pot_gain_val = (cur_p_f - best_buy_p) * eff - deg_cost
+                        pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
                         global_arb_note = f"Откуп в {self._format_h(best_buy_h)} ({pot_gain_val:.2f})"
                     else:
                         global_arb_note = "Нет окна откупа"
