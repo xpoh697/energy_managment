@@ -1749,6 +1749,7 @@ class EnergyProfileManager:
         """
         Parses Solcast 'Analysis' attributes to get hourly distribution for a specific day.
         Returns a dict {hour: value} normalized or raw.
+        [Diag v5.2.1-fix-indent-persistent-411]
         """
         if not sensor_list:
             return {}
