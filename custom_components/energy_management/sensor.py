@@ -67,6 +67,7 @@ STORAGE_VERSION = 1
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the sensor platform."""
+    _LOGGER.info("!!! Starting setup for EM sensors !!!")
     manager = hass.data[DOMAIN][entry.entry_id]
 
     entities = []
@@ -92,6 +93,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(TodayProfileSensor(manager, "consumption", "Потребление за сегодня (Профиль)"))
 
         # Add the Smart Budget sensor using the custom period length as the profile baseline
+        _LOGGER.info("!!! Preparing to add EnergyBudgetSensor !!!")
         entities.append(EnergyBudgetSensor(manager, "Профицит энергии до утра", custom_period))
 
     if has_generation:
@@ -2650,6 +2652,7 @@ class TodayProfileSensor(SensorEntity):
 class EnergyBudgetSensor(SensorEntity):
     """Calculates if there is expected energy surplus until tomorrow morning (08:00)."""
     def __init__(self, manager, name, days_for_profile):
+        _LOGGER.info("!!! EnergyBudgetSensor __init__ for %s !!!", name)
         self.manager = manager
         self.days_for_profile = days_for_profile
         self._attr_name = name
