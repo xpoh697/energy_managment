@@ -699,6 +699,7 @@ class StrategyEngine:
             "arbitrage_decision": "Нет данных",
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
+        charge_commands = {}
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
