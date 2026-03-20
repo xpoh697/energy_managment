@@ -591,6 +591,7 @@ class StrategyEngine:
         dist_today = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
         dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, (now + timedelta(days=1)).strftime("%Y-%m-%d"))
 
+        fraction_left_h1 = float(1.0 - (now.minute / 60.0))
         for i, h_abs in enumerate(sim_range):
             real_h = int(h_abs % 24)
             is_tom = bool(h_abs >= 24)
