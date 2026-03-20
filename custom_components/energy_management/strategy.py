@@ -1109,7 +1109,7 @@ class StrategyEngine:
                             expected_night = float(normalize_float(expected_night_val))
                             forecast_val_raw = budget_data.get("forecast_val", 0.0)
                             forecast = float(normalize_float(forecast_val_raw))
-                            total_avg = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_type).values()))
+                            total_avg = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_idx).values()))
                             tomorrow_need = float(max(0.0, (total_avg - expected_night) - forecast))
                             target_soc = float(min(base_target, (expected_night + tomorrow_need) / b_cap * 100.0))
                             res["charge_reason"] = "survival"
@@ -1266,11 +1266,11 @@ class StrategyEngine:
                     tomorrow_solar_total = f_tom
                     
                     # 1. First safety check: Base consumption tomorrow (essential needs only)
-                    tomorrow_cons_base = float(sum(man.get_average_profile("consumption_base", man.custom_period, tom_type).values())) * occ_coeff
+                    tomorrow_cons_base = float(sum(man.get_average_profile("consumption_base", man.custom_period, tom_idx).values())) * occ_coeff
                     base_deficit_tomorrow = max(0.0, tomorrow_cons_base - tomorrow_solar_total)
                     
                     # 2. Planning: Total consumption (full profile with all historical loads)
-                    tomorrow_cons_total = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_type).values())) * occ_coeff
+                    tomorrow_cons_total = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_idx).values())) * occ_coeff
                     
                     # Deficit for the full profile (used for conservative solar_is_excess check)
                     tomorrow_deficit_full = max(0.0, tomorrow_cons_total - tomorrow_solar_total)
