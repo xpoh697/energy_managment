@@ -593,6 +593,8 @@ class StrategyEngine:
         dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, (now + timedelta(days=1)).strftime("%Y-%m-%d"))
 
 
+        simulated_soc = float(start_soc)
+        history_log = {}
         for i, h_abs in enumerate(sim_range):
             real_h = int(h_abs % 24)
             is_tom = bool(h_abs >= 24)
