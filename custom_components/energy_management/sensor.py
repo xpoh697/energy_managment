@@ -1842,7 +1842,7 @@ class EnergyProfileManager:
                 except Exception:
                     continue
                     
-        return res if found_data else {}
+        return {k: round(float(v), 2) for k, v in res.items()} if found_data else {}
 
     @staticmethod
     def get_cc_cv_ratio(soc):
