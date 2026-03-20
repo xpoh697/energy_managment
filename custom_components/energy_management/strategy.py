@@ -828,7 +828,11 @@ class StrategyEngine:
                         is_arb_window = any(is_buy_profitable_arb(p, h) for h, p in combined)
                         if dynamic_buy_ai and (not any(float(normalize_float(p)) <= buy_limit for h, p in combined) or is_arb_window):
                             res["state"] = "preparing_arbitrage"
-                res["arbitrage_decision"] = global_arb_note
+                    
+                    if res.get("state") == "preparing_arbitrage" and not is_arb_window:
+                        res["arbitrage_decision"] = "Заряд в дешевое окно"
+                    else:
+                        res["arbitrage_decision"] = global_arb_note
             else: # sell
                 res["limit_used"] = sell_limit
                 if negative_hours and cur_hour in negative_hours:
@@ -1421,7 +1425,10 @@ class StrategyEngine:
                             tag = "Арбитраж" if "Арбитраж" in decision_tag else "Излишки солнца"
                         cur_mode_text = f"Активная продажа ({tag})"
             elif state == "preparing_arbitrage":
-                cur_mode_text = "Ожидание арбитража"
+                if mode == "buy" and "Заряд в дешевое" in str(res.get("arbitrage_decision", "")):
+                    cur_mode_text = "Ожидание дешевой цены"
+                else:
+                    cur_mode_text = "Ожидание арбитража"
             elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not target_hours_sorted:
                 cur_mode_text = "Нет ценового окна"
             elif state == "idle":
