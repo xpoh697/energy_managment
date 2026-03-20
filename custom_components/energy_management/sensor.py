@@ -1821,9 +1821,10 @@ class EnergyProfileManager:
                     res[str(h_idx)] += float(val or 0.0)
                     found_data = True
                     
-                    # Store sample keys for first found interval
+                    # Store sample for first found interval
                     if items_processed == 0:
                         self.data["debug_sample_keys"] = list(item.keys())
+                        self.data["debug_interval_sample"] = str(item)
                     items_processed += 1
                 except (ValueError, IndexError, TypeError):
                     continue
