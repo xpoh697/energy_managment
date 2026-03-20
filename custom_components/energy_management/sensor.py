@@ -1787,6 +1787,13 @@ class EnergyProfileManager:
             for item in intervals:
                 if not isinstance(item, dict): continue
                 
+                # DIAGNOSTICS: Capture structure of the very first interval item
+                if items_processed == 0:
+                    self.data["debug_sample_keys"] = list(item.keys())
+                    self.data["debug_interval_sample"] = str(item)
+                items_processed += 1
+                
+                try:
                 # Solcast uses 'period_start', Forecast.Solar might use 'datetime' or 'time'
                 p_start = item.get("period_start") or item.get("datetime") or item.get("time")
                 if not p_start: continue
@@ -1820,12 +1827,6 @@ class EnergyProfileManager:
                     
                     res[str(h_idx)] += float(val or 0.0)
                     found_data = True
-                    
-                    # Store sample for first found interval
-                    if items_processed == 0:
-                        self.data["debug_sample_keys"] = list(item.keys())
-                        self.data["debug_interval_sample"] = str(item)
-                    items_processed += 1
                 except (ValueError, IndexError, TypeError):
                     continue
                     
