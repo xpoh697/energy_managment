@@ -274,6 +274,9 @@ class EnergyProfileManager:
         today_forecasts = config_data.get(CONF_FORECAST_TODAY_REMAINING, [])
         self.forecast_today_sensor = [str(today_forecasts)] if isinstance(today_forecasts, str) else cast(List[str], today_forecasts or [])
 
+        # Use local import as safety fallback for mysterious NameError in some HA environments
+        from .const import CONF_FORECAST_TODAY_HOURLY
+        
         today_hourly = config_data.get(CONF_FORECAST_TODAY_HOURLY, [])
         self.forecast_today_hourly_sensor = [str(today_hourly)] if isinstance(today_hourly, str) else cast(List[str], today_hourly or [])
 
