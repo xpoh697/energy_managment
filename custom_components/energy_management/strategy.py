@@ -1194,6 +1194,7 @@ class StrategyEngine:
                     # Initial defaults for robustness
                     arb_gain = 0.0
                     cheap_h_back = None
+                    best_buy_h = None
                     cheap_p_back = 0.0
                     cur_p_f = float(normalize_float(today_prices.get(str(cur_hour), 0.0)))
                     
