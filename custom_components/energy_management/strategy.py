@@ -271,9 +271,25 @@ class StrategyEngine:
             raw_f = man.get_forecast_value(man.forecast_today_sensor)
             forecast_val = float(raw_f) if raw_f is not None else 0.0
             
-            p_gen = dict(man.get_average_profile("generation", days_for_profile, "all"))
-            hist_gen_so_far = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(cur_hour + 1)))
-            total_hist_gen = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(24)))
+            # v5.2 - Dynamic Period Adaptability (Fast Learning in Transition Seasons)
+            # March, April, Sept, Oct are transition seasons for solar
+            curr_month = now.month
+            eff_period = days_for_profile
+            if curr_month in [3, 4, 9, 10]:
+                eff_period = 7 # Accelerated learning
+                
+            day_idx = man.day_type
+            p_gen = dict(man.get_average_profile("generation", eff_period, "all"))
+            
+            # Use hourly distribution if available
+            dist = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
+            if dist:
+                # Use Solcast curve if available
+                hist_gen_so_far = float(sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour + 1)))
+                total_hist_gen = float(sum(float(dist.get(str(h), 0.0)) for h in range(24)))
+            else:
+                hist_gen_so_far = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(cur_hour + 1)))
+                total_hist_gen = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(24)))
             
             # --- Improved Performance Coefficients (v4.0) ---
             # A. Calculate Historical Average Performance from history list
@@ -344,8 +360,8 @@ class StrategyEngine:
                         
             # 3. Expected consumption
             occ_coeff = float(man.get_occupancy_coefficient())
-            expected_today = float(man.get_expected_remaining("consumption_base", days_for_profile)) * occ_coeff
-            expected_night = float(man.get_expected_night("consumption_base", days_for_profile)) * occ_coeff
+            expected_today = float(man.get_expected_remaining("consumption_base", eff_period, day_idx)) * occ_coeff
+            expected_night = float(man.get_expected_night("consumption_base", eff_period, day_idx)) * occ_coeff
             expected_consumption = float(expected_today + expected_night)
             
             # Current historical value (used for waste/potential detection)
@@ -378,8 +394,16 @@ class StrategyEngine:
                 # Potential generation from Forecast (Today remaining distributed by profile)
                 # This ensures we don't start boilers on cloudy days just because "history says it's sunny".
                 f_today = float(man.get_forecast_value(man.forecast_today_sensor) or 0.0)
-                hist_rem = sum(float(p_gen.get(str(h), 0.0)) for h in range(cur_hour, 24))
-                f_potential = float(f_today * (cur_hist_val / hist_rem)) if hist_rem > 0.1 else 0.0
+                
+                # Check for Solcast hourly curve
+                dist = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
+                if dist:
+                    cur_h_dist = float(dist.get(str(cur_hour), 0.0))
+                    rem_dist = sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour, 24))
+                    f_potential = float(f_today * (cur_h_dist / rem_dist)) if rem_dist > 0.01 else 0.0
+                else:
+                    hist_rem = sum(float(p_gen.get(str(h), 0.0)) for h in range(cur_hour, 24))
+                    f_potential = float(f_today * (cur_hist_val / hist_rem)) if hist_rem > 0.1 else 0.0
                 
                 potential_gen = float(max(gen_kw, f_potential))
                 waste_kw = float(max(0.0, potential_gen - gen_kw))
@@ -532,32 +556,40 @@ class StrategyEngine:
         if b_cap_f <= 0.1:
             return float(start_soc), {}
 
+        # v5.2 - Dynamic Period Adaptability (Fast Learning in Transition Seasons) 
+        eff_period = man.custom_period
+        if now.month in [3, 4, 9, 10]:
+            eff_period = 7 
+
+        day_idx_today = man.day_type
+        tomorrow_dt = now + timedelta(days=1)
+        day_idx_tom = (tomorrow_dt).weekday() # Simplified, manager.day_type handles today holiday
+        
+        # 1. Solar distribution (Solcast Curve)
         f_today = float(man.get_forecast_value(man.forecast_today_sensor) or 0.0)
         f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
+        dist_today = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
+        dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, tomorrow_dt.strftime("%Y-%m-%d"))
+
+        # 2. Consumption profiles (7-day Aware)
+        prof_cons_today = dict(man.get_average_profile("consumption_base", eff_period, day_idx_today))
+        prof_cons_tom = dict(man.get_average_profile("consumption_base", eff_period, day_idx_tom))
         
-        day_type_today = "weekend" if now.weekday() >= 5 else "weekday"
-        tomorrow_dt = now + timedelta(days=1)
-        day_type_tom = "weekend" if tomorrow_dt.weekday() >= 5 else "weekday"
-        
-        prof_gen = dict(man.get_average_profile("generation", man.custom_period, "all"))
-        prof_cons_today = dict(man.get_average_profile("consumption_base", man.custom_period, day_type_today))
-        prof_cons_tom = dict(man.get_average_profile("consumption_base", man.custom_period, day_type_tom))
-        
-        total_hist_gen = float(sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(24)))
-        if total_hist_gen < 0.1: total_hist_gen = 1.0
+        # 3. Generation profiles (Historical Baseline)
+        prof_gen_today = dict(man.get_average_profile("generation", eff_period, day_idx_today))
+        prof_gen_tom = dict(man.get_average_profile("generation", eff_period, day_idx_tom))
         
         blended_coeff = float(getattr(man, "last_blended_coeff", 1.0))
         eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
         max_batt_p_v = man.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
         max_batt_p = float(max_batt_p_v) if max_batt_p_v is not None else 5.0
 
-        simulated_soc = float(start_soc)
-        history_log = {}
-        fraction_left_h1 = float(1.0 - (now.minute / 60.0))
-        
         sim_consumed_today = {str(s_id): float(man.daily_deduct_consumption.get(str(s_id), 0.0)) 
                              for s_id in man.deduct_settings}
         sim_consumed_tom = {str(s_id): 0.0 for s_id in man.deduct_settings}
+
+        dist_today = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
+        dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, (now + timedelta(days=1)).strftime("%Y-%m-%d"))
 
         for i, h_abs in enumerate(sim_range):
             real_h = int(h_abs % 24)
@@ -567,6 +599,28 @@ class StrategyEngine:
             step_duration = float(fraction_left_h1 if i == 0 else 1.0)
             if step_duration <= 0.001: continue
 
+            # 1. Generation Forecast for this hour
+            if is_tom:
+                if dist_tom:
+                    total_dist = sum(dist_tom.values())
+                    expected_gen_kw = float(dist_tom.get(h_str, 0.0) / total_dist * f_tom * blended_coeff) if total_dist > 0.1 else 0.0
+                else:
+                    total_hist = sum(prof_gen_tom.values())
+                    expected_gen_kw = float(normalize_float(prof_gen_tom.get(h_str, 0.0)) / total_hist * f_tom * blended_coeff) if total_hist > 0.1 else 0.0
+            else:
+                if dist_today:
+                    # Sum of future distribution values from current hour
+                    rem_dist = sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour, 24))
+                    expected_gen_kw = float(dist_today.get(h_str, 0.0) / rem_dist * f_today * blended_coeff) if rem_dist > 0.1 else 0.0
+                else:
+                    rem_hist = sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour, 24))
+                    expected_gen_kw = float(normalize_float(prof_gen_today.get(h_str, 0.0)) / rem_hist * f_today * blended_coeff) if rem_hist > 0.1 else 0.0
+            
+            # First hour correction
+            if i == 0:
+                expected_gen_kw = max(expected_gen_kw, float(getattr(man, "avg_gen_kw", 0.0)))
+
+            # 2. Managed Loads SIM
             active_m_p = 0.0
             day_sim_consumed = sim_consumed_tom if is_tom else sim_consumed_today
             d_settings = dict(getattr(man, "deduct_settings", {}))
@@ -584,36 +638,13 @@ class StrategyEngine:
                         p_draw = float(p_kw)
                     
                     if only_solar and expected_gen_kw < float(p_draw * 0.5):
-                        p_draw = 0.0 # Solar only loads don't run at night/cloudy in sim
+                        p_draw = 0.0
                     
                     if p_draw > 0.001:
                         active_m_p += p_draw
                         day_sim_consumed[s_id_s] += float(p_draw * step_duration)
 
-            hist_hour_gen = float(normalize_float(prof_gen.get(h_str, 0.0)))
-            if is_tom:
-                # For tomorrow, always use full day history as baseline (starts at 00:00)
-                expected_gen_kw = float(hist_hour_gen / total_hist_gen * f_tom * blended_coeff) if total_hist_gen > 0.1 else hist_hour_gen
-            else:
-                # DISTRIBUTION FIX: Use only the FUTURE part of historical profile for distribution
-                # because f_today typically represents the REMAINING solar from NOW.
-                if 'hist_rem_today' not in locals():
-                    cur_h = int(now.hour)
-                    # Use fractional weighting for the current hour to prevent jumps at the turn of the hour
-                    hist_cur_h = float(normalize_float(prof_gen.get(str(cur_h), 0.0)))
-                    hist_rest_today = float(sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(cur_h + 1, 24)))
-                    hist_rem_today = (hist_cur_h * fraction_left_h1) + hist_rest_today
-                    
-                    if hist_rem_today < 0.1: hist_rem_today = total_hist_gen # Fallback
-
-                expected_gen_kw = float(hist_hour_gen / hist_rem_today * f_today * blended_coeff) if hist_rem_today > 0.1 else hist_hour_gen
-                
-                if i == 0:
-                    # Current actual power is often more accurate than profile for the first hour
-                    cur_actual_gen = float(getattr(man, "avg_gen_kw", 0.0))
-                    if cur_actual_gen > expected_gen_kw:
-                        expected_gen_kw = cur_actual_gen
-            
+            # 3. Base Consumption
             p_cons = prof_cons_tom if is_tom else prof_cons_today
             occ_coeff = float(man.get_occupancy_coefficient())
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
@@ -632,7 +663,6 @@ class StrategyEngine:
                     simulated_soc = float(min(100.0, simulated_soc + (actual_charge_kw * step_duration / b_cap_f * 100.0)))
             elif total_net_kw < -0.001: 
                 sim_eff = float(max(0.85, eff_coeff))
-                # Cap discharge power by battery physical limits
                 actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
                 if b_cap_f > 0.1:
                     simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
@@ -697,8 +727,8 @@ class StrategyEngine:
             b_soc = float(batt_soc)
             b_cap = float(batt_cap)
             
-            today_type = "weekend" if now.weekday() >= 5 else "weekday"
-            tom_type = "weekend" if (now + timedelta(days=1)).weekday() >= 5 else "weekday"
+            today_idx = man.day_type
+            tom_idx = (now + timedelta(days=1)).weekday()
             
             prof_gen = dict(man.get_average_profile("generation", man.custom_period, "all"))
             

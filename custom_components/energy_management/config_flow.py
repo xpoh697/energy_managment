@@ -11,6 +11,7 @@ from .const import (
     CONF_DEDUCT_SENSORS,
     CONF_CUSTOM_PERIOD,
     CONF_FORECAST_TODAY_REMAINING,
+    CONF_FORECAST_TODAY_HOURLY,
     CONF_FORECAST_TOMORROW,
     CONF_BATTERY_SOC,
     CONF_BATTERY_CAPACITY,
@@ -173,6 +174,9 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, EnergyManagementFlow
                 vol.Optional(CONF_FORECAST_TODAY_REMAINING, default=[]): selector.EntitySelector(
                     selector.EntitySelectorConfig(multiple=True, domain="sensor")
                 ),
+                vol.Optional(CONF_FORECAST_TODAY_HOURLY, default=[]): selector.EntitySelector(
+                    selector.EntitySelectorConfig(multiple=True, domain="sensor")
+                ),
                 vol.Optional(CONF_FORECAST_TOMORROW, default=[]): selector.EntitySelector(
                     selector.EntitySelectorConfig(multiple=True, domain="sensor")
                 ),
@@ -291,7 +295,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow, EnergyManagementFl
             selector.EntitySelectorConfig(multiple=True, domain="sensor")
         )
         
-        for key in [CONF_GENERATION_SENSORS, CONF_DEDUCT_SENSORS, CONF_FORECAST_TODAY_REMAINING, CONF_FORECAST_TOMORROW, CONF_POWER_LOAD_SENSORS, CONF_POWER_GEN_SENSORS, CONF_GRID_IMPORT_SENSORS, CONF_GRID_EXPORT_SENSORS]:
+        for key in [CONF_GENERATION_SENSORS, CONF_DEDUCT_SENSORS, CONF_FORECAST_TODAY_REMAINING, CONF_FORECAST_TODAY_HOURLY, CONF_FORECAST_TOMORROW, CONF_POWER_LOAD_SENSORS, CONF_POWER_GEN_SENSORS, CONF_GRID_IMPORT_SENSORS, CONF_GRID_EXPORT_SENSORS]:
             val = get_list(key)
             schema_dict[vol.Optional(key, default=val)] = selector.EntitySelector(
                 selector.EntitySelectorConfig(multiple=True, domain="sensor")

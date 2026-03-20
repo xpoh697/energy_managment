@@ -216,9 +216,9 @@ class EnergyProfileManager:
         return dt_util.now()
 
     @property
-    def day_type(self) -> str:
-        """Determines if today is a weekday or weekend."""
-        return "weekend" if self.now.weekday() >= 5 else "weekday"
+    def is_weekend(self) -> bool:
+        """Determines if today is a weekend day (Sat/Sun) or holiday."""
+        return self.day_type >= 5
 
     @property
     def avg_load_kw(self) -> float:
@@ -272,6 +272,9 @@ class EnergyProfileManager:
 
         today_forecasts = config_data.get(CONF_FORECAST_TODAY_REMAINING, [])
         self.forecast_today_sensor = [str(today_forecasts)] if isinstance(today_forecasts, str) else cast(List[str], today_forecasts or [])
+
+        today_hourly = config_data.get(CONF_FORECAST_TODAY_HOURLY, [])
+        self.forecast_today_hourly_sensor = [str(today_hourly)] if isinstance(today_hourly, str) else cast(List[str], today_hourly or [])
 
         tomorrow_forecasts = config_data.get(CONF_FORECAST_TOMORROW, [])
         self.forecast_tomorrow_sensor = [str(tomorrow_forecasts)] if isinstance(tomorrow_forecasts, str) else cast(List[str], tomorrow_forecasts or [])
@@ -946,7 +949,22 @@ class EnergyProfileManager:
 
     @property
     def day_type(self):
-        return "weekend" if self.now.weekday() >= 5 else "weekday"
+        """Returns the current day type index (0-6). 
+        If binary_sensor.workday is 'off' (holiday), it may return 6 (Sunday) if configured.
+        """
+        now = self.now
+        wd = now.weekday()
+        
+        # Holiday awareness (Optional)
+        # If today is a holiday, we might want to treat it as a Sunday (6) for profiles
+        if self.entry.data.get("holiday_as_weekend", True):
+            workday_sensor = self.entry.data.get("workday_sensor")
+            if workday_sensor:
+                st = self.hass.states.get(workday_sensor)
+                if st and st.state == "off":
+                    return 6 # Sunday
+        
+        return wd
 
     @property
     def avg_load_kw(self):
@@ -1390,7 +1408,12 @@ class EnergyProfileManager:
             sh = str(h)
             h_data = self.data.get(profile_type, {})
             history = h_data.get(sh, [])
-            relevant = history[-days:] if days > 0 else history
+            
+            # v5.2 - Dynamic Period Adaptability
+            # If no period is passed, use self.custom_period (default 14)
+            # Transition periods (spring/autumn) might use shorter windows (e.g. 7)
+            eff_days = days if days is not None else self.custom_period
+            relevant = history[-eff_days:] if eff_days > 0 else history
             valid_vals = []
 
             for item in relevant:
@@ -1405,8 +1428,14 @@ class EnergyProfileManager:
                         occ = None
 
                     if wd is not None:
+                        # Support legacy "weekday"/"weekend" AND specific day 0-6
                         if day_type == "weekday" and wd >= 5: continue
                         if day_type == "weekend" and wd < 5: continue
+                        
+                        if isinstance(day_type, int) or (isinstance(day_type, str) and day_type.isdigit()):
+                            try:
+                                if int(wd) != int(day_type): continue
+                            except (ValueError, TypeError): pass
 
                     # Filter by occupancy if requested
                     if occupancy_filter is not None and occ is not None:
@@ -1695,6 +1724,61 @@ class EnergyProfileManager:
                 val_sum += v
         return val_sum if val_sum > 0 else None
 
+    def get_forecast_hourly_distribution(self, sensor_list, target_date_str=None):
+        """
+        Parses Solcast 'Analysis' attributes to get hourly distribution for a specific day.
+        Returns a dict {hour: value} normalized or raw.
+        """
+        if not sensor_list:
+            return {}
+            
+        res = {str(h): 0.0 for h in range(24)}
+        found_data = False
+        
+        if target_date_str is None:
+            target_date_str = self.now.strftime("%Y-%m-%d")
+
+        for fsensor in sensor_list:
+            st = self.hass.states.get(fsensor)
+            if not st: continue
+            
+            # 1. Check for Solcast standard: Analysis -> intervals
+            analysis = st.attributes.get("Analysis", {})
+            intervals = analysis.get("intervals") if isinstance(analysis, dict) else None
+            
+            if not intervals:
+                # Fallback: check NordPool-like list in attributes (Forecast.Solar sometimes uses this)
+                intervals = st.attributes.get("forecast") or st.attributes.get("hourly")
+            
+            if not isinstance(intervals, list): continue
+            
+            for item in intervals:
+                if not isinstance(item, dict): continue
+                
+                # Solcast uses 'period_start', Forecast.Solar might use 'datetime' or 'time'
+                p_start = item.get("period_start") or item.get("datetime") or item.get("time")
+                if not p_start: continue
+                
+                # Extract date and hour
+                try:
+                    # Format: 2026-03-20T10:30:00+01:00
+                    if "T" in str(p_start):
+                        d_part, t_part = str(p_start).split("T")
+                        if d_part != target_date_str: continue
+                        
+                        hour_str = t_part[:2]
+                        h_idx = int(hour_str)
+                        
+                        # Value field (Solcast uses 'pv_estimate' or 'estimate')
+                        val = item.get("pv_estimate") or item.get("estimate") or item.get("value") or 0.0
+                        
+                        res[str(h_idx)] += float(val)
+                        found_data = True
+                except (ValueError, IndexError):
+                    continue
+                    
+        return res if found_data else {}
+
     @staticmethod
     def get_cc_cv_ratio(soc):
         """Calculate CC/CV charge acceptance ratio."""
@@ -1923,22 +2007,41 @@ class ProfileAveragedSensor(EnergyBaseSensor):
 
     @property
     def extra_state_attributes(self):
-        if self.ptype == "consumption":
-            base_profile = self.manager.get_average_profile("consumption_base", self.days)
-            base_profile_weekday = self.manager.get_average_profile("consumption_base", self.days, "weekday")
-            base_profile_weekend = self.manager.get_average_profile("consumption_base", self.days, "weekend")
-            total_profile = self.manager.get_average_profile("consumption_total", self.days)
+        # Specific day index (0-6)
+        curr_day = self.manager.day_type
+        
+        # v5.2 - Show if we are using 7-day or standard window
+        learning_mode = "Standard"
+        if self.days <= 7:
+            learning_mode = "Fast Adaptive"
+
+        if self.ptype == "generation":
+            profile = self.manager.get_average_profile("generation", self.days, "all")
+            
+            # Check if we have hourly distribution sensors
+            dist_source = "historical"
+            if self.manager.forecast_today_hourly_sensor:
+                dist = self.manager.get_forecast_hourly_distribution(self.manager.forecast_today_hourly_sensor)
+                if dist:
+                    dist_source = "forecast_hourly"
+                    
             return {
-                "base_profile": base_profile,
-                "base_profile_weekday": base_profile_weekday,
-                "base_profile_weekend": base_profile_weekend,
-                "total_profile": total_profile,
-                "total_daily_average": round_f(sum(total_profile.values()), 3)
+                "period_days": self.days,
+                "current_day_index": curr_day,
+                "learning_mode": learning_mode,
+                "dist_source": dist_source,
+                "profile": profile
             }
         else:
-            profile = self.manager.get_average_profile("generation", self.days, "all")
+            base_profile = self.manager.get_average_profile("consumption_base", self.days, curr_day)
+            total_profile = self.manager.get_average_profile("consumption_total", self.days, curr_day)
             return {
-                "profile": profile
+                "period_days": self.days,
+                "current_day_index": curr_day,
+                "learning_mode": learning_mode,
+                "base_profile": base_profile,
+                "total_profile": total_profile,
+                "total_daily_average": round_f(sum(total_profile.values()), 3)
             }
 
 
@@ -2337,7 +2440,7 @@ class InverterOperationModeSensor(SensorEntity):
 
         attrs = {}
         if not is_forecast:
-            day_type = "weekend" if now.weekday() >= 5 else "weekday"
+            day_type = self.manager.day_type
             formatted_peak = self.manager.strategy_engine._format_h(peak_start_hour)
             attrs = {
                 "is_preparing_for_peak": is_preparing_for_peak,
