@@ -819,7 +819,7 @@ class StrategyEngine:
                 if int(h_s) < cur_hour: continue
                 p_b, h_b = get_best_buyback(h_s)
                 if h_b is not None:
-                    gain = float((float(p_s) - float(p_b)) * eff - deg_cost)
+                    gain = float(float(p_s) * eff - float(p_b) - deg_cost)
                     if gain > max_arb_gain:
                         max_arb_gain = gain
                         best_arb_pair = (int(h_s), int(h_b))
@@ -841,7 +841,7 @@ class StrategyEngine:
                     def is_buy_profitable_arb(buy_p, hour):
                         future_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > hour]
                         if not future_sell: return False
-                        return float((max(future_sell) - buy_p) * eff) >= threshold
+                        return float(max(future_sell) * eff - buy_p) >= threshold
 
                     dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
                     wt_filtered = {h: p for h, p in today_prices.items() if float(normalize_float(p)) <= buy_limit or (dynamic_buy_ai and is_buy_profitable_arb(float(normalize_float(p)), int(h)))}
@@ -885,7 +885,7 @@ class StrategyEngine:
                     cheap_p_back, cheap_h = get_best_buyback(hour)
                     if cheap_h is None: return False, 0.0, 999.0, None
                     # gain = (Sale Price - Buyback Price) * Efficiency - Degradation Cost
-                    gain = float((price - cheap_p_back) * eff - deg_cost)
+                    gain = float(price * eff - cheap_p_back - deg_cost)
                     return gain >= threshold, gain, cheap_p_back, cheap_h
 
                 raw_peaks_today = get_peaks(today_prices, True, 0.0, tolerance)
@@ -1085,7 +1085,7 @@ class StrategyEngine:
                     
                     # 2. Check if pre-charging from current grid price is profitable against this peak
                     cheapest_buy_in_window = min(float(all_buy_prices[h]) for h in target_hours_sorted if h >= cur_hour) if target_hours_sorted else 999.0
-                    if peak_hour is not None and (best_peak_p - cheapest_buy_in_window) * eff >= strict_threshold:
+                    if peak_hour is not None and (best_peak_p * eff - cheapest_buy_in_window) >= strict_threshold:
                         is_strict_arb = True
                     
                     dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
