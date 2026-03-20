@@ -2658,6 +2658,7 @@ class EnergyBudgetSensor(SensorEntity):
         self._attr_icon = "mdi:scale-balance"
         self._state = 0.0
         self._attrs = {}
+        self.entity_id = f"{DOMAIN}.energy_management_surplus"
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
@@ -2707,7 +2708,10 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
                 "forecast_distribution": res.get("forecast_distribution", {}),
                 "forecast_dist_source": res.get("forecast_dist_source", "historical"),
-                "debug_forecast_sensors": res.get("debug_forecast_sensors", [])
+                "debug_forecast_sensors": res.get("debug_forecast_sensors", []),
+                "debug_sample_keys": res.get("debug_sample_keys", []),
+                "debug_interval_sample": res.get("debug_interval_sample", "EMPTY"),
+                "debug_raw_attributes_sample": res.get("debug_raw_attributes_sample", "EMPTY")
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
