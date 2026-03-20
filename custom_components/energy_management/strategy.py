@@ -792,7 +792,7 @@ class StrategyEngine:
             if max_arb_gain >= threshold:
                 s_h, b_h = best_arb_pair
                 if s_h is not None and b_h is not None:
-                    global_arb_note = f"Арбитраж: Прд. {all_sell_prices[s_h]:.2f} ({self._format_h(s_h)}) -> Отк. {all_buy_prices[b_h]:.2f} ({self._format_h(b_h)}), выгода {max_arb_gain:.2f}"
+                    global_arb_note = f"Арбитраж: Продажа в {self._format_h(s_h)} (по {all_sell_prices[s_h]:.2f}), выгода {max_arb_gain:.2f}/кВт·ч"
 
 
             if mode == "buy":
@@ -831,7 +831,8 @@ class StrategyEngine:
                     
                     if res.get("state") == "preparing_arbitrage":
                         if is_arb_window:
-                            res["arbitrage_decision"] = global_arb_note
+                            s_h, b_h = best_arb_pair
+                            res["arbitrage_decision"] = f"Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f}/кВт·ч"
                         else:
                             res["arbitrage_decision"] = "Заряд для обеспечения дома (Survival)"
                     else:
