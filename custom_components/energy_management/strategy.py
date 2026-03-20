@@ -829,8 +829,11 @@ class StrategyEngine:
                         if dynamic_buy_ai and (not any(float(normalize_float(p)) <= buy_limit for h, p in combined) or is_arb_window):
                             res["state"] = "preparing_arbitrage"
                     
-                    if res.get("state") == "preparing_arbitrage" and not is_arb_window:
-                        res["arbitrage_decision"] = "Заряд в дешевое окно"
+                    if res.get("state") == "preparing_arbitrage":
+                        if is_arb_window:
+                            res["arbitrage_decision"] = global_arb_note
+                        else:
+                            res["arbitrage_decision"] = "Заряд для обеспечения дома (Survival)"
                     else:
                         res["arbitrage_decision"] = global_arb_note
             else: # sell
@@ -1051,7 +1054,9 @@ class StrategyEngine:
                     dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
                     if negative_hours:
                         target_soc = 100.0
+                        res["charge_reason"] = "negative"
                     elif dynamic_buy_ai and is_strict_arb:
+                        res["charge_reason"] = "arbitrage"
                         # ADAPTIVE TARGET: Only buy what the sun won't provide until the peak starts
                         # Run a 'dry' simulation to see what SOC we hit by peak_hour WITHOUT buying from grid
                         sim_range_dry = list(range(cur_hour, int(peak_hour)))
@@ -1073,8 +1078,13 @@ class StrategyEngine:
                             total_avg = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_type).values()))
                             tomorrow_need = float(max(0.0, (total_avg - expected_night) - forecast))
                             target_soc = float(min(base_target, (expected_night + tomorrow_need) / b_cap * 100.0))
-                        else: target_soc = base_target
-                    else: target_soc = base_target
+                            res["charge_reason"] = "survival"
+                        else: 
+                            target_soc = base_target
+                            res["charge_reason"] = "manual"
+                    else: 
+                        target_soc = base_target
+                        res["charge_reason"] = "manual"
                     
                     target_soc = float(min(100.0, target_soc))
                     sim_soc_plan = b_soc
@@ -1411,7 +1421,13 @@ class StrategyEngine:
             state = res.get("state")
             if state == "active":
                 if mode == "buy":
-                    cur_mode_text = "Экстренная зарядка" if res.get("charge_reason") == "survival" else "Активная зарядка"
+                    reason_tag = "Зарядка"
+                    c_reason = res.get("charge_reason", "manual")
+                    if c_reason == "survival": reason_tag = "Зарядка (Выживание)"
+                    elif c_reason == "arbitrage": reason_tag = "Зарядка (Арбитраж)"
+                    elif c_reason == "negative": reason_tag = "Зарядка (Отриц. цена)"
+                    
+                    cur_mode_text = f"Экстренная {reason_tag}" if res.get("charge_reason") == "survival" and b_soc < 15 else f"Активная {reason_tag}"
                 else:
                     rec_p = float(res.get("recommended_power_kw", 0.0) or 0.0)
                     if rec_p <= 0:
@@ -1425,8 +1441,14 @@ class StrategyEngine:
                             tag = "Арбитраж" if "Арбитраж" in decision_tag else "Излишки солнца"
                         cur_mode_text = f"Активная продажа ({tag})"
             elif state == "preparing_arbitrage":
-                if mode == "buy" and "Заряд в дешевое" in str(res.get("arbitrage_decision", "")):
-                    cur_mode_text = "Ожидание дешевой цены"
+                if mode == "buy":
+                    c_reason = res.get("charge_reason", "manual")
+                    if c_reason == "survival":
+                        cur_mode_text = "Ожидание (Заряд для дома)"
+                    elif c_reason == "arbitrage":
+                        cur_mode_text = "Ожидание (Заряд арбитража)"
+                    else:
+                        cur_mode_text = "Ожидание дешевой цены"
                 else:
                     cur_mode_text = "Ожидание арбитража"
             elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not target_hours_sorted:
