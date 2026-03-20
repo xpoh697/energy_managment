@@ -354,8 +354,11 @@ class EnergyProfileManager:
 
         buy_p = config_data.get(CONF_PRICE_BUY)
         sell_p = config_data.get(CONF_PRICE_SELL)
-        self.price_buy_sensors = [str(buy_p)] if buy_p and isinstance(buy_p, (str, int, float)) else []
-        self.price_sell_sensors = [str(sell_p)] if sell_p and isinstance(sell_p, (str, int, float)) else []
+        if isinstance(buy_p, list): self.price_buy_sensors = [str(s) for s in buy_p if s]
+        else: self.price_buy_sensors = [str(buy_p)] if buy_p and isinstance(buy_p, (str, int, float)) else []
+        
+        if isinstance(sell_p, list): self.price_sell_sensors = [str(s) for s in sell_p if s]
+        else: self.price_sell_sensors = [str(sell_p)] if sell_p and isinstance(sell_p, (str, int, float)) else []
 
         self.all_price_sensors = set([s for s in (self.price_buy_sensors + self.price_sell_sensors) if s])
 

@@ -868,7 +868,7 @@ class StrategyEngine:
                     if res.get("state") == "preparing_arbitrage":
                         if is_arb_window:
                             s_h, b_h = best_arb_pair
-                            res["arbitrage_decision"] = f"[V2] Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f} {currency}/кВт·ч"
+                            res["arbitrage_decision"] = f"[V2] Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f} (Sell: {self.manager.price_sell_sensors})"
                         else:
                             res["arbitrage_decision"] = "Заряд для обеспечения дома (Survival)"
                     else:
@@ -1115,7 +1115,8 @@ class StrategyEngine:
                             total_avg = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_idx).values()))
                             tomorrow_need = float(max(0.0, (total_avg - expected_night) - forecast))
                             target_soc = float(min(base_target, (expected_night + tomorrow_need) / b_cap * 100.0))
-                            res["charge_reason"] = "survival"
+                            if target_soc > b_soc + 2.0: # Only trigger if we actually need to add > 2% SOC
+                                res["charge_reason"] = "survival"
                         else: 
                             target_soc = base_target
                             res["charge_reason"] = "manual"
@@ -1387,10 +1388,9 @@ class StrategyEngine:
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
                     # Ensure global_arb_note is always consistent
-                    best_buy_p, best_buy_h = get_best_buyback(cur_hour)
                     if best_buy_h is not None:
                         pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
-                        global_arb_note = f"Откуп в {self._format_h(best_buy_h)} ({pot_gain_val:.2f})"
+                        global_arb_note = f"Откуп в {self._format_h(best_buy_h)} (Gain: {pot_gain_val:.2f}, Sell: {self.manager.price_sell_sensors})"
                     else:
                         global_arb_note = "Нет окна откупа"
 
@@ -1452,7 +1452,7 @@ class StrategyEngine:
                 
             # Use current peak power only if we are actually in a peak hour
             # Otherwise show 0 as real command, but attributes will show the potential
-            in_peak = bool(cur_hour in target_hours_sorted)
+            in_peak = (cur_hour in target_hours_sorted) and (power_needed > 0.01)
             real_cmd_p = power_needed if (mode == "sell" and in_peak) else 0.0
             if mode == "buy" and in_peak:
                 real_cmd_p = power_needed
@@ -1462,8 +1462,10 @@ class StrategyEngine:
                 res["state"] = "active"
 
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
-            res["active_hours"] = target_hours_sorted
-            res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in target_hours_sorted])
+            # Only show hours that actually have planned power
+            actual_active = [h for h in target_hours_sorted if charge_commands.get(h, 0.0) > 0.01]
+            res["active_hours"] = actual_active
+            res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active])
             res["active_periods"] = ", ".join(found_periods)
             res["target_soc"] = float(round_f(target_soc, 1))
             
