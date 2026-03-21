@@ -2703,7 +2703,8 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
                 "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
                 "forecast_distribution": res.get("forecast_distribution", {}),
-                "forecast_dist_source": res.get("forecast_dist_source", "historical")
+                "forecast_dist_source": res.get("forecast_dist_source", "historical"),
+                "debug_forecast_sample": self.manager.data.get("debug_forecast_sample", [])
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
