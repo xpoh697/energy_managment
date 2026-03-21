@@ -1772,19 +1772,26 @@ class EnergyProfileManager:
             self.data["debug_raw_attributes_sample"] = attrs_str
             
             items_processed = 0
-            # 1. Check for Solcast standard: Analysis or analysis -> intervals
-            analysis = st.attributes.get("Analysis") or st.attributes.get("analysis")
-            intervals = None
-            if isinstance(analysis, dict):
-                intervals = analysis.get("intervals")
+            # 1. Check for Solcast detailedForecast (Priority)
+            intervals = st.attributes.get("detailedForecast") or st.attributes.get("detailed_forecast")
+            attr_found = "detailedForecast" if "detailedForecast" in st.attributes else ("detailed_forecast" if "detailed_forecast" in st.attributes else None)
             
             if not intervals:
-                # 2. Check top level intervals
+                # 2. Check for Solcast standard: Analysis or analysis -> intervals
+                analysis = st.attributes.get("Analysis") or st.attributes.get("analysis")
+                if isinstance(analysis, dict):
+                    intervals = analysis.get("intervals")
+                    attr_found = "Analysis/analysis"
+            
+            if not intervals:
+                # 3. Check top level intervals
                 intervals = st.attributes.get("intervals")
+                attr_found = "intervals" if intervals else attr_found
             
             if not intervals:
-                # 3. Solcast specialized keys
-                intervals = st.attributes.get("forecast_today") or st.attributes.get("forecast_total") or st.attributes.get("detailed_forecast") or st.attributes.get("detailedForecast") or st.attributes.get("forecast_tomorrow")
+                # 4. Other Solcast specialized keys
+                intervals = st.attributes.get("forecast_today") or st.attributes.get("forecast_total") or st.attributes.get("forecast_tomorrow")
+                attr_found = "forecast_special" if intervals else attr_found
             
             if not intervals:
                 # 4. Fallback: Forecast.Solar uses 'forecast' or 'hourly'
@@ -1838,7 +1845,7 @@ class EnergyProfileManager:
                         # DIAGNOSTICS: Store first 20 points
                         ds = self.data.get("debug_forecast_sample", [])
                         if len(ds) < 20:
-                            ds.append(f"{dt_local.hour:02d}:00 -> {val} ({k})")
+                            ds.append(f"{dt_local.hour:02d}:00 -> {val} ({k}) in {attr_found}")
                             self.data["debug_forecast_sample"] = ds
                     except (ValueError, IndexError, TypeError):
                         continue
