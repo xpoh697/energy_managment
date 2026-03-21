@@ -2761,7 +2761,9 @@ class MarketStrategySensor(SensorEntity):
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "sunrise_hour": res.get("sunrise_hour", 0),
             "prices_today": today_fmt,
-            "prices_tomorrow": tom_fmt
+            "prices_tomorrow": tom_fmt,
+            "debug_charge_reason": res.get("debug_charge_reason", "n/a"),
+            "debug_state": res.get("debug_state", "n/a")
         }
 
         if self.mode == "sell":

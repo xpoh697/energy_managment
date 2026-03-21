@@ -1598,6 +1598,8 @@ class StrategyEngine:
                         cur_mode_text = "Ожидание (Пик цены)"
             
             res["current_mode_text"] = cur_mode_text
+            res["debug_charge_reason"] = str(res.get("charge_reason", "missing"))
+            res["debug_state"] = str(state)
             
             self._strategy_cache[cache_key] = {"time": now, "res": res}
             return res
