@@ -2358,11 +2358,11 @@ class InverterOperationModeSensor(SensorEntity):
                 try:
                     h_idx_s = str(f_dt.hour)
                     
-                    if "sale" in f_mode and "stop" not in f_mode:
+                    if "sale" in f_mode:
                         p_val = (sell_strategy.get("tomorrow_prices", {}) if is_tom else sell_strategy.get("today_prices", {})).get(h_idx_s)
                         if p_val is not None:
                             p_suffix = f" (sp: {float(p_val):.2f})"
-                    elif "buy" in f_mode and "stop" not in f_mode:
+                    elif "buy" in f_mode:
                         p_val = (buy_strategy.get("tomorrow_prices", {}) if is_tom else buy_strategy.get("today_prices", {})).get(h_idx_s)
                         if p_val is not None:
                             p_suffix = f" (bp: {float(p_val):.2f})"
