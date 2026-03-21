@@ -1063,8 +1063,7 @@ class StrategyEngine:
 
             if not target_hours and mode == "buy":
                 res["state"] = "price_limit_not_met"
-                self._calculating_strategy = old_calc
-                return res
+                # Continue to simulation to show natural discharge
                 
             target_hours_sorted = sorted(target_hours)
             found_periods = []
