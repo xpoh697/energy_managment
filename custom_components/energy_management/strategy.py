@@ -1013,7 +1013,7 @@ class StrategyEngine:
                 natural_hours_names = set(target_hours)
                 survival_hours = set(target_hours)
                 
-                active_dist = man.energy_profile_manager.get_generation_profile()
+                active_dist = man.data.get("avg_profiles", {}).get("generation", {})
                 safety_counter = 0
                 while safety_counter < 48:
                     safety_counter += 1
