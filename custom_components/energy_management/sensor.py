@@ -2493,7 +2493,7 @@ class InverterOperationModeSensor(SensorEntity):
                 reason = "Разрешена продажа только солнца"
             else:
                 if not has_surplus:
-                    reason = f"Блокировка sale_pv_no_bat: нет избытка генерации ({round_f(avg_gen, 2)} <= {round_f(avg_load, 2)})"
+                    reason = f"Блокировка sale_pv_no_bat: избыток ({round_f(avg_gen - avg_load, 2)} кВт) < 0.1 кВт"
                 elif not has_enough_energy:
                     reason = f"Блокировка sale_pv_no_bat: низкий заряд ({round_f(batt_soc, 1)}% < {round_f(floor_soc, 1)}%)"
                 else:
