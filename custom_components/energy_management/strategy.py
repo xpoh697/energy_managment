@@ -666,6 +666,13 @@ class StrategyEngine:
             occ_coeff = float(man.get_occupancy_coefficient())
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
             
+            # Anchor the first step of simulation to REAL active load, not profile.
+            # This eliminates "flat SOC" prediction when current load is low but profile is high.
+            if i == 0:
+                total_actual_load = float(getattr(man, "avg_load_kw", expected_cons_kw))
+                # subtract ALREADY calculated active_m_p for this step to get "Base" component
+                expected_cons_kw = max(0.0, total_actual_load - active_m_p)
+            
             cmd_p = 0.0
             if commands and h_abs in commands:
                 cmd_p = float(commands[h_abs])

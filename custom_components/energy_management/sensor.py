@@ -225,6 +225,8 @@ class EnergyProfileManager:
     def avg_load_kw(self) -> float:
         """Retrieve smoothed load power (last 10m)."""
         if not self.power_history:
+            if self.power_load_sensors:
+                return float(sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_load_sensors))
             return 0.0
         return sum(s.get("load_kw", 0.0) for s in self.power_history) / len(self.power_history)
 
@@ -232,6 +234,8 @@ class EnergyProfileManager:
     def avg_gen_kw(self) -> float:
         """Retrieve smoothed generation power (last 10m)."""
         if not self.power_history:
+            if self.power_gen_sensors:
+                return float(sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors))
             return 0.0
         return sum(s.get("gen_kw", 0.0) for s in self.power_history) / len(self.power_history)
     
