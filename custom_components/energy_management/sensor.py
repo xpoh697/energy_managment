@@ -1756,7 +1756,6 @@ class EnergyProfileManager:
             
         res = {str(h): 0.0 for h in range(24)}
         found_data = False
-        self.data["debug_forecast_sample"] = []
         
         if target_date_str is None:
             target_date_str = self.now.strftime("%Y-%m-%d")
@@ -1767,39 +1766,24 @@ class EnergyProfileManager:
                 self.data["debug_raw_attributes_sample"] = f"SENSOR_NOT_FOUND: {fsensor}"
                 continue
             
-            # DIAGNOSTICS: Store raw attributes of the sensor
-            attrs_str = str(st.attributes)[:500] # First 500 chars to avoid bloat
-            self.data["debug_raw_attributes_sample"] = attrs_str
-            
             items_processed = 0
             # 1. Check for Solcast detailedForecast (Priority)
             intervals = st.attributes.get("detailedForecast") or st.attributes.get("detailed_forecast")
-            attr_found = "detailedForecast" if "detailedForecast" in st.attributes else ("detailed_forecast" if "detailed_forecast" in st.attributes else None)
             
             if not intervals:
-                # 2. Check for Solcast standard: Analysis or analysis -> intervals
-                analysis = st.attributes.get("Analysis") or st.attributes.get("analysis")
-                if isinstance(analysis, dict):
-                    intervals = analysis.get("intervals")
-                    attr_found = "Analysis/analysis"
-            
-            if not intervals:
-                # 3. Check top level intervals
+                # 2. Check top level intervals
                 intervals = st.attributes.get("intervals")
-                attr_found = "intervals" if intervals else attr_found
             
             if not intervals:
-                # 4. Other Solcast specialized keys
+                # 3. Other Solcast specialized keys
                 intervals = st.attributes.get("forecast_today") or st.attributes.get("forecast_total") or st.attributes.get("forecast_tomorrow")
-                attr_found = "forecast_special" if intervals else attr_found
             
             if not intervals:
                 # 4. Fallback: Forecast.Solar uses 'forecast' or 'hourly'
                 intervals = (st.attributes.get("forecast") or st.attributes.get("hourly"))
             
-            # DIAGNOSTICS: If we have attributes but no intervals, log why
+            # If we have attributes but no intervals, skip
             if not isinstance(intervals, list): 
-                self.data["debug_interval_sample"] = f"NO_LIST_FOUND (type={type(intervals)})"
                 continue
             
             for item in intervals:
@@ -1841,12 +1825,6 @@ class EnergyProfileManager:
                         
                         res[str(h_idx)] += float(val or 0.0)
                         found_data = True
-                        
-                        # DIAGNOSTICS: Store first 20 points
-                        ds = self.data.get("debug_forecast_sample", [])
-                        if len(ds) < 20:
-                            ds.append(f"{dt_local.hour:02d}:00 -> {val} ({k}) in {attr_found}")
-                            self.data["debug_forecast_sample"] = ds
                     except (ValueError, IndexError, TypeError):
                         continue
                 except Exception:
@@ -2717,8 +2695,7 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
                 "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
                 "forecast_distribution": res.get("forecast_distribution", {}),
-                "forecast_dist_source": res.get("forecast_dist_source", "historical"),
-                "debug_forecast_sample": self.manager.data.get("debug_forecast_sample", [])
+                "forecast_dist_source": res.get("forecast_dist_source", "historical")
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
