@@ -624,10 +624,14 @@ class StrategyEngine:
                 if dist_today:
                     # Sum of future distribution values from current hour
                     rem_dist = sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour, 24))
-                    expected_gen_kw = float(dist_today.get(h_str, 0.0) / rem_dist * f_today * blended_coeff) if rem_dist > 0.1 else 0.0
+                    # For the current hour (i==0), f_today is the REMAINING energy. 
+                    # We must divide by step_duration to get the Power (kW) for the remaining period.
+                    energy_h = float(dist_today.get(h_str, 0.0) / rem_dist * f_today * blended_coeff) if rem_dist > 0.1 else 0.0
+                    expected_gen_kw = energy_h / step_duration if (i == 0 and step_duration > 0.001) else energy_h
                 else:
                     rem_hist = sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour, 24))
-                    expected_gen_kw = float(normalize_float(prof_gen_today.get(h_str, 0.0)) / rem_hist * f_today * blended_coeff) if rem_hist > 0.1 else 0.0
+                    energy_h = float(normalize_float(prof_gen_today.get(h_str, 0.0)) / rem_hist * f_today * blended_coeff) if rem_hist > 0.1 else 0.0
+                    expected_gen_kw = energy_h / step_duration if (i == 0 and step_duration > 0.001) else energy_h
             
             # First hour correction
             if i == 0:
