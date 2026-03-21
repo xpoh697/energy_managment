@@ -1218,11 +1218,11 @@ class StrategyEngine:
                     last_h_buy = max(target_hours_sorted) if target_hours_sorted else min(13, cur_hour + 6)
                     key_end = f"{last_h_buy % 24:02d}:59" + (" (Завтра)" if last_h_buy >= 24 else "")
                     soc_at_end = float(sim_log.get(key_end, b_soc))
-                        
+
                     # 3. Projected SOC TOMORROW MORNING (08:00 AM)
                     key_morning = "07:59 (Завтра)"
                     soc_morning = float(sim_log.get(key_morning, soc_at_end))
-                    
+
                     res["buy_simulation"] = {
                         "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_at_end_pct": float(round_f(soc_at_end, 1)),
