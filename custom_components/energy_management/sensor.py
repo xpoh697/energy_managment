@@ -2352,7 +2352,24 @@ class InverterOperationModeSensor(SensorEntity):
                 f_soc = buy_sim_log.get(h_key) or sell_sim_log.get(h_key) or batt_soc
                 
                 f_mode, _ = self._get_mode_at(f_dt, f_soc, is_forecast=True)
-                forecast[f_dt.strftime("%H:00")] = f_mode
+                
+                # Add price info if applicable
+                p_suffix = ""
+                try:
+                    h_idx_s = str(f_dt.hour)
+                    
+                    if "sale" in f_mode:
+                        p_val = (sell_strategy.get("tomorrow_prices", {}) if is_tom else sell_strategy.get("today_prices", {})).get(h_idx_s)
+                        if p_val is not None:
+                            p_suffix = f" (sp: {float(p_val):.2f})"
+                    elif "buy" in f_mode:
+                        p_val = (buy_strategy.get("tomorrow_prices", {}) if is_tom else buy_strategy.get("today_prices", {})).get(h_idx_s)
+                        if p_val is not None:
+                            p_suffix = f" (bp: {float(p_val):.2f})"
+                except Exception:
+                    pass
+                
+                forecast[f_dt.strftime("%H:00")] = f"{f_mode}{p_suffix}"
                 
             attrs["planned_modes_24h"] = forecast
             return attrs
