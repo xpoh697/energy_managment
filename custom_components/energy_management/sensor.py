@@ -1757,14 +1757,17 @@ class EnergyProfileManager:
         res = {str(h): 0.0 for h in range(24)}
         found_data = False
         
+        self.data["debug_fix_version"] = "v5.4.2-multiplier-fix"
+        self.data["debug_forecast_sensors_used"] = []
+        
         if target_date_str is None:
             target_date_str = self.now.strftime("%Y-%m-%d")
 
         for fsensor in sensor_list:
             st = self.hass.states.get(fsensor)
-            if not st: 
-                self.data["debug_raw_attributes_sample"] = f"SENSOR_NOT_FOUND: {fsensor}"
-                continue
+            if not st: continue
+            
+            self.data["debug_forecast_sensors_used"].append(fsensor)
             
             items_processed = 0
             # 1. Check for Solcast detailedForecast (Priority)
@@ -2697,7 +2700,9 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
                 "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
                 "forecast_distribution": res.get("forecast_distribution", {}),
-                "forecast_dist_source": res.get("forecast_dist_source", "historical")
+                "forecast_dist_source": res.get("forecast_dist_source", "historical"),
+                "debug_fix_version": self.manager.data.get("debug_fix_version"),
+                "debug_forecast_sensors_used": self.manager.data.get("debug_forecast_sensors_used")
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
