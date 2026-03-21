@@ -1269,7 +1269,7 @@ class StrategyEngine:
                     active_buffer = soc_buffer_val
                     
                     has_solar_coming = man.get_expected_remaining("generation") > 0.5
-                    is_morning = (now_h < 13)
+                    is_morning = (cur_hour < 13)
                     
                     # Logic: If (Solar Today) > (Cons Today) + 2kWh margin, we don't need buffer now.
                     solar_left = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
