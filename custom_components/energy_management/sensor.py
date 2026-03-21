@@ -1783,7 +1783,7 @@ class EnergyProfileManager:
             
             if not intervals:
                 # 3. Solcast specialized keys
-                intervals = st.attributes.get("forecast_today") or st.attributes.get("forecast_total") or st.attributes.get("detailed_forecast") or st.attributes.get("forecast_tomorrow")
+                intervals = st.attributes.get("forecast_today") or st.attributes.get("forecast_total") or st.attributes.get("detailed_forecast") or st.attributes.get("detailedForecast") or st.attributes.get("forecast_tomorrow")
             
             if not intervals:
                 # 4. Fallback: Forecast.Solar uses 'forecast' or 'hourly'
