@@ -1028,7 +1028,16 @@ class StrategyEngine:
                         is_tom_sim = h_step >= 24
                         h_label = f"{h_step % 24:0>2}:59" + (" (Завтра)" if is_tom_sim else "")
                         soc_at_h = float(log.get(h_label, 100.0))
+                        
+                        # IMMINENT SOLAR AWARENESS (v5.3)
+                        # If we have a minor violation (< 15% depth) but solar is expected to kick in 
+                        # within 3 hours, we don't start grid charging yet.
+                        is_minor = (min_soc - soc_at_h) < 15.0
+                        solar_income_soon = sum(float(normalize_float(active_dist.get(str(hs % 24), 0.0))) for hs in range(h_step, h_step + 3)) > 0.5
                         if soc_at_h < min_soc and violation_hour is None:
+                            if is_minor and solar_income_soon and h_step < 12:
+                                # Skip this violation, wait for sun
+                                continue
                             violation_hour = h_step
                     
                     if violation_hour is not None:
@@ -1118,15 +1127,33 @@ class StrategyEngine:
                     elif dynamic_buy_ai:
                         budget_data = self.get_budget_and_permissions(man.custom_period, skip_strategy_check=True)
                         if budget_data:
-                            expected_night_val = budget_data.get("expected_consumption", 0.0)
-                            expected_night = float(normalize_float(expected_night_val))
-                            forecast_val_raw = budget_data.get("forecast_val", 0.0)
-                            forecast = float(normalize_float(forecast_val_raw))
-                            total_avg = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_idx).values()))
-                            tomorrow_need = float(max(0.0, (total_avg - expected_night) - forecast))
-                            target_soc = float(min(base_target, (expected_night + tomorrow_need) / b_cap * 100.0))
-                            if target_soc > b_soc + 2.0: # Only trigger if we actually need to add > 2% SOC
+                            # 1. Total energy needed UNTIL sunrise tomorrow
+                            expected_cons_until_morning_val = budget_data.get("expected_consumption", 0.0)
+                            expected_cons_until_morning = float(normalize_float(expected_cons_until_morning_val))
+                            
+                            # 2. Total solar income available TODAY before sunset
+                            solar_left_today_raw = budget_data.get("forecast_val", 0.0)
+                            solar_left_today = float(normalize_float(solar_left_today_raw))
+                            
+                            # 3. Tomorrow's total daily consumption deficit (Long term planning)
+                            total_avg_tom = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_idx).values()))
+                            f_tom_raw = man.get_forecast_value(man.forecast_tomorrow_sensor)
+                            f_tom = float(f_tom_raw) if f_tom_raw is not None else 0.0
+                            tomorrow_deficit = float(max(0.0, total_avg_tom - f_tom))
+                            
+                            # SURVIVAL NEED: We only MUST buy if (Current + Solar Today) < Consumption until morning
+                            # We use a safety buffer of min_soc
+                            survival_target_kwh = expected_cons_until_morning + (min_soc * b_cap / 100.0)
+                            available_kwh = (b_soc * b_cap / 100.0) + solar_left_today
+                            
+                            if available_kwh < survival_target_kwh:
                                 res["charge_reason"] = "survival"
+                                # Target is just enough to survive + tomorrow's deficit (capped by base_target)
+                                target_soc = float(min(base_target, (survival_target_kwh + tomorrow_deficit) / b_cap * 100.0))
+                            else:
+                                # We stay at current SOC (no grid buy needed for survival)
+                                target_soc = b_soc
+                                res["charge_reason"] = "none"
                         else: 
                             target_soc = base_target
                             res["charge_reason"] = "manual"
