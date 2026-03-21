@@ -1823,7 +1823,9 @@ class EnergyProfileManager:
                                 val = item[k]
                                 break
                         
-                        res[str(h_idx)] += float(val or 0.0)
+                        # Solcast detailedForecast uses 30-minute intervals. 
+                        # Summing two 30-min kW values gives 2x actual kWh, so we multiply by 0.5.
+                        res[str(h_idx)] += float(val or 0.0) * 0.5
                         found_data = True
                     except (ValueError, IndexError, TypeError):
                         continue
