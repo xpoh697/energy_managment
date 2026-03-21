@@ -1756,6 +1756,7 @@ class EnergyProfileManager:
             
         res = {str(h): 0.0 for h in range(24)}
         found_data = False
+        self.data["debug_forecast_sample"] = []
         
         if target_date_str is None:
             target_date_str = self.now.strftime("%Y-%m-%d")
@@ -1833,6 +1834,12 @@ class EnergyProfileManager:
                         
                         res[str(h_idx)] += float(val or 0.0)
                         found_data = True
+                        
+                        # DIAGNOSTICS: Store first 20 points
+                        ds = self.data.get("debug_forecast_sample", [])
+                        if len(ds) < 20:
+                            ds.append(f"{dt_local.hour:02d}:00 -> {val} ({k})")
+                            self.data["debug_forecast_sample"] = ds
                     except (ValueError, IndexError, TypeError):
                         continue
                 except Exception:
