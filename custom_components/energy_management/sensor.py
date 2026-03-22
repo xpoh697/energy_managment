@@ -2368,15 +2368,24 @@ class InverterOperationModeSensor(SensorEntity):
             
             for i in range(1, 25):
                 f_dt = now + timedelta(hours=i)
-                h_idx_s = str(f_dt.hour)
-                is_tom = f_dt.date() > now.date()
+                h_key = f"{f_dt.hour:0>2}:59" + (" (Завтра)" if is_tom else "")
                 
-                # Use absolute hour (0-47) to match AI strategy planned hours
-                h_abs = now.hour + i
-                
-                f_soc = buy_sim_log.get(h_key) or sell_sim_log.get(h_key) or batt_soc
-                
-                f_mode, f_context = self._get_mode_at(f_dt, f_soc, is_forecast=True, abs_hour=h_abs)
+                # Pick projected SOC and power from strategy simulations
+                f_data = buy_sim_log.get(h_key) or sell_sim_log.get(h_key)
+                f_soc = batt_soc
+                f_gen = 0.0
+                f_load = 0.5
+                if isinstance(f_data, dict):
+                    f_soc = f_data.get("soc", batt_soc)
+                    f_gen = f_data.get("gen_kw", 0.0)
+                    f_load = f_data.get("load_kw", 0.5)
+                elif isinstance(f_data, (int, float)):
+                    f_soc = float(f_data)
+
+                f_mode, f_context = self._get_mode_at(
+                    f_dt, f_soc, is_forecast=True, abs_hour=h_abs,
+                    avg_gen_override=f_gen, avg_load_override=f_load
+                )
                 
                 # Add price info if applicable
                 p_suffix = ""
@@ -2402,7 +2411,7 @@ class InverterOperationModeSensor(SensorEntity):
             _LOGGER.error("Error in InverterOperationModeSensor extra_state_attributes: %s", e)
             return {"error": str(e)}
 
-    def _get_mode_at(self, dt_now, batt_soc, is_forecast=False, abs_hour=None):
+    def _get_mode_at(self, dt_now, batt_soc, is_forecast=False, abs_hour=None, avg_gen_override=None, avg_load_override=None):
         """Calculates the inverter mode for a given timestamp and SOC."""
         mode = "sale_pv" # default
         now = dt_now
@@ -2463,10 +2472,14 @@ class InverterOperationModeSensor(SensorEntity):
                 sim_range = [h for h in range(now_h, end_h) if h < 48]
                 sim_soc, sim_log = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now)
                 
-                ever_fully_charged = any(val >= (target_soc_sell - 0.5) for val in sim_log.values())
+                ever_fully_charged = any(
+                    (val.get("soc", 0.0) if isinstance(val, dict) else val) >= (target_soc_sell - 0.5) 
+                    for val in sim_log.values()
+                )
                 total_needed = 0
                 for i, val in enumerate(sim_log.values()):
-                    if val >= (target_soc_sell - 0.5):
+                    val_soc = val.get("soc", 0.0) if isinstance(val, dict) else val
+                    if val_soc >= (target_soc_sell - 0.5):
                         total_needed = i + 1
                         break
                 
@@ -2501,8 +2514,9 @@ class InverterOperationModeSensor(SensorEntity):
 
         # Pre-calculate common conditions
         # We use 5-minute averages for the mode selection to be more responsive as requested
-        avg_load = self.manager.avg_load_5m_kw if not is_forecast else 0.5
-        avg_gen = self.manager.avg_gen_5m_kw if not is_forecast else 0.0
+        # For forecasts, we use predicted values from the simulation log if provided
+        avg_load = self.manager.avg_load_5m_kw if not is_forecast else (avg_load_override if avg_load_override is not None else 0.5)
+        avg_gen = self.manager.avg_gen_5m_kw if not is_forecast else (avg_gen_override if avg_gen_override is not None else 0.0)
         has_surplus = bool(avg_gen > (avg_load + 0.1))
         is_before_limit_hour = bool(now_h < sale_pv_no_bat_max_hour)
 

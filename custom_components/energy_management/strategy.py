@@ -691,7 +691,12 @@ class StrategyEngine:
                 if b_cap_f > 0.1:
                     simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
             
-            history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = float(round_f(simulated_soc, 1))
+            # Store enriched data for the 24h forecast sensors
+            history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
+                "soc": round_f(float(simulated_soc), 1),
+                "gen_kw": round_f(float(expected_gen_kw), 3),
+                "load_kw": round_f(float(expected_cons_kw), 3)
+            }
 
         return float(simulated_soc), history_log
 
