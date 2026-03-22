@@ -2410,8 +2410,8 @@ class InverterOperationModeSensor(SensorEntity):
                 if p_suffix:
                     f_display += p_suffix
                 
-                # Format the key with tomorrow indicator
-                h_full_key = f_dt.strftime("%H:00") + (" (Завтра)" if is_tom else "")
+                # Format the key (simple HH:00 as requested)
+                h_full_key = f_dt.strftime("%H:00")
                 forecast[h_full_key] = f_display
                 
             attrs["planned_modes_24h"] = forecast
