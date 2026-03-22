@@ -1252,7 +1252,8 @@ class StrategyEngine:
                         res["buy_simulation"] = {
                             "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
                             "projected_soc_at_end_pct": float(round_f(soc_at_end, 1)),
-                            "projected_soc_morning_pct": float(round_f(soc_morning, 1))
+                            "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
+                            "log": sim_log
                         }
                     except Exception as e:
                         _LOGGER.error("Error in MarketStrategy BUY simulation: %s", e)
@@ -1516,7 +1517,8 @@ class StrategyEngine:
                     res["sell_simulation"] = {
                         "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
-                        "projected_soc_morning_pct": float(round_f(soc_morning, 1))
+                        "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
+                        "log": sim_log
                     }
                     
                     # Arbitrage details for UI attributes

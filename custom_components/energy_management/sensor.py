@@ -2405,15 +2405,14 @@ class InverterOperationModeSensor(SensorEntity):
                 except Exception:
                     pass
                 
-                # Add diagnostic reason to the mode string for the forecast
-                f_reason = f_context.get("reason", "No reason provided")
+                # Format the display string (without diagnostic reasons as requested)
                 f_display = f_mode
                 if p_suffix:
                     f_display += p_suffix
                 
                 # Format the key with tomorrow indicator
                 h_full_key = f_dt.strftime("%H:00") + (" (Завтра)" if is_tom else "")
-                forecast[h_full_key] = f"{f_display} [{f_reason}]"
+                forecast[h_full_key] = f_display
                 
             attrs["planned_modes_24h"] = forecast
             return attrs
@@ -2528,7 +2527,7 @@ class InverterOperationModeSensor(SensorEntity):
         avg_load = self.manager.avg_load_5m_kw if not is_forecast else (avg_load_override if avg_load_override is not None else 0.5)
         avg_gen = self.manager.avg_gen_5m_kw if not is_forecast else (avg_gen_override if avg_gen_override is not None else 0.0)
         has_surplus = bool(avg_gen > (avg_load + 0.05))
-        is_before_limit_hour = bool(now_h < sale_pv_no_bat_max_hour)
+        is_before_limit_hour = bool(now_h <= sale_pv_no_bat_max_hour)
 
         # State Machine Ladder
         if is_buying_active and not target_reached:
