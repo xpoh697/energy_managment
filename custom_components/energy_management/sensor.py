@@ -2368,14 +2368,15 @@ class InverterOperationModeSensor(SensorEntity):
             
             for i in range(1, 25):
                 f_dt = now + timedelta(hours=i)
-                h_now_abs = now.hour + i
-                is_tom = (h_now_abs >= 24)
-                h_key = f"{f_dt.hour:0>2}:59" + (" (Завтра)" if is_tom else "")
+                h_idx_s = str(f_dt.hour)
+                is_tom = f_dt.date() > now.date()
                 
-                # Pick projected SOC (buy has priority if both exist, usually they don't overlap)
+                # Use absolute hour (0-47) to match AI strategy planned hours
+                h_abs = now.hour + i
+                
                 f_soc = buy_sim_log.get(h_key) or sell_sim_log.get(h_key) or batt_soc
                 
-                f_mode, _ = self._get_mode_at(f_dt, f_soc, is_forecast=True)
+                f_mode, f_context = self._get_mode_at(f_dt, f_soc, is_forecast=True, abs_hour=h_abs)
                 
                 # Add price info if applicable
                 p_suffix = ""
@@ -2401,11 +2402,13 @@ class InverterOperationModeSensor(SensorEntity):
             _LOGGER.error("Error in InverterOperationModeSensor extra_state_attributes: %s", e)
             return {"error": str(e)}
 
-    def _get_mode_at(self, dt_now, batt_soc, is_forecast=False):
+    def _get_mode_at(self, dt_now, batt_soc, is_forecast=False, abs_hour=None):
         """Calculates the inverter mode for a given timestamp and SOC."""
         mode = "sale_pv" # default
         now = dt_now
         now_h = now.hour
+        # Target check hour (use abs_hour if provided for forecast alignment)
+        check_h = abs_hour if abs_hour is not None else now_h
         cur_hour_str = str(now_h)
         today_str = now.strftime("%Y-%m-%d")
 
@@ -2430,8 +2433,8 @@ class InverterOperationModeSensor(SensorEntity):
         
         # When forecasting, we use target hours instead of active state
         if is_forecast:
-            is_selling_active = now_h in sell_strategy.get("active_hours", [])
-            is_buying_active = now_h in buy_strategy.get("active_hours", [])
+            is_selling_active = check_h in sell_strategy.get("active_hours", [])
+            is_buying_active = check_h in buy_strategy.get("active_hours", [])
         else:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"
