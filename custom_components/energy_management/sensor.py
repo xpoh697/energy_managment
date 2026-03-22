@@ -2368,6 +2368,8 @@ class InverterOperationModeSensor(SensorEntity):
             
             for i in range(1, 25):
                 f_dt = now + timedelta(hours=i)
+                is_tom = f_dt.date() > now.date()
+                h_abs = now.hour + i
                 h_key = f"{f_dt.hour:0>2}:59" + (" (Завтра)" if is_tom else "")
                 
                 # Pick projected SOC and power from strategy simulations
