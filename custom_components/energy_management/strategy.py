@@ -1053,7 +1053,7 @@ class StrategyEngine:
                     for h_step in sim_range:
                         is_tom_sim = h_step >= 24
                         h_label = f"{h_step % 24:0>2}:59" + (" (Завтра)" if is_tom_sim else "")
-                        soc_at_h = float(log.get(h_label, 100.0))
+                        soc_at_h = self._get_soc_from_log(log, h_label, 100.0)
                         
                         # IMMINENT SOLAR AWARENESS (v5.3)
                         # If we have a minor violation (< 15% depth) but solar is expected to kick in 
