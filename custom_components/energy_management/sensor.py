@@ -2519,7 +2519,7 @@ class InverterOperationModeSensor(SensorEntity):
         # For forecasts, we use predicted values from the simulation log if provided
         avg_load = self.manager.avg_load_5m_kw if not is_forecast else (avg_load_override if avg_load_override is not None else 0.5)
         avg_gen = self.manager.avg_gen_5m_kw if not is_forecast else (avg_gen_override if avg_gen_override is not None else 0.0)
-        has_surplus = bool(avg_gen > (avg_load + 0.1))
+        has_surplus = bool(avg_gen > (avg_load + 0.05))
         is_before_limit_hour = bool(now_h < sale_pv_no_bat_max_hour)
 
         # State Machine Ladder

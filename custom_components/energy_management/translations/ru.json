@@ -216,6 +216,17 @@
           "expected_remaining_gen": { "name": "Прогноз прихода (кВт*ч)" },
           "hourly_simulation": { "name": "Почасовая симуляция" }
         }
+      },
+      "inverter_mode": {
+        "state": {
+          "buy": "Закупка из сети",
+          "sale_pv": "Продажа (Солнце)",
+          "sale_pv_bat": "Продажа (Солнце + АКБ)",
+          "sale_pv_no_bat": "Продажа (Только Солнце)",
+          "stop_sale": "Запрет продажи",
+          "bat_emergency": "Аварийный стоп АКБ",
+          "idle": "Ожидание"
+        }
       }
     },
     "switch": {

@@ -184,6 +184,17 @@
       },
       "grid_balance": {
         "name": "Live Grid Balance"
+      },
+      "inverter_mode": {
+        "state": {
+          "buy": "Grid Buying",
+          "sale_pv": "Selling (Solar Only)",
+          "sale_pv_bat": "Selling (Solar + Battery)",
+          "sale_pv_no_bat": "Selling (Solar Only)",
+          "stop_sale": "Stop Sale",
+          "bat_emergency": "Battery Emergency",
+          "idle": "Idle"
+        }
       }
     },
     "number": {
