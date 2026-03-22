@@ -2474,6 +2474,12 @@ class InverterOperationModeSensor(SensorEntity):
                 target_reached = True
                 reason = f"Достигнут целевой заряд (Закуп: {t_soc}%)"
 
+        # Pre-calculate common conditions
+        avg_load = self.manager.avg_load_kw if not is_forecast else 0.5
+        avg_gen = self.manager.avg_gen_kw if not is_forecast else 0.0
+        has_surplus = bool(avg_gen > (avg_load + 0.1))
+        is_before_limit_hour = bool(now_h < sale_pv_no_bat_max_hour)
+
         # State Machine Ladder
         if is_buying_active and not target_reached:
             mode = "buy"
@@ -2481,9 +2487,7 @@ class InverterOperationModeSensor(SensorEntity):
         
         elif batt_soc <= min_soc:
             # Emergency: Don't sell anything from battery, but allow PV export if there's surplus
-            avg_load = self.manager.avg_load_kw if not is_forecast else 0.5
-            avg_gen = self.manager.avg_gen_kw if not is_forecast else 0.0
-            if avg_gen > (avg_load + 0.1):
+            if has_surplus:
                 mode = "sale_pv"
                 reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), но есть излишек солнца"
             else:
@@ -2500,12 +2504,22 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "stop_sale"
             reason = f"Продажа заблокирована: Цена ({cur_price:.2f}) < Порога ({price_stop_sell:.2f})"
             
-        elif cur_price is not None and cur_price < price_sell_only_pv and not is_preparing_for_peak:
-            # SAFE MODE: Solar is okay to sell, but keep the battery for later (it's too cheap to drain now)
-            mode = "sale_pv_no_bat"
-            reason = f"Продажа только солнца: Цена ({cur_price:.2f}) < Лимита АКБ ({price_sell_only_pv:.2f})"
+        elif cur_price is not None and cur_price >= price_sell_only_pv:
+            # SAFE MORNING MODE (User's 3 conditions)
+            if is_before_limit_hour and has_surplus:
+                mode = "sale_pv_no_bat"
+                reason = f"Продажа только солнца: Цена ({cur_price:.2f}) >= Порога ({price_sell_only_pv:.2f}), утро, есть излишек"
+            else:
+                # If conditions for sale_pv_no_bat for high price not met, fallback to standard or high power
+                if not is_before_limit_hour or not has_surplus:
+                    mode = "sale_pv"
+                    reason = f"Цена ({cur_price:.2f}) >= Порога, но "
+                    reason += "уже не утро" if not is_before_limit_hour else "нет излишка генерации"
+                else:
+                    mode = "sale_pv"
+                    reason = "Стандартный экспорт солнечных излишков"
             
-        elif cur_price is not None and cur_price >= price_sell_limit and not is_preparing_for_peak:
+        elif cur_price is not None and cur_price >= price_sell_limit:
             # FIXED PRICE LIMIT: Price is so good we sell from battery even without AI
             mode = "sale_pv_bat"
             reason = f"Продажа из АКБ: Цена ({cur_price:.2f}) >= Фикс. Лимита ({price_sell_limit:.2f})"
@@ -2513,7 +2527,7 @@ class InverterOperationModeSensor(SensorEntity):
         else:
             # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
             mode = "sale_pv"
-            reason = "Стандартный экспорт солнечных излишков"
+            reason = f"Стандартная работа: Цена ({cur_price:.2f} sp) - излишки в сеть"
 
         attrs = {}
         if not is_forecast:
