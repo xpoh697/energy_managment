@@ -2405,7 +2405,15 @@ class InverterOperationModeSensor(SensorEntity):
                 except Exception:
                     pass
                 
-                forecast[f_dt.strftime("%H:00")] = f"{f_mode}{p_suffix}"
+                # Add diagnostic reason to the mode string for the forecast
+                f_reason = f_context.get("reason", "No reason provided")
+                f_display = f_mode
+                if p_suffix:
+                    f_display += p_suffix
+                
+                # Format the key with tomorrow indicator
+                h_full_key = f_dt.strftime("%H:00") + (" (Завтра)" if is_tom else "")
+                forecast[h_full_key] = f"{f_display} [{f_reason}]"
                 
             attrs["planned_modes_24h"] = forecast
             return attrs
