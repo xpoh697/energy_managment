@@ -2410,14 +2410,16 @@ class InverterOperationModeSensor(SensorEntity):
         today_str = now.strftime("%Y-%m-%d")
 
         try:
-            from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR
+            from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_PRICE_SELL_LIMIT
             price_stop_sell = self.manager.get_setting(CONF_PRICE_STOP_SELL, 0.0)
             price_sell_only_pv = self.manager.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0)
             sale_pv_no_bat_max_hour = self.manager.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
+            price_sell_limit = self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)
         except ImportError:
             price_stop_sell = 0.0
             price_sell_only_pv = 999.0
             sale_pv_no_bat_max_hour = 13.0
+            price_sell_limit = 5.0
 
         min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
         cur_price = self.manager.get_price("sell", today_str, now_h)
