@@ -554,12 +554,19 @@ class StrategyEngine:
         finally:
             self._calculating_strategy = old_calc
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None):
+    def _get_soc_from_log(self, log: dict, key: str, default: float) -> float:
+        """Safely extract SOC float from simulation log (handles both float and dict formats)."""
+        val = log.get(key)
+        if isinstance(val, dict):
+            return float(val.get("soc", default))
+        return float(val if val is not None else default)
+
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}
 
-        man: Any = self.manager
+        man = man or self.manager
         _, batt_cap, _ = man.get_battery_state()
         b_cap_f = float(batt_cap)
         if b_cap_f <= 0.1:
@@ -1227,7 +1234,7 @@ class StrategyEngine:
                             if first_h_buy > cur_hour:
                                 prev_h = first_h_buy - 1
                                 key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                                soc_at_start = float(sim_log.get(key_start, b_soc))
+                                soc_at_start = self._get_soc_from_log(sim_log, key_start, b_soc)
                             else:
                                 soc_at_start = b_soc
                         else:
@@ -1236,11 +1243,11 @@ class StrategyEngine:
                         # 2. Projected SOC AFTER the last buy hour (or noon today if no buys)
                         last_h_buy = max(target_hours_sorted) if target_hours_sorted else min(13, cur_hour + 6)
                         key_end = f"{last_h_buy % 24:02d}:59" + (" (Завтра)" if last_h_buy >= 24 else "")
-                        soc_at_end = float(sim_log.get(key_end, b_soc))
+                        soc_at_end = self._get_soc_from_log(sim_log, key_end, b_soc)
                             
                         # 3. Projected SOC TOMORROW MORNING (08:00 AM)
                         key_morning = "07:59 (Завтра)"
-                        soc_morning = float(sim_log.get(key_morning, soc_at_end))
+                        soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_at_end)
                         
                         res["buy_simulation"] = {
                             "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
@@ -1376,9 +1383,8 @@ class StrategyEngine:
                         # Find natural SOC at sunrise (last point in sim_log or exact hour)
                         natural_morning_soc = b_soc
                         if baseline_log:
-                            # Use the exact key format from run_soc_simulation
                             key_morning_sim = f"{sunrise_h-1:02d}:59 (Завтра)"
-                            natural_morning_soc = float(baseline_log.get(key_morning_sim, b_soc))
+                            natural_morning_soc = self._get_soc_from_log(baseline_log, key_morning_sim, b_soc)
                         
                         # 2. Available energy is the extra above target_morning_soc
                         extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc)
@@ -1494,18 +1500,18 @@ class StrategyEngine:
                     if first_h_sell > cur_hour:
                         prev_h = first_h_sell - 1
                         key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                        soc_at_start = float(sim_log.get(key_start, b_soc))
+                        soc_at_start = self._get_soc_from_log(sim_log, key_start, b_soc)
                     else:
                         soc_at_start = b_soc
                         
                     # 2. Projected SOC AFTER the last peak
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else cur_hour
                     key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
-                    soc_after = float(sim_log.get(key_after, b_soc))
+                    soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
                     
                     # 3. Projected SOC TOMORROW MORNING (at Dynamic Sunrise)
                     key_morning = f"{sunrise_h-1:02d}:59 (Завтра)"
-                    soc_morning = float(sim_log.get(key_morning, soc_after))
+                    soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
 
                     res["sell_simulation"] = {
                         "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
