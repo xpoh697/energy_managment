@@ -2474,43 +2474,46 @@ class InverterOperationModeSensor(SensorEntity):
                 target_reached = True
                 reason = f"Достигнут целевой заряд (Закуп: {t_soc}%)"
 
+        # State Machine Ladder
         if is_buying_active and not target_reached:
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ"
+        
         elif batt_soc <= min_soc:
+            # Emergency: Don't sell anything from battery, but allow PV export if there's surplus
             avg_load = self.manager.avg_load_kw if not is_forecast else 0.5
             avg_gen = self.manager.avg_gen_kw if not is_forecast else 0.0
             if avg_gen > (avg_load + 0.1):
                 mode = "sale_pv"
-                reason = "Низкий заряд, но есть излишек солнца"
+                reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), но есть излишек солнца"
             else:
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
+        
         elif is_selling_active and not target_reached:
+            # Active AI / Arbitrage strategy
             mode = "sale_pv_bat"
-            reason = "Активна стратегия ПРОДАЖИ"
+            reason = "Активна стратегия ПРОДАЖИ (AI)"
+            
         elif cur_price is not None and cur_price < price_stop_sell:
+            # Global price floor for ANY selling
             mode = "stop_sale"
-            reason = f"Цена ({cur_price}) < Порога блокировки ({price_stop_sell})"
-        elif cur_price is not None and cur_price >= price_sell_only_pv and not is_preparing_for_peak:
-            avg_load = self.manager.avg_load_kw if not is_forecast else 0.5
-            avg_gen = self.manager.avg_gen_kw if not is_forecast else 0.0
-            floor_soc = sell_strategy.get("arbitrage_buyback", {}).get("ai_floor_soc_pct", min_soc)
+            reason = f"Продажа заблокирована: Цена ({cur_price:.2f}) < Порога ({price_stop_sell:.2f})"
             
-            has_surplus = bool(avg_gen > (avg_load + 0.1))
-            has_enough_energy = bool(batt_soc >= floor_soc)
-            is_before_limit = bool(now_h < sale_pv_no_bat_max_hour)
+        elif cur_price is not None and cur_price < price_sell_only_pv and not is_preparing_for_peak:
+            # SAFE MODE: Solar is okay to sell, but keep the battery for later (it's too cheap to drain now)
+            mode = "sale_pv_no_bat"
+            reason = f"Продажа только солнца: Цена ({cur_price:.2f}) < Лимита АКБ ({price_sell_only_pv:.2f})"
             
-            if has_surplus and has_enough_energy and is_before_limit:
-                mode = "sale_pv_no_bat"
-                reason = "Разрешена продажа только солнца"
-            else:
-                if not has_surplus:
-                    reason = f"Блокировка sale_pv_no_bat: избыток ({round_f(avg_gen - avg_load, 2)} кВт) < 0.1 кВт"
-                elif not has_enough_energy:
-                    reason = f"Блокировка sale_pv_no_bat: низкий заряд ({round_f(batt_soc, 1)}% < {round_f(floor_soc, 1)}%)"
-                else:
-                    reason = f"Блокировка sale_pv_no_bat: ограничение по времени"
+        elif cur_price is not None and cur_price >= price_sell_limit and not is_preparing_for_peak:
+            # FIXED PRICE LIMIT: Price is so good we sell from battery even without AI
+            mode = "sale_pv_bat"
+            reason = f"Продажа из АКБ: Цена ({cur_price:.2f}) >= Фикс. Лимита ({price_sell_limit:.2f})"
+            
+        else:
+            # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
+            mode = "sale_pv"
+            reason = "Стандартный экспорт солнечных излишков"
 
         attrs = {}
         if not is_forecast:
