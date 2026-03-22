@@ -238,6 +238,26 @@ class EnergyProfileManager:
                 return float(sum((get_kwh_val(self.hass.states.get(s)) or 0.0) for s in self.power_gen_sensors))
             return 0.0
         return sum(s.get("gen_kw", 0.0) for s in self.power_history) / len(self.power_history)
+
+    @property
+    def avg_load_5m_kw(self) -> float:
+        """Retrieve smoothed load power (last 5m)."""
+        if not self.power_history:
+            return self.avg_load_kw
+        cutoff = self.now - timedelta(minutes=5)
+        samples = [s.get("load_kw", 0.0) for s in self.power_history if s["time"] >= cutoff]
+        if not samples: return self.avg_load_kw
+        return sum(samples) / len(samples)
+
+    @property
+    def avg_gen_5m_kw(self) -> float:
+        """Retrieve smoothed generation power (last 5m)."""
+        if not self.power_history:
+            return self.avg_gen_kw
+        cutoff = self.now - timedelta(minutes=5)
+        samples = [s.get("gen_kw", 0.0) for s in self.power_history if s["time"] >= cutoff]
+        if not samples: return self.avg_gen_kw
+        return sum(samples) / len(samples)
     
     data: Dict[str, Any]
     max_days: int
@@ -2475,8 +2495,9 @@ class InverterOperationModeSensor(SensorEntity):
                 reason = f"Достигнут целевой заряд (Закуп: {t_soc}%)"
 
         # Pre-calculate common conditions
-        avg_load = self.manager.avg_load_kw if not is_forecast else 0.5
-        avg_gen = self.manager.avg_gen_kw if not is_forecast else 0.0
+        # We use 5-minute averages for the mode selection to be more responsive as requested
+        avg_load = self.manager.avg_load_5m_kw if not is_forecast else 0.5
+        avg_gen = self.manager.avg_gen_5m_kw if not is_forecast else 0.0
         has_surplus = bool(avg_gen > (avg_load + 0.1))
         is_before_limit_hour = bool(now_h < sale_pv_no_bat_max_hour)
 
