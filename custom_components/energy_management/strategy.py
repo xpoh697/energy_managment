@@ -1199,9 +1199,14 @@ class StrategyEngine:
                         # 1. Prediction of SOC at the START of this hour (solar only)
                         sim_to_b = list(range(cur_hour, int(h_b)))
                         soc_at_b, _ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None)
+                        
+                        # Fix (v6.16): For future hours, use Minute 0 to get FULL solar hour in simulation.
+                        # This prevents "losing" solar minutes due to now.minute offset.
+                        sim_start_time = now if h_b == cur_hour else now.replace(minute=0, second=0, microsecond=0)
+                        
                         # 2. Prediction of MAX SOC achieved by Sun alone TODAY starting from this hour
                         sim_eod = list(range(int(h_b), 24))
-                        soc_final_dry, dry_log = self.run_soc_simulation(soc_at_b, sim_eod, now + timedelta(hours=int(h_b-cur_hour)), commands=None)
+                        soc_final_dry, dry_log = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
                         max_dry_soc = max([float(st["soc"]) for st in dry_log.values()] + [float(soc_at_b)])
                         
                         if max_dry_soc < 99.0: # If sun alone won't reach 100% at any point today
@@ -1224,10 +1229,12 @@ class StrategyEngine:
                         res["charge_reason"] = "none"
                         target_soc = b_soc
 
-                    # Final Override: If no useful hours left or sun is sufficient, no buy
-                    if not pool:
+                    # Final Override (v6.16): If no useful hours left, sun is sufficient,
+                    # OR current SOC is already high enough (prevents micro-buys for 1% arbitrage)
+                    if not pool or target_soc <= (b_soc + 0.5):
                         target_soc = b_soc
                         res["charge_reason"] = "none"
+                        pool = [] # Empty pool to clear attributes
                     
                     target_soc = float(min(100.0, target_soc))
                     sim_soc_plan = b_soc
