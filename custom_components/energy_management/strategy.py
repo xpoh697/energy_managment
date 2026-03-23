@@ -1189,13 +1189,29 @@ class StrategyEngine:
                     survival_target_kwh = cons_until_morning + (min_soc * b_cap / 100.0)
                     available_today_kwh = (b_soc * b_cap / 100.0) + solar_income
                     
-                    # 2. Dry simulation to see natural SOC gain from solar
-                    expected_soc_at_peak, _ = self.run_soc_simulation(b_soc, sim_range_dry, now, commands=None)
-                    sun_gain_pct = max(0.0, expected_soc_at_peak - b_soc)
+                    # --- Granular Solar Priority (v6.14) ---
+                    # We only buy from grid what the Sun WON'T provide before the peak starts.
+                    peak_h = peak_hour if peak_hour else 18
+                    pool = [h for h in target_hours_sorted if h >= cur_hour]
+                    pool_useful = []
                     
+                    for h_b in pool:
+                        # 1. Prediction of SOC at the START of this hour (solar only)
+                        sim_to_b = list(range(cur_hour, int(h_b)))
+                        soc_at_b, _ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None)
+                        # 2. Prediction of SOC at PEAK starting from this hour (solar only)
+                        sim_from_b = list(range(int(h_b), int(peak_h)))
+                        soc_at_peak_dry, _ = self.run_soc_simulation(soc_at_b, sim_from_b, now + timedelta(hours=int(h_b-cur_hour)), commands=None)
+                        
+                        if soc_at_peak_dry < 97.0: # If sun alone won't reach ~100% by peak
+                            pool_useful.append(h_b)
+                    
+                    pool = pool_useful
                     if is_strict_arb:
                         res["charge_reason"] = "arbitrage"
-                        # Strategy: Be at 100% by peak, but subtract what sun gives for free
+                        # Adaptive Target: 100% minus what the sun gives eventually
+                        expected_soc_at_peak, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, int(peak_h))), now, commands=None)
+                        sun_gain_pct = max(0.0, expected_soc_at_peak - b_soc)
                         target_soc = float(min(100.0, 100.0 - sun_gain_pct))
                     elif negative_hours:
                         res["charge_reason"] = "negative"
@@ -1207,11 +1223,10 @@ class StrategyEngine:
                         res["charge_reason"] = "none"
                         target_soc = b_soc
 
-                    # Final Safety Check: If we reach the base target from solar alone, NO GRID BUY at all
-                    # We use a 1% margin to avoid jitter
-                    if expected_soc_at_peak >= (base_target - 1.0):
+                    # Final Override: If no useful hours left or sun is sufficient, no buy
+                    if not pool:
                         target_soc = b_soc
-                        res["charge_reason"] = "solar_sufficient"
+                        res["charge_reason"] = "none"
                     
                     target_soc = float(min(100.0, target_soc))
                     sim_soc_plan = b_soc
@@ -1225,7 +1240,6 @@ class StrategyEngine:
                         energy_to_buy = theoretical_gap_kwh * 1.1
 
                         # 2. Sort available hours by price (cheapest first)
-                        pool = [h for h in target_hours_sorted if h >= cur_hour]
                         pool_sorted = sorted(pool, key=lambda h: all_buy_prices[h])
 
                         # 3. v6.4: Smooth window distribution (Smooth as requested in pt 4)
