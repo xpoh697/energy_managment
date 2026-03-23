@@ -1425,9 +1425,10 @@ class StrategyEngine:
                         target_soc = target_morning_soc
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                     
-                    # Recommended power: Total available / hours left to sell
-                    power_peak = available_sell_ac / num_peaks_left
-                    power_needed = float(max(0.0, power_peak))
+                    # Recommended power: Prioritize nearest window (Greedy v5.4)
+                    # We try to sell EXACTLY the required surplus as fast as possible.
+                    # The value is capped by man.get_setting(CONF_BATTERY_MAX_POWER) later in simulation/logic.
+                    power_needed = float(max(0.0, available_sell_ac))
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         target_soc = float(target_soc)
