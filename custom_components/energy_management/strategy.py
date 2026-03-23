@@ -62,72 +62,96 @@ class StrategyEngine:
         return f"{d}{h_abs % 24:02d}:00"
 
     def get_battery_degradation_cost(self):
-        """Cost of battery wear per kWh (Cycle Cost)."""
+        """Cost of battery wear per kWh (Cycle Cost). Syncs with UI sensor."""
         batt_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
         cycles = self.manager.get_setting(CONF_BATTERY_RATED_CYCLES, 6000)
         
+        # Pull battery capacity once
         _, cap, _ = self.manager.get_battery_state()
-        if cap <= 0: cap = 10.0
+        if cap <= 1.0: cap = 10.0 # Safety default
         
         if cycles <= 0 or batt_cost <= 0: return 0.0
-        return batt_cost / (cycles * cap)
+        # Formula: total_cost / (total_cycles * total_capacity)
+        return round_f(batt_cost / (cycles * cap), 4)
 
     def get_efficiency_coefficient(self) -> float:
-        """Calculates historical inverter/system efficiency."""
+        """Calculates historical inverter efficiency (Smart filtering for High Power)."""
         man: Any = self.manager
         d_store = getattr(man, "data", {})
-        if not isinstance(d_store, dict):
-            return 1.0
+        if not isinstance(d_store, dict): return 0.95
 
-        p_val = getattr(man, "custom_period", 14)
-        n_days = 14
-        if p_val is not None:
-            try:
-                n_days = int(float(str(p_val)))
-            except (ValueError, TypeError):
-                n_days = 14
-        
+        l_map = d_store.get("losses", {})
+        if not isinstance(l_map, dict): return 0.95
+            
         sum_g = 0.0
         sum_l = 0.0
         smp_count = 0
         
-        l_map = d_store.get("losses", {})
-        if not isinstance(l_map, dict):
-            return 1.0
-            
+        # Rule: We only count samples where Generation was > 1kW 
+        # to avoid standby-power bias (where 0.3kW loss on 0.5kW gen makes eff look like 40%)
+        # Arbitrage happens at high power (5kW), so we need High-Power Efficiency.
         for h_idx in range(24):
-            key_h = str(h_idx)
-            recs = l_map.get(key_h, [])
-            if not isinstance(recs, list):
-                continue
+            recs = l_map.get(str(h_idx), [])
+            if not isinstance(recs, list): continue
             
-            n_tot = len(recs)
-            start_i = 0
-            if n_days > 0 and n_tot > n_days:
-                start_i = int(n_tot - n_days)
+            for item in recs[-14:]: # Last 14 days
+                if not isinstance(item, dict): continue
+                g_val = float(normalize_float(item.get("gen", 0.0)))
+                l_val = float(normalize_float(item.get("v", 0.0)))
                 
-            for i in range(n_tot):
-                if i < start_i:
-                    continue
-                item = recs[i]
-                if not isinstance(item, dict):
-                    continue
-                
-                g_v = item.get("gen", 0.0)
-                l_v = item.get("v", 0.0)
-                g_val = float(normalize_float(g_v))
-                l_val = float(normalize_float(l_v))
-                
-                if g_val > 0.01:
+                # Rule: Only samples with > 1.0 kW generation (representing significant activity)
+                if g_val > 1.0:
                     sum_g += g_val
                     sum_l += l_val
                     smp_count += 1
         
-        if smp_count < 5 or sum_g < 0.1:
-            return 1.0
+        if smp_count < 3 or sum_g < 1.0:
+            return 0.95 # Reasonable modern inverter default
             
         eff_ratio = float((sum_g - sum_l) / sum_g)
-        return float(max(0.85, min(1.0, eff_ratio)))
+        # Never allow less than 85% or more than 99%
+        return float(max(0.85, min(0.99, eff_ratio)))
+
+    # --- REFACTOR v6.2 MODULAR HELPERS ---
+
+    def _get_sunrise_baseline_soc(self, current_soc, now, sunrise_h, best_buy_pair, all_buy_prices, threshold, eff, deg_cost, max_p):
+        """Runs a baseline simulation to end-of-night without any selling."""
+        cur_hour = now.hour
+        # 1. Run Baseline Simulation (including profitable buy-backs before sunrise)
+        sim_end_h = 24 + sunrise_h
+        sim_range = range(cur_hour, sim_end_h)
+        
+        # Add predicted buy-backs to the baseline so we 'see' them in the morning projection
+        baseline_commands = {}
+        if best_buy_pair[1] is not None and best_buy_pair[1] < sunrise_h:
+            for h_b, p_b in all_buy_prices.items():
+                if h_b < sunrise_h and h_b > cur_hour:
+                    # If this hour is profitable (Gain >= threshold)
+                    # Note: We use a simplified check for baseline inclusion
+                    baseline_commands[int(h_b)] = float(max_p)
+        
+        _, baseline_log = self.run_soc_simulation(current_soc, sim_range, now, baseline_commands)
+        
+        # Find natural SOC at sunrise
+        natural_morning_soc = current_soc
+        if baseline_log:
+            key_morning_sim = f"{sunrise_h-1:02d}:59 (Завтра)"
+            natural_morning_soc = self._get_soc_from_log(baseline_log, key_morning_sim, current_soc)
+        
+        return natural_morning_soc
+
+    def _calculate_sunrise_surplus(self, natural_morning_soc, min_soc, buffer_soc, batt_cap, eff):
+        """Strictly calculates surplus above the safety mark (e.g. 28%)."""
+        target_morning_soc = float(min_soc + buffer_soc)
+        extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc)
+        return float((extra_soc_pct * batt_cap / 100.0) * eff)
+
+    def _calc_immediate_safety_floor(self, min_soc, active_buffer, total_cons_to_sunrise, base_deficit_tomorrow, total_solar_to_sunrise, batt_cap, eff):
+        """The 'Gatekeeper' floor for current hour selling."""
+        active_floor_soc = float(min_soc + active_buffer)
+        # Coverage for essential needs until sunrise
+        res_cons_base_dc = max(0.0, (total_cons_to_sunrise + base_deficit_tomorrow) / eff - (total_solar_to_sunrise / 0.98))
+        return active_floor_soc + (res_cons_base_dc / batt_cap * 100.0)
 
     def get_gen_forecast_coefficient(self, forecast_value: float, prof_gen: dict, hour_start: int, hour_end: int) -> float:
         if not forecast_value or forecast_value <= 0.1:
@@ -528,6 +552,8 @@ class StrategyEngine:
                 "forecast_coefficient": float(blended_coeff or 1.0),
                 "forecast_hist_coefficient": float(hist_coeff or 1.0),
                 "forecast_today_coefficient": float(today_coeff or 1.0),
+                "efficiency_coefficient": float(eff_coeff or 1.0),
+                "degradation_cost": float(self.get_battery_degradation_cost() or 0.0),
                 "debug_actual_today": float(actual_today or 0.0),
                 "debug_expected_today_total": float(expected_today_total or 0.0),
                 "debug_expected_today_so_far": float(expected_today_total - forecast_val),
@@ -848,9 +874,14 @@ class StrategyEngine:
                     res["target_price"] = target_price
                 else:
                     def is_buy_profitable_arb(buy_p, hour):
+                        # Find best future sell price after this buy hour
                         future_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > hour]
                         if not future_sell: return False
-                        return float(max(future_sell) * eff - buy_p) >= threshold
+                        best_s = max(future_sell)
+                        
+                        # Use the strict formula: (Sell * Eff) - Buy - Deg >= Threshold
+                        gain = float(best_s * eff - buy_p - deg_cost)
+                        return gain >= threshold
 
                     dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
                     wt_filtered = {h: p for h, p in today_prices.items() if float(normalize_float(p)) <= buy_limit or (dynamic_buy_ai and is_buy_profitable_arb(float(normalize_float(p)), int(h)))}
@@ -867,6 +898,18 @@ class StrategyEngine:
                     
                     if combined:
                         target_hours = [int(h) for h, p in combined]
+                        
+                        # --- v6.3: LIFT TOLERANCE FOR PROFITABLE ARBITRAGE ---
+                        # If an hour is profitable for arbitrage, we MUST include it in target_hours
+                        # even if it wasn't selected by get_peaks (e.g. it's 0.18 and best is 0.12).
+                        if dynamic_buy_ai:
+                            for h, p in (today_prices | tomorrow_prices if tomorrow_prices else today_prices).items():
+                                h_abs = int(h)
+                                if h_abs <= cur_hour: continue
+                                if h_abs not in target_hours and is_buy_profitable_arb(float(normalize_float(p)), h_abs):
+                                    target_hours.append(h_abs)
+                                    _LOGGER.debug(f"[Strategy] v6.3: Profitable hour {h_abs} (p:{p}) added to plan via arbitrage bypass")
+
                         target_price = float(min(p for h, p in combined))
                         res["target_price"] = target_price
                         
@@ -1102,8 +1145,8 @@ class StrategyEngine:
                         peak_hour = [h for h in future_sell_peaks if all_sell_prices[h] == best_peak_p][0]
                     
                     # 2. Check if pre-charging from current grid price is profitable against this peak
-                    cheapest_buy_in_window = min(float(all_buy_prices[h]) for h in target_hours_sorted if h >= cur_hour) if target_hours_sorted else 999.0
-                    if peak_hour is not None and (best_peak_p * eff - cheapest_buy_in_window) >= strict_threshold:
+                    cheapest_buy_in_window = min(float(all_buy_prices.get(h, 999.0)) for h in target_hours_sorted if h >= cur_hour) if target_hours_sorted else 999.0
+                    if peak_hour is not None and (best_peak_p * eff - cheapest_buy_in_window - deg_cost) >= threshold:
                         is_strict_arb = True
                     
                     dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
@@ -1175,21 +1218,19 @@ class StrategyEngine:
                         pool = [h for h in target_hours_sorted if h >= cur_hour]
                         pool_sorted = sorted(pool, key=lambda h: all_buy_prices[h])
 
-                        # 3. Waterfall allocation
-                        rem_buy = energy_to_buy
-                        for h in pool_sorted:
-                            if rem_buy <= 0: break
-                            # Capacity of this hour in kWh
-                            h_factor = 1.0
-                            if h == cur_hour:
-                                h_factor = max(0.1, (60 - now.minute) / 60.0)
-                            
-                            h_cap_kwh = max_p * h_factor
-                            take_kwh = min(rem_buy, h_cap_kwh)
-                            
-                            # Required power (kW)
-                            charge_commands[int(h)] = take_kwh / h_factor
-                            rem_buy -= take_kwh
+                        # 3. v6.4: Smooth window distribution (Smooth as requested in pt 4)
+                        # Instead of filling cheapest first at max power, we spread energy across the whole window.
+                        # Formula: Power = (Total Energy Needed) / (Sum of time factors)
+                        total_h_factors = sum(max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0 for h in pool)
+                        if total_h_factors > 0.01:
+                            p_req = float(energy_to_buy / total_h_factors)
+                            # Clamp to BMS limit
+                            p_final = min(max_p, p_req)
+                            for h in pool:
+                                charge_commands[int(h)] = p_final
+                        else:
+                            for h in pool:
+                                charge_commands[int(h)] = min(max_p, energy_to_buy)
 
                     power_needed = charge_commands.get(cur_hour, 0.0)
                     upcoming_p = next((p for h, p in charge_commands.items() if p > 0), 0.0)
@@ -1340,34 +1381,18 @@ class StrategyEngine:
                     tomorrow_deficit_full = max(0.0, tomorrow_cons_total - tomorrow_solar_total)
                     solar_is_excess = bool(tomorrow_solar_total > tomorrow_cons_total + 1.5) # 1.5kWh buffer
                     
-                    # PRECISE SIMULATION-BASED CALCULATION (v4.5)
+                    # PRECISE SIMULATION-BASED CALCULATION (v6.2 Modular)
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # 1. Run Baseline Simulation (including profitable buy-backs before sunrise)
-                        sim_end_h = max(24 + sunrise_h, int(active_window[1]) + 1)
-                        sim_range = range(cur_hour, sim_end_h)
-                        
-                        # Add predicted buy-backs to the baseline so we 'see' them in the morning projection
-                        baseline_commands = {}
-                        if best_buy_pair[1] is not None and best_buy_pair[1] < sunrise_h:
-                            # If the absolute best buy window is before sunrise, assume we'll use it
-                            # We can be more sophisticated by checking all profitable hours
-                            for h_b, p_b in all_buy_prices.items():
-                                if h_b < sunrise_h and h_b > cur_hour:
-                                    # If this hour is profitable for arbitrage from current peak
-                                    if cur_p_f * eff - p_b - deg_cost >= threshold:
-                                        baseline_commands[int(h_b)] = float(max_p) # Assume max charge power
-                        
-                        _, baseline_log = self.run_soc_simulation(b_soc, sim_range, now, baseline_commands)
-                        
-                        # Find natural SOC at sunrise (last point in sim_log or exact hour)
-                        natural_morning_soc = b_soc
-                        if baseline_log:
-                            key_morning_sim = f"{sunrise_h-1:02d}:59 (Завтра)"
-                            natural_morning_soc = self._get_soc_from_log(baseline_log, key_morning_sim, b_soc)
+                        # 1. Run Baseline Simulation
+                        natural_morning_soc = self._get_sunrise_baseline_soc(
+                            b_soc, now, sunrise_h, best_buy_pair, 
+                            all_buy_prices, threshold, eff, deg_cost, max_p
+                        )
                         
                         # 2. Available energy is the extra above target_morning_soc (Safety margin)
-                        extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc)
-                        available_sell_ac = float((extra_soc_pct * b_cap / 100.0) * eff)
+                        available_sell_ac = self._calculate_sunrise_surplus(
+                            natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, eff
+                        )
                     else:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
@@ -1390,21 +1415,20 @@ class StrategyEngine:
                     else:
                         num_peaks_left = float(num_peaks_left_raw) or 1.0
                     
-                    # --- TWO-STEP SAFETY CHECK (Refined v4.6) ---
+                    # --- TWO-STEP SAFETY CHECK (Refined v6.2) ---
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
-                    # This check only uses consumption_base (no managed loads) for the long horizon.
-                    res_cons_base_dc = max(0.0, (total_cons_to_sunrise + base_deficit_tomorrow) / eff - (total_solar_to_sunrise / 0.98))
-                    ai_soc_floor_base = active_floor_soc + (res_cons_base_dc / b_cap * 100.0)
+                    ai_soc_floor_base = self._calc_immediate_safety_floor(
+                        min_soc_val, active_buffer, total_cons_to_sunrise, 
+                        base_deficit_tomorrow, total_solar_to_sunrise, b_cap, eff
+                    )
                     
-                    # 2. Daily Surplus Calculation (Sunrise-Aware v5.3)
-                    # [Diag v5.2.6-fix-sunrise-surplus]
-                    # Instead of a complex current floor, we calculate exactly how much
-                    # "waste" energy we will have at Sunrise if we DO NOTHING.
-                    # This surplus is what we are allowed to sell today.
-                    surplus_soc_at_sunrise = max(0.0, float(natural_morning_soc - target_morning_soc))
-                    available_sell_dc = (surplus_soc_at_sunrise / 100.0 * b_cap)
+                    # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
+                    available_sell_dc = self._calculate_sunrise_surplus(
+                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0
+                    )
+                    surplus_soc_at_sunrise = (available_sell_dc / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     
-                    # We still keep ai_soc_floor_base for long-term safety (cloudy tomorrow)
+                    # Final safety floor
                     ai_soc_floor_final = max(target_morning_soc, ai_soc_floor_base)
                     
                     # Arbitrage math for the Gatekeeper logic
