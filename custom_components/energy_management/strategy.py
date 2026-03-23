@@ -1413,6 +1413,17 @@ class StrategyEngine:
                     arbitrage_is_best = False
                     result_is_profitable = bool(gain_vs_buyback >= threshold)
                     
+                    if is_in_peak:
+                        if result_is_profitable:
+                            decision_tag = "Арбитраж (Цена выгоднее выкупа)"
+                            arbitrage_is_best = True
+                        elif solar_is_excess:
+                            decision_tag = "Продажа излишков (Солнца завтра много)"
+                            arbitrage_is_best = True
+                        else:
+                            decision_tag = "Экономия (Солнца мало, откупа нет)"
+                            arbitrage_is_best = False
+
                     # Final Permission Check
                     if b_soc < ai_soc_floor_base and not (arbitrage_is_best and result_is_profitable):
                         # Throttled/Idle because base needs for tomorrow are not guaranteed
@@ -1494,7 +1505,7 @@ class StrategyEngine:
                         "target_morning_soc_pct": float(target_morning_soc),
                         "reserve_kwh": float(round_f(target_morning_soc * b_cap / 100.0, 2)),
                         "energy_to_wait_kwh": float(round_f(total_cons_to_sunrise, 2)),
-                        "ai_floor_soc_pct": float(round_f(ai_soc_floor_reserve, 1)),
+                        "ai_floor_soc_pct": float(round_f(ai_soc_floor_final, 1)),
                     }
                     if h_bb is not None and (gain_vs_buyback >= threshold):
                         res["arbitrage_buyback"]["power_kw"] = max_p
