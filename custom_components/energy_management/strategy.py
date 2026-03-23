@@ -1170,59 +1170,42 @@ class StrategyEngine:
                     if peak_hour is not None and (best_peak_p * eff - cheapest_buy_in_window - deg_cost) >= threshold:
                         is_strict_arb = True
                     
-                    dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
-                    if negative_hours:
-                        target_soc = 100.0
-                        res["charge_reason"] = "negative"
-                    elif dynamic_buy_ai and is_strict_arb:
+                    # --- Adaptive Target Engine (v6.9) ---
+                    # We only buy from grid what the Sun WON'T provide before the peak starts.
+                    peak_h_for_adaptive = peak_hour if peak_hour else 18
+                    sim_range_dry = list(range(cur_hour, int(peak_h_for_adaptive)))
+                    
+                    # 1. Survival Check (Mandatory)
+                    budget_data = self.get_budget_and_permissions(man.custom_period, skip_strategy_check=True)
+                    solar_income = float(normalize_float(budget_data.get("forecast_val", 0.0) if budget_data else 0.0))
+                    cons_until_morning = float(normalize_float(budget_data.get("expected_consumption", 2.0) if budget_data else 2.0))
+                    
+                    survival_target_kwh = cons_until_morning + (min_soc * b_cap / 100.0)
+                    available_today_kwh = (b_soc * b_cap / 100.0) + solar_income
+                    
+                    # 2. Dry simulation to see natural SOC gain from solar
+                    expected_soc_at_peak, _ = self.run_soc_simulation(b_soc, sim_range_dry, now, commands=None)
+                    sun_gain_pct = max(0.0, expected_soc_at_peak - b_soc)
+                    
+                    if is_strict_arb:
                         res["charge_reason"] = "arbitrage"
-                        # ADAPTIVE TARGET: Only buy what the sun won't provide until the peak starts
-                        # Run a 'dry' simulation to see what SOC we hit by peak_hour WITHOUT buying from grid
-                        sim_range_dry = list(range(cur_hour, int(peak_hour)))
-                        if sim_range_dry:
-                            expected_soc_at_peak, _ = self.run_soc_simulation(b_soc, sim_range_dry, now, commands=None)
-                            # We want to be at 100% at peak_hour. 
-                            # If solar alone gives us 20% gain, we only need to buy up to 80% now.
-                            sun_gain = max(0.0, expected_soc_at_peak - b_soc)
-                            target_soc = float(min(100.0, 100.0 - sun_gain))
-                        else:
-                            target_soc = 100.0
-                    elif dynamic_buy_ai:
-                        budget_data = self.get_budget_and_permissions(man.custom_period, skip_strategy_check=True)
-                        if budget_data:
-                            # 1. Total energy needed UNTIL sunrise tomorrow
-                            expected_cons_until_morning_val = budget_data.get("expected_consumption", 0.0)
-                            expected_cons_until_morning = float(normalize_float(expected_cons_until_morning_val))
-                            
-                            # 2. Total solar income available TODAY before sunset
-                            solar_left_today_raw = budget_data.get("forecast_val", 0.0)
-                            solar_left_today = float(normalize_float(solar_left_today_raw))
-                            
-                            # 3. Tomorrow's total daily consumption deficit (Long term planning)
-                            total_avg_tom = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_idx).values()))
-                            f_tom_raw = man.get_forecast_value(man.forecast_tomorrow_sensor)
-                            f_tom = float(f_tom_raw) if f_tom_raw is not None else 0.0
-                            tomorrow_deficit = float(max(0.0, total_avg_tom - f_tom))
-                            
-                            # SURVIVAL NEED: We only MUST buy if (Current + Solar Today) < Consumption until morning
-                            # We use a safety buffer of min_soc
-                            survival_target_kwh = expected_cons_until_morning + (min_soc * b_cap / 100.0)
-                            available_kwh = (b_soc * b_cap / 100.0) + solar_left_today
-                            
-                            if available_kwh < survival_target_kwh:
-                                res["charge_reason"] = "survival"
-                                # Target is just enough to survive + tomorrow's deficit (capped by base_target)
-                                target_soc = float(min(base_target, (survival_target_kwh + tomorrow_deficit) / b_cap * 100.0))
-                            else:
-                                # We stay at current SOC (no grid buy needed for survival)
-                                target_soc = b_soc
-                                res["charge_reason"] = "none"
-                        else: 
-                            target_soc = base_target
-                            res["charge_reason"] = "manual"
-                    else: 
-                        target_soc = base_target
-                        res["charge_reason"] = "manual"
+                        # Strategy: Be at 100% by peak, but subtract what sun gives for free
+                        target_soc = float(min(100.0, 100.0 - sun_gain_pct))
+                    elif negative_hours:
+                        res["charge_reason"] = "negative"
+                        target_soc = 100.0
+                    elif available_today_kwh < survival_target_kwh:
+                        res["charge_reason"] = "survival"
+                        target_soc = float(min(base_target, survival_target_kwh / b_cap * 100.0))
+                    else:
+                        res["charge_reason"] = "none"
+                        target_soc = b_soc
+
+                    # Final Safety Check: If we reach the base target from solar alone, NO GRID BUY at all
+                    # We use a 1% margin to avoid jitter
+                    if expected_soc_at_peak >= (base_target - 1.0):
+                        target_soc = b_soc
+                        res["charge_reason"] = "solar_sufficient"
                     
                     target_soc = float(min(100.0, target_soc))
                     sim_soc_plan = b_soc
