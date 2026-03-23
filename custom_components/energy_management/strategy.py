@@ -1392,16 +1392,16 @@ class StrategyEngine:
                     res_cons_base_dc = max(0.0, (total_cons_to_sunrise + base_deficit_tomorrow) / eff - (total_solar_to_sunrise / 0.98))
                     ai_soc_floor_base = target_morning_soc + (res_cons_base_dc / b_cap * 100.0)
                     
-                    # 2. Daily calculation: Simplified reserve
-                    sim_natural_drop = max(0.0, float(b_soc - natural_morning_soc))
-                    ai_soc_floor_reserve = float(target_morning_soc + sim_natural_drop)
+                    # 2. Daily Surplus Calculation (Sunrise-Aware v5.3)
+                    # [Diag v5.2.6-fix-sunrise-surplus]
+                    # Instead of a complex current floor, we calculate exactly how much
+                    # "waste" energy we will have at Sunrise if we DO NOTHING.
+                    # This surplus is what we are allowed to sell today.
+                    surplus_soc_at_sunrise = max(0.0, float(natural_morning_soc - target_morning_soc))
+                    available_sell_dc = (surplus_soc_at_sunrise / 100.0 * b_cap)
                     
-                    # We no longer add more insurance on top if user has a decent buffer
-                    if active_buffer > 5.0:
-                         ai_soc_floor_reserve = target_morning_soc + sim_natural_drop
-                    else:
-                         # For low buffer scenarios, we still keep the house needs check
-                         ai_soc_floor_reserve = max(ai_soc_floor_reserve, ai_soc_floor_base)
+                    # We still keep ai_soc_floor_base for long-term safety (cloudy tomorrow)
+                    ai_soc_floor_final = max(target_morning_soc, ai_soc_floor_base)
                     
                     # Arbitrage math for the Gatekeeper logic
                     p_bb, h_bb = get_best_buyback(cur_hour) 
@@ -1413,39 +1413,27 @@ class StrategyEngine:
                     arbitrage_is_best = False
                     result_is_profitable = bool(gain_vs_buyback >= threshold)
                     
-                    if is_in_peak:
-                        if result_is_profitable:
-                            decision_tag = "Арбитраж (Цена выгоднее выкупа)"
-                            arbitrage_is_best = True
-                        elif solar_is_excess:
-                            decision_tag = "Продажа излишков (Солнца завтра много)"
-                            arbitrage_is_best = True
-                        else:
-                            decision_tag = "Экономия (Солнца мало, откупа нет)"
-                            arbitrage_is_best = False
-
-                    # Final SOC calculation
+                    # Final Permission Check
                     if b_soc < ai_soc_floor_base and not (arbitrage_is_best and result_is_profitable):
                         # Throttled/Idle because base needs for tomorrow are not guaranteed
-                        target_soc = float(max(base_target, ai_soc_floor_base))
+                        target_soc = ai_soc_floor_base
+                        available_sell_ac = 0.0
                         if is_in_peak and not arbitrage_is_best:
                             decision_tag = "Защита базы (Завтра мало солнца)"
                     else:
-                        target_soc = float(max(base_target, ai_soc_floor_reserve))
+                        # We are allowed to sell the surplus!
+                        target_soc = target_morning_soc
+                        available_sell_ac = float(max(0.0, available_sell_dc * eff))
                     
-                    # Note: We no longer override target_soc with base_target for arbitrage
-                    # to ensure the safety floor (reserve + buffer) is preserved in any case,
-                    # as per user's survival priority.
+                    # Recommended power: Total available / hours left to sell
+                    power_peak = available_sell_ac / num_peaks_left
+                    power_needed = float(max(0.0, power_peak))
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         target_soc = float(target_soc)
                     else:
                         target_soc = base_target
 
-                    # Recommended power: Total available / hours left to sell
-                    available_sell_ac = float(max(0.0, (batt_energy_val - (target_soc * b_cap / 100.0)) * eff))
-                    power_peak = available_sell_ac / num_peaks_left
-                    power_needed = float(max(0.0, power_peak))
                     # Ensure global_arb_note is always consistent
                     best_buy_p, best_buy_h = get_best_buyback(cur_hour)
                     if best_buy_h is not None:
