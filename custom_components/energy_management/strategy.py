@@ -587,9 +587,11 @@ class StrategyEngine:
         dist_today = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
         dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, tomorrow_dt.strftime("%Y-%m-%d"))
 
-        # 2. Consumption profiles (7-day Aware)
-        prof_cons_today = dict(man.get_average_profile("consumption_base", eff_period, day_idx_today))
-        prof_cons_tom = dict(man.get_average_profile("consumption_base", eff_period, day_idx_tom))
+        # 2. Consumption profiles (7-day Aware Total Load)
+        # [Diag v5.2.4-fix-realistic-soc-115]
+        # We use consumption_total to ensure simulation matches Gatekeeper logic
+        prof_cons_today = dict(man.get_predicted_profile("consumption_total"))
+        prof_cons_tom = dict(man.get_average_profile("consumption_total", eff_period, day_idx_tom))
         
         # 3. Generation profiles (Historical Baseline)
         prof_gen_today = dict(man.get_average_profile("generation", eff_period, day_idx_today))
@@ -644,48 +646,20 @@ class StrategyEngine:
             if i == 0:
                 expected_gen_kw = max(expected_gen_kw, float(getattr(man, "avg_gen_kw", 0.0)))
 
-            # 2. Managed Loads SIM
-            active_m_p = 0.0
-            day_sim_consumed = sim_consumed_tom if is_tom else sim_consumed_today
-            d_settings = dict(getattr(man, "deduct_settings", {}))
-            for s_id, s_conf in d_settings.items():
-                s_id_s = str(s_id)
-                p_kw, _, _, sc_is_running = man.get_managed_load_stats(s_id_s)
-                target_kwh = float(s_conf.get("required_kwh", 2.0))
-                
-                if day_sim_consumed.get(s_id_s, 0.0) < target_kwh:
-                    only_solar = bool(s_conf.get(CONF_ONLY_SOLAR, False))
-                    p_draw = 0.0
-                    if sc_is_running and not is_tom:
-                        p_draw = float(p_kw)
-                    elif not bool(s_conf.get(CONF_IS_CYCLIC, False)):
-                        p_draw = float(p_kw)
-                    
-                    if only_solar and expected_gen_kw < float(p_draw * 0.5):
-                        p_draw = 0.0
-                    
-                    if p_draw > 0.001:
-                        active_m_p += p_draw
-                        day_sim_consumed[s_id_s] += float(p_draw * step_duration)
+            # 4. Inverter Command (AI Buying/Selling)
+            cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
 
-            # 3. Base Consumption
+            # 3. Consumption Profile (includes historical managed loads)
             p_cons = prof_cons_tom if is_tom else prof_cons_today
             occ_coeff = float(man.get_occupancy_coefficient())
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
             
             # Anchor the first step of simulation to REAL active load, not profile.
-            # This eliminates "flat SOC" prediction when current load is low but profile is high.
+            # This ensures we start from the current reality.
             if i == 0:
-                total_actual_load = float(getattr(man, "avg_load_kw", expected_cons_kw))
-                # subtract ALREADY calculated active_m_p for this step to get "Base" component
-                expected_cons_kw = max(0.0, total_actual_load - active_m_p)
+                expected_cons_kw = float(getattr(man, "avg_load_kw", expected_cons_kw))
             
-            cmd_p = 0.0
-            if commands and h_abs in commands:
-                cmd_p = float(commands[h_abs])
-            
-            net_house_kw = float(expected_gen_kw - expected_cons_kw)
-            total_net_kw = float(net_house_kw + cmd_p - active_m_p)
+            total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
             
             if total_net_kw > 0.001: 
                 acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))

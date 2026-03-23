@@ -1629,6 +1629,38 @@ class EnergyProfileManager:
         """Calculates historical inverter/system efficiency."""
         return self.strategy_engine.get_efficiency_coefficient()
 
+    def get_predicted_profile(self, profile_type):
+        """Returns a 24h profile combining today's actual data with historical averages for future hours."""
+        now = dt_util.now()
+        cur_hour = now.hour
+        res = {}
+        for h in range(24):
+            sh = str(h)
+            if h < cur_hour:
+                # Use today's actual data
+                history = self.data.get(profile_type, {}).get(sh, [])
+                if history:
+                    last_record = history[-1]
+                    val = normalize_float(last_record.get("v") if isinstance(last_record, dict) else last_record)
+                    res[sh] = round_f(val, 3)
+                else:
+                    res[sh] = 0.0
+            elif h == cur_hour:
+                # Use current real-time value
+                if profile_type == "consumption_base": res[sh] = round_f(self.current_consumption_base, 3)
+                elif profile_type == "consumption_total": res[sh] = round_f(self.current_consumption_total, 3)
+                elif profile_type == "generation": res[sh] = round_f(self.current_generation, 3)
+                else: res[sh] = 0.0
+            else:
+                # Use historical average for future hours
+                history = self.data.get(profile_type, {}).get(sh, [])
+                if history:
+                    vals = [normalize_float(item.get("v") if isinstance(item, dict) else item) for item in history]
+                    res[sh] = round_f(sum(vals) / len(vals), 3)
+                else:
+                    res[sh] = 0.0
+        return res
+
     def get_todays_profile(self, profile_type):
         """Returns the actual hourly profile for the current day up to the current hour."""
         now = dt_util.now()
