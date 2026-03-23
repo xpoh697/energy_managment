@@ -848,16 +848,37 @@ class StrategyEngine:
             _bb_h = min(_bb_options, key=lambda h: all_buy_prices[h]) if _bb_options else None
             best_buy_pair = (all_buy_prices[_bb_h], _bb_h) if _bb_h is not None else (999.0, None)
 
-            best_arb_pair = (None, None)
-            max_arb_gain = -999.0
+            # --- Shared Arbitrage Analysis (v6.6) ---
+            # 1. Gain from SELLING NOW (or soon) and BUYING BACK LATER (Primary for SELL mode)
+            best_sell_now_pair = (None, None)
+            max_gain_sell_now = -999.0
             for h_s, p_s in all_sell_prices.items():
                 if int(h_s) < cur_hour: continue
                 p_b, h_b = get_best_buyback(h_s)
                 if h_b is not None:
                     gain = float(float(p_s) * eff - float(p_b) - deg_cost)
-                    if gain > max_arb_gain:
-                        max_arb_gain = gain
-                        best_arb_pair = (int(h_s), int(h_b))
+                    if gain > max_gain_sell_now:
+                        max_gain_sell_now = gain
+                        best_sell_now_pair = (int(h_s), int(h_b))
+
+            # 2. Gain from BUYING NOW (or soon) and SELLING LATER (Primary for BUY mode)
+            best_buy_now_pair = (None, None)
+            max_gain_buy_now = -999.0
+            for h_b, p_b in all_buy_prices.items():
+                if int(h_b) < cur_hour: continue
+                # Find best future sell after this buy hour
+                future_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > h_b]
+                if future_sell:
+                    best_s_p = max(future_sell)
+                    best_s_h = [h_s for h_s, p_s in all_sell_prices.items() if h_s > h_b and p_s == best_s_p][0]
+                    gain = float(best_s_p * eff - p_b - deg_cost)
+                    if gain > max_gain_buy_now:
+                        max_gain_buy_now = gain
+                        best_buy_now_pair = (int(best_s_h), int(h_b))
+
+            # Use mode-specific gain for decision logic and UI strings
+            max_arb_gain = max_gain_buy_now if mode == "buy" else max_gain_sell_now
+            best_arb_pair = best_buy_now_pair if mode == "buy" else best_sell_now_pair
 
             global_arb_note = "Нет прибыльного арбитража"
             if max_arb_gain >= threshold:
