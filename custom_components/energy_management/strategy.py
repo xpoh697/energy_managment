@@ -1290,7 +1290,11 @@ class StrategyEngine:
                         if not is_evening_sale and has_solar_coming:
                             active_buffer = 0.0
 
-                    target_morning_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)) + active_buffer
+                    min_soc_val = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
+                    # Hard Target for tomorrow morning (always includes full buffer)
+                    target_morning_soc = min_soc_val + soc_buffer_val
+                    # Dynamic floor for NOW (can be adaptive 0% buffer)
+                    active_floor_soc = min_soc_val + active_buffer
                     
                     # AC Balance until Sunrise tomorrow
                     # budget_data_sell.get("expected_consumption") ALREADY includes both today's remaining AND night until 8 AM
@@ -1361,7 +1365,7 @@ class StrategyEngine:
                             key_morning_sim = f"{sunrise_h-1:02d}:59 (Завтра)"
                             natural_morning_soc = self._get_soc_from_log(baseline_log, key_morning_sim, b_soc)
                         
-                        # 2. Available energy is the extra above target_morning_soc
+                        # 2. Available energy is the extra above target_morning_soc (Safety margin)
                         extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc)
                         available_sell_ac = float((extra_soc_pct * b_cap / 100.0) * eff)
                     else:
@@ -1390,7 +1394,7 @@ class StrategyEngine:
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
                     # This check only uses consumption_base (no managed loads) for the long horizon.
                     res_cons_base_dc = max(0.0, (total_cons_to_sunrise + base_deficit_tomorrow) / eff - (total_solar_to_sunrise / 0.98))
-                    ai_soc_floor_base = target_morning_soc + (res_cons_base_dc / b_cap * 100.0)
+                    ai_soc_floor_base = active_floor_soc + (res_cons_base_dc / b_cap * 100.0)
                     
                     # 2. Daily Surplus Calculation (Sunrise-Aware v5.3)
                     # [Diag v5.2.6-fix-sunrise-surplus]
