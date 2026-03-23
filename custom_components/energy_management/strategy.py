@@ -1289,6 +1289,11 @@ class StrategyEngine:
                             "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
                             "log": sim_log
                         }
+
+                        # v7.1: Update target_soc to reflect the end of the current buy period
+                        # instead of the theoretical daily target (as requested by USER).
+                        if cur_hour in target_hours_sorted and man.get_setting(CONF_DYNAMIC_SOC_BUY, True):
+                            target_soc = float(round_f(soc_at_end, 1))
                     except Exception as e:
                         _LOGGER.error("Error in MarketStrategy BUY simulation: %s", e)
                         res["buy_simulation"] = {
@@ -1541,6 +1546,11 @@ class StrategyEngine:
                         "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
                         "log": sim_log
                     }
+
+                    # v7.1: Update target_soc to reflect the end of the current sale period
+                    # instead of the fixed morning value (as requested by USER).
+                    if is_in_peak and man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                        target_soc = float(round_f(soc_after, 1))
                     
                     # Arbitrage details for UI attributes
                     res["arbitrage_buyback"] = {
