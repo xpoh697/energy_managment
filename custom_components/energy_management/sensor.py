@@ -2551,7 +2551,7 @@ class InverterOperationModeSensor(SensorEntity):
         elif cur_price is not None and cur_price < price_stop_sell:
             # Global price floor for ANY selling
             mode = "stop_sale"
-            reason = f"Продажа заблокирована: Цена ({cur_price:.2f}) < Порога ({price_stop_sell:.2f})"
+            reason = f"Продажа заблокирована: Цена ({cur_price or 0.0:.2f}) < Порога ({price_stop_sell or 0.0:.2f})"
             
         elif cur_price is not None and cur_price >= price_sell_only_pv:
             # SAFE MORNING MODE (User's 4 conditions)
@@ -2564,28 +2564,28 @@ class InverterOperationModeSensor(SensorEntity):
             
             if is_before_limit_hour and has_surplus and not is_energy_low_for_evening:
                 mode = "sale_pv_no_bat"
-                reason = f"Продажа только солнца: Цена ({cur_price:.2f}) >= Порога, утро, есть излишек и запас энергии"
+                reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога, утро, есть излишек и запас энергии"
             else:
                 # If conditions for sale_pv_no_bat not met, fallback to standard or charge
                 mode = "sale_pv"
                 if is_energy_low_for_evening:
-                    reason = f"Цена ({cur_price:.2f}) >= Порога, но коплю заряд (не успею дозарядиться к вечеру)"
+                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (не успею дозарядиться к вечеру)"
                 elif not is_before_limit_hour:
-                    reason = f"Цена ({cur_price:.2f}) >= Порога, но уже не утро"
+                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но уже не утро"
                 elif not has_surplus:
-                    reason = f"Цена ({cur_price:.2f}) >= Порога, но нет излишка солнца"
+                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но нет излишка солнца"
                 else:
                     reason = "Стандартная работа: цена высокая, но условия sale_pv_no_bat не соблюдены"
             
         elif cur_price is not None and cur_price >= price_sell_limit:
             # FIXED PRICE LIMIT: Price is so good we sell from battery even without AI
             mode = "sale_pv_bat"
-            reason = f"Продажа из АКБ: Цена ({cur_price:.2f}) >= Фикс. Лимита ({price_sell_limit:.2f})"
+            reason = f"Продажа из АКБ: Цена ({cur_price or 0.0:.2f}) >= Фикс. Лимита ({price_sell_limit or 0.0:.2f})"
             
         else:
             # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
             mode = "sale_pv"
-            reason = f"Стандартная работа: Цена ({cur_price:.2f} sp) - излишки в сеть"
+            reason = f"Стандартная работа: Цена ({cur_price or 0.0:.2f} sp) - излишки в сеть"
 
         attrs = {}
         if not is_forecast:
