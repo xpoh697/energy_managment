@@ -1136,20 +1136,7 @@ class StrategyEngine:
                 # Continue to simulation to show natural discharge
                 
             target_hours_sorted = sorted(target_hours)
-            found_periods = []
-            def _format_period(s, e):
-                s_d = "Завтра " if s >= 24 else ""
-                e_d = "Завтра " if e >= 24 else ""
-                return f"{s_d}{s % 24:02d}:00 - {e_d}{e % 24:02d}:59"
-                
-            if target_hours_sorted:
-                start = prev = target_hours_sorted[0]
-                for h in target_hours_sorted[1:]:
-                    if h == prev + 1: prev = h
-                    else:
-                        found_periods.append(_format_period(start, prev))
-                        start = prev = h
-                found_periods.append(_format_period(start, prev))
+            found_periods = [] # Legacy reference, actual logic moved to end of function (v6.18)
                 
             # Target & Power Calculation
             power_needed = 0.0
@@ -1592,9 +1579,33 @@ class StrategyEngine:
                 if not actual_active and power_needed > 0.01:
                     actual_active = [h for h in target_hours_sorted if h >= cur_hour]
 
+            # Regenerate active_periods based on final filtered hours (v6.18)
+            final_periods = []
+            if actual_active:
+                sorted_fit = sorted(list(set(actual_active)))
+                if sorted_fit:
+                    groups = []
+                    cur_group = [sorted_fit[0]]
+                    for i in range(1, len(sorted_fit)):
+                        if sorted_fit[i] == sorted_fit[i-1] + 1:
+                            cur_group.append(sorted_fit[i])
+                        else:
+                            groups.append(cur_group)
+                            cur_group = [sorted_fit[i]]
+                    groups.append(cur_group)
+                    for g in groups:
+                        h_min = min(g) % 24
+                        h_max = max(g) % 24
+                        suffix_min = " (Завтра)" if min(g) >= 24 else ""
+                        suffix_max = " (Завтра)" if max(g) >= 24 else ""
+                        if len(g) == 1:
+                            final_periods.append(f"{h_min:02d}:00 - {h_min:02d}:59{suffix_min}")
+                        else:
+                            final_periods.append(f"{h_min:02d}:00{suffix_min} - {h_max:02d}:59{suffix_max}")
+
             res["active_hours"] = actual_active
             res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active])
-            res["active_periods"] = ", ".join(found_periods)
+            res["active_periods"] = ", ".join(final_periods) if final_periods else "Нет"
             res["target_soc"] = float(round_f(target_soc, 1))
             
             # Mode Detection Logic (Moved from sensor.py for better centralization)
@@ -1621,6 +1632,8 @@ class StrategyEngine:
                         if arbitrage_is_best:
                             tag = "Арбитраж" if "Арбитраж" in decision_tag else "Излишки солнца"
                         cur_mode_text = f"Активная продажа ({tag})"
+            elif res.get("charge_reason") == "none" and mode == "buy":
+                cur_mode_text = "В покупке нет необходимости"
             elif state == "preparing_arbitrage":
                 if mode == "buy":
                     c_reason = res.get("charge_reason", "manual")
