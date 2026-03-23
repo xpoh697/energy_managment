@@ -1199,11 +1199,12 @@ class StrategyEngine:
                         # 1. Prediction of SOC at the START of this hour (solar only)
                         sim_to_b = list(range(cur_hour, int(h_b)))
                         soc_at_b, _ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None)
-                        # 2. Prediction of SOC at PEAK starting from this hour (solar only)
-                        sim_from_b = list(range(int(h_b), int(peak_h)))
-                        soc_at_peak_dry, _ = self.run_soc_simulation(soc_at_b, sim_from_b, now + timedelta(hours=int(h_b-cur_hour)), commands=None)
+                        # 2. Prediction of MAX SOC achieved by Sun alone TODAY starting from this hour
+                        sim_eod = list(range(int(h_b), 24))
+                        soc_final_dry, dry_log = self.run_soc_simulation(soc_at_b, sim_eod, now + timedelta(hours=int(h_b-cur_hour)), commands=None)
+                        max_dry_soc = max([float(st["soc"]) for st in dry_log.values()] + [float(soc_at_b)])
                         
-                        if soc_at_peak_dry < 97.0: # If sun alone won't reach ~100% by peak
+                        if max_dry_soc < 99.0: # If sun alone won't reach 100% at any point today
                             pool_useful.append(h_b)
                     
                     pool = pool_useful
