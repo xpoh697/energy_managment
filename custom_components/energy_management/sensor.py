@@ -1987,9 +1987,16 @@ class EnergyProfileManager:
         if avg_export < 0.5: # Sufficient surplus is needed to confirm it's a BMS limit
             return
 
-        # Condition 3: Battery is charging (batt_kw is negative)
-        avg_batt = sum(float(x.get("batt_kw") or 0.0) for x in relevant_history) / len(relevant_history)
+        # Condition 3: Battery is charging (batt_kw is negative) and power is STABLE
+        # (Filtering out noise from jittery grid/load sensors as requested in v6.7)
+        batt_samples = [float(x.get("batt_kw") or 0.0) for x in relevant_history]
+        avg_batt = sum(batt_samples) / len(relevant_history)
         
+        # Stability check: ensure power doesn't jump too much in the window (max 150W variance)
+        power_spread = max(batt_samples) - min(batt_samples)
+        if power_spread > 0.15: # 150W spread is too noisy for precise BMS learning
+            return
+
         if avg_batt < -0.05: # At least 50W charge observed
             charge_power_limit = abs(avg_batt)
             soc, _, _ = self.get_battery_state()
