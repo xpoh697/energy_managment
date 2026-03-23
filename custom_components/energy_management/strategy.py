@@ -51,10 +51,16 @@ class StrategyEngine:
 
     @staticmethod
     def get_cc_cv_ratio(soc):
-        if soc < 80: return 1.0
-        if soc >= 98: return 0.1
-        return 1.0 - (soc - 80) * (0.9 / 18.0)
-
+        """Strict CC/CV ratio based on user-provided table (v6.11).
+        - 20-95%: 100% power
+        - 95-97%: 30-50% (avg 40%)
+        - 98-99%: 10-15% (avg 12.5%)
+        - 100%: 0%
+        """
+        if soc >= 100: return 0.0
+        if soc >= 98: return 0.125
+        if soc >= 95: return 0.40
+        return 1.0 # 20-95% range
     @staticmethod
     def _format_h(h_abs):
         if h_abs is None: return "Нет данных"
