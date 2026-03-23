@@ -2563,8 +2563,13 @@ class InverterOperationModeSensor(SensorEntity):
 
         # State Machine Ladder
         if is_buying_active and not target_reached:
+            # v6.5: Force 'buy' mode in forecast for active target hours to stay in sync with strategy sensor
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ"
+        elif is_buying_active and is_forecast:
+            # Even if target_reached (adaptive), show as buy in forecast if it's a planned hour
+            mode = "buy"
+            reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
         elif batt_soc <= min_soc:
             # Emergency: Don't sell anything from battery, but allow PV export if there's surplus
