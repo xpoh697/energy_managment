@@ -2838,6 +2838,9 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_actual_today": _sr(res.get("debug_actual_today")),
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
                 "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
+                "debug_h_acc_cur": _sr(res.get("debug_h_acc_cur", 1.0)),
+                "debug_h_count_cur": int(res.get("debug_h_count_cur", 0)),
+                "debug_hist_coeff_rem": _sr(res.get("debug_hist_coeff_rem", 1.0)),
                 "forecast_distribution": res.get("forecast_distribution", {}),
                 "forecast_dist_source": res.get("forecast_dist_source", "historical")
             }
