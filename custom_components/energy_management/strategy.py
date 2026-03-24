@@ -464,11 +464,18 @@ class StrategyEngine:
                 if dist:
                     dist_source = "forecast_hourly"
                     cur_h_dist = float(dist.get(str(cur_hour), 0.0))
-                    rem_dist = sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour, 24))
-                    f_potential = float(f_today * (cur_h_dist / rem_dist) * h_acc) if rem_dist > 0.01 else 0.0
+                    # v7.5 - Pro-rate the current hour weight to match f_today (remaining energy)
+                    rem_minutes = 60 - now.minute
+                    step_duration = rem_minutes / 60.0
+                    rem_dist = (cur_h_dist * step_duration) + sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour + 1, 24))
+                    f_potential = float(f_today * (cur_h_dist * step_duration / rem_dist) * h_acc / step_duration) if rem_dist > 0.01 else 0.0
                 else:
-                    hist_rem = sum(float(p_gen.get(str(h), 0.0)) for h in range(cur_hour, 24))
-                    f_potential = float(f_today * (cur_hist_val / hist_rem) * h_acc) if hist_rem > 0.1 else 0.0
+                    # Same for historical profile
+                    rem_minutes = 60 - now.minute
+                    step_duration = rem_minutes / 60.0
+                    cur_h_hist = float(p_gen.get(str(cur_hour), 0.0))
+                    rem_hist = (cur_h_hist * step_duration) + sum(float(p_gen.get(str(h), 0.0)) for h in range(cur_hour + 1, 24))
+                    f_potential = float(f_today * (cur_h_hist * step_duration / rem_hist) * h_acc / step_duration) if rem_hist > 0.1 else 0.0
                 
                 potential_gen = float(max(gen_kw, f_potential))
                 waste_kw = float(max(0.0, potential_gen - gen_kw))
@@ -700,17 +707,20 @@ class StrategyEngine:
                     expected_gen_kw = float(normalize_float(prof_gen_tom.get(h_str, 0.0)) / total_hist * f_tom * blended_coeff * h_acc) if total_hist > 0.1 else 0.0
             else:
                 if dist_today:
-                    # Sum of future distribution values from current hour
-                    rem_dist = sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour, 24))
-                    # For the current hour (i==0), f_today is the REMAINING energy. 
-                    # We must divide by step_duration to get the Power (kW) for the remaining period.
+                    # v7.5 - Pro-rate the current hour weight to match f_today (remaining energy)
+                    cur_h_weight = float(dist_today.get(h_str, 0.0))
+                    rem_dist = (cur_h_weight * step_duration) + sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
+                    
                     h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    energy_h = float(dist_today.get(h_str, 0.0) / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
+                    # energy_h is now the Energy for the REMAINING part of this step/hour
+                    energy_h = float(cur_h_weight * step_duration / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
                     expected_gen_kw = energy_h
                 else:
-                    rem_hist = sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour, 24))
+                    cur_h_hist = float(prof_gen_today.get(h_str, 0.0))
+                    rem_hist = (cur_h_hist * step_duration) + sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
+                    
                     h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    energy_h = float(normalize_float(prof_gen_today.get(h_str, 0.0)) / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
+                    energy_h = float(cur_h_hist * step_duration / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
                     expected_gen_kw = energy_h
             
             # First hour correction: 
