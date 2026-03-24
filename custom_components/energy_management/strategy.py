@@ -348,17 +348,26 @@ class StrategyEngine:
                 total_hist_gen = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(24)))
                 active_dist = p_gen
             
-            # --- Improved Performance Coefficients (v4.0) ---
-            # A. Calculate Historical Average Performance from history list
-            hist_recs = man.data.get("forecast_history", [])
-            perf_list = []
-            for rec in hist_recs:
-                act = float(rec.get("actual", 0))
-                fct = float(rec.get("forecast", 0))
-                if fct > 0.1:
-                    perf_list.append(max(0.3, min(act / fct, 1.5)))
+            # --- Improved Performance Coefficients (v4.0 + Hourly Awareness v7.4) ---
+            # A. Calculate Historical Average Performance for the REMAINING part of the day
+            # This captures if, say, Solcast always underestimates mornings but overestimates evenings.
             
-            hist_coeff = float(sum(perf_list) / len(perf_list)) if perf_list else 1.0
+            # v7.4 - New Hourly-weighted history
+            rem_hours = range(cur_hour, 24)
+            rem_accs = [self.get_hourly_accuracy_coeff(h) for h in rem_hours]
+            # Custom historical weight for the remaining period
+            hist_coeff = float(sum(rem_accs) / len(rem_accs)) if rem_accs else 1.0
+            
+            # Keep the original daily recs for reference/fallback if hourly logic has 0 data
+            hist_recs = man.data.get("forecast_history", [])
+            if hist_coeff > 0.99 and hist_coeff < 1.01 and hist_recs:
+                # Fallback to total daily history if hourly history is empty (new system)
+                perf_list = []
+                for rec in hist_recs:
+                    act, fct = float(rec.get("actual", 0)), float(rec.get("forecast", 0))
+                    if fct > 0.1: perf_list.append(max(0.3, min(act/fct, 1.5)))
+                if perf_list: hist_coeff = float(sum(perf_list) / len(perf_list))
+
             actual_today = float(man.data.get("temp_daily_gen", 0.0) or 0.0)
             
             fraction_so_far = float(hist_gen_so_far / total_hist_gen) if total_hist_gen > 0.1 else 0.0
