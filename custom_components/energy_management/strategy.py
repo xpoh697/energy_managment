@@ -464,18 +464,17 @@ class StrategyEngine:
                 if dist:
                     dist_source = "forecast_hourly"
                     cur_h_dist = float(dist.get(str(cur_hour), 0.0))
-                    # v7.5 - Pro-rate the current hour weight to match f_today (remaining energy)
+                    # v7.5.1 - Simplified Power calculation: (Weight / Sum of Weights) * Total Energy
                     rem_minutes = 60 - now.minute
                     step_duration = rem_minutes / 60.0
                     rem_dist = (cur_h_dist * step_duration) + sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour + 1, 24))
-                    f_potential = float(f_today * (cur_h_dist * step_duration / rem_dist) * h_acc / step_duration) if rem_dist > 0.01 else 0.0
+                    f_potential = float(f_today * (cur_h_dist / rem_dist) * h_acc) if rem_dist > 0.01 else 0.0
                 else:
-                    # Same for historical profile
                     rem_minutes = 60 - now.minute
                     step_duration = rem_minutes / 60.0
                     cur_h_hist = float(p_gen.get(str(cur_hour), 0.0))
                     rem_hist = (cur_h_hist * step_duration) + sum(float(p_gen.get(str(h), 0.0)) for h in range(cur_hour + 1, 24))
-                    f_potential = float(f_today * (cur_h_hist * step_duration / rem_hist) * h_acc / step_duration) if rem_hist > 0.1 else 0.0
+                    f_potential = float(f_today * (cur_h_hist / rem_hist) * h_acc) if rem_hist > 0.1 else 0.0
                 
                 potential_gen = float(max(gen_kw, f_potential))
                 waste_kw = float(max(0.0, potential_gen - gen_kw))
@@ -712,30 +711,22 @@ class StrategyEngine:
                     rem_dist = (cur_h_weight * step_duration) + sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
                     
                     h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    # energy_h is now the Energy for the REMAINING part of this step/hour
-                    energy_h = float(cur_h_weight * step_duration / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
-                    expected_gen_kw = energy_h
+                    # v7.5.2 - Calculate Power (kW) directly: (Weight / Sum of Weights) * Remaining Energy
+                    expected_gen_kw = float(cur_h_weight / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
                 else:
                     cur_h_hist = float(prof_gen_today.get(h_str, 0.0))
                     rem_hist = (cur_h_hist * step_duration) + sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
                     
                     h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    energy_h = float(cur_h_hist * step_duration / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
-                    expected_gen_kw = energy_h
+                    expected_gen_kw = float(cur_h_hist / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
             
             # First hour correction: 
             # Use real-time power (kW) if available, but ensure it's treated as Power (kW).
             # Solar (expected_gen_kw) from 'energy_h' is already kWh for the remaining period.
             if i == 0:
-                # If we have real averaged power, convert it to Energy for the first step
+                # v7.5.2 - If we have real-time power, we can anchor the first step to it.
                 real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
-                # expected_gen_kw (from energy_h) is 'kWh for remainder'. 
-                # To make it work with 'step_duration' in the formula below, 
-                # we should treat it as average Power (kW) for this step:
-                if step_duration > 0.05:
-                    # Power = Energy / Time
-                    expected_gen_kw = max(expected_gen_kw / step_duration, real_gen_kw)
-                else:
+                if real_gen_kw > 0.01:
                     expected_gen_kw = real_gen_kw
 
             # 4. Inverter Command (AI Buying/Selling)
