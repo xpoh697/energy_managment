@@ -2896,24 +2896,32 @@ class MarketStrategySensor(SensorEntity):
             "prices_tomorrow": tom_fmt
         }
 
+        # v7.2 - Hide detailed projections if nothing is planned for today
+        # (reduces clutter and avoids 'nonsense' values for future/past windows)
+        is_active = res.get("state") == "active"
+        has_planned = bool(res.get("active_hours", []))
+        show_extra = is_active or has_planned
+
         if self.mode == "sell":
-            attrs.update({
-                "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_start_pct", 0.0),
-                "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
-                "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
-                "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
-                "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
-                "arbitrage_sunrise_hour": res.get("arbitrage_buyback", {}).get("sunrise_hour", 0),
-                "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
-                "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
-                "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
-            })
+            if show_extra:
+                attrs.update({
+                    "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_sale_start_pct", 0.0),
+                    "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
+                    "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
+                    "arbitrage_buyback_power": res.get("arbitrage_buyback", {}).get("power_kw", 0.0),
+                    "arbitrage_buyback_note": res.get("arbitrage_buyback", {}).get("note", ""),
+                    "arbitrage_sunrise_hour": res.get("arbitrage_buyback", {}).get("sunrise_hour", 0),
+                    "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
+                    "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
+                    "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
+                })
         else: # buy
-            attrs.update({
-                "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
-                "projected_soc_after_buy": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
-                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
-            })
+            if show_extra:
+                attrs.update({
+                    "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
+                    "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
+                    "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
+                })
 
         return attrs
 

@@ -674,9 +674,20 @@ class StrategyEngine:
                     energy_h = float(normalize_float(prof_gen_today.get(h_str, 0.0)) / rem_hist * f_today * blended_coeff) if rem_hist > 0.1 else 0.0
                     expected_gen_kw = energy_h
             
-            # First hour correction
+            # First hour correction: 
+            # Use real-time power (kW) if available, but ensure it's treated as Power (kW).
+            # Solar (expected_gen_kw) from 'energy_h' is already kWh for the remaining period.
             if i == 0:
-                expected_gen_kw = max(expected_gen_kw, float(getattr(man, "avg_gen_kw", 0.0)))
+                # If we have real averaged power, convert it to Energy for the first step
+                real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
+                # expected_gen_kw (from energy_h) is 'kWh for remainder'. 
+                # To make it work with 'step_duration' in the formula below, 
+                # we should treat it as average Power (kW) for this step:
+                if step_duration > 0.05:
+                    # Power = Energy / Time
+                    expected_gen_kw = max(expected_gen_kw / step_duration, real_gen_kw)
+                else:
+                    expected_gen_kw = real_gen_kw
 
             # 4. Inverter Command (AI Buying/Selling)
             cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
@@ -687,10 +698,10 @@ class StrategyEngine:
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
             
             # Anchor the first step of simulation to REAL active load, not profile.
-            # This ensures we start from the current reality.
             if i == 0:
                 expected_cons_kw = float(getattr(man, "avg_load_kw", expected_cons_kw))
             
+            # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
             total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
             
             if total_net_kw > 0.001: 
@@ -1283,6 +1294,12 @@ class StrategyEngine:
                         key_morning = "07:59 (Завтра)"
                         soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_at_end)
                         
+                        # v7.2 - CLEANUP: If no buy is currently planned for today, return current SOC
+                        if not target_hours_sorted:
+                            power_needed = 0.0
+                            soc_at_start = b_soc
+                            soc_at_end = b_soc
+
                         res["buy_simulation"] = {
                             "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
                             "projected_soc_at_end_pct": float(round_f(soc_at_end, 1)),
@@ -1518,13 +1535,19 @@ class StrategyEngine:
                     sim_end_h = max(24 + sunrise_h, int(active_window[1]) + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     
-                    # Use the actual calculated power_needed for the simulation, not just raw max_p
+                    # Use the actual calculated power_needed for the simulation
                     sim_commands = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
+                    
+                    # v7.2: Include planned buy-back in the sell simulation for consistency
+                    # (only if it's within the simulation range)
+                    if best_buy_h is not None and best_buy_h < sim_end_h:
+                        sim_commands[int(best_buy_h)] = float(max_p)
+
                     _, sim_log = self.run_soc_simulation(b_soc, sim_range, now, sim_commands)
                     
                     # 1. Projected SOC at START of the first peak
-                    first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else cur_hour
-                    if first_h_sell > cur_hour:
+                    first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else None
+                    if first_h_sell is not None and first_h_sell > cur_hour:
                         prev_h = first_h_sell - 1
                         key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
                         soc_at_start = self._get_soc_from_log(sim_log, key_start, b_soc)
@@ -1532,16 +1555,27 @@ class StrategyEngine:
                         soc_at_start = b_soc
                         
                     # 2. Projected SOC AFTER the last peak
-                    last_h_sell = max(target_hours_sorted) if target_hours_sorted else cur_hour
-                    key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
-                    soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
+                    last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
+                    if last_h_sell is not None:
+                        key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
+                        soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
+                    else:
+                        soc_after = b_soc
                     
                     # 3. Projected SOC TOMORROW MORNING (at Dynamic Sunrise)
                     key_morning = f"{sunrise_h-1:02d}:59 (Завтра)"
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
 
+                    # v7.2 - CLEANUP: If no sale is currently planned for today, return current SOC
+                    # to avoid "nonsense" projections in the UI.
+                    if not target_hours_sorted:
+                        power_needed = 0.0
+                        soc_at_start = b_soc
+                        soc_after = b_soc
+                        # soc_morning remains as natural discharge result
+
                     res["sell_simulation"] = {
-                        "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
+                        "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
                         "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
                         "log": sim_log
