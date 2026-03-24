@@ -1125,10 +1125,14 @@ class EnergyProfileManager:
         # Track occupancy at snapshot time
         occ_count = self.get_current_occupancy()
 
-        # Append to history lists (with occupancy tag)
+        # Capture current forecast for the past hour to track accuracy
+        f_dist = self.get_forecast_hourly_distribution(self.forecast_today_hourly_sensor)
+        f_val = float(f_dist.get(str(past_hour), 0.0))
+
+        # Append to history lists (with occupancy tag and forecast snapshot)
         self.data["consumption_base"][str(past_hour)].append({"v": self.current_consumption_base, "wd": today_wd, "occ": occ_count})
         self.data["consumption_total"][str(past_hour)].append({"v": self.current_consumption_total, "wd": today_wd, "occ": occ_count})
-        self.data["generation"][str(past_hour)].append({"v": self.current_generation, "wd": today_wd})
+        self.data["generation"][str(past_hour)].append({"v": self.current_generation, "f": f_val, "wd": today_wd})
 
         # Store losses alongside generation for efficiency calculation
         if "losses" not in self.data:

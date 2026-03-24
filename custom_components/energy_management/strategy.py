@@ -159,6 +159,30 @@ class StrategyEngine:
         res_cons_base_dc = max(0.0, (total_cons_to_sunrise + base_deficit_tomorrow) / eff - (total_solar_to_sunrise / 0.98))
         return active_floor_soc + (res_cons_base_dc / batt_cap * 100.0)
 
+    def get_hourly_accuracy_coeff(self, hour):
+        """Calculates specific historical accuracy for a given hour of day (v/f)."""
+        man = self.manager
+        sh = str(hour)
+        history = man.data.get("generation", {}).get(sh, [])
+        if not history:
+            return 1.0
+            
+        # Use last 14 days for a stable profile
+        perf_list = []
+        for rec in history[-14:]:
+            if not isinstance(rec, dict): continue
+            v = float(rec.get("v", 0.0))
+            f = float(rec.get("f", 0.0))
+            if f > 0.1:
+                # Clamp per-hour ratio to avoid outliers (0.2x to 2.0x)
+                perf_list.append(max(0.2, min(v / f, 2.0)))
+        
+        if not perf_list:
+            return 1.0
+            
+        # Standard average
+        return float(sum(perf_list) / len(perf_list))
+
     def get_gen_forecast_coefficient(self, forecast_value: float, prof_gen: dict, hour_start: int, hour_end: int) -> float:
         if not forecast_value or forecast_value <= 0.1:
             return 1.0
@@ -430,13 +454,19 @@ class StrategyEngine:
                 
                 # Check for Solcast hourly curve
                 dist = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
+                dist_source = "historical"
+                
+                # v7.2 - Hourly Accuracy adjustment
+                h_acc = self.get_hourly_accuracy_coeff(cur_hour)
+
                 if dist:
+                    dist_source = "forecast_hourly"
                     cur_h_dist = float(dist.get(str(cur_hour), 0.0))
                     rem_dist = sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour, 24))
-                    f_potential = float(f_today * (cur_h_dist / rem_dist)) if rem_dist > 0.01 else 0.0
+                    f_potential = float(f_today * (cur_h_dist / rem_dist) * h_acc) if rem_dist > 0.01 else 0.0
                 else:
                     hist_rem = sum(float(p_gen.get(str(h), 0.0)) for h in range(cur_hour, 24))
-                    f_potential = float(f_today * (cur_hist_val / hist_rem)) if hist_rem > 0.1 else 0.0
+                    f_potential = float(f_today * (cur_hist_val / hist_rem) * h_acc) if hist_rem > 0.1 else 0.0
                 
                 potential_gen = float(max(gen_kw, f_potential))
                 waste_kw = float(max(0.0, potential_gen - gen_kw))
@@ -657,21 +687,25 @@ class StrategyEngine:
             if is_tom:
                 if dist_tom:
                     total_dist = sum(dist_tom.values())
-                    expected_gen_kw = float(dist_tom.get(h_str, 0.0) / total_dist * f_tom * blended_coeff) if total_dist > 0.1 else 0.0
+                    h_acc = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
+                    expected_gen_kw = float(dist_tom.get(h_str, 0.0) / total_dist * f_tom * blended_coeff * h_acc) if total_dist > 0.1 else 0.0
                 else:
                     total_hist = sum(prof_gen_tom.values())
-                    expected_gen_kw = float(normalize_float(prof_gen_tom.get(h_str, 0.0)) / total_hist * f_tom * blended_coeff) if total_hist > 0.1 else 0.0
+                    h_acc = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
+                    expected_gen_kw = float(normalize_float(prof_gen_tom.get(h_str, 0.0)) / total_hist * f_tom * blended_coeff * h_acc) if total_hist > 0.1 else 0.0
             else:
                 if dist_today:
                     # Sum of future distribution values from current hour
                     rem_dist = sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour, 24))
                     # For the current hour (i==0), f_today is the REMAINING energy. 
                     # We must divide by step_duration to get the Power (kW) for the remaining period.
-                    energy_h = float(dist_today.get(h_str, 0.0) / rem_dist * f_today * blended_coeff) if rem_dist > 0.1 else 0.0
+                    h_acc = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
+                    energy_h = float(dist_today.get(h_str, 0.0) / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
                     expected_gen_kw = energy_h
                 else:
                     rem_hist = sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour, 24))
-                    energy_h = float(normalize_float(prof_gen_today.get(h_str, 0.0)) / rem_hist * f_today * blended_coeff) if rem_hist > 0.1 else 0.0
+                    h_acc = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
+                    energy_h = float(normalize_float(prof_gen_today.get(h_str, 0.0)) / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
                     expected_gen_kw = energy_h
             
             # First hour correction: 
