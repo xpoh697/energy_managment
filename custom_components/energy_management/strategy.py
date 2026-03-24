@@ -1618,10 +1618,9 @@ class StrategyEngine:
             if mode == "buy":
                 actual_active = [h for h in target_hours_sorted if charge_commands.get(h, 0.0) > 0.01]
             else:
-                actual_active = [h for h in target_hours_sorted if power_needed > 0.01 and h == cur_hour]
-                # For sell mode, we also want to show the future peaks that are planned
-                if not actual_active and power_needed > 0.01:
-                    actual_active = [h for h in target_hours_sorted if h >= cur_hour]
+                # v7.2.1: Always show future peak windows if they are identified, 
+                # even if current power_needed is 0 (e.g. waiting for peak or saving battery).
+                actual_active = [h for h in target_hours_sorted if h >= cur_hour]
 
             # Regenerate active_periods based on final filtered hours (v6.18)
             final_periods = []
