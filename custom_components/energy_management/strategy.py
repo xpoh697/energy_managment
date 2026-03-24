@@ -352,11 +352,25 @@ class StrategyEngine:
             # A. Calculate Historical Average Performance for the REMAINING part of the day
             # This captures if, say, Solcast always underestimates mornings but overestimates evenings.
             
-            # v7.4 - New Hourly-weighted history
+            # v7.6 - Weighted historical coefficient (avoids jumps at hour boundaries)
+            dist = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
             rem_hours = range(cur_hour, 24)
-            rem_accs_data = [self.get_hourly_accuracy_coeff(h) for h in rem_hours]
-            rem_accs = [d[0] for d in rem_accs_data]
-            hist_coeff = float(sum(rem_accs) / len(rem_accs)) if rem_accs else 1.0
+            
+            top_h = 0.0
+            bot_h = 0.0
+            for h in rem_hours:
+                acc, _ = self.get_hourly_accuracy_coeff(h)
+                weight = float(dist.get(str(h), 0.0) if dist else 0.0)
+                top_h += acc * weight
+                bot_h += weight
+            
+            if bot_h > 0.01:
+                hist_coeff = float(top_h / bot_h)
+            else:
+                # Fallback to simple average (at night or if dist empty)
+                rem_accs_data = [self.get_hourly_accuracy_coeff(h) for h in rem_hours]
+                rem_accs = [d[0] for d in rem_accs_data if d[0] is not None]
+                hist_coeff = float(sum(rem_accs) / len(rem_accs)) if rem_accs else 1.0
             
             # Debug info for the current hour specifically
             h_acc_cur, h_count_cur = self.get_hourly_accuracy_coeff(cur_hour)
@@ -398,13 +412,14 @@ class StrategyEngine:
             external_progress = 1.0 - (forecast_val / expected_today_total) if expected_today_total > 0.1 else fraction_so_far
             external_progress = max(0.0, min(external_progress, 1.0))
             
-            # Use a blend of history and today's yield performance
-            blended_coeff = float((today_coeff * external_progress) + (hist_coeff * (1.0 - external_progress)))
+            # v7.6.1 - Correct blended multiplier: We blend today's consistency with 1.0 baseline,
+            # because historical bias (h_acc) is handled per-hour in simulation steps.
+            blended_coeff = float((today_coeff * external_progress) + (1.0 * (1.0 - external_progress)))
             
             # Safety guards
             blended_coeff = float(max(0.3, min(blended_coeff, 1.5)))
             
-            man.last_blended_coeff = blended_coeff
+            man.last_blended_coeff = float(blended_coeff)
             forecast_val_adjusted = float(forecast_val * blended_coeff)
                 
             # 2. Battery state
@@ -711,7 +726,7 @@ class StrategyEngine:
                     rem_dist = (cur_h_weight * step_duration) + sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
                     
                     h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    # v7.5.2 - Calculate Power (kW) directly: (Weight / Sum of Weights) * Remaining Energy
+                    # v7.6.1 - Correct units: Power (kW) = Weight / Sum_Weights * Total_Energy * Calibration * Hourly_Bias
                     expected_gen_kw = float(cur_h_weight / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
                 else:
                     cur_h_hist = float(prof_gen_today.get(h_str, 0.0))
