@@ -1613,10 +1613,13 @@ class StrategyEngine:
                     # Use the actual calculated power_needed for the simulation
                     sim_commands = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
                     
-                    # v7.2: Include planned buy-back in the sell simulation for consistency
-                    # (only if it's within the simulation range)
+                    # v7.8.7 - Only include buy-back in the simulation if it's actually profitable 
+                    # and planned. Otherwise we "hallucinate" energy in the morning SOC.
                     if best_buy_h is not None and best_buy_h < sim_end_h:
-                        sim_commands[int(best_buy_h)] = float(max_p)
+                        pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
+                        min_profit = man.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.05)
+                        if pot_gain_val >= min_profit:
+                            sim_commands[int(best_buy_h)] = float(max_p)
 
                     _, sim_log = self.run_soc_simulation(b_soc, sim_range, now, sim_commands)
                     
