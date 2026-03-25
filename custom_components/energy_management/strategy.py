@@ -738,9 +738,14 @@ class StrategyEngine:
                     h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
                     expected_gen_kw = float(cur_h_hist / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
             
-            # v7.8.3 - Solar Night Clamp (Prevent "Hallucinating" solar production at night)
-            # v7.8.4 - Adjusted to 5:00-21:00 to be safe for summer/winter
-            if real_h < 5 or real_h > 21:
+            # v7.8.6 - Dynamic Solar Night Clamp
+            # We determine if it's "night" by checking the historical generation profile.
+            p_gen_check = prof_gen_tom if is_tom else prof_gen_today
+            hist_h_val = float(normalize_float(p_gen_check.get(h_str, 0.0)))
+            
+            # If history says 0 and it's typical night hours, force 0.
+            # This prevents the "Weighted inflation" from turnining technical noise into 2kW at 2 AM.
+            if hist_h_val < 0.01 and (real_h < 8 or real_h > 20):
                 expected_gen_kw = 0.0
 
             # First hour correction: 
