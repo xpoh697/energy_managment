@@ -738,6 +738,11 @@ class StrategyEngine:
                     h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
                     expected_gen_kw = float(cur_h_hist / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
             
+            # v7.8.3 - Solar Night Clamp (Prevent "Hallucinating" solar production at night)
+            # v7.8.4 - Adjusted to 5:00-21:00 to be safe for summer/winter
+            if real_h < 5 or real_h > 21:
+                expected_gen_kw = 0.0
+
             # First hour correction: 
             # Use real-time power (kW) if available, but ensure it's treated as Power (kW).
             # Solar (expected_gen_kw) from 'energy_h' is already kWh for the remaining period.
@@ -757,7 +762,12 @@ class StrategyEngine:
             
             # Anchor the first step of simulation to REAL active load, not profile.
             if i == 0:
+                # v7.8.5 - If it's the first step, use real-time power (kW)
+                # avg_load_kw is already Power in kW.
                 expected_cons_kw = float(getattr(man, "avg_load_kw", expected_cons_kw))
+                
+                # Special case: if we are using predicted_profile's h==cur_hour, it might be Energy (kWh)
+                # But avg_load_kw is always better for the first step.
             
             # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
             total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
