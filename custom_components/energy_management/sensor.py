@@ -1369,9 +1369,14 @@ class EnergyProfileManager:
         if not state_obj:
             return
 
-        res = {}
-        # Parse arrays in attributes (NordPool, ENTSO-E, etc common formats)
-        for attr in ["price_today", "prices_today", "prices", "data", "raw_today", "price_tomorrow", "prices_tomorrow", "raw_tomorrow"]:
+        # Parse arrays in attributes (NordPool, ENTSO-E, Solcast, etc common formats)
+        # v7.8.1 - Expanded with Solcast-specific attributes
+        search_attrs = [
+            "price_today", "prices_today", "prices", "data", "raw_today", 
+            "price_tomorrow", "prices_tomorrow", "raw_tomorrow",
+            "forecast", "hourly", "detailedForecast", "forecast_today", "forecast_tomorrow"
+        ]
+        for attr in search_attrs:
             arr = state_obj.attributes.get(attr)
             if isinstance(arr, list):
                 for item in arr:
@@ -1385,18 +1390,43 @@ class EnergyProfileManager:
 
                         if start_str and price_val is not None:
                             try:
+                                hour = None
                                 if "T" in str(start_str):
                                     p_date = str(start_str).split("T")[0]
                                     p_time = str(start_str).split("T")[1][:2]
                                     hour = str(int(p_time))
+                                elif " " in str(start_str):
+                                    # Fallback for "YYYY-MM-DD HH:MM:SS"
+                                    p_date = str(start_str).split(" ")[0]
+                                    p_time = str(start_str).split(" ")[1][:2]
+                                    hour = str(int(p_time))
+                                
+                                if hour is not None:
                                     if p_date not in res:
                                         res[p_date] = {}
                                     res[p_date][hour] = float(price_val)
                             except Exception:
                                 pass
+                        
+                        # Support for Solcast's specific keys if not found above
+                        # (period_start, pv_estimate / pv_estimate10 / pv_estimate90)
+                        p_start = item.get("period_start") or item.get("period")
+                        pv_est = item.get("pv_estimate") or item.get("pv_estimate10")
+                        if p_start and pv_est is not None:
+                            try:
+                                p_date = str(p_start).split("T")[0] if "T" in str(p_start) else str(p_start).split(" ")[0]
+                                p_time = str(p_start).split("T")[1][:2] if "T" in str(p_start) else str(p_start).split(" ")[1][:2]
+                                hour = str(int(p_time))
+                                if p_date not in res: res[p_date] = {}
+                                res[p_date][hour] = float(pv_est)
+                            except Exception: pass
 
         # Fallback to current continuous state if no arrays exist
-        if not res:
+        # v7.8.2 - Avoid "flat solar" bug. If it's a solar/generation sensor, a flat line is always wrong.
+        e_id = str(state_obj.entity_id).lower()
+        is_generation = "solar" in e_id or "gen" in e_id or "pv" in e_id
+        
+        if not res and not is_generation:
             try:
                 val = float(state_obj.state)
                 now = dt_util.now()
@@ -1406,6 +1436,10 @@ class EnergyProfileManager:
                     res[d_str] = {str(h): val for h in range(24)}
             except ValueError:
                 pass
+        elif not res and is_generation:
+             # For solar sensors without internal distribution, we assume 0 for night/future 
+             # and avoid generating a dangerous 24h flat line.
+             pass
 
         # Merge into caching dictionary
         if res:
