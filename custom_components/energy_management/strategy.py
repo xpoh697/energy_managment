@@ -1327,7 +1327,8 @@ class StrategyEngine:
                     # --- BUY SIMULATION ---
                     try:
                         # We simulate natural behavior even if no grid purchase is planned
-                        sim_end_h = max(32, max(target_hours_sorted) + 1) if target_hours_sorted else (cur_hour + 24)
+                        # v7.8 - Ensure simulation covers at least 24h OR until sunrise tomorrow
+                        sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                         sim_range = list(range(cur_hour, sim_end_h))
                         _, sim_log = self.run_soc_simulation(b_soc, sim_range, now, charge_commands)
                         
@@ -1590,7 +1591,8 @@ class StrategyEngine:
 
                     # --- SELL SIMULATION ---
                     # Extend simulation to tomorrow morning (Sunrise) or end of peaks, whichever is later
-                    sim_end_h = max(24 + sunrise_h, int(active_window[1]) + 1)
+                    # v7.8 - Ensure simulation covers at least 24h OR until sunrise tomorrow
+                    sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     
                     # Use the actual calculated power_needed for the simulation
