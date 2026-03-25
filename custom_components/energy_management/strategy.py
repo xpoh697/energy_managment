@@ -171,6 +171,9 @@ class StrategyEngine:
         perf_list = []
         for rec in history[-14:]:
             if not isinstance(rec, dict): continue
+            # v7.7 - Skip records where generation was curtailed (c=True)
+            if rec.get("c"): continue
+            
             v = float(rec.get("v", 0.0))
             f = float(rec.get("f", 0.0))
             if f > 0.1:

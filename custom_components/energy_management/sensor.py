@@ -1129,10 +1129,16 @@ class EnergyProfileManager:
         f_dist = self.get_forecast_hourly_distribution(self.forecast_today_hourly_sensor)
         f_val = float(f_dist.get(str(past_hour), 0.0))
 
+        # Check for solar curtailment (clipping due to full battery and no export)
+        # v7.7 - Avoid poisoning historical accuracy with throttled data
+        is_stop_sale = getattr(self, "current_inverter_mode", "") == "stop_sale"
+        b_soc, _, _ = self.get_battery_state()
+        is_curtailed = bool(is_stop_sale and b_soc > 95)
+        
         # Append to history lists (with occupancy tag and forecast snapshot)
         self.data["consumption_base"][str(past_hour)].append({"v": self.current_consumption_base, "wd": today_wd, "occ": occ_count})
         self.data["consumption_total"][str(past_hour)].append({"v": self.current_consumption_total, "wd": today_wd, "occ": occ_count})
-        self.data["generation"][str(past_hour)].append({"v": self.current_generation, "f": f_val, "wd": today_wd})
+        self.data["generation"][str(past_hour)].append({"v": self.current_generation, "f": f_val, "wd": today_wd, "c": is_curtailed})
 
         # Store losses alongside generation for efficiency calculation
         if "losses" not in self.data:
