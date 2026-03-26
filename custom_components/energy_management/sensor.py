@@ -210,6 +210,13 @@ class EnergyProfileManager:
     _unsub_time: Any
     _unsub_power_poll: Any
     _unsub_periodic_save: Any
+    def get_sunrise_hour(self):
+        """Find the first hour of solar generation from the profile (4:00 - 12:00)."""
+        prof = self.get_average_profile("generation", 14, "all")
+        for h in range(4, 12):
+            if float(prof.get(str(h), 0.0)) > 0.05:
+                return h
+        return 6 # Default fallback
 
     @property
     def now(self) -> datetime:
@@ -2079,13 +2086,6 @@ class EnergyProfileManager:
                     if s in self.bms_learned_profile and self.bms_learned_profile[s] > new_val:
                         self.bms_learned_profile[s] = new_val
 
-    def get_sunrise_hour(self):
-        """Find the first hour of solar generation from the profile (4:00 - 12:00)."""
-        prof = self.get_average_profile("generation", 14, "all")
-        for h in range(4, 12):
-            if float(prof.get(str(h), 0.0)) > 0.05:
-                return h
-        return 6 # Default fallback
 
 class UniversalPriceSensor(SensorEntity):
     """Exposes 48-hour price data with price_today/price_tomorrow attributes for templates."""
