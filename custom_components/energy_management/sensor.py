@@ -2905,7 +2905,10 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_h_count_cur": int(res.get("debug_h_count_cur", 0)),
                 "debug_hist_coeff_rem": _sr(res.get("debug_hist_coeff_rem", 1.0)),
                 "forecast_distribution": res.get("forecast_distribution", {}),
-                "forecast_dist_source": res.get("forecast_dist_source", "historical")
+                "forecast_dist_source": res.get("forecast_dist_source", "historical"),
+                "projected_morning_soc": _sr(res.get("projected_morning_soc")),
+                "survival_threshold": _sr(res.get("survival_threshold")),
+                "battery_capacity_kwh": _sr(res.get("battery_capacity_kwh"))
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
