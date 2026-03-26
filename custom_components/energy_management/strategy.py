@@ -471,13 +471,13 @@ class StrategyEngine:
             
             # If we don't reach morning safely even with BASE load -> No budget for anything.
             if projected_morning_soc < survival_threshold:
-                initial_budget = 0.0
+                initial_budget = float((projected_morning_soc - survival_threshold) * b_cap_f / 100.0 * eff_coeff)
                 _LOGGER.debug(f"[Budget] Survival gate locked: Projected morning SOC {projected_morning_soc:.1f}% < {survival_threshold}%")
             else:
-                # Surplus = (Solar + Battery) - Base_Cons - Safety_Reserve
-                survival_reserve_kwh = (survival_threshold * b_cap_f / 100.0)
-                solar_remaining = float(forecast_val_adjusted or 0.0)
-                initial_budget = float(((solar_remaining + b_energy_f) * eff_coeff) - expected_base_consumption - survival_reserve_kwh)
+                # v7.9.5 - Balanced view (Matching Simulation): (Morning_SOC - Target_SOC) converted to AC kWh.
+                # This ensures the UI surplus matches the 24h Prediction screen.
+                surplus_soc = float(projected_morning_soc - survival_threshold)
+                initial_budget = float(surplus_soc * b_cap_f / 100.0 * eff_coeff)
                 
             available_budget = initial_budget
             
