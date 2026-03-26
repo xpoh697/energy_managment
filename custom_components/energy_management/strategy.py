@@ -435,25 +435,33 @@ class StrategyEngine:
             min_soc = float(min_soc_val) if min_soc_val is not None else 10.0
             eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
                         
-            # 3. Expected consumption (v7.9 - Use 'total' instead of 'base' for survival budget)
+            # 3. Expected consumption (v7.9.2 - 'Cleaned Total' to avoid double-counting)
             occ_coeff = float(man.get_occupancy_coefficient())
-            expected_today = float(man.get_expected_remaining("consumption_total", eff_period, day_idx)) * occ_coeff
-            expected_night = float(man.get_expected_night("consumption_total", eff_period, day_idx)) * occ_coeff
-            expected_consumption = float(expected_today + expected_night)
+            total_rem_today = float(man.get_expected_remaining("consumption_total", eff_period, day_idx)) * occ_coeff
+            total_night = float(man.get_expected_night("consumption_total", eff_period, day_idx)) * occ_coeff
+            expected_total_consumption = float(total_rem_today + total_night)
             
-            # Current historical value (used for waste/potential detection)
-            cur_hist_val = float(normalize_float(p_gen.get(str(cur_hour), 0.0)))
-
+            # v7.9.2 - Subtract statistically expected managed loads from 'total' to get essential baseline
+            expected_managed_rem = 0.0
+            for s_id in man.deduct_settings:
+                _, rem_today, is_cyclic, _ = man.get_managed_load_stats(s_id)
+                expected_managed_rem += float(rem_today)
+                # For non-cyclic (boilers), also account for the full night run if it hasn't happened yet
+                if not is_cyclic and cur_hour < 23:
+                    expected_managed_rem += float(man.deduct_settings.get(s_id, {}).get("required_kwh", 0.0))
+            
+            # Essential house load = Total - statistically expected managed components
+            essential_house_consumption = max(0.0, expected_total_consumption - expected_managed_rem)
+            
             # 4. Initial Budget (kWh until sunrise)
-            # v7.9 - Conservative budget: Every kWh used now is one kWh less for tonight.
-            # We must only allow budget if we are ABOVE the safety target for tomorrow.
+            # v7.9.2 - Conservative but fair: (Available Energy * Eff) - Essential House Needs - Safety Buffer
             soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
-            # Reserve in kWh: (Min SOC % + Buffer %) * Capacity
             survival_reserve = (min_soc + soc_buffer) * b_cap_f / 100.0
             
-            # (Energy Income * Eff) - Energy Need - Reserve = True Surplus
-            initial_budget = float(((solar_remaining + b_energy_f) * eff_coeff) - expected_consumption - survival_reserve)
+            solar_remaining = float(forecast_val_adjusted or 0.0)
+            initial_budget = float(((solar_remaining + b_energy_f) * eff_coeff) - essential_house_consumption - survival_reserve)
             available_budget = initial_budget
+            
             
             permissions = {}
             permissions_reasons = {}
