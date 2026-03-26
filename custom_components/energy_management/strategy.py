@@ -640,8 +640,9 @@ class StrategyEngine:
                     
             return {
                 "initial_budget": float(initial_budget or 0.0),
-                "projected_morning_soc": round_f(projected_morning_soc, 1),
-                "survival_threshold": round_f(survival_threshold, 1),
+                "battery_capacity_kwh": float(b_cap_f or 0.0),
+                "projected_morning_soc": float(round_f(projected_morning_soc, 1)),
+                "survival_threshold": float(round_f(survival_threshold, 1)),
                 "battery_energy_kwh": round_f(b_energy_f, 3),
                 "expected_consumption_kwh": round_f(expected_base_consumption, 3),
                 "permissions": permissions or {},
