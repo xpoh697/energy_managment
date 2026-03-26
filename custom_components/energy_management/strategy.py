@@ -467,7 +467,9 @@ class StrategyEngine:
             
             # Sunrise tomorrow is at 24 + sunrise_h
             morning_h_abs = 24 + sunrise_h
-            projected_morning_soc = self._get_soc_from_log(sim_log, str(morning_h_abs), sim_res_soc)
+            # v7.9.6 - Correct key format for simulation log lookup
+            target_key = f"{sunrise_h:0>2}:59 (Завтра)" 
+            projected_morning_soc = self._get_soc_from_log(sim_log, target_key, sim_res_soc)
             
             # If we don't reach morning safely even with BASE load -> No budget for anything.
             if projected_morning_soc < survival_threshold:
