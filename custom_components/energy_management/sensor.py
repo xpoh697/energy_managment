@@ -1549,6 +1549,14 @@ class EnergyProfileManager:
                     pass
 
             if valid_vals:
+                # v7.9.9 - Outlier Filtering (Triton Filter)
+                # Ensure a few samples exist, then trim the top/bottom 10% to remove accidental spikes (like boiler leaks)
+                if len(valid_vals) >= 5:
+                    valid_vals.sort()
+                    # Trim top 10% and bottom 10% (at least 1 sample if list is large)
+                    trim_count = max(1, len(valid_vals) // 10)
+                    valid_vals = valid_vals[trim_count:-trim_count]
+                
                 profile[str(h)] = round_f(sum(valid_vals) / len(valid_vals), 3)
             else:
                 profile[str(h)] = 0.0
