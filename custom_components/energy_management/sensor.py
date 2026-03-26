@@ -1717,19 +1717,18 @@ class EnergyProfileManager:
                 else:
                     res[sh] = 0.0
             elif h == cur_hour:
-                # Use current real-time value
-                if profile_type == "consumption_base": res[sh] = round_f(self.current_consumption_base, 3)
+                # Use current real-time value, but sanitize base_load to prevent spike poisoning
+                if profile_type == "consumption_base": 
+                    safe_base_p = min(1.2, float(self.current_consumption_base))
+                    self.avg_base_load_kw = self._update_moving_avg("base_load_kw", safe_base_p)
+                    res[sh] = round_f(self.avg_base_load_kw, 3)
                 elif profile_type == "consumption_total": res[sh] = round_f(self.current_consumption_total, 3)
                 elif profile_type == "generation": res[sh] = round_f(self.current_generation, 3)
                 else: res[sh] = 0.0
             else:
-                # Use historical average for future hours
-                history = self.data.get(profile_type, {}).get(sh, [])
-                if history:
-                    vals = [normalize_float(item.get("v") if isinstance(item, dict) else item) for item in history]
-                    res[sh] = round_f(sum(vals) / len(vals), 3)
-                else:
-                    res[sh] = 0.0
+                # v7.9.9 - Use get_average_profile to ensure MEDIAN filter is applied to history
+                avg_prof = self.get_average_profile(profile_type)
+                res[sh] = round_f(float(avg_prof.get(sh, 0.0)), 3)
         return res
 
     def get_todays_profile(self, profile_type):
