@@ -448,13 +448,26 @@ class StrategyEngine:
             survival_threshold = min_soc + soc_buffer
             
             # Quick 24h simulation (baseline only) to find projected morning SOC
-            sim_res = self.run_soc_simulation(
-                target_soc=min_soc,
-                mode="buy",
-                is_prediction=True,
+            # We need to reach the next sunrise (approx 6-8 AM)
+            sim_range = list(range(cur_hour, cur_hour + 24))
+            sim_res_soc, sim_log = self.run_soc_simulation(
+                start_soc=b_soc_f,
+                sim_range=sim_range,
+                now=now,
                 house_profile_override="consumption_base"
             )
-            projected_morning_soc = float(sim_res.get("projected_soc_morning_pct", 0.0))
+            # Find the SOC at the start of tomorrow's generation (sunrise)
+            projected_morning_soc = 0.0
+            sunrise_h = 8 # Default
+            prof_gen = man.get_average_profile("generation", eff_period, day_idx_today)
+            for h in range(24):
+                if float(prof_gen.get(str(h), 0.0)) > 0.05:
+                    sunrise_h = h
+                    break
+            
+            # Sunrise tomorrow is at 24 + sunrise_h
+            morning_h_abs = 24 + sunrise_h
+            projected_morning_soc = self._get_soc_from_log(sim_log, str(morning_h_abs), sim_res_soc)
             
             # If we don't reach morning safely even with BASE load -> No budget for anything.
             if projected_morning_soc < survival_threshold:
@@ -670,7 +683,7 @@ class StrategyEngine:
             return float(val.get("soc", default))
         return float(val if val is not None else default)
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}
@@ -697,10 +710,9 @@ class StrategyEngine:
         dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, tomorrow_dt.strftime("%Y-%m-%d"))
 
         # 2. Consumption profiles (7-day Aware Total Load)
-        # [Diag v5.2.4-fix-realistic-soc-115]
-        # We use consumption_total to ensure simulation matches Gatekeeper logic
-        prof_cons_today = dict(man.get_predicted_profile("consumption_total"))
-        prof_cons_tom = dict(man.get_average_profile("consumption_total", eff_period, day_idx_tom))
+        p_type = house_profile_override or "consumption_total"
+        prof_cons_today = dict(man.get_predicted_profile(p_type))
+        prof_cons_tom = dict(man.get_average_profile(p_type, eff_period, day_idx_tom))
         
         # 3. Generation profiles (Historical Baseline)
         prof_gen_today = dict(man.get_average_profile("generation", eff_period, day_idx_today))
