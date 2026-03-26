@@ -1549,13 +1549,16 @@ class EnergyProfileManager:
                     pass
 
             if valid_vals:
-                # v7.9.9 - Outlier Filtering (Triton Filter)
-                # Ensure a few samples exist, then trim the top/bottom 10% to remove accidental spikes (like boiler leaks)
+                # v7.9.9 - Aggressive Outlier Filtering (Triton Filter v2)
+                # We trim 25% of the highest values and 5% of lowest to find the "Clean Base".
                 if len(valid_vals) >= 5:
                     valid_vals.sort()
-                    # Trim top 10% and bottom 10% (at least 1 sample if list is large)
-                    trim_count = max(1, len(valid_vals) // 10)
-                    valid_vals = valid_vals[trim_count:-trim_count]
+                    high_trim = max(1, int(len(valid_vals) * 0.25))
+                    low_trim = max(0, int(len(valid_vals) * 0.05))
+                    
+                    # Ensure we don't trim everything
+                    if (high_trim + low_trim) < len(valid_vals):
+                        valid_vals = valid_vals[low_trim:-high_trim]
                 
                 profile[str(h)] = round_f(sum(valid_vals) / len(valid_vals), 3)
             else:
@@ -2910,6 +2913,7 @@ class EnergyBudgetSensor(SensorEntity):
                 "forecast_remaining_adjusted_kwh": _sr(res.get("forecast_val")),
                 "battery_energy_kwh": _sr(res.get("batt_energy_val")),
                 "expected_consumption_kwh": _sr(res.get("expected_consumption")),
+                "expected_base_load_kw": _sr(float(res.get("expected_consumption") or 0.0) / (12.5 if 12.5 > 0 else 1)), # Approximate average load
                 "forecast_coefficient": _sr(res.get("forecast_coefficient", 1.0), 1.0),
                 "forecast_coefficient_today": _sr(res.get("forecast_today_coefficient", 1.0), 1.0),
                 "occupancy_coefficient": _sr(res.get("occupancy_coefficient", 1.0), 1.0),
