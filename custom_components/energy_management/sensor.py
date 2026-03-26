@@ -89,10 +89,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         for key, (name_ru, days) in periods.items():
             entities.append(ProfileAveragedSensor(manager, "consumption", key, f"Профиль Потребления ({name_ru})", days))
         entities.append(LiveHourlySensor(manager, "consumption", "Текущее почасовое потребление"))
-        entities.append(TodayProfileSensor(manager, "consumption", "Потребление за сегодня (Профиль)"))
+        entities.append(TodayProfileSensor(manager, "consumption", "Прогноз потребления за сегодня"))
 
         # Add the Smart Budget sensor using the custom period length as the profile baseline
-        entities.append(EnergyBudgetSensor(manager, "Энергетический баланс до утра", custom_period))
+        entities.append(EnergyBudgetSensor(manager, "Энергетический прогноз (Выживание)", custom_period))
 
     if has_generation:
         for key, (name_ru, days) in periods.items():
