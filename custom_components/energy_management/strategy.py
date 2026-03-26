@@ -640,6 +640,10 @@ class StrategyEngine:
                     
             return {
                 "initial_budget": float(initial_budget or 0.0),
+                "projected_morning_soc": round_f(projected_morning_soc, 1),
+                "survival_threshold": round_f(survival_threshold, 1),
+                "battery_energy_kwh": round_f(b_energy_f, 3),
+                "expected_consumption_kwh": round_f(expected_base_consumption, 3),
                 "permissions": permissions or {},
                 "permissions_reasons": permissions_reasons or {},
                 "forecast_val": float(forecast_val_adjusted or 0.0),
@@ -799,9 +803,12 @@ class StrategyEngine:
             
             # Anchor the first step of simulation to REAL active load, not profile.
             if i == 0:
-                # v7.8.5 - If it's the first step, use real-time power (kW)
-                # avg_load_kw is already Power in kW.
-                expected_cons_kw = float(getattr(man, "avg_load_kw", expected_cons_kw))
+                # v7.9.7 - If it's the first step, use real-time power (kW)
+                # Ensure we use BASE power for survival simulations to avoid double-counting active loads.
+                if house_profile_override == "consumption_base":
+                    expected_cons_kw = float(getattr(man, "avg_base_load_kw", expected_cons_kw))
+                else:
+                    expected_cons_kw = float(getattr(man, "avg_load_kw", expected_cons_kw))
                 
                 # Special case: if we are using predicted_profile's h==cur_hour, it might be Energy (kWh)
                 # But avg_load_kw is always better for the first step.

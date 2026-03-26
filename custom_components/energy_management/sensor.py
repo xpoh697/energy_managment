@@ -240,6 +240,19 @@ class EnergyProfileManager:
         return sum(s.get("gen_kw", 0.0) for s in self.power_history) / len(self.power_history)
 
     @property
+    def avg_base_load_kw(self) -> float:
+        """Retrieve smoothed BASE load power (Total - Managed)."""
+        tot = self.avg_load_kw
+        man_kw = 0.0
+        for s_id, settings in self.deduct_settings.items():
+            if not isinstance(settings, dict): continue
+            power_sensor = settings.get("power_sensor")
+            if power_sensor:
+                st = self.hass.states.get(power_sensor)
+                man_kw += (get_kwh_val(st) or 0.0)
+        return max(0.0, tot - man_kw)
+
+    @property
     def avg_load_5m_kw(self) -> float:
         """Retrieve smoothed load power (last 5m)."""
         if not self.power_history:
