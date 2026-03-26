@@ -438,8 +438,9 @@ class StrategyEngine:
             # 3. Expected consumption (v7.9.4 - Base profile + Simulation Guard)
             # Use 'base' profile as the absolute essential house survival floor.
             occ_coeff = float(man.get_occupancy_coefficient())
+            sunrise_hour = man.get_sunrise_hour() or 6
             base_rem_today = float(man.get_expected_remaining("consumption_base", eff_period, day_idx)) * occ_coeff
-            base_night = float(man.get_expected_night("consumption_base", eff_period, day_idx)) * occ_coeff
+            base_night = float(man.get_expected_night("consumption_base", eff_period, day_idx, until_hour=sunrise_hour)) * occ_coeff
             expected_base_consumption = float(base_rem_today + base_night)
             
             # v7.9.4 - Survival Projection Gate
