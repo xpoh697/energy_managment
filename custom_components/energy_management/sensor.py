@@ -1727,7 +1727,7 @@ class EnergyProfileManager:
                 else: res[sh] = 0.0
             else:
                 # v7.9.9 - Use get_average_profile to ensure MEDIAN filter is applied to history
-                avg_prof = self.get_average_profile(profile_type)
+                avg_prof = self.get_average_profile(profile_type, self.custom_period)
                 res[sh] = round_f(float(avg_prof.get(sh, 0.0)), 3)
         return res
 
