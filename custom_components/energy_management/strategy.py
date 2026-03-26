@@ -435,22 +435,24 @@ class StrategyEngine:
             min_soc = float(min_soc_val) if min_soc_val is not None else 10.0
             eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
                         
-            # 3. Expected consumption
+            # 3. Expected consumption (v7.9 - Use 'total' instead of 'base' for survival budget)
             occ_coeff = float(man.get_occupancy_coefficient())
-            expected_today = float(man.get_expected_remaining("consumption_base", eff_period, day_idx)) * occ_coeff
-            expected_night = float(man.get_expected_night("consumption_base", eff_period, day_idx)) * occ_coeff
+            expected_today = float(man.get_expected_remaining("consumption_total", eff_period, day_idx)) * occ_coeff
+            expected_night = float(man.get_expected_night("consumption_total", eff_period, day_idx)) * occ_coeff
             expected_consumption = float(expected_today + expected_night)
             
             # Current historical value (used for waste/potential detection)
             cur_hist_val = float(normalize_float(p_gen.get(str(cur_hour), 0.0)))
 
-            # 1. Solar Remaining
-            # Important: forecast_val (from man.forecast_today_sensor) typically already 
-            # represents the REMAINING solar for the day. 
-            # Multiplying by (hist_rem / total_hist_gen) would cause a double-reduction.
-            solar_remaining = float(forecast_val_adjusted or 0.0)
+            # 4. Initial Budget (kWh until sunrise)
+            # v7.9 - Conservative budget: Every kWh used now is one kWh less for tonight.
+            # We must only allow budget if we are ABOVE the safety target for tomorrow.
+            soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
+            # Reserve in kWh: (Min SOC % + Buffer %) * Capacity
+            survival_reserve = (min_soc + soc_buffer) * b_cap_f / 100.0
             
-            initial_budget = float(solar_remaining + (b_energy_f - (min_soc * b_cap_f / 100.0)) - expected_consumption)
+            # (Energy Income * Eff) - Energy Need - Reserve = True Surplus
+            initial_budget = float(((solar_remaining + b_energy_f) * eff_coeff) - expected_consumption - survival_reserve)
             available_budget = initial_budget
             
             permissions = {}
