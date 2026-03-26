@@ -2,6 +2,7 @@ import logging
 import json
 import os
 from typing import Any, cast, List, Tuple, Dict, Optional
+import statistics
 from datetime import datetime, timedelta
 from homeassistant.components.sensor import SensorEntity, SensorStateClass, SensorDeviceClass
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -1549,18 +1550,13 @@ class EnergyProfileManager:
                     pass
 
             if valid_vals:
-                # v7.9.9 - Aggressive Outlier Filtering (Triton Filter v2)
-                # We trim 25% of the highest values and 5% of lowest to find the "Clean Base".
-                if len(valid_vals) >= 5:
-                    valid_vals.sort()
-                    high_trim = max(1, int(len(valid_vals) * 0.25))
-                    low_trim = max(0, int(len(valid_vals) * 0.05))
-                    
-                    # Ensure we don't trim everything
-                    if (high_trim + low_trim) < len(valid_vals):
-                        valid_vals = valid_vals[low_trim:-high_trim]
-                
-                profile[str(h)] = round_f(sum(valid_vals) / len(valid_vals), 3)
+                # v7.9.9 - MEDIAN Filter (Maximum Robustness)
+                # Instead of a mean with outliers, we use a median to find the "Most Likely" base load.
+                if len(valid_vals) >= 3:
+                     profile[str(h)] = round_f(float(statistics.median(valid_vals)), 3)
+                else:
+                     # Fallback to mean for very small datasets
+                     profile[str(h)] = round_f(sum(valid_vals) / len(valid_vals), 3)
             else:
                 profile[str(h)] = 0.0
 

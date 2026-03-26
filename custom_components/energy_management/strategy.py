@@ -818,12 +818,12 @@ class StrategyEngine:
             # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
             total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
             
-            # v4.8: Standby power / Inverter self-consumption
-            # v7.9.9: If we have high-quality efficiency data (>0.6), we assume it ALREADY
-            # includes the idle losses to avoid double-counting.
+            # v7.9.9: If we have high-quality efficiency data (>0.6) from the user's sensor, 
+            # we assume it ALREADY includes the idle losses to avoid double-counting.
+            # Otherwise, we add the constant idle_p (usually 0.05kW) to the house load.
             idle_p = float(man.current_losses) if hasattr(man, 'current_losses') else 0.05
-            if eff_coeff > 0.999:
-                batt_energy_dc -= (idle_p * step_duration)
+            if eff_coeff < 0.999: # Only add if not already in efficiency
+                 expected_cons_kw += idle_p
             
             if total_net_kw > 0.001: 
                 acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))
