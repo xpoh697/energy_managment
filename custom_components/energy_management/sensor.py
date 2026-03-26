@@ -1390,6 +1390,7 @@ class EnergyProfileManager:
         if not state_obj:
             return
 
+        res = {}
         # Parse arrays in attributes (NordPool, ENTSO-E, Solcast, etc common formats)
         # v7.8.1 - Expanded with Solcast-specific attributes
         search_attrs = [
