@@ -459,7 +459,7 @@ class StrategyEngine:
             # Find the SOC at the start of tomorrow's generation (sunrise)
             projected_morning_soc = 0.0
             sunrise_h = 8 # Default
-            prof_gen = man.get_average_profile("generation", eff_period, day_idx_today)
+            prof_gen = man.get_average_profile("generation", eff_period, day_idx)
             for h in range(24):
                 if float(prof_gen.get(str(h), 0.0)) > 0.05:
                     sunrise_h = h
