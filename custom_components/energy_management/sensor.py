@@ -1856,6 +1856,12 @@ class EnergyProfileManager:
         """Read battery SOC, capacity, and calculate stored energy."""
         soc = self.get_sensor_float(self.battery_soc_sensor, soc_default)
         cap = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
+        
+        # v11.0.2 - Fallback to manual setup if sensor is unknown/0
+        if cap <= 0.1:
+            from .const import CONF_BATTERY_CAPACITY
+            cap = self.get_setting(CONF_BATTERY_CAPACITY, 0.0)
+            
         energy = cap * (soc / 100.0) if cap > 0 else 0.0
         return soc, cap, energy
 
