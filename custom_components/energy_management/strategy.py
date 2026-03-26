@@ -640,7 +640,7 @@ class StrategyEngine:
                 "debug_forecast_sensors": [],
                 "debug_fraction_so_far": float(external_progress if 'external_progress' in locals() else fraction_so_far),
                 "batt_energy_val": float(b_energy_f or 0.0),
-                "expected_consumption": float(expected_consumption or 0.0),
+                "expected_consumption": float(essential_house_consumption or 0.0),
                 "occupancy_coefficient": float(occ_coeff or 1.0),
                 "efficiency_coefficient": float(eff_coeff or 1.0),
                 "available_power_total_kw": float(initial_power_kw or 0.0),
