@@ -2648,7 +2648,14 @@ class InverterOperationModeSensor(SensorEntity):
             # 3. Averaged Surplus > 0
             # 4. Simulation shows we will be full enough for evening/peak
             
-            is_energy_low_for_evening = is_preparing_for_peak # is_preparing_for_peak already captures "Won't reach target SOC by peak"
+            # v7.9 - Morning Survival Guard
+            # We don't just check for "Preparing for Peak Today", we also check 
+            # if we have enough energy to reach tomorrow morning (Sunrise).
+            morning_soc_proj = sell_strategy.get("sell_simulation", {}).get("projected_soc_morning_pct", 100.0)
+            target_morning = sell_strategy.get("arbitrage_buyback", {}).get("target_morning_soc_pct", 25.0)
+            is_low_for_morning = bool(morning_soc_proj < target_morning)
+            
+            is_energy_low_for_evening = bool(is_preparing_for_peak or is_low_for_morning)
             
             if is_before_limit_hour and has_surplus and not is_energy_low_for_evening:
                 mode = "sale_pv_no_bat"
@@ -2657,7 +2664,10 @@ class InverterOperationModeSensor(SensorEntity):
                 # If conditions for sale_pv_no_bat not met, fallback to standard or charge
                 mode = "sale_pv"
                 if is_energy_low_for_evening:
-                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (не успею дозарядиться к вечеру)"
+                    if is_low_for_morning:
+                        reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (мало на утро: {morning_soc_proj}%)"
+                    else:
+                        reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (не успею к пику)"
                 elif not is_before_limit_hour:
                     reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но уже не утро"
                 elif not has_surplus:
