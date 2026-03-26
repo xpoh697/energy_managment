@@ -1404,8 +1404,16 @@ class StrategyEngine:
                         key_end = f"{last_h_buy % 24:02d}:59" + (" (Завтра)" if last_h_buy >= 24 else "")
                         soc_at_end = self._get_soc_from_log(sim_log, key_end, b_soc)
                             
-                        # 3. Projected SOC TOMORROW MORNING (08:00 AM)
-                        key_morning = "07:59 (Завтра)"
+                        # 3. Projected SOC TOMORROW MORNING (At actual sunrise)
+                        # v7.9.8 - Ensure consistency with Energy Balance sensor
+                        sunrise_h_sim = 8
+                        prof_gen_tom = man.get_average_profile("generation", self.manager.custom_period, (now + timedelta(days=1)).weekday())
+                        for h in range(24):
+                            if float(prof_gen_tom.get(str(h), 0.0)) > 0.05:
+                                sunrise_h_sim = h
+                                break
+                                
+                        key_morning = f"{sunrise_h_sim:02d}:59 (Завтра)"
                         soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_at_end)
                         
                         # v7.2 - CLEANUP: If no buy is currently planned for today, return current SOC
