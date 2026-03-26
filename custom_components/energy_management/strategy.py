@@ -435,27 +435,41 @@ class StrategyEngine:
             min_soc = float(min_soc_val) if min_soc_val is not None else 10.0
             eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
                         
-            # 3. Expected consumption (v7.9.3 - Raw Total as Safety Floor)
-            # v7.9.3 - Use FULL house needs (total) as the baseline. 
-            # This is intentionally conservative: we only allow extra loads 
-            # if we have energy BEYOND our typical daily needs + safety buffer.
+            # 3. Expected consumption (v7.9.4 - Base profile + Simulation Guard)
+            # Use 'base' profile as the absolute essential house survival floor.
             occ_coeff = float(man.get_occupancy_coefficient())
-            total_rem_today = float(man.get_expected_remaining("consumption_total", eff_period, day_idx)) * occ_coeff
-            total_night = float(man.get_expected_night("consumption_total", eff_period, day_idx)) * occ_coeff
-            expected_total_consumption = float(total_rem_today + total_night)
+            base_rem_today = float(man.get_expected_remaining("consumption_base", eff_period, day_idx)) * occ_coeff
+            base_night = float(man.get_expected_night("consumption_base", eff_period, day_idx)) * occ_coeff
+            expected_base_consumption = float(base_rem_today + base_night)
             
-            # v7.9.3 - Initial Budget (kWh until sunrise)
-            # (Solar_Rem + Battery_Energy) * Eff - Total_House_Needs - Safety_Buffer
+            # v7.9.4 - Survival Projection Gate
+            # We check if even WITH just the base load, we can reach morning safely.
             soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
-            survival_reserve = (min_soc + soc_buffer) * b_cap_f / 100.0
+            survival_threshold = min_soc + soc_buffer
             
-            solar_remaining = float(forecast_val_adjusted or 0.0)
-            initial_budget = float(((solar_remaining + b_energy_f) * eff_coeff) - expected_total_consumption - survival_reserve)
+            # Quick 24h simulation (baseline only) to find projected morning SOC
+            sim_res = self.run_soc_simulation(
+                target_soc=min_soc,
+                mode="buy",
+                is_prediction=True,
+                house_profile_override="consumption_base"
+            )
+            projected_morning_soc = float(sim_res.get("projected_soc_morning_pct", 0.0))
+            
+            # If we don't reach morning safely even with BASE load -> No budget for anything.
+            if projected_morning_soc < survival_threshold:
+                initial_budget = 0.0
+                _LOGGER.debug(f"[Budget] Survival gate locked: Projected morning SOC {projected_morning_soc:.1f}% < {survival_threshold}%")
+            else:
+                # Surplus = (Solar + Battery) - Base_Cons - Safety_Reserve
+                survival_reserve_kwh = (survival_threshold * b_cap_f / 100.0)
+                solar_remaining = float(forecast_val_adjusted or 0.0)
+                initial_budget = float(((solar_remaining + b_energy_f) * eff_coeff) - expected_base_consumption - survival_reserve_kwh)
+                
             available_budget = initial_budget
             
-            # Sync for return dict
-            essential_house_consumption = expected_total_consumption
-            
+            # For diagnostic attributes
+            essential_house_consumption = expected_base_consumption 
             
             permissions = {}
             permissions_reasons = {}
