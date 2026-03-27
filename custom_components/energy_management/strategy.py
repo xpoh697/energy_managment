@@ -694,13 +694,13 @@ class StrategyEngine:
     def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None):
         """Universal SOC simulation engine."""
         if not sim_range:
-            return float(start_soc), {}
+            return float(start_soc), {}, 0.0
 
         man = man or self.manager
         _, batt_cap, _ = man.get_battery_state()
         b_cap_f = float(batt_cap)
         if b_cap_f <= 0.1:
-            return float(start_soc), {}
+            return float(start_soc), {}, 0.0
 
         # v5.2 - Dynamic Period Adaptability (Fast Learning in Transition Seasons) 
         eff_period = man.custom_period
