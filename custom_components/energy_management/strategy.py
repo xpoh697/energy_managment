@@ -451,7 +451,7 @@ class StrategyEngine:
             # Quick 24h simulation (baseline only) to find projected morning SOC
             # We need to reach the next sunrise (approx 6-8 AM)
             sim_range = list(range(cur_hour, cur_hour + 24))
-            sim_res_soc, sim_log = self.run_soc_simulation(
+            sim_res_soc, sim_log, overflow_kwh = self.run_soc_simulation(
                 start_soc=b_soc_f,
                 sim_range=sim_range,
                 now=now,
@@ -742,6 +742,7 @@ class StrategyEngine:
 
         simulated_soc = float(start_soc)
         history_log = {}
+        overflow_kwh = 0.0
         for i, h_abs in enumerate(sim_range):
             real_h = int(h_abs % 24)
             is_tom = bool(h_abs >= 24)
@@ -828,8 +829,18 @@ class StrategyEngine:
             if total_net_kw > 0.001: 
                 acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))
                 actual_charge_kw = float(min(total_net_kw * eff_coeff, max_batt_p * acc_ratio))
+                
+                old_soc = simulated_soc
                 if b_cap_f > 0.1:
                     simulated_soc = float(min(100.0, simulated_soc + (actual_charge_kw * step_duration / b_cap_f * 100.0)))
+                
+                # v11.0.6 - Track overflow energy (AC kWh)
+                actual_stored_kwh_ac = 0.0
+                if b_cap_f > 0.1:
+                    actual_stored_kwh_ac = ((simulated_soc - old_soc) / 100.0 * b_cap_f) / max(0.1, eff_coeff)
+                
+                overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
+                overflow_kwh += overflow_h
             elif total_net_kw < -0.001: 
                 sim_eff = float(max(0.85, eff_coeff))
                 actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
@@ -843,7 +854,7 @@ class StrategyEngine:
                 "load_kw": round_f(float(expected_cons_kw), 3)
             }
 
-        return float(simulated_soc), history_log
+        return float(simulated_soc), history_log, float(overflow_kwh)
 
     def get_market_strategy(self, mode="buy"):
         now = dt_util.now()
@@ -1223,7 +1234,7 @@ class StrategyEngine:
                     _win_end = int(best_arb_pair[0]) if best_arb_pair[0] is not None and int(best_arb_pair[0]) > cur_hour else int(max(all_buy_prices.keys()) if all_buy_prices else 23)
                     sim_range = list(range(cur_hour, _win_end + 1))
                     commands = {h_cmd: max_p for h_cmd in survival_hours}
-                    _, log = self.run_soc_simulation(b_soc, sim_range, now, commands)
+                    _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, commands)
                     
                     violation_hour = None
                     for h_step in sim_range:
@@ -1317,7 +1328,7 @@ class StrategyEngine:
                     for h_b in pool:
                         # 1. Prediction of SOC at the START of this hour (solar only)
                         sim_to_b = list(range(cur_hour, int(h_b)))
-                        soc_at_b, _ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None)
+                        soc_at_b, _, _ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None)
                         
                         # Fix (v6.16): For future hours, use Minute 0 to get FULL solar hour in simulation.
                         # This prevents "losing" solar minutes due to now.minute offset.
@@ -1325,7 +1336,7 @@ class StrategyEngine:
                         
                         # 2. Prediction of MAX SOC achieved by Sun alone TODAY starting from this hour
                         sim_eod = list(range(int(h_b), 24))
-                        soc_final_dry, dry_log = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
+                        soc_final_dry, dry_log, _ = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
                         max_dry_soc = max([float(st["soc"]) for st in dry_log.values()] + [float(soc_at_b)])
                         
                         if max_dry_soc < 99.0: # If sun alone won't reach 100% at any point today
@@ -1335,7 +1346,7 @@ class StrategyEngine:
                     if is_strict_arb:
                         res["charge_reason"] = "arbitrage"
                         # Adaptive Target: 100% minus what the sun gives eventually
-                        expected_soc_at_peak, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, int(peak_h))), now, commands=None)
+                        expected_soc_at_peak, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, int(peak_h))), now, commands=None)
                         sun_gain_pct = max(0.0, expected_soc_at_peak - b_soc)
                         target_soc = float(min(100.0, 100.0 - sun_gain_pct))
                     elif negative_hours:
@@ -1393,7 +1404,7 @@ class StrategyEngine:
                         # v7.8 - Ensure simulation covers at least 24h OR until sunrise tomorrow
                         sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                         sim_range = list(range(cur_hour, sim_end_h))
-                        _, sim_log = self.run_soc_simulation(b_soc, sim_range, now, charge_commands)
+                        _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands)
                         
                         # 1. Projected SOC at START of the first buy hour
                         if target_hours_sorted:
@@ -1677,7 +1688,7 @@ class StrategyEngine:
                         if pot_gain_val >= min_profit:
                             sim_commands[int(best_buy_h)] = float(max_p)
 
-                    _, sim_log = self.run_soc_simulation(b_soc, sim_range, now, sim_commands)
+                    _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_commands)
                     
                     # 1. Projected SOC at START of the first peak
                     first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else None

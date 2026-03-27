@@ -94,6 +94,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
         # Add the Smart Budget sensor using the custom period length as the profile baseline
         entities.append(EnergyBudgetSensor(manager, "Энергетический прогноз (Выживание)", custom_period))
+        entities.append(PotentialExportTodaySensor(manager))
 
     if has_generation:
         for key, (name_ru, days) in periods.items():
@@ -3610,3 +3611,43 @@ class GridBalanceSensor(SensorEntity):
         }
 
 
+
+class PotentialExportTodaySensor(SensorEntity):
+    """Calculates potential energy export for today (surplus after 100% SOC)."""
+    def __init__(self, manager):
+        self.manager = manager
+        self._attr_name = "Потенциальный экспорт сегодня"
+        self._attr_unique_id = f"{manager.entry.entry_id}_potential_export"
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_icon = "mdi:export"
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self.entity_id = f"{DOMAIN}.energy_management_potential_export"
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Antigravity AI",
+            model="Energy Optimization Engine",
+        )
+
+    @property
+    def native_value(self):
+        budget_res = self.manager.get_budget_and_permissions(self.manager.custom_period)
+        return float(budget_res.get("potential_export_kwh", 0.0))
+
+    @property
+    def extra_state_attributes(self):
+        budget_res = self.manager.get_budget_and_permissions(self.manager.custom_period)
+        return {
+            "forecast_remaining": budget_res.get("forecast_val", 0.0),
+            "expected_consumption": budget_res.get("expected_consumption_kwh", 0.0),
+            "battery_to_full": round_f(max(0.0, float(budget_res.get("battery_capacity_kwh", 0.0)) - float(budget_res.get("battery_energy_kwh", 0.0))), 3)
+        }
+
+    async def async_added_to_hass(self):
+        self.manager.update_listeners.append(self.async_write_ha_state)
+
+    async def async_will_remove_from_hass(self):
+        if self.async_write_ha_state in self.manager.update_listeners:
+            self.manager.update_listeners.remove(self.async_write_ha_state)
