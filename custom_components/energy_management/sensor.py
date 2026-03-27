@@ -2359,7 +2359,7 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
                 sim_hours = list(range(now.hour, sunrise_hour))
 
         # 1. Run Unified Simulation Engine
-        simulated_soc, charge_log = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
+        simulated_soc, charge_log, _ = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
 
         f_raw = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
@@ -2596,7 +2596,7 @@ class InverterOperationModeSensor(SensorEntity):
             else:
                 end_h = peak_start_hour if peak_start_hour is not None else (now_h + 24)
                 sim_range = [h for h in range(now_h, end_h) if h < 48]
-                sim_soc, sim_log = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now)
+                sim_soc, sim_log, _ = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now)
                 
                 ever_fully_charged = any(
                     (val.get("soc", 0.0) if isinstance(val, dict) else val) >= (target_soc_sell - 0.5) 
