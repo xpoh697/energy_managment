@@ -583,7 +583,12 @@ class EnergyProfileManager:
         # Restore daily deduct consumption (how much each managed load already consumed today)
         saved_deduct = self.data.get("daily_deduct_consumption", {})
         for s in self.deduct_sensors:
-            self.daily_deduct_consumption[s] = saved_deduct.get(s, 0.0)
+            val = saved_deduct.get(s, 0.0)
+            # v11.1.3 - Clean poisoned data (>20kWh per day for a single appliance is likely a bug)
+            if val > 20.0:
+                _LOGGER.warning("Energy Management: Purging poisoned daily deduct value (%s) for %s", val, s)
+                val = 0.0
+            self.daily_deduct_consumption[s] = val
 
         # Restore hourly accumulators (energy accumulated since the last hour-top save)
         accum = self.data.get("hourly_accumulators", {})
@@ -1092,9 +1097,11 @@ class EnergyProfileManager:
         delta = new_val - old_val
 
         if delta < 0:
-            # The sensor reset its internal counter (e.g. daily/monthly reset on the device).
-            # Usually the new delta is just the new value.
-            delta = new_val
+            # v11.1.3 - Improved reset logic. 
+            # If a sensor drops (e.g. transient 0 on reconnect), DON'T treat new total as delta.
+            # Just reset baseline and wait for next real increment.
+            self.sensor_last_values[entity_id] = new_val
+            return
 
         # If it is the first read after restart, the delta might be large.
         if is_restarting and (delta <= 0 or delta > 50.0):
@@ -1114,6 +1121,10 @@ class EnergyProfileManager:
         if entity_id in self.consumption_sensors:
             self.current_consumption_total += delta
         if entity_id in self.deduct_sensors:
+            # v11.1.3 - Spike protection for managed loads
+            if delta > 2.0:
+                _LOGGER.warning("Energy Management: Ignored suspicious jump of %s kWh for managed load %s", delta, entity_id)
+                return
             self.current_hourly_deduct += delta
             self.daily_deduct_consumption[entity_id] = self.daily_deduct_consumption.get(entity_id, 0.0) + delta
         if entity_id in self.generation_sensors:
