@@ -2398,8 +2398,9 @@ class ConsumptionDeviationSensor(EnergyBaseSensor):
         cur_hour = now.hour
 
         # 1. Get Actual Base Today (synchronized with Profile sensor)
+        # v11.1.2 - Include current hour's accumulator to avoid -100% deviation
         today_total_prof = self.manager.get_todays_profile("consumption_total")
-        total_actual = sum(today_total_prof.values())
+        total_actual = sum(today_total_prof.values()) + getattr(self.manager, "current_consumption_total", 0.0)
 
         # Deduct managed loads (daily accumulators)
         deduct_sum = sum(self.manager.daily_deduct_consumption.get(s, 0.0) for s in self.manager.deduct_settings)
