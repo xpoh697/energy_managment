@@ -3620,8 +3620,9 @@ class PotentialExportTodaySensor(SensorEntity):
         self._attr_unique_id = f"{manager.entry.entry_id}_potential_export"
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_icon = "mdi:export"
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_suggested_display_precision = 2
         self.entity_id = f"{DOMAIN}.energy_management_potential_export"
 
         self._attr_device_info = DeviceInfo(
