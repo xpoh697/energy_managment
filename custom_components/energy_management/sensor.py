@@ -3664,7 +3664,9 @@ class PotentialExportTodaySensor(SensorEntity):
         return {
             "forecast_remaining": budget_res.get("forecast_val", 0.0),
             "expected_consumption": budget_res.get("expected_consumption_kwh", 0.0),
-            "battery_to_full": round_f(max(0.0, float(budget_res.get("battery_capacity_kwh", 0.0)) - float(budget_res.get("battery_energy_kwh", 0.0))), 3)
+            "battery_to_full": round_f(max(0.0, float(budget_res.get("battery_capacity_kwh", 0.0)) - float(budget_res.get("battery_energy_kwh", 0.0))), 3),
+            "sun_overflow": budget_res.get("sun_overflow_kwh", 0.0),
+            "battery_surplus": budget_res.get("battery_surplus_kwh", 0.0)
         }
 
     async def async_added_to_hass(self):
