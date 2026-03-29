@@ -639,6 +639,19 @@ class StrategyEngine:
                         available_gen_kw -= e_kw
                         reserved_by.append(s_id_s)
                     
+            # v11.1.18 - Correct overflow gathering: ONLY count overflow until NEXT sunrise.
+            # Tomorrow's sun isn't 'today's' overflow.
+            overflow_today = 0.0
+            for k, entry in sim_log.items():
+                if "(Завтра)" in k:
+                    h_abs = int(k.split(":")[0])
+                    if h_abs >= sunrise_h:
+                        break # Stopped at sunrise
+                if isinstance(entry, dict):
+                    overflow_today += float(entry.get("overflow", 0.0))
+            
+            batt_surplus = self._calculate_sunrise_surplus(projected_morning_soc, min_soc, soc_buffer, b_cap_f, eff_coeff)
+            
             return {
                 "initial_budget": float(initial_budget or 0.0),
                 "battery_capacity_kwh": float(b_cap_f or 0.0),
@@ -646,9 +659,9 @@ class StrategyEngine:
                 "survival_threshold": float(round_f(survival_threshold, 1)),
                 "battery_energy_kwh": round_f(b_energy_f, 3),
                 "expected_consumption_kwh": round_f(expected_base_consumption, 3),
-                "sun_overflow_kwh": round_f(overflow_kwh, 3),
-                "battery_surplus_kwh": round_f(self._calculate_sunrise_surplus(projected_morning_soc, min_soc, soc_buffer, b_cap_f, eff_coeff), 3),
-                "potential_export_kwh": round_f(float(overflow_kwh) + self._calculate_sunrise_surplus(projected_morning_soc, min_soc, soc_buffer, b_cap_f, eff_coeff), 3),
+                "sun_overflow_kwh": round_f(overflow_today, 3),
+                "battery_surplus_kwh": round_f(batt_surplus, 3),
+                "potential_export_kwh": round_f(overflow_today + batt_surplus, 3),
                 "permissions": permissions or {},
                 "permissions_reasons": permissions_reasons or {},
                 "forecast_val": float(forecast_val_adjusted or 0.0),
