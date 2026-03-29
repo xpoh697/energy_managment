@@ -1139,13 +1139,21 @@ class EnergyProfileManager:
             self.current_grid_export += delta
 
         # Consolidate base consumption: total meter minus all managed loads
-        # v11.1.8 - Improved deduction logic: handle minor calibration errors between plugs and main meter.
-        # We ensure that if Total exists, the Base doesn't drop to exactly 0 while a large load is ON, 
-        # as it usually means the plug is reporting slightly more than the house meter sees.
+        # v11.1.12 - Synthetic Baseline Floor: Use historical average as a floor if measurements are suspiciously low
         raw_base = self.current_consumption_total - self.current_hourly_deduct
-        if raw_base < 0.01 and self.current_consumption_total > 0.05:
-            # If we are over-deducting, keep 5% of the baseline as a floor or at least a tiny bit
-            self.current_consumption_base = max(0.001, self.current_consumption_total * 0.05)
+        
+        # Get historical average for this hour to use as a fallback floor
+        # (normalized to the fraction of the hour passed so far)
+        avg_prof = self.get_average_profile("consumption_base", 14, "all")
+        hour_key = str(now.hour)
+        expected_total_h = float(avg_prof.get(hour_key, 0.4)) # Fallback to 400W if no history
+        progress = now.minute / 60.0
+        expected_floor = expected_total_h * progress * 0.7 # 70% of expected is a safe floor
+        
+        if raw_base < expected_floor and self.current_hourly_deduct > 0.1:
+            # If we are significantly below typical base while a managed load is ON, 
+            # assume measurement mismatch and follow the historic profile floor.
+            self.current_consumption_base = max(raw_base, expected_floor)
         else:
             self.current_consumption_base = max(0.0, raw_base)
 
