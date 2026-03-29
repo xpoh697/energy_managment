@@ -1139,7 +1139,15 @@ class EnergyProfileManager:
             self.current_grid_export += delta
 
         # Consolidate base consumption: total meter minus all managed loads
-        self.current_consumption_base = max(0.0, self.current_consumption_total - self.current_hourly_deduct)
+        # v11.1.8 - Improved deduction logic: handle minor calibration errors between plugs and main meter.
+        # We ensure that if Total exists, the Base doesn't drop to exactly 0 while a large load is ON, 
+        # as it usually means the plug is reporting slightly more than the house meter sees.
+        raw_base = self.current_consumption_total - self.current_hourly_deduct
+        if raw_base < 0.01 and self.current_consumption_total > 0.05:
+            # If we are over-deducting, keep 5% of the baseline as a floor or at least a tiny bit
+            self.current_consumption_base = max(0.001, self.current_consumption_total * 0.05)
+        else:
+            self.current_consumption_base = max(0.0, raw_base)
 
         if self.current_consumption_base < 0:
             self.current_consumption_base = 0.0
@@ -2411,7 +2419,8 @@ class ConsumptionDeviationSensor(EnergyBaseSensor):
         # 1. Get Actual Base Today (synchronized with Profile sensor)
         # v11.1.2 - Include current hour's accumulator to avoid -100% deviation
         today_total_prof = self.manager.get_todays_profile("consumption_total")
-        total_actual = sum(today_total_prof.values()) + getattr(self.manager, "current_consumption_total", 0.0)
+        # v11.1.8 - Removed double counting: get_todays_profile ALREADY includes current_consumption_total
+        total_actual = sum(today_total_prof.values())
 
         # Deduct managed loads (daily accumulators)
         deduct_sum = sum(self.manager.daily_deduct_consumption.get(s, 0.0) for s in self.manager.deduct_settings)
