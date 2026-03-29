@@ -790,31 +790,26 @@ class StrategyEngine:
             if hist_h_val < 0.01 and (real_h < 8 or real_h > 20):
                 expected_gen_kw = 0.0
 
-            # First hour correction: 
-            # Use real-time power (kW) if available, but ensure it's treated as Power (kW).
-            # Solar (expected_gen_kw) from 'energy_h' is already kWh for the remaining period.
-            if i == 0:
-                # v7.5.2 - If we have real-time power, we can anchor the first step to it.
-                real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
-                if real_gen_kw > 0.01:
-                    expected_gen_kw = real_gen_kw
-
-            # 4. Inverter Command (AI Buying/Selling)
-            cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
-
-            # 3. Consumption Profile (includes historical managed loads)
+            # 3. Expected consumption (v7.9.4 - Base profile)
             p_cons = prof_cons_tom if is_tom else prof_cons_today
             occ_coeff = float(man.get_occupancy_coefficient())
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
             
-            # Anchor the first step of simulation to REAL active load, not profile.
+            # v11.1.15 - Blended Anchor: Smoothly transition from profile to real-time load
+            # to avoid discontinuities at the top of the hour (v7.9.7 fix)
             if i == 0:
-                # v7.9.7 - If it's the first step, use real-time power (kW)
-                # Ensure we use BASE power for survival simulations to avoid double-counting active loads.
-                if house_profile_override == "consumption_base":
-                    expected_cons_kw = float(getattr(man, "avg_base_load_kw", expected_cons_kw))
-                else:
-                    expected_cons_kw = float(getattr(man, "avg_load_kw", expected_cons_kw))
+                anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
+                # Only anchor if we have a reasonable load reading
+                real_load = float(getattr(man, "avg_base_load_kw" if house_profile_override == "consumption_base" else "avg_load_kw", expected_cons_kw))
+                expected_cons_kw = (real_load * anchor_weight) + (expected_cons_kw * (1.0 - anchor_weight))
+            
+            # First hour solar correction: 
+            if i == 0:
+                # v11.1.15 - Blended Solar Anchor: Same logic as load to prevent sawtooth
+                real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
+                if real_gen_kw > 0.01:
+                    anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
+                    expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
                 
                 # Special case: if we are using predicted_profile's h==cur_hour, it might be Energy (kWh)
                 # But avg_load_kw is always better for the first step.
