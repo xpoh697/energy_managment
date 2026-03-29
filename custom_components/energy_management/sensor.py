@@ -2078,21 +2078,16 @@ class EnergyProfileManager:
         hist_list = list(self.power_history)
         relevant_history = hist_list[-5:]
 
-        # Condition 2: Average real export to grid > 500W (0.5 kW)
+        # Condition 2: Average real export to grid (Sufficient surplus needed)
         avg_export = sum(float(x.get("grid_kw", 0.0)) for x in relevant_history) / len(relevant_history)
-        if avg_export < 0.5: # Sufficient surplus is needed to confirm it's a BMS limit
-            return
-
-        # Condition 3: Battery is charging (batt_kw is negative) and power is STABLE
-        # (Filtering out noise from jittery grid/load sensors as requested in v6.7)
-        batt_samples = [float(x.get("batt_kw") or 0.0) for x in relevant_history]
-        avg_batt = sum(batt_samples) / len(relevant_history)
         
         # Stability check: ensure power doesn't jump too much in the window (max 150W variance)
+        batt_samples = [float(x.get("batt_kw") or 0.0) for x in relevant_history]
         power_spread = max(batt_samples) - min(batt_samples)
         if power_spread > 0.15: # 150W spread is too noisy for precise BMS learning
             return
 
+        avg_batt = sum(batt_samples) / len(relevant_history)
         if avg_batt < -0.05: # At least 50W charge observed
             charge_power_limit = abs(avg_batt)
             soc, _, _ = self.get_battery_state()
@@ -2101,10 +2096,23 @@ class EnergyProfileManager:
             max_batt_p = float(self.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             old_val = self.bms_learned_profile.get(soc_int, max_batt_p)
             
-            # Update logic: adjust towards observed limit if there's a significant difference (> 50W)
-            if abs(charge_power_limit - old_val) > 0.05:
-                # Use light smoothing (weight 1/5)
-                new_val = (old_val * 4 + charge_power_limit) / 5.0
+            # v11.1.11 - Asymmetric Learning:
+            # 1. Trust higher power immediately (clears solar-limited trash)
+            # 2. Skeptical for lower power: need high surplus (1kW for CC, 0.5kW for CV) to trust as limit.
+            do_update = False
+            if charge_power_limit > old_val + 0.05:
+                # If we see HIGHER power, the previous limit was definitely too low (likely non-BMS limited)
+                new_val = charge_power_limit
+                do_update = True
+            elif charge_power_limit < old_val - 0.05:
+                # To trust a LOWER value as a REAL BMS limit, we need significant surplus elsewhere
+                surplus_threshold = 0.5 if soc_int >= 95 else 1.0
+                if avg_export > surplus_threshold:
+                    # Smooth jump down (BMS curve is usually stable)
+                    new_val = (old_val * 3 + charge_power_limit) / 4.0
+                    do_update = True
+                
+            if do_update:
                 self.bms_learned_profile[soc_int] = round_f(new_val, 3)
                 
                 # --- Monotonicity Enforcement ---
