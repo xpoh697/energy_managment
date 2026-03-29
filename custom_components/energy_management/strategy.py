@@ -811,9 +811,9 @@ class StrategyEngine:
                     anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
                     expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
                 
-                # Special case: if we are using predicted_profile's h==cur_hour, it might be Energy (kWh)
-                # But avg_load_kw is always better for the first step.
-            
+            # 4. Inverter Command (AI Buying/Selling)
+            cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
+
             # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
             total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
             

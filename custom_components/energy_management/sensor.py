@@ -1143,6 +1143,7 @@ class EnergyProfileManager:
         # whenever a managed load is active, as live meter data is often out of sync.
         # reconciliation happens only at the end of the hour for history recording.
         
+        now = dt_util.now()
         avg_prof = self.get_average_profile("consumption_base", 14, "all")
         hour_key = str(now.hour)
         expected_total_h = float(avg_prof.get(hour_key, 0.4))
@@ -2833,6 +2834,7 @@ class LiveHourlySensor(RestoreEntity, SensorEntity):
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
         if last_state and last_state.state not in ("unknown", "unavailable"):
             val = normalize_float(last_state.state)
             # Recover into manager if it hasn't accumulated anything since restart
