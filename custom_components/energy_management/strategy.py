@@ -646,7 +646,7 @@ class StrategyEngine:
                 "survival_threshold": float(round_f(survival_threshold, 1)),
                 "battery_energy_kwh": round_f(b_energy_f, 3),
                 "expected_consumption_kwh": round_f(expected_base_consumption, 3),
-                "potential_export_kwh": round_f(max(0.0, float(forecast_val_adjusted) - float(expected_base_consumption) - (float(b_cap_f) - float(b_energy_f))), 3),
+                "potential_export_kwh": round_f(float(overflow_kwh) + self._calculate_sunrise_surplus(projected_morning_soc, min_soc, soc_buffer, b_cap_f, eff_coeff), 3),
                 "permissions": permissions or {},
                 "permissions_reasons": permissions_reasons or {},
                 "forecast_val": float(forecast_val_adjusted or 0.0),
