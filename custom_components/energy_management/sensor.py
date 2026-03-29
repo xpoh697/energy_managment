@@ -1138,23 +1138,25 @@ class EnergyProfileManager:
         if entity_id in self.grid_export_sensors:
             self.current_grid_export += delta
 
-        # Consolidate base consumption: total meter minus all managed loads
-        # v11.1.12 - Synthetic Baseline Floor: Use historical average as a floor if measurements are suspiciously low
-        raw_base = self.current_consumption_total - self.current_hourly_deduct
+        # v11.1.13 - End-of-Hour Recovery logic:
+        # During the hour, we strictly follow the historical base profile for visual stability 
+        # whenever a managed load is active, as live meter data is often out of sync.
+        # reconciliation happens only at the end of the hour for history recording.
         
-        # Get historical average for this hour to use as a fallback floor
-        # (normalized to the fraction of the hour passed so far)
         avg_prof = self.get_average_profile("consumption_base", 14, "all")
         hour_key = str(now.hour)
-        expected_total_h = float(avg_prof.get(hour_key, 0.4)) # Fallback to 400W if no history
+        expected_total_h = float(avg_prof.get(hour_key, 0.4))
         progress = now.minute / 60.0
-        expected_floor = expected_total_h * progress * 0.7 # 70% of expected is a safe floor
+        expected_so_far = expected_total_h * progress
         
-        if raw_base < expected_floor and self.current_hourly_deduct > 0.1:
-            # If we are significantly below typical base while a managed load is ON, 
-            # assume measurement mismatch and follow the historic profile floor.
-            self.current_consumption_base = max(raw_base, expected_floor)
+        raw_base = self.current_consumption_total - self.current_hourly_deduct
+        
+        if self.current_hourly_deduct > 0.05:
+            # Managed load is active: trust the profile for the BASE component
+            # This ensures the blue line stays stable while the pink line might be jittery
+            self.current_consumption_base = max(expected_so_far, raw_base)
         else:
+            # No managed loads: trust the meter
             self.current_consumption_base = max(0.0, raw_base)
 
         if self.current_consumption_base < 0:
