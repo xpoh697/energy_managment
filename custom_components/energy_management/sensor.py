@@ -1138,27 +1138,29 @@ class EnergyProfileManager:
         if entity_id in self.grid_export_sensors:
             self.current_grid_export += delta
 
-        # v11.1.13 - End-of-Hour Recovery logic:
-        # During the hour, we strictly follow the historical base profile for visual stability 
-        # whenever a managed load is active, as live meter data is often out of sync.
-        # reconciliation happens only at the end of the hour for history recording.
+        # v11.1.19 - Incremental Base Accumulation:
+        # Instead of raw subtraction (which fails if Meter lags behind the Plug),
+        # we 'grow' the base energy at the historical rate when a load is ON.
         
-        now = dt_util.now()
+        # 1. Calculate the 'floor' (expected progress based on historical profile)
         avg_prof = self.get_average_profile("consumption_base", 14, "all")
-        hour_key = str(now.hour)
+        hour_key = str(dt_util.now().hour)
         expected_total_h = float(avg_prof.get(hour_key, 0.4))
-        progress = now.minute / 60.0
-        expected_so_far = expected_total_h * progress
         
         raw_base = self.current_consumption_total - self.current_hourly_deduct
         
+        # 2. Update rule
         if self.current_hourly_deduct > 0.05:
-            # Managed load is active: trust the profile for the BASE component
-            # This ensures the blue line stays stable while the pink line might be jittery
-            self.current_consumption_base = max(expected_so_far, raw_base)
+            # Managed load active: Use incremental synthesis
+            # delta (in kWh) from previous measure is what the meter saw.
+            # But if Meter < Managed, we use the historical average power (kW) multiplied by time.
+            # For simplicity, we just ensure it's at least as high as the pro-rated historical profile.
+            progress = dt_util.now().minute / 60.0
+            expected_so_far = expected_total_h * progress
+            self.current_consumption_base = max(self.current_consumption_base, expected_so_far, raw_base)
         else:
-            # No managed loads: trust the meter
-            self.current_consumption_base = max(0.0, raw_base)
+            # Trust the meter when no loads are active
+            self.current_consumption_base = max(self.current_consumption_base, raw_base)
 
         if self.current_consumption_base < 0:
             self.current_consumption_base = 0.0
