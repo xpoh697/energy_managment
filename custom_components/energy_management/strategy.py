@@ -1736,10 +1736,14 @@ class StrategyEngine:
                     if is_in_peak and man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         target_soc = float(round_f(soc_after, 1))
                     
+                    # v11.1.20 - Calculate potential gain using target_price if we are preparing for a future peak
+                    best_sell_price_for_arb = max(cur_p_f, float(target_price or 0.0))
+                    gain_for_attr = float(best_sell_price_for_arb * eff - p_bb - deg_cost) if h_bb is not None else 0.0
+
                     # Arbitrage details for UI attributes
                     res["arbitrage_buyback"] = {
                         "power_kw": 0.0,
-                        "note": "Нет выгодного окна для откупа" if not arbitrage_is_best else "",
+                        "note": "Нет выгодного окна для откупа",
                         "available_kwh": float(round_f(available_sell_ac, 2)),
                         "sunrise_hour": sunrise_h,
                         "soc_buffer_pct": float(soc_buffer_val),
@@ -1748,7 +1752,7 @@ class StrategyEngine:
                         "energy_to_wait_kwh": float(round_f(total_cons_to_sunrise, 2)),
                         "ai_floor_soc_pct": float(round_f(ai_soc_floor_final, 1)),
                     }
-                    if h_bb is not None and (gain_vs_buyback >= threshold):
+                    if h_bb is not None and (gain_for_attr >= threshold):
                         res["arbitrage_buyback"]["power_kw"] = max_p
                         res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
                 
