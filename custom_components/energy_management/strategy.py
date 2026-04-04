@@ -448,17 +448,8 @@ class StrategyEngine:
             soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
             survival_threshold = min_soc + soc_buffer
             
-            # Quick 24h simulation (baseline only) to find projected morning SOC
-            # We need to reach the next sunrise (approx 6-8 AM)
-            sim_range = list(range(cur_hour, cur_hour + 24))
-            sim_res_soc, sim_log, overflow_kwh = self.run_soc_simulation(
-                start_soc=b_soc_f,
-                sim_range=sim_range,
-                now=now,
-                house_profile_override="consumption_base"
-            )
             # Find the SOC at the start of tomorrow's generation (sunrise)
-            projected_morning_soc = 0.0
+            # v11.1.19 - Move sunrise calculation UP to limit simulation range
             sunrise_h = 8 # Default
             prof_gen = man.get_average_profile("generation", eff_period, day_idx)
             for h in range(24):
@@ -466,8 +457,18 @@ class StrategyEngine:
                     sunrise_h = h
                     break
             
-            # Sunrise tomorrow is at 24 + sunrise_h
-            morning_h_abs = 24 + sunrise_h
+            # Quick accurate simulation (baseline only) until tomorrow's sunrise
+            # This allows overflow_kwh to accurately represent "Today's" exportable surplus.
+            sim_end_h = 24 + sunrise_h
+            sim_range = list(range(cur_hour, sim_end_h))
+            
+            sim_res_soc, sim_log, overflow_kwh = self.run_soc_simulation(
+                start_soc=b_soc_f,
+                sim_range=sim_range,
+                now=now,
+                house_profile_override="consumption_base"
+            )
+
             # v7.9.6 - Correct key format for simulation log lookup
             target_key = f"{sunrise_h:0>2}:59 (Завтра)" 
             projected_morning_soc = self._get_soc_from_log(sim_log, target_key, sim_res_soc)
@@ -639,16 +640,9 @@ class StrategyEngine:
                         available_gen_kw -= e_kw
                         reserved_by.append(s_id_s)
                     
-            # v11.1.18 - Correct overflow gathering: ONLY count overflow until NEXT sunrise.
-            # Tomorrow's sun isn't 'today's' overflow.
-            overflow_today = 0.0
-            for k, entry in sim_log.items():
-                if "(Завтра)" in k:
-                    h_abs = int(k.split(":")[0])
-                    if h_abs >= sunrise_h:
-                        break # Stopped at sunrise
-                if isinstance(entry, dict):
-                    overflow_today += float(entry.get("overflow", 0.0))
+            # v11.1.19 - Use the returned overflow_kwh directly.
+            # Since simulation range is limited to sunrise, this IS today's overflow.
+            overflow_today = float(overflow_kwh or 0.0)
             
             batt_surplus = self._calculate_sunrise_surplus(projected_morning_soc, min_soc, soc_buffer, b_cap_f, eff_coeff)
             
