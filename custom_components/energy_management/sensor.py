@@ -1183,16 +1183,26 @@ class EnergyProfileManager:
         f_dist = self.get_forecast_hourly_distribution(self.forecast_today_hourly_sensor)
         f_val = float(f_dist.get(str(past_hour), 0.0))
 
-        # Check for solar curtailment (clipping due to full battery and no export)
-        # v7.7 - Avoid poisoning historical accuracy with throttled data
+        # Check for solar curtailment (clipping due to full battery or negative price)
+        # v11.1.21 - Expanded: also detect economic curtailment (negative price purchase)
+        p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), past_hour)
+        is_neg_price = bool(p_buy is not None and p_buy <= 0)
+        
         is_stop_sale = getattr(self, "current_inverter_mode", "") == "stop_sale"
         b_soc, _, _ = self.get_battery_state()
-        is_curtailed = bool(is_stop_sale and b_soc > 95)
+        is_curtailed = bool((is_stop_sale and b_soc > 95) or is_neg_price)
         
+        # v11.1.21 - "Healing" logic: if curtailed, record forecast instead of actual zero/low gen
+        # This prevents poisoning historical profiles with 0s when generation was suppressed for profit.
+        gen_to_record = self.current_generation
+        if is_curtailed and f_val > (gen_to_record + 0.1):
+            _LOGGER.info("Energy Management: Healing solar profile for hour %s. Recording forecast %s instead of actual %s (Curtailment mode: %s)", past_hour, f_val, gen_to_record, "Economy" if is_neg_price else "BMS")
+            gen_to_record = f_val
+            
         # Append to history lists (with occupancy tag and forecast snapshot)
         self.data["consumption_base"][str(past_hour)].append({"v": self.current_consumption_base, "wd": today_wd, "occ": occ_count})
         self.data["consumption_total"][str(past_hour)].append({"v": self.current_consumption_total, "wd": today_wd, "occ": occ_count})
-        self.data["generation"][str(past_hour)].append({"v": self.current_generation, "f": f_val, "wd": today_wd, "c": is_curtailed})
+        self.data["generation"][str(past_hour)].append({"v": gen_to_record, "f": f_val, "wd": today_wd, "c": is_curtailed})
 
         # Store losses alongside generation for efficiency calculation
         if "losses" not in self.data:
@@ -2689,10 +2699,18 @@ class InverterOperationModeSensor(SensorEntity):
         is_before_limit_hour = bool(now_h <= sale_pv_no_bat_max_hour)
 
         # State Machine Ladder
-        if is_buying_active and not target_reached:
-            # v6.5: Force 'buy' mode in forecast for active target hours to stay in sync with strategy sensor
+        # v11.1.22: For Negative Prices, always use 'buy' mode to power house from grid
+        buy_p_cur = self.manager.get_price("buy", today_str, now_h)
+        is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
+
+        # State Machine Ladder
+        if (is_buying_active and not target_reached) or is_neg_buy:
+            # v11.1.22 - Priority: Negative price always forces buy mode
             mode = "buy"
-            reason = "Активна стратегия ПОКУПКИ"
+            if is_neg_buy:
+                reason = f"Отрицательная цена ({buy_p_cur:.2f}): Питание дома от сети"
+            else:
+                reason = "Активна стратегия ПОКУПКИ"
         elif is_buying_active and is_forecast:
             # Even if target_reached (adaptive), show as buy in forecast if it's a planned hour
             mode = "buy"

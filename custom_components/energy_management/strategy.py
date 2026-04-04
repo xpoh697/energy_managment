@@ -1385,19 +1385,30 @@ class StrategyEngine:
                         # 2. Sort available hours by price (cheapest first)
                         pool_sorted = sorted(pool, key=lambda h: all_buy_prices[h])
 
-                        # 3. v6.4: Smooth window distribution (Smooth as requested in pt 4)
-                        # Instead of filling cheapest first at max power, we spread energy across the whole window.
-                        # Formula: Power = (Total Energy Needed) / (Sum of time factors)
-                        total_h_factors = sum(max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0 for h in pool)
-                        if total_h_factors > 0.01:
-                            p_req = float(energy_to_buy / total_h_factors)
-                            # Clamp to BMS limit
-                            p_final = min(max_p, p_req)
-                            for h in pool:
-                                charge_commands[int(h)] = p_final
+                        # 3. v11.1.22: Differentiated allocation
+                        is_neg_strategy = bool(res.get("charge_reason") == "negative")
+                        
+                        if is_neg_strategy:
+                            # Greedy Allocation: fill battery at the best (most negative) prices first
+                            pool_sorted_neg = sorted(pool, key=lambda hr: all_buy_prices.get(hr, 999.0))
+                            rem_kwh = energy_to_buy
+                            for h in pool_sorted_neg:
+                                h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
+                                p_greedy = min(max_p, rem_kwh / h_factor) if rem_kwh > 0.05 else 0.0
+                                charge_commands[int(h)] = round_f(p_greedy, 3)
+                                rem_kwh -= (p_greedy * h_factor)
                         else:
-                            for h in pool:
-                                charge_commands[int(h)] = min(max_p, energy_to_buy)
+                            # v6.4: Smooth window distribution (Smooth as requested for normal arbitrage)
+                            total_h_factors = sum(max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0 for h in pool)
+                            if total_h_factors > 0.01:
+                                p_req = float(energy_to_buy / total_h_factors)
+                                # Clamp to BMS limit
+                                p_final = min(max_p, p_req)
+                                for h in pool:
+                                    charge_commands[int(h)] = p_final
+                            else:
+                                for h in pool:
+                                    charge_commands[int(h)] = min(max_p, energy_to_buy)
 
                     power_needed = charge_commands.get(cur_hour, 0.0)
                     upcoming_p = next((p for h, p in charge_commands.items() if p > 0), 0.0)
