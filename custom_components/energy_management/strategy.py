@@ -1779,9 +1779,13 @@ class StrategyEngine:
                 res["state"] = "active"
 
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
-            # Only show hours that actually have planned power
+            # Only show hours that actually have planned power OR negative price hours (v11.1.22)
             if mode == "buy":
-                actual_active = [h for h in target_hours_sorted if charge_commands.get(h, 0.0) > 0.01]
+                # v11.1.22: Include negative price hours even if charge power is 0 (to show grid-power status)
+                actual_active = [
+                    h for h in target_hours_sorted 
+                    if charge_commands.get(h, 0.0) > 0.01 or all_buy_prices.get(h, 999.0) <= 0.0
+                ]
             else:
                 # v7.2.1: Always show future peak windows if they are identified, 
                 # even if current power_needed is 0 (e.g. waiting for peak or saving battery).
@@ -1814,6 +1818,15 @@ class StrategyEngine:
             res["active_hours"] = actual_active
             res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active])
             res["active_periods"] = ", ".join(final_periods) if final_periods else "Нет"
+            
+            # v11.1.22: Add planned hourly power distribution for transparency
+            p_distribution = {}
+            for h in actual_active:
+                h_label = self._format_h(h)
+                p_val = charge_commands.get(h, 0.0) if mode == "buy" else float(res.get("recommended_power_kw", 0.0))
+                p_distribution[h_label] = float(round_f(p_val, 2))
+                
+            res["planned_power_per_h"] = p_distribution
             res["target_soc"] = float(round_f(target_soc, 1))
             
             # Mode Detection Logic (Moved from sensor.py for better centralization)

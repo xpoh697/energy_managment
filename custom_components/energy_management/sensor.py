@@ -2783,11 +2783,23 @@ class InverterOperationModeSensor(SensorEntity):
         if not is_forecast:
             day_type = self.manager.day_type
             formatted_peak = self.manager.strategy_engine._format_h(peak_start_hour)
+            
+            # v11.1.22: Synchronize with dynamic strategy results
+            if mode == "buy":
+                p_val = buy_strategy.get("recommended_power_kw", 0.0)
+                t_soc = buy_strategy.get("target_soc", 0.0)
+            elif "sale" in mode and is_selling_active:
+                p_val = sell_strategy.get("recommended_power_kw", 0.0)
+                t_soc = sell_strategy.get("target_soc", 0.0)
+            else:
+                p_val = 0.0
+                t_soc = 0.0
+
             attrs = {
                 "is_preparing_for_peak": is_preparing_for_peak,
                 "next_peak_start_hour": formatted_peak,
-                "power": fixed_buy["power"] if is_buying_active else (fixed_sell["power"] if is_selling_active else 0.0),
-                "target_soc": fixed_buy["target_soc"] if is_buying_active else (fixed_sell["target_soc"] if is_selling_active else 0.0),
+                "power": p_val,
+                "target_soc": t_soc,
             }
             if mode == "buy":
                 attrs["charge_target_soc"] = buy_strategy.get("charge_target_soc", 100.0)
@@ -3052,9 +3064,9 @@ class MarketStrategySensor(SensorEntity):
             "recommended_power_kw": res.get("recommended_power_kw", 0.0),
             "current_mode": current_mode,
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
-            "sunrise_hour": res.get("sunrise_hour", 0),
             "prices_today": today_fmt,
-            "prices_tomorrow": tom_fmt
+            "prices_tomorrow": tom_fmt,
+            "planned_power": res.get("planned_power_per_h", {})
         }
 
         # v7.2 - Hide detailed projections if nothing is planned for today
