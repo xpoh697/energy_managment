@@ -701,7 +701,7 @@ class StrategyEngine:
             return float(val.get("soc", default))
         return float(val if val is not None else default)
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None, no_battery_charge=False):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -822,7 +822,12 @@ class StrategyEngine:
             cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
 
             # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
-            total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
+            if no_battery_charge:
+                # v11.1.39: PV only covers load, no battery charge from surplus
+                p_for_house = min(expected_gen_kw, expected_cons_kw)
+                total_net_kw = float(p_for_house - expected_cons_kw + cmd_p)
+            else:
+                total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
             
             # v7.9.9: If we have high-quality efficiency data (>0.6) from the user's sensor, 
             # we assume it ALREADY includes the idle losses to avoid double-counting.
@@ -1413,6 +1418,25 @@ class StrategyEngine:
                             else:
                                 for h in pool:
                                     charge_commands[int(h)] = min(max_p, energy_to_buy)
+
+                    # v11.1.39: Survival simulation for NO_PV_SALE_NO_BAT mode
+                    res["can_wait_for_negative"] = False
+                    first_neg_h = None
+                    # Search today's prices (up to tomorrow morning, limit 12h horizon)
+                    for h_idx in range(cur_hour, min(48, cur_hour + 12)):
+                        if all_buy_prices.get(h_idx, 999.0) <= 0.0:
+                            first_neg_h = h_idx
+                            break
+                    
+                    if first_neg_h is not None and first_neg_h > cur_hour:
+                        # Simulation: Can we survive until first_neg_h without extra charging from PV?
+                        sim_range_neg = list(range(cur_hour, first_neg_h))
+                        soc_at_neg, _, _ = self.run_soc_simulation(b_soc, sim_range_neg, now, no_battery_charge=True)
+                        
+                        # Threshold 20% or user's min_soc_buy
+                        threshold_neg = max(20.0, float(man.get_setting("min_soc_buy", 20.0)))
+                        res["can_wait_for_negative"] = bool(soc_at_neg > threshold_neg)
+                        res["first_negative_hour"] = first_neg_h
 
                     power_needed = charge_commands.get(cur_hour, 0.0)
                     upcoming_p = next((p for h, p in charge_commands.items() if p > 0), 0.0)

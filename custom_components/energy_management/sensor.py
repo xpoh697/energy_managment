@@ -2788,6 +2788,11 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv_bat"
             reason = "Активна стратегия ПРОДАЖИ (AI)"
             
+        elif buy_strategy.get("can_wait_for_negative") and cur_price is not None and cur_price < price_sell_only_pv:
+            # v11.1.39: Intellectual wait for negative prices (Zero Export + Idle Battery)
+            mode = "no_pv_sale_no_bat"
+            neg_h = buy_strategy.get("first_negative_hour", "??")
+            reason = f"Остановка: ожидание отриц. цен ({neg_h}:00), АКБ хватит"
         elif cur_price is not None and cur_price < price_stop_sell:
             # Global price floor for ANY selling
             mode = "stop_sale"
@@ -2846,6 +2851,11 @@ class InverterOperationModeSensor(SensorEntity):
             if mode == "buy":
                 p_val = buy_strategy.get("recommended_power_kw", 0.0)
                 t_soc = buy_strategy.get("target_soc", 0.0)
+            elif mode == "no_pv_sale_no_bat":
+                # v11.1.39: Target is current SOC to prevent charging from PV
+                p_val = 0.0
+                t_soc = float(round_f(batt_soc, 1))
+                chg_reason = "wait_for_negative"
             elif "sale" in mode and is_selling_active:
                 p_val = sell_strategy.get("recommended_power_kw", 0.0)
                 t_soc = sell_strategy.get("target_soc", 0.0)
