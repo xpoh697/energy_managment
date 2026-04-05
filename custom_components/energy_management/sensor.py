@@ -2793,10 +2793,9 @@ class InverterOperationModeSensor(SensorEntity):
                     # Battery low + Good price: sale_pv allows charge and export
                     mode = "sale_pv"
                     reason = f"Добор солнца в АКБ (limit: {min_soc}%)"
-            else:
-                # No sun: Hard stop
+                # No sun (insufficient surplus): Recovery wait / Solar crumbs allowed
                 mode = "bat_emergency"
-                reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
+                reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
         
         elif is_waiting_for_neg:
             # v11.1.55 - Priority 3: Wait for negative price

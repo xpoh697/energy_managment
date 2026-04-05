@@ -837,17 +837,10 @@ class StrategyEngine:
                  expected_cons_kw += idle_p
             
             if total_net_kw > 0.001: 
-                # v11.1.61 - bat_emergency sync: if SOC <= min_soc, only allow charge if strong surplus (>50W)
-                # matching the 'has_surplus' logic in the main sensor.
-                min_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
-                can_charge = True
-                if simulated_soc <= min_soc and total_net_kw < 0.05:
-                    can_charge = False
-                
-                actual_charge_kw = 0.0
-                if can_charge:
-                    acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))
-                    actual_charge_kw = float(min(total_net_kw * eff_coeff, max_batt_p * acc_ratio))
+                # v11.1.62 - bat_emergency recovery: Allow charging from solar 'crumbs' even in emergency
+                # to match inverter's physical behavior (steering to limit+1%).
+                acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))
+                actual_charge_kw = float(min(total_net_kw * eff_coeff, max_batt_p * acc_ratio))
                 
                 old_soc = simulated_soc
                 if b_cap_f > 0.1:
