@@ -20,7 +20,8 @@
           "price_sell": "Tariff: Grid Selling Price",
           "custom_period": "Custom Calculation Period (Days)",
           "presence_sensors": "Presence Sensors (person.* / binary_sensor.* / zone.home)",
-          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)"
+          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
+          "battery_voltage": "Battery Voltage Sensor (Volts)"
         }
       },
       "deduct_settings": {
@@ -71,7 +72,8 @@
           "price_sell": "Tariff: Grid Selling Price",
           "custom_period": "Custom Calculation Period (Days)",
           "presence_sensors": "Presence Sensors (person.* / binary_sensor.* / zone.home)",
-          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)"
+          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
+          "battery_voltage": "Battery Voltage Sensor (Volts)"
         }
       },
       "deduct_settings": {
