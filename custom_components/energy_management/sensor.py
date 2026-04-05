@@ -2607,13 +2607,9 @@ class InverterOperationModeSensor(SensorEntity):
                 elif isinstance(f_data, (int, float)):
                     f_soc = float(f_data)
 
-                # v11.1.45: Define sim_log from strategy simulation results
-                sim_log = buy_sim_log or sell_sim_log or {}
-
                 f_mode, f_context = self._get_mode_at(
                     f_dt, f_soc, is_forecast=True, abs_hour=h_abs,
-                    avg_gen_override=f_gen, avg_load_override=f_load,
-                    sim_log=sim_log
+                    avg_gen_override=f_gen, avg_load_override=f_load
                 )
                 
                 # Add price info if applicable
@@ -2651,7 +2647,7 @@ class InverterOperationModeSensor(SensorEntity):
             _LOGGER.error("Error in InverterOperationModeSensor extra_state_attributes: %s", e)
             return {"error": str(e)}
 
-    def _get_mode_at(self, dt_now, batt_soc, is_forecast=False, abs_hour=None, avg_gen_override=None, avg_load_override=None, sim_log=None):
+    def _get_mode_at(self, dt_now, batt_soc, is_forecast=False, abs_hour=None, avg_gen_override=None, avg_load_override=None):
         """Calculates the inverter mode for a given timestamp and SOC."""
         mode = "sale_pv" # default
         now = dt_now
