@@ -2781,16 +2781,23 @@ class InverterOperationModeSensor(SensorEntity):
             reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
         elif batt_soc <= min_soc:
-            # v11.1.50 - Priority 2: Emergency SOC charge from sun
+            # v11.1.51 - Priority 2: Emergency SOC management
             if has_surplus:
-                mode = "sale_pv"
-                reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), добор солнца в АКБ (limit: {min_soc}%)"
+                if is_waiting_for_neg:
+                    # Special Case: Battery low AND Waiting for better prices
+                    # We use the waiting mode to block export but allow charging from PV
+                    mode = "no_pv_sale_no_bat"
+                    neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
+                    reason = f"Добор солнца + Ожидание отриц. цен ({neg_h_disp}г)"
+                else:
+                    mode = "sale_pv"
+                    reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), добор солнца в АКБ (limit: {min_soc}%)"
             else:
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
         
         elif is_waiting_for_neg:
-            # v11.1.50 - Priority 3: Wait for negative (No sell/No charge)
+            # v11.1.50 - Priority 3: Wait for negative (No sell/No charge from grid)
             mode = "no_pv_sale_no_bat"
             neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
             reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
