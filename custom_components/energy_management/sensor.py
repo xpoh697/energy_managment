@@ -2789,6 +2789,13 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
+        elif is_waiting_for_neg:
+            # v11.1.44: WAIT MODE (Priority above standard AI and emergency SOC)
+            # Price below PV sale limit, and negative prices ahead.
+            mode = "no_pv_sale_no_bat"
+            neg_h_disp = neg_h or "??"
+            reason = f"Ожидание отриц. цен ({neg_h_disp}:00): Экономим место в АКБ"
+
         elif batt_soc <= min_soc:
             # Emergency: Don't sell anything from battery, but allow PV export if there's surplus
             if has_surplus:
@@ -2797,13 +2804,6 @@ class InverterOperationModeSensor(SensorEntity):
             else:
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
-        
-        elif is_waiting_for_neg:
-            # v11.1.44: WAIT MODE (Priority above standard AI and selling)
-            # Price below PV sale limit, and negative prices ahead.
-            mode = "no_pv_sale_no_bat"
-            neg_h_disp = neg_h or "??"
-            reason = f"Ожидание отриц. цен ({neg_h_disp}:00): Экономим место в АКБ"
 
         elif is_selling_active and not target_reached:
             # Active AI / Arbitrage strategy
