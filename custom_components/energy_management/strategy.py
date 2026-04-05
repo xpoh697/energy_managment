@@ -1422,9 +1422,10 @@ class StrategyEngine:
                     # v11.1.39: Survival simulation for NO_PV_SALE_NO_BAT mode
                     res["can_wait_for_negative"] = False
                     first_neg_h = None
-                    # Search today's prices (up to tomorrow morning, limit 12h horizon)
-                    for h_idx in range(cur_hour, min(48, cur_hour + 12)):
-                        if all_buy_prices.get(h_idx, 999.0) <= 0.0:
+                    # Search today's prices (up to tomorrow morning, limit 24h horizon for evening forecasts)
+                    # v11.1.42: Strictly negative prices are our target for the waiting mode
+                    for h_idx in range(cur_hour, min(48, cur_hour + 24)):
+                        if all_buy_prices.get(h_idx, 999.0) < 0.0:
                             first_neg_h = h_idx
                             break
                     

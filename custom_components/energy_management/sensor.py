@@ -2788,18 +2788,22 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv_bat"
             reason = "Активна стратегия ПРОДАЖИ (AI)"
             
-        # v11.1.41: Dynamic forecast survival check
+        # v11.1.41-42: Dynamic forecast survival check
         can_wait = buy_strategy.get("can_wait_for_negative", False)
         neg_h = buy_strategy.get("first_negative_hour")
         if is_forecast and neg_h and not can_wait and h_abs < neg_h:
-            # If we are in forecast, check if simulated SOC at THIS hour can reach the negative price window
+            # Re-check survival from THIS forecast hour
             h_soc = self._get_soc_from_log(sim_log, f"{now_h:02d}:59" + (" (Завтра)" if h_abs >= 24 else ""), batt_soc)
             hours_left = neg_h - h_abs
             batt_cap = float(self.manager.battery_capacity)
-            # Safe estimate: 0.7kW consumption buffer (House + losses)
-            needed_kwh = hours_left * 0.7 
+            
+            # v11.1.42: Relaxed survival (10% threshold) and daylight awareness
+            # If it's daylight (07-18), assume house is powered by PV and battery discharge is 0
+            is_day_sim = bool(7 <= now_h < 19)
+            needed_kwh = hours_left * 0.6 if not is_day_sim else 0.0
+            
             needed_soc = (needed_kwh / batt_cap * 100.0) if batt_cap > 0.1 else 100.0
-            threshold = max(20.0, float(self.manager.get_setting("min_soc_buy", 20.0)))
+            threshold = 10.0 # Relaxed to min_soc for negative price opportunities
             if (h_soc - needed_soc) > threshold:
                 can_wait = True
 
