@@ -2628,12 +2628,16 @@ class InverterOperationModeSensor(SensorEntity):
                 except Exception:
                     pass
                 
-                # Format the display string (without diagnostic reasons as requested)
+                # Format the full display string (with diagnostic reason)
                 f_display = f_mode
+                f_diag = f_context.get("reason", "")
+                if f_diag:
+                    f_display += f": '{f_diag}'"
+                
                 if p_suffix:
                     f_display += p_suffix
                 
-                # Format the key (simple HH:00 as requested)
+                # Format the key (simple HH:00)
                 h_full_key = f_dt.strftime("%H:00")
                 forecast[h_full_key] = f_display
                 
@@ -2849,16 +2853,29 @@ class InverterOperationModeSensor(SensorEntity):
                 p_val = 0.0
                 t_soc = 0.0
 
+            # Extract diagnostic info
+            chg_reason = ""
+            if mode == "buy":
+                chg_reason = buy_strategy.get("charge_reason", "")
+            elif "sale" in mode and is_selling_active:
+                chg_reason = sell_strategy.get("charge_reason", "")
+
             attrs = {
                 "power": p_val,
                 "target_soc": t_soc,
+                "charge_reason": chg_reason,
             }
             
-            # v11.1.32: Add real-time charge current (Amps) if voltage sensor is available
-            if self.manager.battery_voltage_sensor and p_val > 0:
+            # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
+            if self.manager.battery_voltage_sensor:
                 v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor)
                 if v_val and v_val > 0.1:
-                    attrs["charge_amps"] = round_f((p_val * 1000.0) / v_val, 2)
+                    c_amps = 0.0
+                    if p_val > 0:
+                        c_amps = round_f((p_val * 1000.0) / v_val, 2)
+                    attrs["charge_amps"] = c_amps
+                else:
+                    attrs["charge_amps"] = 0.0
             
             attrs["is_preparing_for_peak"] = is_preparing_for_peak
             attrs["next_peak_start_hour"] = formatted_peak
