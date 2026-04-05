@@ -166,7 +166,7 @@
       },
       "market_strategy": {
         "state": {
-          "idle": "Idle",
+          "standard": "Standard Operation",
           "price_limit_not_met": "No price window",
           "unprofitable_arbitrage": "No price window",
           "charging": "Charging",
@@ -195,7 +195,6 @@
           "sale_pv_no_bat": "Selling (Solar Only)",
           "stop_sale": "Stop Sale",
           "bat_emergency": "Battery Emergency",
-          "idle": "Idle",
           "no_pv_sale_no_bat": "Waiting for Negative (Battery OK)"
         }
       }

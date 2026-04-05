@@ -876,7 +876,7 @@ class StrategyEngine:
             return cached["res"]
 
         res = {
-            "state": "idle",
+            "state": "standard",
             "mode": mode,
             "active_hours": [],
             "active_periods": "",
@@ -1894,18 +1894,18 @@ class StrategyEngine:
                         cur_mode_text = "Ожидание дешевой цены"
                 else:
                     cur_mode_text = "Ожидание арбитража"
-            elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not target_hours_sorted or state == "idle":
+            elif state in ["price_limit_not_met", "unprofitable_arbitrage"] or not target_hours_sorted or state == "standard":
                 if mode == "buy":
                     if res.get("charge_reason") == "none":
                         cur_mode_text = "В покупке нет необходимости"
                     else:
                         cur_mode_text = "Нет ценового окна"
                 else: # sell
-                    if state == "idle":
+                    if state == "standard":
                          cur_mode_text = "Ожидание"
                     else:
                          cur_mode_text = "Нет ценового окна"
-            elif state == "idle":
+            elif state == "standard":
                 if mode == "buy" and res.get("charge_reason") == "survival":
                     cur_mode_text = "Ожидание (Экстренно)"
                 elif mode == "sell":

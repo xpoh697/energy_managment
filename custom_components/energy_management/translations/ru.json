@@ -172,7 +172,7 @@
       },
       "market_strategy": {
         "state": {
-          "idle": "Ожидание",
+          "standard": "Стандартная работа",
           "price_limit_not_met": "Нет ценового окна",
           "unprofitable_arbitrage": "Нет ценового окна",
           "charging": "Зарядка (Сеть)",
@@ -227,7 +227,6 @@
           "sale_pv_no_bat": "Продажа (Только Солнце)",
           "stop_sale": "Запрет продажи",
           "bat_emergency": "Аварийный стоп АКБ",
-          "idle": "Ожидание",
           "no_pv_sale_no_bat": "Ожидание отриц. цен (АКБ хватит)"
         }
       }
