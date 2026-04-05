@@ -2673,8 +2673,8 @@ class InverterOperationModeSensor(SensorEntity):
         cur_price = self.manager.get_price("sell", today_str, now_h)
 
         # Strategy results
-        sell_strategy = self.manager.get_market_strategy("sell")
-        buy_strategy = self.manager.get_market_strategy("buy")
+        sell_strategy = self.manager.get_market_strategy("sell") or {}
+        buy_strategy = self.manager.get_market_strategy("buy") or {}
         
         # When forecasting, we use target hours instead of active state
         if is_forecast:
@@ -2864,7 +2864,8 @@ class InverterOperationModeSensor(SensorEntity):
             day_type = self.manager.day_type
             formatted_peak = self.manager.strategy_engine._format_h(peak_start_hour)
             
-            # v11.1.22: Synchronize with dynamic strategy results
+            # v11.1.22/58: Synchronize with dynamic strategy results
+            chg_reason = ""
             if mode == "buy":
                 p_val = buy_strategy.get("recommended_power_kw", 0.0)
                 t_soc = buy_strategy.get("target_soc", 0.0)
@@ -2881,11 +2882,11 @@ class InverterOperationModeSensor(SensorEntity):
                 t_soc = 0.0
 
             # Extract diagnostic info
-            chg_reason = ""
-            if mode == "buy":
-                chg_reason = buy_strategy.get("charge_reason", "")
-            elif "sale" in mode and is_selling_active:
-                chg_reason = sell_strategy.get("charge_reason", "")
+            if not chg_reason:
+                if mode == "buy":
+                    chg_reason = buy_strategy.get("charge_reason", "")
+                elif "sale" in mode and is_selling_active:
+                    chg_reason = sell_strategy.get("charge_reason", "")
 
             attrs = {
                 "power": p_val,
@@ -2972,13 +2973,13 @@ class LiveHourlySensor(RestoreEntity, SensorEntity):
         if last_state and last_state.state not in ("unknown", "unavailable"):
             val = normalize_float(last_state.state)
             # Recover into manager if it hasn't accumulated anything since restart
-            if self.ptype == "consumption" and self.manager.current_consumption_base == 0:
+            if self.ptype == "consumption" and (self.manager.current_consumption_base or 0) == 0:
                 self.manager.current_consumption_base = val
-                # v11.1.14 - Restore true total from attributes to reconstruct the deduction
+                # v11.1.14/58 - Restore true total from attributes to reconstruct the deduction
                 total_val = normalize_float(last_state.attributes.get("total_consumption"))
                 if total_val >= val:
                     self.manager.current_consumption_total = total_val
-                    self.manager.current_hourly_deduct = round_f(total_val - val, 3)
+                    self.manager.current_hourly_deduct = round_f((total_val or 0.0) - (val or 0.0), 3)
                 else:
                     self.manager.current_consumption_total = val # Fallback
                     
