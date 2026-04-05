@@ -818,15 +818,21 @@ class EnergyProfileManager:
                     s_avail_for_batt = max(0.0, gen_kw - load_kw)
                     g_to_b = max(0.0, p_charge - s_avail_for_batt)
 
-                    # 4. Grid Export = surplus energy we sold
-                    grid_export_kw = max(0.0, gen_kw + batt_p - load_kw)
+                    # v11.1.24 - Actual Financial Flow (Wallet/Saldo)
+                    # We track the real money movement (Meter-based): (Export * p_sell) - (Import * p_buy).
+                    # This ensures the wallet grows when importing at negative prices.
+                    grid_import_kw = max(0.0, load_kw + p_charge - s_to_l - b_to_l - s_avail_for_batt)
+                    # If we have a direct grid power sensor, use it for higher precision
+                    if self.grid_power_sensor:
+                        grid_p_val = self.get_sensor_float(self.grid_power_sensor)
+                        if grid_p_val is not None:
+                            grid_export_kw = max(0.0, grid_p_val)
+                            grid_import_kw = max(0.0, -grid_p_val)
+                    else:
+                        grid_export_kw = max(0.0, gen_kw + batt_p - load_kw)
 
-                    # Net saving power in kW for this moment
-                    net_saving_kw = s_to_l + b_to_l - g_to_b
-
-                    # Total incremental wallet change: savings from self-consumption + revenue from sales
-                    step_delta = (net_saving_kw * p_buy * dt_h) + (grid_export_kw * p_sell * dt_h)
-
+                    step_delta = (grid_export_kw * (p_sell or 0.0) * dt_h) - (grid_import_kw * (p_buy or 0.0) * dt_h)
+                    
                     current_bal = self.data.get("energy_balance", 0.0)
                     self.data["energy_balance"] = round_f(current_bal + step_delta, 4)
 
@@ -1274,13 +1280,16 @@ class EnergyProfileManager:
                     h_buy_kwh  = max(0.0,  grid_flow)
                     h_sell_kwh = max(0.0, -grid_flow)
 
-                # 1. Total Benefit Component
-                # Value of not having the system (Baseline)
-                baseline_cost = cons_h * (p_buy or 0.0)
-                # Actual cost now
-                actual_net_cost = (h_buy_kwh * (p_buy or 0.0)) - (h_sell_kwh * (p_sell or 0.0))
+                # v11.1.24 - New Integrated ROI Model (System Benefit)
+                solar_self = min(gen_h, cons_h)
+                batt_to_load = batt_discharged
+                # Portion of charging that came from GRID (not from surplus solar)
+                grid_to_batt = max(0.0, batt_charged - max(0.0, gen_h - cons_h))
+                p_buy_eff = max(0.0, p_buy or 0.0)
 
-                total_profit_h = round_f(baseline_cost - actual_net_cost, 4)
+                # Total profit = Solar Savings + Battery Savings + Sales - Grid Charge Cost
+                total_profit_h = (solar_self * p_buy_eff) + (batt_to_load * p_buy_eff) + (h_sell_kwh * (p_sell or 0.0)) - (grid_to_batt * (p_buy or 0.0))
+                total_profit_h = round_f(total_profit_h, 4)
 
                 # Persist to "total" category
                 if "savings" not in self.data:
@@ -1290,11 +1299,10 @@ class EnergyProfileManager:
 
                 day_entry["total"] = round_f(day_entry.get("total", 0.0) + total_profit_h, 4)
 
-                # Also keep old components as breakdown (for attributes)
-                solar_self = min(gen_h, cons_h)
-                day_entry["solar"]     = round_f(day_entry.get("solar",     0.0) + (solar_self * (p_buy or 0.0)), 4)
+                # Breakdown for attributes
+                day_entry["solar"]     = round_f(day_entry.get("solar",     0.0) + (solar_self * p_buy_eff), 4)
                 day_entry["sell"]      = round_f(day_entry.get("sell",      0.0) + (h_sell_kwh * (p_sell or 0.0)), 4)
-                # Arbitrage is the remainder
+                # Arbitrage captures battery savings and charging profit
                 day_entry["arbitrage"] = round_f(day_entry["total"] - day_entry["solar"] - day_entry["sell"], 4)
 
                 # Keep at most 400 days of savings
