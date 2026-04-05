@@ -752,6 +752,7 @@ class EnergyProfileManager:
     @callback
     def _poll_instant_power(self, now):
         """Poll and save the current instantaneous power levels for averaging."""
+        is_neg_price = False
         load_kw = 0.0
         gen_kw = 0.0
         batt_p = 0.0
@@ -794,6 +795,7 @@ class EnergyProfileManager:
         if self.price_buy_sensors:
             p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), now.hour) or 0.0
             p_sell = self.get_price("sell", now.strftime("%Y-%m-%d"), now.hour) or 0.0
+            is_neg_price = bool(p_buy <= 0)
 
             batt_p = 0.0
             if self.battery_power_sensor:
