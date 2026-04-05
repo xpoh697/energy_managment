@@ -345,7 +345,8 @@ class EnergyProfileManager:
         if isinstance(raw_grid_p, list): raw_grid_p = raw_grid_p[0] if raw_grid_p else None
         self.grid_power_sensor = str(raw_grid_p) if raw_grid_p else None
 
-        raw_bat_v = config_data.get(CONF_BATTERY_VOLTAGE)
+        # v11.1.35: Using hardcoded string if constant import fails in end-user environment
+        raw_bat_v = config_data.get("battery_voltage")
         if isinstance(raw_bat_v, list): raw_bat_v = raw_bat_v[0] if raw_bat_v else None
         self.battery_voltage_sensor = str(raw_bat_v) if raw_bat_v else None
 
