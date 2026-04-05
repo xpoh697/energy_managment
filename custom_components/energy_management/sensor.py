@@ -2770,33 +2770,30 @@ class InverterOperationModeSensor(SensorEntity):
 
         # State Machine Ladder
         if (is_buying_active and not target_reached) or is_neg_buy:
-            # v11.1.22 - Priority: Negative price always forces buy mode
+            # v11.1.22/50 - Priority 1: Buying (AI or Negative)
             mode = "buy"
             if is_neg_buy:
                 reason = f"Отрицательная цена ({buy_p_cur:.2f}): Питание дома от сети"
             else:
                 reason = "Активна стратегия ПОКУПКИ"
         elif is_buying_active and is_forecast:
-            # Even if target_reached (adaptive), show as buy in forecast if it's a planned hour
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
-        elif is_waiting_for_neg:
-            # v11.1.44-49: WAIT MODE (Priority above standard AI and emergency SOC)
-            mode = "no_pv_sale_no_bat"
-            neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
-            reason = f"Ожидание отриц. цен ({neg_h_disp}г): Эмкость АКБ сохранена"
-
         elif batt_soc <= min_soc:
-            # Emergency: Don't sell anything from battery, but allow PV export if there's surplus
+            # v11.1.50 - Priority 2: Emergency SOC charge from sun
             if has_surplus:
                 mode = "sale_pv"
-                # v11.1.49: Diagnostic why wait-mode skipped
-                wait_diag = f" [neg:{neg_h} vs cur:{check_h}, gen:{avg_gen:.2f}]" if neg_h else ""
-                reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), но есть излишек солнца{wait_diag}"
+                reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), добор солнца в АКБ (limit: {min_soc}%)"
             else:
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
+        
+        elif is_waiting_for_neg:
+            # v11.1.50 - Priority 3: Wait for negative (No sell/No charge)
+            mode = "no_pv_sale_no_bat"
+            neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
+            reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
 
         elif is_selling_active and not target_reached:
             # Active AI / Arbitrage strategy
