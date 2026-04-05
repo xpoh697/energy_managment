@@ -2763,6 +2763,20 @@ class InverterOperationModeSensor(SensorEntity):
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
 
         # State Machine Ladder
+        # v11.1.41-44: Dynamic forecast survival check & Prioritization
+        can_wait = buy_strategy.get("can_wait_for_negative", False)
+        neg_h = buy_strategy.get("first_negative_hour")
+        
+        # v11.1.44: If there is a negative window ahead and price is below user limit, 
+        # we ALWAYS prefer waiting (no charge/no sale) to save battery capacity.
+        is_waiting_for_neg = False
+        if neg_h and cur_price is not None and cur_price < price_sell_only_pv:
+            # We are before the negative window and price is not good enough for selling PV
+            # If we are in forecast, we also check if it's feasible, but more leniently
+            if not is_forecast or (abs_hour is not None and abs_hour < neg_h):
+                is_waiting_for_neg = True
+
+        # State Machine Ladder
         if (is_buying_active and not target_reached) or is_neg_buy:
             # v11.1.22 - Priority: Negative price always forces buy mode
             mode = "buy"
@@ -2784,35 +2798,18 @@ class InverterOperationModeSensor(SensorEntity):
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
         
+        elif is_waiting_for_neg:
+            # v11.1.44: WAIT MODE (Priority above standard AI and selling)
+            # Price below PV sale limit, and negative prices ahead.
+            mode = "no_pv_sale_no_bat"
+            neg_h_disp = neg_h or "??"
+            reason = f"Ожидание отриц. цен ({neg_h_disp}:00): Экономим место в АКБ"
+
         elif is_selling_active and not target_reached:
             # Active AI / Arbitrage strategy
             mode = "sale_pv_bat"
             reason = "Активна стратегия ПРОДАЖИ (AI)"
             
-        # v11.1.41-42: Dynamic forecast survival check
-        can_wait = buy_strategy.get("can_wait_for_negative", False)
-        neg_h = buy_strategy.get("first_negative_hour")
-        if is_forecast and neg_h and not can_wait and abs_hour is not None and abs_hour < neg_h:
-            # Re-check survival from THIS forecast hour
-            h_soc = self._get_soc_from_log(sim_log, f"{now_h:02d}:59" + (" (Завтра)" if abs_hour >= 24 else ""), batt_soc)
-            hours_left = neg_h - abs_hour
-            batt_cap = float(self.manager.battery_capacity)
-            
-            # v11.1.42: Relaxed survival (10% threshold) and daylight awareness
-            # If it's daylight (07-18), assume house is powered by PV and battery discharge is 0
-            is_day_sim = bool(7 <= now_h < 19)
-            needed_kwh = hours_left * 0.6 if not is_day_sim else 0.0
-            
-            needed_soc = (needed_kwh / batt_cap * 100.0) if batt_cap > 0.1 else 100.0
-            threshold = 10.0 # Relaxed to min_soc for negative price opportunities
-            if (h_soc - needed_soc) > threshold:
-                can_wait = True
-
-        if can_wait and cur_price is not None and cur_price < price_sell_only_pv:
-            # v11.1.39: Intellectual wait for negative prices (Zero Export + Idle Battery)
-            mode = "no_pv_sale_no_bat"
-            neg_h_disp = neg_h or "??"
-            reason = f"Остановка: ожидание отриц. цен ({neg_h_disp}:00), АКБ хватит"
         elif cur_price is not None and cur_price < price_stop_sell:
             # Global price floor for ANY selling
             mode = "stop_sale"
