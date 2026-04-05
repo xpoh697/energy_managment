@@ -2761,19 +2761,11 @@ class InverterOperationModeSensor(SensorEntity):
         buy_p_cur = self.manager.get_price("buy", today_str, now_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
 
-        # State Machine Ladder
-        # v11.1.41-44: Dynamic forecast survival check & Prioritization
-        can_wait = buy_strategy.get("can_wait_for_negative", False)
-        neg_h = buy_strategy.get("first_negative_hour")
-        
-        # v11.1.44: If there is a negative window ahead and price is below user limit, 
-        # we ALWAYS prefer waiting (no charge/no sale) to save battery capacity.
-        # v11.1.47: Only activate this if there is actual solar generation (>50W).
+        # v11.1.44-49: Priority Logic Refinement
         is_waiting_for_neg = False
-        if neg_h and cur_price is not None and cur_price < price_sell_only_pv and avg_gen > 0.05:
-            # We are before the negative window and price is not good enough for selling PV
-            # If we are in forecast, we also check if it's feasible, but more leniently
-            if not is_forecast or (abs_hour is not None and abs_hour < neg_h):
+        if neg_h and cur_price is not None and cur_price < price_sell_only_pv and avg_gen > 0.01:
+            # v11.1.49: Use unified comparison: check_h (absolute index)
+            if not is_forecast or check_h < neg_h:
                 is_waiting_for_neg = True
 
         # State Machine Ladder
@@ -2790,17 +2782,18 @@ class InverterOperationModeSensor(SensorEntity):
             reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
         elif is_waiting_for_neg:
-            # v11.1.44: WAIT MODE (Priority above standard AI and emergency SOC)
-            # Price below PV sale limit, and negative prices ahead.
+            # v11.1.44-49: WAIT MODE (Priority above standard AI and emergency SOC)
             mode = "no_pv_sale_no_bat"
-            neg_h_disp = neg_h or "??"
-            reason = f"Ожидание отриц. цен ({neg_h_disp}:00): Экономим место в АКБ"
+            neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
+            reason = f"Ожидание отриц. цен ({neg_h_disp}г): Эмкость АКБ сохранена"
 
         elif batt_soc <= min_soc:
             # Emergency: Don't sell anything from battery, but allow PV export if there's surplus
             if has_surplus:
                 mode = "sale_pv"
-                reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), но есть излишек солнца"
+                # v11.1.49: Diagnostic why wait-mode skipped
+                wait_diag = f" [neg:{neg_h} vs cur:{check_h}, gen:{avg_gen:.2f}]" if neg_h else ""
+                reason = f"Низкий заряд ({round_f(batt_soc, 1)}%), но есть излишек солнца{wait_diag}"
             else:
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%)"
