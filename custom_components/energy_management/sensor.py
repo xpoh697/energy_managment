@@ -1195,32 +1195,38 @@ class EnergyProfileManager:
 
         # Check for solar curtailment (clipping due to full battery or negative price)
         # v11.1.21 - Expanded: also detect economic curtailment (negative price purchase)
+        # v11.1.25 - Robust Healing Trigger
         p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), past_hour)
-        is_neg_price = bool(p_buy is not None and p_buy <= 0)
         
         is_stop_sale = getattr(self, "current_inverter_mode", "") == "stop_sale"
         b_soc, _, _ = self.get_battery_state()
-        is_curtailed = bool((is_stop_sale and b_soc > 95) or is_neg_price)
+        is_curtailed = bool((is_stop_sale and b_soc > 95) or (p_buy is not None and p_buy <= 0))
         
         # v11.1.21 - Solar "Healing" logic: if curtailed, record forecast instead of actual zero/low gen
         gen_to_record = self.current_generation
         if is_curtailed and f_val > (gen_to_record + 0.1):
-            _LOGGER.info("Energy Management: Healing solar profile for hour %s. Recording forecast %s instead of actual %s (Mode: %s)", past_hour, f_val, gen_to_record, "Economy" if is_neg_price else "BMS")
+            _LOGGER.info("Energy Management: Healing solar profile for hour %s. Recording forecast %s instead of actual %s (Mode: %s)", past_hour, f_val, gen_to_record, "Economy" if (p_buy is not None and p_buy <= 0) else "BMS")
             gen_to_record = f_val
 
-        # v11.1.23 - Consumption "Healing" logic: if price was negative, record average instead of actual
-        # This prevents market-driven spikes from polluting the normal household base pattern.
+        # We heal if price is negative/near-zero (<= 0.05) OR if the strategy explicitly forced a buy.
+        is_buy_mode = getattr(self, "current_inverter_mode", "") == "buy"
+        is_cheap_energy = bool(p_buy is not None and p_buy <= 0.05)
+        should_heal = is_cheap_energy or is_buy_mode
+
         record_base = self.current_consumption_base
         record_total = self.current_consumption_total
-        if is_neg_price:
-             _LOGGER.info("Energy Management: Healing consumption profile for hour %s due to negative price. Recording average %s instead of actual %s", past_hour, avg_cons_val, record_base)
+        healed_flag = 0
+
+        if should_heal:
+             _LOGGER.info("Energy Management: Healing consumption profile for hour %s (Price: %s, Mode: %s). Recording average %s instead of actual %s", past_hour, p_buy, "buy" if is_buy_mode else "cheap", avg_cons_val, record_base)
              record_base = avg_cons_val
              record_total = avg_cons_val + self.current_hourly_deduct
+             healed_flag = 1
             
         # Append to history lists (with occupancy tag and forecast snapshot)
-        self.data["consumption_base"][str(past_hour)].append({"v": record_base, "wd": today_wd, "occ": occ_count})
-        self.data["consumption_total"][str(past_hour)].append({"v": record_total, "wd": today_wd, "occ": occ_count})
-        self.data["generation"][str(past_hour)].append({"v": gen_to_record, "f": f_val, "wd": today_wd, "c": is_curtailed})
+        self.data["consumption_base"][str(past_hour)].append({"v": record_base, "wd": today_wd, "occ": occ_count, "h": healed_flag})
+        self.data["consumption_total"][str(past_hour)].append({"v": record_total, "wd": today_wd, "occ": occ_count, "h": healed_flag})
+        self.data["generation"][str(past_hour)].append({"v": gen_to_record, "f": f_val, "wd": today_wd, "c": 1 if is_curtailed else 0})
 
         # Store losses alongside generation for efficiency calculation
         if "losses" not in self.data:
