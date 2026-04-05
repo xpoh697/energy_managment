@@ -2761,8 +2761,9 @@ class InverterOperationModeSensor(SensorEntity):
         buy_p_cur = self.manager.get_price("buy", today_str, now_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
 
-        # v11.1.44-49: Priority Logic Refinement
+        # v11.1.44-57: Priority Logic Refinement
         is_waiting_for_neg = False
+        neg_h = buy_strategy.get("first_negative_hour")
         if neg_h and cur_price is not None and cur_price < price_sell_only_pv and avg_gen > 0.01:
             # v11.1.49: Use unified comparison: check_h (absolute index)
             if not is_forecast or check_h < neg_h:
