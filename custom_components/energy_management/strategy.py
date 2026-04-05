@@ -1400,7 +1400,8 @@ class StrategyEngine:
                         if is_neg_strategy:
                             # Greedy Allocation: fill battery at the best (most negative) prices first
                             pool_sorted_neg = sorted(pool, key=lambda hr: all_buy_prices.get(hr, 999.0))
-                            rem_kwh = energy_to_buy
+                            # v11.1.59: Add 15% safety margin for real-world losses/BMS limits
+                            rem_kwh = energy_to_buy * 1.15
                             for h in pool_sorted_neg:
                                 h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
                                 p_greedy = min(max_p, rem_kwh / h_factor) if rem_kwh > 0.05 else 0.0
