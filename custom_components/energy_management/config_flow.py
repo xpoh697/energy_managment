@@ -35,6 +35,7 @@ from .const import (
     CONF_ONLY_SOLAR,
     CONF_ACTIVE_SENSOR,
     CONF_GRID_POWER,
+    CONF_BATTERY_VOLTAGE,
 )
 
 
@@ -201,6 +202,9 @@ class EnergyManagementConfigFlow(config_entries.ConfigFlow, EnergyManagementFlow
                 vol.Optional(CONF_GRID_POWER): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
+                vol.Optional(CONF_BATTERY_VOLTAGE): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 vol.Optional(CONF_PRICE_BUY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -318,7 +322,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow, EnergyManagementFl
                 selector.EntitySelectorConfig(domain="sensor")
             )
 
-        for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_BATTERY_POWER, CONF_GRID_POWER, CONF_PRICE_BUY, CONF_PRICE_SELL]:
+        for key in [CONF_BATTERY_SOC, CONF_BATTERY_CAPACITY, CONF_BATTERY_POWER, CONF_GRID_POWER, CONF_BATTERY_VOLTAGE, CONF_PRICE_BUY, CONF_PRICE_SELL]:
             val = get_str(key)
             if val:
                 schema_dict[vol.Optional(key, default=val)] = selector.EntitySelector(

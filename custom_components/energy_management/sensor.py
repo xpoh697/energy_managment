@@ -344,6 +344,10 @@ class EnergyProfileManager:
         if isinstance(raw_grid_p, list): raw_grid_p = raw_grid_p[0] if raw_grid_p else None
         self.grid_power_sensor = str(raw_grid_p) if raw_grid_p else None
 
+        raw_bat_v = config_data.get(CONF_BATTERY_VOLTAGE)
+        if isinstance(raw_bat_v, list): raw_bat_v = raw_bat_v[0] if raw_bat_v else None
+        self.battery_voltage_sensor = str(raw_bat_v) if raw_bat_v else None
+
         # Presence / occupancy sensors (person.* or binary_sensor.*)
         presence_raw = config_data.get(CONF_PRESENCE_SENSORS, [])
         if isinstance(presence_raw, str):
@@ -363,6 +367,9 @@ class EnergyProfileManager:
             self.all_power_sensors.add(str(self.battery_power_sensor))
         if self.grid_power_sensor is not None:
             self.all_power_sensors.add(str(self.grid_power_sensor))
+        
+        if self.battery_voltage_sensor:
+            self.all_sensors = self.all_sensors | {str(self.battery_voltage_sensor)}
         
         # Adaptive BMS Model: "SOC" -> Max Charge Power (kW)
         self.bms_learned_profile = {}
@@ -397,6 +404,8 @@ class EnergyProfileManager:
             self.battery_power_sensor = str(self.battery_power_sensor).strip()
         if self.grid_power_sensor:
             self.grid_power_sensor = str(self.grid_power_sensor).strip()
+        if self.battery_voltage_sensor:
+            self.battery_voltage_sensor = str(self.battery_voltage_sensor).strip()
 
         buy_p = config_data.get(CONF_PRICE_BUY)
         sell_p = config_data.get(CONF_PRICE_SELL)
@@ -2841,9 +2850,16 @@ class InverterOperationModeSensor(SensorEntity):
             attrs = {
                 "power": p_val,
                 "target_soc": t_soc,
-                "is_preparing_for_peak": is_preparing_for_peak,
-                "next_peak_start_hour": formatted_peak,
             }
+            
+            # v11.1.32: Add real-time charge current (Amps) if voltage sensor is available
+            if self.manager.battery_voltage_sensor and p_val > 0:
+                v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor)
+                if v_val and v_val > 0.1:
+                    attrs["charge_amps"] = round_f((p_val * 1000.0) / v_val, 2)
+            
+            attrs["is_preparing_for_peak"] = is_preparing_for_peak
+            attrs["next_peak_start_hour"] = formatted_peak
             
             self.manager.current_inverter_mode = mode
 
