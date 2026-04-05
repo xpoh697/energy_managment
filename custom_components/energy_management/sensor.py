@@ -2607,6 +2607,9 @@ class InverterOperationModeSensor(SensorEntity):
                 elif isinstance(f_data, (int, float)):
                     f_soc = float(f_data)
 
+                # v11.1.45: Define sim_log from strategy simulation results
+                sim_log = buy_sim_log or sell_sim_log or {}
+
                 f_mode, f_context = self._get_mode_at(
                     f_dt, f_soc, is_forecast=True, abs_hour=h_abs,
                     avg_gen_override=f_gen, avg_load_override=f_load,
