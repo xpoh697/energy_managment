@@ -1344,7 +1344,9 @@ class StrategyEngine:
                         soc_final_dry, dry_log, _ = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
                         max_dry_soc = max([float(st["soc"]) for st in dry_log.values()] + [float(soc_at_b)])
                         
-                        if max_dry_soc < 99.0: # If sun alone won't reach 100% at any point today
+                        # v11.1.30: Always include negative price hours regardless of future solar potential
+                        p_buy_h = all_buy_prices.get(h_b, 999.0)
+                        if max_dry_soc < 99.0 or p_buy_h <= 0.0:
                             pool_useful.append(h_b)
                     
                     pool = pool_useful
@@ -1366,7 +1368,9 @@ class StrategyEngine:
 
                     # Final Override (v6.16): If no useful hours left, sun is sufficient,
                     # OR current SOC is already high enough (prevents micro-buys for 1% arbitrage)
-                    if not pool or target_soc <= (b_soc + 0.5):
+                    # v11.1.30: Bypass these checks if price is negative (always useful to fill the battery)
+                    should_skip_buy = (not pool or target_soc <= (b_soc + 0.5)) and not negative_hours
+                    if should_skip_buy:
                         target_soc = b_soc
                         res["charge_reason"] = "none"
                         pool = [] # Empty pool to clear attributes
