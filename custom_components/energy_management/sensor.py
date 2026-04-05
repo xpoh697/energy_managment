@@ -823,15 +823,12 @@ class EnergyProfileManager:
 
                     # v11.1.24 - Actual Financial Flow (Wallet/Saldo)
                     # We track the real money movement (Meter-based): (Export * p_sell) - (Import * p_buy).
-                    # This ensures the wallet grows when importing at negative prices.
-                    grid_import_kw = max(0.0, load_kw + p_charge - s_to_l - b_to_l - s_avail_for_batt)
-                    # If we have a direct grid power sensor, use it for higher precision
+                    # 'grid_p' is already scaled to kW and uses internal convention (+ export, - import).
                     if self.grid_power_sensor:
-                        grid_p_val = self.get_sensor_float(self.grid_power_sensor)
-                        if grid_p_val is not None:
-                            grid_export_kw = max(0.0, grid_p_val)
-                            grid_import_kw = max(0.0, -grid_p_val)
+                        grid_export_kw = max(0.0, grid_p)
+                        grid_import_kw = max(0.0, -grid_p)
                     else:
+                        grid_import_kw = max(0.0, load_kw + p_charge - s_to_l - b_to_l - s_avail_for_batt)
                         grid_export_kw = max(0.0, gen_kw + batt_p - load_kw)
 
                     # v11.1.26 - Enhanced Grid Flow Calculation
