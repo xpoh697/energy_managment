@@ -2609,7 +2609,8 @@ class InverterOperationModeSensor(SensorEntity):
 
                 f_mode, f_context = self._get_mode_at(
                     f_dt, f_soc, is_forecast=True, abs_hour=h_abs,
-                    avg_gen_override=f_gen, avg_load_override=f_load
+                    avg_gen_override=f_gen, avg_load_override=f_load,
+                    sim_log=sim_log
                 )
                 
                 # Add price info if applicable
@@ -2647,7 +2648,7 @@ class InverterOperationModeSensor(SensorEntity):
             _LOGGER.error("Error in InverterOperationModeSensor extra_state_attributes: %s", e)
             return {"error": str(e)}
 
-    def _get_mode_at(self, dt_now, batt_soc, is_forecast=False, abs_hour=None, avg_gen_override=None, avg_load_override=None):
+    def _get_mode_at(self, dt_now, batt_soc, is_forecast=False, abs_hour=None, avg_gen_override=None, avg_load_override=None, sim_log=None):
         """Calculates the inverter mode for a given timestamp and SOC."""
         mode = "sale_pv" # default
         now = dt_now
@@ -2791,10 +2792,10 @@ class InverterOperationModeSensor(SensorEntity):
         # v11.1.41-42: Dynamic forecast survival check
         can_wait = buy_strategy.get("can_wait_for_negative", False)
         neg_h = buy_strategy.get("first_negative_hour")
-        if is_forecast and neg_h and not can_wait and h_abs < neg_h:
+        if is_forecast and neg_h and not can_wait and abs_hour is not None and abs_hour < neg_h:
             # Re-check survival from THIS forecast hour
-            h_soc = self._get_soc_from_log(sim_log, f"{now_h:02d}:59" + (" (Завтра)" if h_abs >= 24 else ""), batt_soc)
-            hours_left = neg_h - h_abs
+            h_soc = self._get_soc_from_log(sim_log, f"{now_h:02d}:59" + (" (Завтра)" if abs_hour >= 24 else ""), batt_soc)
+            hours_left = neg_h - abs_hour
             batt_cap = float(self.manager.battery_capacity)
             
             # v11.1.42: Relaxed survival (10% threshold) and daylight awareness
