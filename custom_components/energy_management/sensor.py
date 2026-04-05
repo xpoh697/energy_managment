@@ -850,6 +850,7 @@ class EnergyProfileManager:
                         "dt_h": dt_h, "step": step_delta
                     }
                    
+                    is_neg_price = bool(p_buy is not None and p_buy <= 0)
                     if is_neg_price and step_delta > 0:
                         _LOGGER.debug("Energy Management Wallet: Growing by %s PLN (Import %s kW at %s PLN/kWh)", round_f(step_delta, 4), record_grid_imp, p_buy)
 
