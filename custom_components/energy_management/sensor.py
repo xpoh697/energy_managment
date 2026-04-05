@@ -790,7 +790,8 @@ class EnergyProfileManager:
         # --- Real-time Balance / Savings Account Logic ---
         # Logic: Increment/Decrement based on (Solar_to_Load + Battery_to_Load - Grid_to_Battery)
         # We need at least price and load power to calculate any savings.
-        if self.price_buy_sensors and self.power_load_sensors:
+        # We need prices and at least some source of power data (load, grid, or battery)
+        if self.price_buy_sensors:
             p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), now.hour) or 0.0
             p_sell = self.get_price("sell", now.strftime("%Y-%m-%d"), now.hour) or 0.0
 
@@ -831,10 +832,26 @@ class EnergyProfileManager:
                     else:
                         grid_export_kw = max(0.0, gen_kw + batt_p - load_kw)
 
-                    step_delta = (grid_export_kw * (p_sell or 0.0) * dt_h) - (grid_import_kw * (p_buy or 0.0) * dt_h)
+                    # v11.1.26 - Enhanced Grid Flow Calculation
+                    # 1. Primary grid import/export (derived or measured)
+                    record_grid_imp = grid_import_kw
+                    record_grid_exp = grid_export_kw
                     
+                    step_delta = (record_grid_exp * (p_sell or 0.0) * dt_h) - (record_grid_imp * (p_buy or 0.0) * dt_h)
+                    
+                    # 2. Update wallet
                     current_bal = self.data.get("energy_balance", 0.0)
-                    self.data["energy_balance"] = round_f(current_bal + step_delta, 4)
+                    self.data["energy_balance"] = round_f(current_bal + step_delta, 6)
+                    
+                    # 3. Store diagnostic snapshot
+                    self.data["wallet_debug"] = {
+                        "p_buy": p_buy, "p_sell": p_sell,
+                        "grid_imp": record_grid_imp, "grid_exp": record_grid_exp,
+                        "dt_h": dt_h, "step": step_delta
+                    }
+                   
+                    if is_neg_price and step_delta > 0:
+                        _LOGGER.debug("Energy Management Wallet: Growing by %s PLN (Import %s kW at %s PLN/kWh)", round_f(step_delta, 4), record_grid_imp, p_buy)
 
             self.data["last_balance_poll_time"] = now_ts
 
@@ -3319,18 +3336,23 @@ class EnergyBalanceSensor(SensorEntity):
 
     @property
     def native_value(self):
+        # The sensor state shows the real-time 'Today' balance.
         return self._get_balance_summary()["today"]
 
     @property
     def extra_state_attributes(self):
         s = self._get_balance_summary()
+        dbg = self.manager.data.get("wallet_debug", {})
         return {
-            "last_update": datetime.fromtimestamp(self.manager.data.get("last_balance_poll_time", 0)).isoformat() if self.manager.data.get("last_balance_poll_time") else None,
-            "yesterday": s["yesterday"],
-            "last_7_days": s["week"],
-            "last_30_days": s["month"],
+            "today_earnings": s["today"],
+            "grid_import_kw": round_f(dbg.get("grid_imp", 0.0), 3),
+            "grid_export_kw": round_f(dbg.get("grid_exp", 0.0), 3),
+            "last_step_gain": round_f(dbg.get("step", 0.0), 6),
+            "price_buy": dbg.get("p_buy", 0.0),
+            "price_sell": dbg.get("p_sell", 0.0),
+            "dt_h": round_f(dbg.get("dt_h", 0.0), 6),
             "lifetime_all_time": s["lifetime"],
-            "formula": "Savings(Solar+Battery)*Price_Buy + Export*Price_Sell - GridCharge*Price_Buy",
+            "last_update": datetime.fromtimestamp(self.manager.data.get("last_balance_poll_time", 0)).isoformat() if self.manager.data.get("last_balance_poll_time") else None,
         }
 
 class AnomalyDetectionSensor(SensorEntity):
