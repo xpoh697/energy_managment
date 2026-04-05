@@ -1350,15 +1350,15 @@ class StrategyEngine:
                             pool_useful.append(h_b)
                     
                     pool = pool_useful
-                    if is_strict_arb:
+                    if negative_hours:
+                        res["charge_reason"] = "negative"
+                        target_soc = 100.0
+                    elif is_strict_arb:
                         res["charge_reason"] = "arbitrage"
                         # Adaptive Target: 100% minus what the sun gives eventually
                         expected_soc_at_peak, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, int(peak_h))), now, commands=None)
                         sun_gain_pct = max(0.0, expected_soc_at_peak - b_soc)
                         target_soc = float(min(100.0, 100.0 - sun_gain_pct))
-                    elif negative_hours:
-                        res["charge_reason"] = "negative"
-                        target_soc = 100.0
                     elif available_today_kwh < survival_target_kwh:
                         res["charge_reason"] = "survival"
                         target_soc = float(min(base_target, survival_target_kwh / b_cap * 100.0))

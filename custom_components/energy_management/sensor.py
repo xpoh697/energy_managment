@@ -2839,14 +2839,11 @@ class InverterOperationModeSensor(SensorEntity):
                 t_soc = 0.0
 
             attrs = {
-                "is_preparing_for_peak": is_preparing_for_peak,
-                "next_peak_start_hour": formatted_peak,
                 "power": p_val,
                 "target_soc": t_soc,
+                "is_preparing_for_peak": is_preparing_for_peak,
+                "next_peak_start_hour": formatted_peak,
             }
-            if mode == "buy":
-                attrs["charge_target_soc"] = buy_strategy.get("charge_target_soc", 100.0)
-                attrs["charge_reason"] = buy_strategy.get("charge_reason", "price")
             
             self.manager.current_inverter_mode = mode
 
