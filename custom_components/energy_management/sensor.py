@@ -1226,9 +1226,13 @@ class EnergyProfileManager:
         # v11.1.25 - Robust Healing Trigger
         p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), past_hour)
         
-        is_stop_sale = getattr(self, "current_inverter_mode", "") == "stop_sale"
+        cur_mode = getattr(self, "current_inverter_mode", "")
+        is_stop_sale = bool(cur_mode == "stop_sale")
+        is_no_pv_sale = bool(cur_mode == "no_pv_sale_no_bat")
         b_soc, _, _ = self.get_battery_state()
-        is_curtailed = bool((is_stop_sale and b_soc > 95) or (p_buy is not None and p_buy <= 0))
+        
+        # v11.1.65 - Enhanced Curtailment Detection: include wait-for-pit mode
+        is_curtailed = bool((is_stop_sale and b_soc > 95) or (p_buy is not None and p_buy <= 0) or is_no_pv_sale)
         
         # v11.1.21 - Solar "Healing" logic: if curtailed, record forecast instead of actual zero/low gen
         gen_to_record = self.current_generation
