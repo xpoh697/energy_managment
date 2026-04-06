@@ -1389,9 +1389,18 @@ class StrategyEngine:
                     charge_commands = {int(h): 0.0 for h in target_hours_sorted if h >= cur_hour}
                     if target_hours_sorted:
                         # 1. Calculate how much kWh we roughly need to add
-                        # We use 110% of the theoretical gap to be safe (cover base consumption during charge)
+                        # v11.1.61 - Include projected base consumption during the charging window 
+                        # otherwise the battery will discharge if charge power < load.
                         theoretical_gap_kwh = max(0.0, (target_soc - b_soc) / 100.0 * b_cap)
-                        energy_to_buy = theoretical_gap_kwh * 1.1
+                        
+                        avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
+                        pool_cons = 0.0
+                        for h in pool:
+                            h_f = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
+                            h_cons = float(normalize_float(avg_prof_cons.get(str(h % 24), 0.5)))
+                            pool_cons += h_cons * h_f
+                            
+                        energy_to_buy = theoretical_gap_kwh + pool_cons
 
                         # 2. Sort available hours by price (cheapest first)
                         pool_sorted = sorted(pool, key=lambda h: all_buy_prices[h])
@@ -1496,10 +1505,8 @@ class StrategyEngine:
                             "log": sim_log
                         }
 
-                        # v7.1: Update target_soc to reflect the end of the current buy period
-                        # instead of the theoretical daily target (as requested by USER).
-                        if cur_hour in target_hours_sorted and man.get_setting(CONF_DYNAMIC_SOC_BUY, True):
-                            target_soc = float(round_f(soc_at_end, 1))
+                        # v7.1: Note: Simulation results are no longer used to override target_soc 
+                        # to ensure the UI shows the intended target (v11.1.61).
                     except Exception as e:
                         _LOGGER.error("Error in MarketStrategy BUY simulation: %s", e)
                         res["buy_simulation"] = {
@@ -1774,10 +1781,7 @@ class StrategyEngine:
                         "log": sim_log
                     }
 
-                    # v7.1: Update target_soc to reflect the end of the current sale period
-                    # instead of the fixed morning value (as requested by USER).
-                    if is_in_peak and man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        target_soc = float(round_f(soc_after, 1))
+                    # v7.1: Note: Simulation results are no longer used to override target_soc (v11.1.61).
                     
                     # v11.1.20 - Calculate potential gain using target_price if we are preparing for a future peak
                     best_sell_price_for_arb = max(cur_p_f, float(target_price or 0.0))

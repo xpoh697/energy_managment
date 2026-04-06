@@ -2701,12 +2701,24 @@ class InverterOperationModeSensor(SensorEntity):
                 break
 
         bms_debug = {"status": "Ожидание" if not is_forecast else "Прогноз"}
+        
+        # v11.1.61: Differentiate target by current strategic mode for diagnostics
+        buy_p_cur = self.manager.get_price("buy", today_str, now_h)
+        is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
+        
         target_soc_sell = self.manager.get_setting(CONF_TARGET_SOC_SELL, 100.0)
+        target_soc_buy = self.manager.get_setting(CONF_TARGET_SOC_BUY, 100.0)
+        
+        active_target = target_soc_sell
+        if is_neg_buy:
+            active_target = 100.0
+        elif is_buying_active:
+            active_target = target_soc_buy
 
         # Skip complex peak simulation during 24h forecast to save CPU
         if not is_forecast and batt_cap > 0:
-            if batt_soc >= (target_soc_sell - 0.5):
-                bms_debug = {"status": "Батарея уже заряжена", "target_soc": target_soc_sell, "current_soc": batt_soc}
+            if batt_soc >= (active_target - 0.5):
+                bms_debug = {"status": "Батарея уже заряжена", "target_soc": active_target, "current_soc": batt_soc}
             else:
                 end_h = peak_start_hour if peak_start_hour is not None else (now_h + 24)
                 sim_range = [h for h in range(now_h, end_h) if h < 48]
