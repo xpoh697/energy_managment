@@ -51,7 +51,7 @@
           "battery_cost": "Total Battery Cost",
           "battery_rated_cycles": "Battery Rated Cycles",
           "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)",
-          "arbitrage_min_profit": "Min. Profit Margin for Arbitrage (Price Diff)"
+          "arbitrage_profit_threshold": "Min. Profit Margin for Arbitrage (Price Diff)"
         }
       }
     },
@@ -113,7 +113,7 @@
           "battery_cost": "Total Battery Cost",
           "battery_rated_cycles": "Battery Rated Cycles",
           "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)",
-          "arbitrage_min_profit": "Min. Profit Margin for Arbitrage (Price Diff)"
+          "arbitrage_profit_threshold": "Min. Profit Margin for Arbitrage (Price Diff)"
         }
       }
     }
@@ -207,11 +207,11 @@
       "price_tolerance": { "name": "Buy Price Tolerance" },
       "price_sell_tolerance": { "name": "Sell Price Tolerance" },
       "battery_max_power": { "name": "Battery Max Power" },
-      "target_soc_buy": { "name": "Target SOC Buy" },
-      "target_soc_sell": { "name": "Target SOC Sell" },
-      "min_soc_buy": { "name": "Min Survival SOC" },
-      "sale_pv_no_bat_max_hour": { "name": "Max Hour for Sell PV" },
-      "arbitrage_min_profit": { "name": "Arbitrage Price Limit (Diff)" }
+      "ai_charge_limit_soc": { "name": "Charge Limit (Max SOC)" },
+      "ai_discharge_limit_soc": { "name": "Discharge Limit (Min SOC)" },
+      "min_soc_buy": { "name": "Minimum SOC Level" },
+      "sale_pv_no_bat_max_hour": { "name": "Max Hour for Sell PV Only" },
+      "arbitrage_profit_threshold": { "name": "Arbitrage Profit Threshold" }
     }
   }
 }

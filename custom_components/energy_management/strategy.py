@@ -990,7 +990,7 @@ class StrategyEngine:
             for h, p in b_p_tom.items(): all_buy_prices[int(h) + 24] = float(normalize_float(p))
 
             deg_cost = float(self.get_battery_degradation_cost() or 0.0)
-            min_p_v = man.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
+            min_p_v = man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.0)
             min_p = float(min_p_v) if min_p_v is not None else 0.0
             threshold = float(max(min_p, 2.0 * deg_cost))
             
@@ -1382,7 +1382,7 @@ class StrategyEngine:
                         res["charge_reason"] = "none"
                         pool = [] # Empty pool to clear attributes
                     
-                    # User-defined Ceiling (v11.1.62) - Using existing CONF_TARGET_SOC_BUY
+                    # User-defined Ceiling (v11.1.62) - Using existing CONF_AI_CHARGE_LIMIT
                     # Skip check if price is negative as requested by USER
                     if target_soc > base_target and not negative_hours:
                         target_soc = base_target
@@ -1715,7 +1715,7 @@ class StrategyEngine:
                     power_needed = float(max(0.0, power_peak))
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # User-defined Floor (v11.1.62) - Using existing CONF_TARGET_SOC_SELL
+                        # User-defined Floor (v11.1.62) - Using existing CONF_AI_DISCHARGE_LIMIT
                         if target_soc < base_target:
                             target_soc = base_target
                             res["note"] = f"Цель ограничена пользователем (Target SOC Sell: {base_target}%)"

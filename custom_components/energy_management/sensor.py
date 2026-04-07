@@ -35,8 +35,8 @@ from .const import (
     CONF_PRICE_BUY,
     CONF_PRICE_SELL,
     CONF_MIN_SOC_BUY,
-    CONF_TARGET_SOC_BUY,
-    CONF_TARGET_SOC_SELL,
+    CONF_AI_CHARGE_LIMIT,
+    CONF_AI_DISCHARGE_LIMIT,
     CONF_BATTERY_MAX_POWER,
     CONF_ACTIVE_SENSOR,
     CONF_TOTAL_SYSTEM_COST,
@@ -44,7 +44,7 @@ from .const import (
     CONF_INVERTER_LOSSES_SENSOR,
     CONF_PRICE_BUY_LIMIT,
     CONF_PRICE_SELL_LIMIT,
-    CONF_ARBITRAGE_MIN_PROFIT,
+    CONF_ARBITRAGE_PROFIT_THRESHOLD,
     CONF_BATTERY_RATED_CYCLES,
     CONF_ANOMALY_THRESHOLD,
     CONF_POWER_SENSOR,
@@ -2707,8 +2707,8 @@ class InverterOperationModeSensor(SensorEntity):
         buy_p_cur = self.manager.get_price("buy", today_str, now_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
         
-        target_soc_sell = self.manager.get_setting(CONF_TARGET_SOC_SELL, 100.0)
-        target_soc_buy = self.manager.get_setting(CONF_TARGET_SOC_BUY, 100.0)
+        target_soc_sell = self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 100.0)
+        target_soc_buy = self.manager.get_setting(CONF_AI_CHARGE_LIMIT, 100.0)
         
         active_target = target_soc_sell
         if is_neg_buy:
@@ -3609,7 +3609,7 @@ class BatteryDegradationSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         cost_per_kwh = self.manager.get_battery_degradation_cost()
-        min_p = self.manager.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.0)
+        min_p = self.manager.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.0)
         threshold = min_p if min_p >= cost_per_kwh else (2 * cost_per_kwh)
 
         batt_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
