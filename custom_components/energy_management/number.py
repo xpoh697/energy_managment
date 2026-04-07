@@ -24,19 +24,19 @@ async def async_setup_entry(hass, entry, async_add_entities):
     manager = hass.data[DOMAIN][entry.entry_id]
     
     entities = [
-        EnergyProfileNumber(manager, CONF_PRICE_BUY_LIMIT, "Buy Price Limit", None, -99.0, 999.0, 0.001, "mdi:cash-minus", 99.0),
-        EnergyProfileNumber(manager, CONF_PRICE_SELL_LIMIT, "Sell Price Limit", None, -99.0, 999.0, 0.001, "mdi:cash-plus", -99.0),
-        EnergyProfileNumber(manager, CONF_ARBITRAGE_PROFIT_THRESHOLD, "Arbitrage Profit Threshold", None, 0.0, 999.0, 0.05, "mdi:hand-coin", 0.1),
-        EnergyProfileNumber(manager, CONF_PRICE_STOP_SELL, "Stop Sell Threshold", None, -99.0, 999.0, 0.001, "mdi:cash-remove", 0.0),
-        EnergyProfileNumber(manager, CONF_PRICE_SELL_ONLY_PV, "Sell PV Only (Block Bat/Loads)", None, -99.0, 999.0, 0.001, "mdi:weather-sunny", 1.5),
-        EnergyProfileNumber(manager, CONF_PRICE_TOLERANCE, "Buy Price Tolerance", None, 0.0, 999.0, 0.001, "mdi:tune", 0.0),
-        EnergyProfileNumber(manager, CONF_PRICE_SELL_TOLERANCE, "Sell Price Tolerance", None, 0.0, 999.0, 0.001, "mdi:tune", 0.0),
-        EnergyProfileNumber(manager, CONF_BATTERY_MAX_POWER, "Battery Max Power", UnitOfPower.KILO_WATT, 0.0, 100.0, 0.1, "mdi:flash", 5.0),
-        EnergyProfileNumber(manager, CONF_AI_CHARGE_LIMIT, "AI Charge Limit SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up", 100.0),
-        EnergyProfileNumber(manager, CONF_AI_DISCHARGE_LIMIT, "AI Discharge Limit SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
-        EnergyProfileNumber(manager, CONF_MIN_SOC_BUY, "Minimum SOC Level", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
-        EnergyProfileNumber(manager, CONF_SOC_BUFFER, "Morning SOC Buffer", PERCENTAGE, 0.0, 50.0, 1.0, "mdi:battery-plus", 15.0),
-        EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Max Hour for Sell PV Only", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
+        EnergyProfileNumber(manager, CONF_PRICE_BUY_LIMIT, "Лимит цены покупки", None, -99.0, 999.0, 0.001, "mdi:cash-minus", 99.0),
+        EnergyProfileNumber(manager, CONF_PRICE_SELL_LIMIT, "Лимит цены продажи", None, -99.0, 999.0, 0.001, "mdi:cash-plus", -99.0),
+        EnergyProfileNumber(manager, CONF_ARBITRAGE_PROFIT_THRESHOLD, "Минимальная прибыль арбитража", None, 0.0, 999.0, 0.05, "mdi:hand-coin", 0.1),
+        EnergyProfileNumber(manager, CONF_PRICE_STOP_SELL, "Порог остановки продажи", None, -99.0, 999.0, 0.001, "mdi:cash-remove", 0.0),
+        EnergyProfileNumber(manager, CONF_PRICE_SELL_ONLY_PV, "Лимит продажи только PV", None, -99.0, 999.0, 0.001, "mdi:weather-sunny", 1.5),
+        EnergyProfileNumber(manager, CONF_PRICE_TOLERANCE, "Допуск цены покупки", None, 0.0, 999.0, 0.001, "mdi:tune", 0.0),
+        EnergyProfileNumber(manager, CONF_PRICE_SELL_TOLERANCE, "Допуск цены продажи", None, 0.0, 999.0, 0.001, "mdi:tune", 0.0),
+        EnergyProfileNumber(manager, CONF_BATTERY_MAX_POWER, "Макс. мощность АКБ (кВт)", UnitOfPower.KILO_WATT, 0.0, 100.0, 0.1, "mdi:flash", 5.0),
+        EnergyProfileNumber(manager, CONF_AI_CHARGE_LIMIT, "Лимит заряда (Max SOC)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up", 100.0),
+        EnergyProfileNumber(manager, CONF_AI_DISCHARGE_LIMIT, "Лимит разряда (Min SOC)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
+        EnergyProfileNumber(manager, CONF_MIN_SOC_BUY, "Минимальный уровень SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
+        EnergyProfileNumber(manager, CONF_SOC_BUFFER, "Буфер SOC на утро (%)", PERCENTAGE, 0.0, 50.0, 1.0, "mdi:battery-plus", 15.0),
+        EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Макс. час для продажи только PV", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
     ]
     
     async_add_entities(entities)
@@ -54,7 +54,7 @@ class EnergyProfileNumber(NumberEntity):
         device_name = manager.entry.data.get("name", "Energy Management")
         self._attr_name = f"{device_name} {name}"
         
-        self._attr_unique_id = f"{manager.entry.entry_id}_{key}"
+        self._attr_unique_id = f"{manager.entry.entry_id}_{key}_v2"
         # Set entity_id to DOMAIN + key to ensure descriptive IDs in Home Assistant
         self.entity_id = f"number.{DOMAIN}_{key}"
         
