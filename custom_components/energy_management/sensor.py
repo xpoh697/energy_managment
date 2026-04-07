@@ -2210,8 +2210,10 @@ class EnergyProfileManager:
             return
 
         avg_batt = sum(batt_samples) / len(relevant_history)
-        if avg_batt < -0.05: # At least 50W charge observed
-            charge_power_limit = abs(avg_batt)
+        if avg_batt < -0.05: # At least 50W average charge observed
+            # v11.1.96 - Use MAX charge power (most negative value), not average.
+            # BMS limit is a ceiling — we want the highest power the battery accepted.
+            charge_power_limit = abs(min(batt_samples))
             soc, _, _ = self.get_battery_state()
             soc_int = int(round_f(float(soc or 0.0), 0))
             
