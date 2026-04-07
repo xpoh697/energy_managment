@@ -2182,27 +2182,23 @@ class EnergyProfileManager:
     def _update_bms_learned_profile(self, now):
         """Analyze stable power history to learn BMS charging limits.
         v11.1.96 - Corrected logic:
-        1. Mode must be 'sale_pv' ONLY. In stop_sale the inverter throttles panels,
-           so observed charge power is NOT the real BMS limit.
-        2. Must have real EXPORT to grid (avg 5 min > 0.5kW) - this proves the battery
-           is REFUSING additional power, not just getting all that's available.
-        3. Update profile while enforcing monotonicity (P(S1) >= P(S2) if S1 < S2).
+        1. sale_pv: Full learning (up + down). Requires export > 0.5kW as proof.
+        2. buy: Upward-only learning. Grid = unlimited source, so if battery takes
+           MORE than profile says, the profile was wrong. No downward updates
+           (inverter may intentionally limit charge current).
+        3. Monotonicity enforced after every update.
         """
         # Condition 0: Stability - need at least 5 samples (5 minutes)
         if len(self.power_history) < 5: return
         
-        # Condition 1: Only learn in sale_pv (free solar export, no throttling)
-        if self.current_inverter_mode != "sale_pv":
+        mode = self.current_inverter_mode
+        # Only learn in sale_pv or buy
+        if mode not in ("sale_pv", "buy"):
             return 
 
         hist_list = list(self.power_history)
         relevant_history = hist_list[-5:]
 
-        # Condition 2: Must have real export to grid — proof that surplus exists
-        avg_export = sum(float(x.get("grid_kw", 0.0)) for x in relevant_history) / len(relevant_history)
-        if avg_export < 0.5:  # Less than 500W export = not enough proof of BMS limit
-            return
-        
         # Stability check: ensure power doesn't jump too much in the window (max 150W variance)
         batt_samples = [float(x.get("batt_kw") or 0.0) for x in relevant_history]
         power_spread = max(batt_samples) - min(batt_samples)
@@ -2211,8 +2207,7 @@ class EnergyProfileManager:
 
         avg_batt = sum(batt_samples) / len(relevant_history)
         if avg_batt < -0.05: # At least 50W average charge observed
-            # v11.1.96 - Use MAX charge power (most negative value), not average.
-            # BMS limit is a ceiling — we want the highest power the battery accepted.
+            # Use MAX charge power (most negative value), not average.
             charge_power_limit = abs(min(batt_samples))
             soc, _, _ = self.get_battery_state()
             soc_int = int(round_f(float(soc or 0.0), 0))
@@ -2220,29 +2215,38 @@ class EnergyProfileManager:
             max_batt_p = float(self.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             old_val = self.bms_learned_profile.get(soc_int, max_batt_p)
             
-            # v11.1.96 - Symmetric learning with export guard:
-            # Both UP and DOWN require export surplus (already checked above).
-            # UP: immediate update (old limit was too low)
-            # DOWN: smoothed update (BMS curve is stable, avoid noise)
             do_update = False
-            if charge_power_limit > old_val + 0.05:
-                new_val = charge_power_limit
-                do_update = True
-            elif charge_power_limit < old_val - 0.05:
-                # Smooth jump down
-                new_val = (old_val * 3 + charge_power_limit) / 4.0
-                do_update = True
+            new_val = old_val
+
+            if mode == "sale_pv":
+                # Full learning: need export proof
+                avg_export = sum(float(x.get("grid_kw", 0.0)) for x in relevant_history) / len(relevant_history)
+                if avg_export < 0.5:
+                    return  # Not enough surplus to trust as BMS limit
+                
+                if charge_power_limit > old_val + 0.05:
+                    new_val = charge_power_limit
+                    do_update = True
+                elif charge_power_limit < old_val - 0.05:
+                    new_val = (old_val * 3 + charge_power_limit) / 4.0
+                    do_update = True
+
+            elif mode == "buy":
+                # Grid = unlimited source. Only update UPWARD.
+                if charge_power_limit > old_val + 0.05:
+                    new_val = charge_power_limit
+                    do_update = True
                 
             if do_update:
                 self.bms_learned_profile[soc_int] = round_f(new_val, 3)
                 
                 # --- Monotonicity Enforcement ---
-                # 1. Downward pass: SOC < current must have AT LEAST this power
+                # Downward pass: SOC < current must have AT LEAST this power
                 for s in range(soc_int - 1, -1, -1):
                     if s in self.bms_learned_profile and self.bms_learned_profile[s] < new_val:
                         self.bms_learned_profile[s] = new_val
                 
-                # 3. Upward pass: SOC > current must have AT MOST this power
+                # Upward pass: SOC > current must have AT MOST this power
                 for s in range(soc_int + 1, 101):
                     if s in self.bms_learned_profile and self.bms_learned_profile[s] > new_val:
                         self.bms_learned_profile[s] = new_val
