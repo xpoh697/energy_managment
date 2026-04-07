@@ -854,34 +854,40 @@ class EnergyProfileManager:
                     # v11.1.87 - Fail-safe Financial Block
                     try:
                         # v11.1.84 - Net Economic Profit (Wallet/Saldo)
-                        # Avoided Cost calculation
-                        avoided_cost = (s_to_l + b_to_l) * (p_buy or 0.0)
+                        # v11.1.90 - Tailored Economic Logic
+                        # 1. Solar to House (Avoided Cost of purchase)
+                        solar_benefit = (s_to_l) * (p_buy or 0.0)
                         
-                        # Real money flow
+                        # 2. Battery to House (Opportunity Cost of selling)
+                        battery_benefit = (b_to_l) * (p_sell or 0.0)
+                        
+                        # 3. Real Grid flow (Meter based profit/loss)
                         grid_revenue = record_grid_exp * (p_sell or 0.0)
                         grid_cost = record_grid_imp * (p_buy or 0.0)
                         
-                        # Degradation
-                        deg_price = float(self.manager.get_battery_degradation_cost() or 0.0)
-                        battery_wear_cost = abs(batt_p) * deg_price
+                        # 4. Amortization (Real resource cost)
+                        deg_each_kwh = float(self.manager.get_battery_degradation_cost() or 0.0)
+                        battery_wear_total = abs(batt_p) * deg_each_kwh
                         
-                        # 11.1.88 - Time Guard Expansion (up to 24h)
+                        # Calculate final step profit/loss
+                        # Formula: (Solar_Benefit) + (Battery_Benefit) + (Export_Profit) - (Import_Cost) - (Wear)
                         if 0 < dt_h < 24.0:
-                            step_delta = (grid_revenue + avoided_cost - grid_cost - battery_wear_cost) * dt_h
+                            step_delta = (solar_benefit + battery_benefit + grid_revenue - grid_cost - battery_wear_total) * dt_h
                             
-                            # Update wallet
+                            # Apply to wallet
                             current_bal = self.data.get("energy_balance", 0.0)
                             self.data["energy_balance"] = round_f(current_bal + step_delta, 6)
                         else:
                             step_delta = 0.0
-                        
                         # Store diagnostic snapshot
                         self.data["wallet_debug"] = {
                             "p_buy": p_buy, "p_sell": p_sell,
                             "grid_imp": round_f(record_grid_imp, 3), 
                             "grid_exp": round_f(record_grid_exp, 3),
                             "dt_h": dt_h, "step": step_delta,
-                            "avoided": avoided_cost, "wear": battery_wear_cost
+                            "solar_gain": round_f(solar_benefit * dt_h, 4),
+                            "battery_gain": round_f(battery_benefit * dt_h, 4),
+                            "wear_cost": round_f(battery_wear_total * dt_h, 4)
                         }
                     except Exception as e:
                         _LOGGER.error("Energy Management: Wallet calculation error: %s", e)
