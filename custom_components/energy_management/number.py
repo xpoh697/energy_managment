@@ -14,6 +14,8 @@ from .const import (
     CONF_TARGET_SOC_BUY,
     CONF_TARGET_SOC_SELL,
     CONF_MIN_SOC_BUY,
+    CONF_MIN_SOC_SELL,
+    CONF_MAX_SOC_BUY,
     CONF_SALE_PV_NO_BAT_MAX_HOUR,
     CONF_ARBITRAGE_MIN_PROFIT,
     CONF_SOC_BUFFER
@@ -35,6 +37,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EnergyProfileNumber(manager, CONF_TARGET_SOC_BUY, "Target SOC Buy", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up", 100.0),
         EnergyProfileNumber(manager, CONF_TARGET_SOC_SELL, "Target SOC Sell", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
         EnergyProfileNumber(manager, CONF_MIN_SOC_BUY, "Minimum SOC Level", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
+        EnergyProfileNumber(manager, CONF_MIN_SOC_SELL, "Minimum SOC Sell (AI Floor)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down-outline", 20.0),
+        EnergyProfileNumber(manager, CONF_MAX_SOC_BUY, "Maximum SOC Buy (AI Ceiling)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up-outline", 100.0),
         EnergyProfileNumber(manager, CONF_SOC_BUFFER, "Morning SOC Buffer", PERCENTAGE, 0.0, 50.0, 1.0, "mdi:battery-plus", 15.0),
         EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Max Hour for Sell PV Only", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
     ]

@@ -26,6 +26,8 @@ CONF_DYNAMIC_SOC_BUY = "dynamic_soc_buy"
 CONF_DYNAMIC_SOC_SELL = "dynamic_soc_sell"
 CONF_DEDUCT_SETTINGS = "deduct_settings"
 CONF_SOC_BUFFER = "soc_buffer"
+CONF_MIN_SOC_SELL = "min_soc_sell"
+CONF_MAX_SOC_BUY = "max_soc_buy"
 
 
 CONF_POWER_LOAD_SENSORS = "power_load_sensors"

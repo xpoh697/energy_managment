@@ -27,6 +27,8 @@ from .const import (
     CONF_DYNAMIC_SOC_BUY,
     CONF_PRIORITY,
     CONF_SOC_BUFFER,
+    CONF_MIN_SOC_SELL,
+    CONF_MAX_SOC_BUY,
     DOMAIN
 )
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
@@ -1382,6 +1384,13 @@ class StrategyEngine:
                         res["charge_reason"] = "none"
                         pool = [] # Empty pool to clear attributes
                     
+                    # User-defined Ceiling (v11.1.62)
+                    max_soc_buy = float(man.get_setting(CONF_MAX_SOC_BUY, 100.0))
+                    # Skip check if price is negative as requested by USER
+                    if target_soc > max_soc_buy and not negative_hours:
+                        target_soc = max_soc_buy
+                        res["note"] = f"Цель ограничена пользователем (Макс. SOC Buy: {max_soc_buy}%)"
+                    
                     target_soc = float(min(100.0, target_soc))
                     sim_soc_plan = b_soc
                     
@@ -1707,6 +1716,11 @@ class StrategyEngine:
                     power_needed = float(max(0.0, power_peak))
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                        # User-defined Floor (v11.1.62)
+                        min_soc_sell = float(man.get_setting(CONF_MIN_SOC_SELL, 20.0))
+                        if target_soc < min_soc_sell:
+                            target_soc = min_soc_sell
+                            res["note"] = f"Цель ограничена пользователем (Мин. SOC Sell: {min_soc_sell}%)"
                         target_soc = float(target_soc)
                     else:
                         target_soc = base_target
