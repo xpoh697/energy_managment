@@ -837,43 +837,49 @@ class EnergyProfileManager:
                     s_to_l = min(gen_kw, load_kw)
 
                     # 2. Battery to Load = energy we didn't buy because of Battery
-                    # (only counts if it covers remaining load)
                     load_rem = max(0.0, load_kw - gen_kw)
                     b_to_l = min(max(0.0, batt_p), load_rem)
 
-                    # 3. Grid to Battery = energy we bought specifically to fill the buffer
-                    p_charge = max(0.0, -batt_p)
-                    s_avail_for_batt = max(0.0, gen_kw - load_kw)
-                    g_to_b = max(0.0, p_charge - s_avail_for_batt)
+                    # v11.1.88 - Restore Grid Flow Logic
+                    if self.grid_power_sensor:
+                        record_grid_exp = max(0.0, grid_p)
+                        record_grid_imp = max(0.0, -grid_p)
+                    else:
+                        # Fallback for derived grid flow
+                        p_charge = max(0.0, -batt_p)
+                        s_avail_for_batt = max(0.0, gen_kw - load_kw)
+                        record_grid_imp = max(0.0, load_kw + p_charge - s_to_l - b_to_l - s_avail_for_batt)
+                        record_grid_exp = max(0.0, gen_kw + batt_p - load_kw)
 
                     # v11.1.87 - Fail-safe Financial Block
                     try:
                         # v11.1.84 - Net Economic Profit (Wallet/Saldo)
-                        # "Сэкономлено или просрано" - The ultimate financial truth.
-                        
-                        # 1. Avoided cost (Savings from PV and Battery self-consumption)
+                        # Avoided Cost calculation
                         avoided_cost = (s_to_l + b_to_l) * (p_buy or 0.0)
                         
-                        # 2. Real grid flow (Meter based)
-                        # These variables are updated inside grid_power_sensor logic above
+                        # Real money flow
                         grid_revenue = record_grid_exp * (p_sell or 0.0)
                         grid_cost = record_grid_imp * (p_buy or 0.0)
                         
-                        # 3. Hidden Costs (Battery Amortization)
+                        # Degradation
                         deg_price = float(self.manager.get_battery_degradation_cost() or 0.0)
                         battery_wear_cost = abs(batt_p) * deg_price
                         
-                        # Total Step Delta in money
-                        step_delta = (grid_revenue + avoided_cost - grid_cost - battery_wear_cost) * dt_h
+                        # 11.1.88 - Time Guard Expansion (up to 24h)
+                        if 0 < dt_h < 24.0:
+                            step_delta = (grid_revenue + avoided_cost - grid_cost - battery_wear_cost) * dt_h
+                            
+                            # Update wallet
+                            current_bal = self.data.get("energy_balance", 0.0)
+                            self.data["energy_balance"] = round_f(current_bal + step_delta, 6)
+                        else:
+                            step_delta = 0.0
                         
-                        # 4. Update wallet
-                        current_bal = self.data.get("energy_balance", 0.0)
-                        self.data["energy_balance"] = round_f(current_bal + step_delta, 6)
-                        
-                        # 5. Store diagnostic snapshot
+                        # Store diagnostic snapshot
                         self.data["wallet_debug"] = {
                             "p_buy": p_buy, "p_sell": p_sell,
-                            "grid_imp": record_grid_imp, "grid_exp": record_grid_exp,
+                            "grid_imp": round_f(record_grid_imp, 3), 
+                            "grid_exp": round_f(record_grid_exp, 3),
                             "dt_h": dt_h, "step": step_delta,
                             "avoided": avoided_cost, "wear": battery_wear_cost
                         }
