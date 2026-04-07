@@ -2181,23 +2181,27 @@ class EnergyProfileManager:
 
     def _update_bms_learned_profile(self, now):
         """Analyze stable power history to learn BMS charging limits.
-        Following USER logic:
-        1. Mode must be 'sale_pv' (exporting) or 'stop_sale' (curtailing).
-        2. Must have stable EXPORT/SURPLUS to grid (avg 5 min > 500W) -> Battery is refusing power.
+        v11.1.96 - Corrected logic:
+        1. Mode must be 'sale_pv' ONLY. In stop_sale the inverter throttles panels,
+           so observed charge power is NOT the real BMS limit.
+        2. Must have real EXPORT to grid (avg 5 min > 0.5kW) - this proves the battery
+           is REFUSING additional power, not just getting all that's available.
         3. Update profile while enforcing monotonicity (P(S1) >= P(S2) if S1 < S2).
         """
         # Condition 0: Stability - need at least 5 samples (5 minutes)
         if len(self.power_history) < 5: return
         
-        # Condition 1: Only learn during solar priority modes
-        if self.current_inverter_mode not in ("sale_pv", "stop_sale"):
+        # Condition 1: Only learn in sale_pv (free solar export, no throttling)
+        if self.current_inverter_mode != "sale_pv":
             return 
 
         hist_list = list(self.power_history)
         relevant_history = hist_list[-5:]
 
-        # Condition 2: Average real export to grid (Sufficient surplus needed)
+        # Condition 2: Must have real export to grid — proof that surplus exists
         avg_export = sum(float(x.get("grid_kw", 0.0)) for x in relevant_history) / len(relevant_history)
+        if avg_export < 0.5:  # Less than 500W export = not enough proof of BMS limit
+            return
         
         # Stability check: ensure power doesn't jump too much in the window (max 150W variance)
         batt_samples = [float(x.get("batt_kw") or 0.0) for x in relevant_history]
@@ -2214,21 +2218,18 @@ class EnergyProfileManager:
             max_batt_p = float(self.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             old_val = self.bms_learned_profile.get(soc_int, max_batt_p)
             
-            # v11.1.11 - Asymmetric Learning:
-            # 1. Trust higher power immediately (clears solar-limited trash)
-            # 2. Skeptical for lower power: need high surplus (1kW for CC, 0.5kW for CV) to trust as limit.
+            # v11.1.96 - Symmetric learning with export guard:
+            # Both UP and DOWN require export surplus (already checked above).
+            # UP: immediate update (old limit was too low)
+            # DOWN: smoothed update (BMS curve is stable, avoid noise)
             do_update = False
             if charge_power_limit > old_val + 0.05:
-                # If we see HIGHER power, the previous limit was definitely too low (likely non-BMS limited)
                 new_val = charge_power_limit
                 do_update = True
             elif charge_power_limit < old_val - 0.05:
-                # To trust a LOWER value as a REAL BMS limit, we need significant surplus elsewhere
-                surplus_threshold = 0.5 if soc_int >= 95 else 1.0
-                if avg_export > surplus_threshold:
-                    # Smooth jump down (BMS curve is usually stable)
-                    new_val = (old_val * 3 + charge_power_limit) / 4.0
-                    do_update = True
+                # Smooth jump down
+                new_val = (old_val * 3 + charge_power_limit) / 4.0
+                do_update = True
                 
             if do_update:
                 self.bms_learned_profile[soc_int] = round_f(new_val, 3)
