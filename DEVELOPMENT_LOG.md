@@ -66,11 +66,12 @@
     - `Buy`: Используется упрощенный расчет (Raw Battery Gap), так как инвертор сам управляет приоритетами тока при зарядке.
     - `Sell`: Используется полный учет (КПД + Нагрузки), чтобы гарантированно не пробить лимит SOC при разряде.
 - **v11.1.82 - Refactoring:** `min_soc_buy` переименован в `emergency_soc_limit` (Аварийный порог SOC) для соответствия смыслу.
-- **v11.1.90 - Refined Financial Model:**
+- **v11.1.92 - Final Economic Model (Avoided Cost):**
     - **Solar to House:** Valued at `p_buy` (Avoided Grid Purchase Cost).
-    - **Battery to House:** Valued at `p_sell` (Opportunity Cost of not selling to grid).
+    - **Battery to House:** Valued at `p_buy` (Avoided Grid Purchase Cost).
+    - **Grid Export (Any source):** Valued at `p_sell` (Revenue).
     - **Battery Wear:** Continuously deducted using `get_battery_degradation_cost()`.
-    - **Diagnostics:** `wallet_debug` now separates `solar_gain` and `battery_gain`.
+    - **Diagnostics:** `wallet_debug` provides `self_consume_gain` (combined PV/Bat) and `wear_cost`.
 
 ## 🏗 Особенности управления инвертором
 - **Зарядка (Buy):** Не нужно добавлять потребление дома к команде. Если дому не хватает — он доберет сам. Если есть солнце — инвертор возьмет меньше из сети. Прогноз в UI принудительно ограничивается `target_soc`.
