@@ -1509,7 +1509,7 @@ class StrategyEngine:
 
                         res["buy_simulation"] = {
                             "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
-                            "projected_soc_at_end_pct": float(round_f(soc_at_end, 1)),
+                            "projected_soc_at_end_pct": float(round_f(min(soc_at_end, target_soc), 1)),
                             "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
                             "log": sim_log
                         }
