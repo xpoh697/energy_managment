@@ -852,8 +852,11 @@ class EnergyProfileManager:
                         grid_import_kw = max(0.0, load_kw + p_charge - s_to_l - b_to_l - s_avail_for_batt)
                         grid_export_kw = max(0.0, gen_kw + batt_p - load_kw)
 
-                    # v11.1.26 - Enhanced Grid Flow Calculation
-                    # 1. Primary grid import/export (derived or measured)
+                    # v11.1.84 - Total Economic Value (Wallet/Saldo)
+                    # Now includes "Avoided Cost": money we DIDN'T spend because we used PV/Battery.
+                    # Benefit = (Solar_to_house + Battery_to_house) * p_buy + (Export * p_sell) - (Import * p_buy)
+                    
+                    # 1. Real grid flow (Meter based)
                     record_grid_imp = grid_import_kw
                     record_grid_exp = grid_export_kw
                     
