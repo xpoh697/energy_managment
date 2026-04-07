@@ -851,42 +851,36 @@ class EnergyProfileManager:
                         record_grid_imp = max(0.0, load_kw + p_charge - s_to_l - b_to_l - s_avail_for_batt)
                         record_grid_exp = max(0.0, gen_kw + batt_p - load_kw)
 
-                    # v11.1.87 - Fail-safe Financial Block
+                    # v11.1.91 - Perfected Economic Logic (Avoided Cost Model)
                     try:
-                        # v11.1.84 - Net Economic Profit (Wallet/Saldo)
-                        # v11.1.90 - Tailored Economic Logic
-                        # 1. Solar to House (Avoided Cost of purchase)
-                        solar_benefit = (s_to_l) * (p_buy or 0.0)
+                        # 1. Self-Consumption Gain (PV and Battery used for House)
+                        # All energy used at home is valued at p_buy (money saved)
+                        self_consumption_gain = (s_to_l + b_to_l) * (p_buy or 0.0)
                         
-                        # 2. Battery to House (Opportunity Cost of selling)
-                        battery_benefit = (b_to_l) * (p_sell or 0.0)
-                        
-                        # 3. Real Grid flow (Meter based profit/loss)
+                        # 2. Grid Meter Revenue/Cost (Real Export/Import)
                         grid_revenue = record_grid_exp * (p_sell or 0.0)
                         grid_cost = record_grid_imp * (p_buy or 0.0)
                         
-                        # 4. Amortization (Real resource cost)
+                        # 3. Amortization (Real resource cost)
                         deg_each_kwh = float(self.manager.get_battery_degradation_cost() or 0.0)
                         battery_wear_total = abs(batt_p) * deg_each_kwh
                         
-                        # Calculate final step profit/loss
-                        # Formula: (Solar_Benefit) + (Battery_Benefit) + (Export_Profit) - (Import_Cost) - (Wear)
+                        # Total Step Profit/Loss
                         if 0 < dt_h < 24.0:
-                            step_delta = (solar_benefit + battery_benefit + grid_revenue - grid_cost - battery_wear_total) * dt_h
+                            step_delta = (self_consumption_gain + grid_revenue - grid_cost - battery_wear_total) * dt_h
                             
-                            # Apply to wallet
                             current_bal = self.data.get("energy_balance", 0.0)
                             self.data["energy_balance"] = round_f(current_bal + step_delta, 6)
                         else:
                             step_delta = 0.0
+                        
                         # Store diagnostic snapshot
                         self.data["wallet_debug"] = {
                             "p_buy": p_buy, "p_sell": p_sell,
                             "grid_imp": round_f(record_grid_imp, 3), 
                             "grid_exp": round_f(record_grid_exp, 3),
                             "dt_h": dt_h, "step": step_delta,
-                            "solar_gain": round_f(solar_benefit * dt_h, 4),
-                            "battery_gain": round_f(battery_benefit * dt_h, 4),
+                            "self_consume_gain": round_f(self_consumption_gain * dt_h, 4),
                             "wear_cost": round_f(battery_wear_total * dt_h, 4)
                         }
                     except Exception as e:
@@ -2234,7 +2228,7 @@ class EnergyProfileManager:
                     if s in self.bms_learned_profile and self.bms_learned_profile[s] < new_val:
                         self.bms_learned_profile[s] = new_val
                 
-        # 3. Upward pass: SOC > current must have AT MOST this power
+                # 3. Upward pass: SOC > current must have AT MOST this power
                 for s in range(soc_int + 1, 101):
                     if s in self.bms_learned_profile and self.bms_learned_profile[s] > new_val:
                         self.bms_learned_profile[s] = new_val
