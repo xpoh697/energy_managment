@@ -1358,7 +1358,9 @@ class EnergyProfileManager:
                 batt_to_load = batt_discharged
                 # Portion of charging that came from GRID (not from surplus solar)
                 grid_to_batt = max(0.0, batt_charged - max(0.0, gen_h - cons_h))
-                p_buy_eff = max(0.0, p_buy or 0.0)
+                # v11.1.95 - Use raw p_buy (no floor) to match wallet Avoided Cost model
+                # Negative prices: self-consumption = loss, grid import = gain
+                p_buy_eff = float(p_buy or 0.0)
 
                 # Total profit = Solar Savings + Battery Savings + Sales - Grid Charge Cost
                 total_profit_h = (solar_self * p_buy_eff) + (batt_to_load * p_buy_eff) + (h_sell_kwh * (p_sell or 0.0)) - (grid_to_batt * (p_buy or 0.0))
