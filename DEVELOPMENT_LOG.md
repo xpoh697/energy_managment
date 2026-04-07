@@ -72,6 +72,7 @@
     - **Grid Export (Any source):** Valued at `p_sell` (Revenue).
     - **Battery Wear:** Continuously deducted using `get_battery_degradation_cost()`.
     - **Diagnostics:** `wallet_debug` provides `self_consume_gain` (combined PV/Bat) and `wear_cost`.
+    - **Negative Prices:** If `p_buy` < 0, self-consumption is recorded as a **loss** (opportunity cost), and grid import as a **gain** (direct profit).
 
 ## 🏗 Особенности управления инвертором
 - **Зарядка (Buy):** Не нужно добавлять потребление дома к команде. Если дому не хватает — он доберет сам. Если есть солнце — инвертор возьмет меньше из сети. Прогноз в UI принудительно ограничивается `target_soc`.
