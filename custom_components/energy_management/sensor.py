@@ -832,7 +832,7 @@ class EnergyProfileManager:
             now_ts = now.timestamp()
             if last_run:
                 dt_h = (now_ts - last_run) / 3600.0
-                if 0 < dt_h < 0.2: # Guard against huge leaps
+                if 0 < dt_h < 24.0: # Removed 0.2 guard to allow instant recovery
                     # 1. Solar to Load = energy we didn't buy because of PV
                     s_to_l = min(gen_kw, load_kw)
 
@@ -890,7 +890,8 @@ class EnergyProfileManager:
                     if is_neg_price and step_delta > 0:
                         _LOGGER.debug("Energy Management Wallet: Growing by %s PLN (Import %s kW at %s PLN/kWh)", round_f(step_delta, 4), record_grid_imp, p_buy)
 
-            self.data["last_balance_poll_time"] = now_ts
+                # v11.1.93 - Always update anchor even if calculation was skipped (kickstart)
+                self.data["last_balance_poll_time"] = now_ts
 
         # Prune older than 10 minutes
         cutoff = now - timedelta(minutes=10)
