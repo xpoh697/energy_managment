@@ -2364,6 +2364,7 @@ class BMSLearnedProfileSensor(SensorEntity):
         self.manager = manager
         self._attr_translation_key = "bms_learned_profile"
         self._attr_unique_id = f"{manager.entry.entry_id}_bms_learned_profile"
+        self.entity_id = f"sensor.{DOMAIN}_bms_learned_profile"
         self._attr_icon = "mdi:battery-charging-high"
         
         self._attr_device_info = DeviceInfo(
