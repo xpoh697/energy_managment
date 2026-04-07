@@ -2219,23 +2219,15 @@ class EnergyProfileManager:
             new_val = old_val
 
             if mode == "sale_pv":
-                # Full learning: need export proof
+                # Need export proof that battery is refusing power
                 avg_export = sum(float(x.get("grid_kw", 0.0)) for x in relevant_history) / len(relevant_history)
                 if avg_export < 0.5:
-                    return  # Not enough surplus to trust as BMS limit
-                
-                if charge_power_limit > old_val + 0.05:
-                    new_val = charge_power_limit
-                    do_update = True
-                elif charge_power_limit < old_val - 0.05:
-                    new_val = (old_val * 3 + charge_power_limit) / 4.0
-                    do_update = True
+                    return
 
-            elif mode == "buy":
-                # Grid = unlimited source. Only update UPWARD.
-                if charge_power_limit > old_val + 0.05:
-                    new_val = charge_power_limit
-                    do_update = True
+            # High Water Mark: only update UPWARD
+            if charge_power_limit > old_val + 0.05:
+                new_val = charge_power_limit
+                do_update = True
                 
             if do_update:
                 self.bms_learned_profile[soc_int] = round_f(new_val, 3)
