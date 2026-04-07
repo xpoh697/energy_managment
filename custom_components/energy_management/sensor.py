@@ -2700,21 +2700,24 @@ class InverterOperationModeSensor(SensorEntity):
             if h > now_h:
                 peak_start_hour = h
                 break
-
+        
         bms_debug = {"status": "Ожидание" if not is_forecast else "Прогноз"}
         
         # v11.1.61: Differentiate target by current strategic mode for diagnostics
         buy_p_cur = self.manager.get_price("buy", today_str, now_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
+        # Target SOC Logic for diagnostics
+        ai_discharge_limit = self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 100.0)
+        ai_charge_limit = self.manager.get_setting(CONF_AI_CHARGE_LIMIT, 100.0)
         
-        target_soc_sell = self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 100.0)
-        target_soc_buy = self.manager.get_setting(CONF_AI_CHARGE_LIMIT, 100.0)
-        
-        active_target = target_soc_sell
+        active_target = ai_discharge_limit
         if is_neg_buy:
-            active_target = 100.0
-        elif is_buying_active:
-            active_target = target_soc_buy
+            active_target = ai_charge_limit
+        
+        # Determine if we are in "Buy" strategic mode
+        is_buying_active = buy_strategy.get("active", False)
+        if is_buying_active:
+            active_target = ai_charge_limit
 
         # Skip complex peak simulation during 24h forecast to save CPU
         if not is_forecast and batt_cap > 0:
@@ -2726,13 +2729,13 @@ class InverterOperationModeSensor(SensorEntity):
                 sim_soc, sim_log, _ = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now)
                 
                 ever_fully_charged = any(
-                    (val.get("soc", 0.0) if isinstance(val, dict) else val) >= (target_soc_sell - 0.5) 
+                    (val.get("soc", 0.0) if isinstance(val, dict) else val) >= (ai_discharge_limit - 0.5) 
                     for val in sim_log.values()
                 )
                 total_needed = 0
                 for i, val in enumerate(sim_log.values()):
                     val_soc = val.get("soc", 0.0) if isinstance(val, dict) else val
-                    if val_soc >= (target_soc_sell - 0.5):
+                    if val_soc >= (ai_discharge_limit - 0.5):
                         total_needed = i + 1
                         break
                 

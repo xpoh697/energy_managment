@@ -14,13 +14,11 @@
           "forecast_today_remaining": "Forecast Remaining Today",
           "forecast_today_hourly": "Forecast Today (Hourly Distribution)",
           "forecast_tomorrow": "Forecast Tomorrow",
-          "battery_soc": "Battery SOC (%)",
-          "battery_capacity": "Battery Capacity",
-          "price_buy": "Tariff: Grid Buying Price",
-          "price_sell": "Tariff: Grid Selling Price",
-          "custom_period": "Custom Calculation Period (Days)",
-          "presence_sensors": "Presence Sensors (person.* / binary_sensor.* / zone.home)",
-          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
+          "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
+          "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)",
+          "ai_charge_limit_soc": "Charge Limit (Max SOC)",
+          "ai_discharge_limit_soc": "Discharge Limit (Min SOC)",
+          "grid_power": "Real-time Grid Power (signed: + import, - export)",
           "battery_voltage": "Battery Voltage Sensor (Volts)"
         }
       },
@@ -41,7 +39,8 @@
           "total_system_cost": "Total System Cost",
           "battery_cost": "Total Battery Cost",
           "battery_rated_cycles": "Battery Rated Cycles",
-          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)"
+          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)",
+          "arbitrage_profit_threshold": "Min. Profit Margin for Arbitrage (Price Diff)"
         }
       }
     },
@@ -66,13 +65,11 @@
           "forecast_today_remaining": "Forecast Remaining Today",
           "forecast_today_hourly": "Forecast Today (Hourly Distribution)",
           "forecast_tomorrow": "Forecast Tomorrow",
-          "battery_soc": "Battery SOC (%)",
-          "battery_capacity": "Battery Capacity",
-          "price_buy": "Tariff: Grid Buying Price",
-          "price_sell": "Tariff: Grid Selling Price",
-          "custom_period": "Custom Calculation Period (Days)",
-          "presence_sensors": "Presence Sensors (person.* / binary_sensor.* / zone.home)",
-          "inverter_losses_sensor": "Inverter Losses Sensor (daily kWh counter, optional)",
+          "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
+          "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)",
+          "ai_charge_limit_soc": "Charge Limit (Max SOC)",
+          "ai_discharge_limit_soc": "Discharge Limit (Min SOC)",
+          "grid_power": "Real-time Grid Power (signed: + import, - export)",
           "battery_voltage": "Battery Voltage Sensor (Volts)"
         }
       },
@@ -94,7 +91,8 @@
           "total_system_cost": "Total System Cost",
           "battery_cost": "Total Battery Cost",
           "battery_rated_cycles": "Battery Rated Cycles",
-          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)"
+          "anomaly_threshold": "Anomaly Trigger Threshold (Multiplier)",
+          "arbitrage_profit_threshold": "Min. Profit Margin for Arbitrage (Price Diff)"
         }
       }
     }
