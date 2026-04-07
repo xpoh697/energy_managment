@@ -2378,8 +2378,10 @@ class BMSLearnedProfileSensor(SensorEntity):
     _attr_has_entity_name = True
     def __init__(self, manager):
         self.manager = manager
+        # v11.1.89 - Forced unique_id change to clear HA registry cache
+        self._attr_name = "Обученный профиль заряда BMS"
         self._attr_translation_key = "bms_learned_profile"
-        self._attr_unique_id = f"{manager.entry.entry_id}_bms_learned_profile"
+        self._attr_unique_id = f"{manager.entry.entry_id}_bms_profile_v2"
         self.entity_id = f"sensor.{DOMAIN}_bms_learned_profile"
         self._attr_icon = "mdi:battery-charging-high"
         
