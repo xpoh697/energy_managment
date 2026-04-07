@@ -869,7 +869,7 @@ class EnergyProfileManager:
                         grid_cost = record_grid_imp * (p_buy or 0.0)
                         
                         # 3. Amortization (Real resource cost)
-                        deg_each_kwh = float(self.manager.get_battery_degradation_cost() or 0.0)
+                        deg_each_kwh = float(self.get_battery_degradation_cost() or 0.0)
                         battery_wear_total = abs(batt_p) * deg_each_kwh
                         
                         # Total Step Profit/Loss
