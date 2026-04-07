@@ -1757,11 +1757,32 @@ class StrategyEngine:
                     sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     
-                    # Use the actual calculated power_needed for the simulation
-                    sim_commands = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
+                    # --- DRAFT SIMULATION (v11.1.81) ---
+                    # We run a draft simulation to see if the power_needed will over-discharge the battery
+                    # below the user limit (base_target) accounting for real projected loads.
+                    sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
+                    sim_range = list(range(cur_hour, sim_end_h))
+                    draft_cmds = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
                     
-                    # v7.8.7 - Only include buy-back in the simulation if it's actually profitable 
-                    # and planned. Otherwise we "hallucinate" energy in the morning SOC.
+                    _, draft_log, _ = self.run_soc_simulation(b_soc, sim_range, now, draft_cmds)
+                    
+                    # Check SOC at end of sale in draft
+                    last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
+                    if last_h_sell is not None:
+                        key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
+                        soc_after_draft = self._get_soc_from_log(draft_log, key_after, b_soc)
+                        
+                        # Corrective Step: If draft goes below target, reduce power needed
+                        if soc_after_draft < (base_target - 0.1):
+                            deficit_soc_pct = base_target - soc_after_draft
+                            # Reduction in DC energy required to stay above floor
+                            reduction_kwh = (deficit_soc_pct * b_cap / 100.0)
+                            # Reduce hourly power (AC equivalent)
+                            power_reduction = (reduction_kwh * eff) / (len(upcoming) or 1)
+                            power_needed = float(max(0.0, power_needed - power_reduction))
+                    
+                    # --- FINAL SIMULATION ---
+                    sim_commands = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
                     if best_buy_h is not None and best_buy_h < sim_end_h:
                         pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
                         diff_threshold = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.1))
@@ -1780,7 +1801,6 @@ class StrategyEngine:
                         soc_at_start = b_soc
                         
                     # 2. Projected SOC AFTER the last peak
-                    last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
                     if last_h_sell is not None:
                         key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
                         soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
