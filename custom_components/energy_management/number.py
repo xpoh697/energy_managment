@@ -49,6 +49,8 @@ class EnergyProfileNumber(NumberEntity):
         self.manager = manager
         self.key = key
         self._attr_translation_key = key
+        # Fallback name if translations aren't loaded or HA caches device name
+        self._attr_name = name
         self._attr_unique_id = f"{manager.entry.entry_id}_{key}"
         # Set entity_id to DOMAIN + key to ensure descriptive IDs in Home Assistant
         self.entity_id = f"number.{DOMAIN}_{key}"

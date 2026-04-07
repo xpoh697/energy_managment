@@ -509,6 +509,15 @@ class EnergyProfileManager:
                         self.data[ptype][h_key] = clean_list
 
         self.settings = self.data.get("settings", {})
+        
+        # Migrate legacy settings for AI SOC limits and arbitrage
+        if "target_soc_buy" in self.settings:
+            self.settings[CONF_AI_CHARGE_LIMIT] = self.settings.pop("target_soc_buy")
+        if "target_soc_sell" in self.settings:
+            self.settings[CONF_AI_DISCHARGE_LIMIT] = self.settings.pop("target_soc_sell")
+        if "arbitrage_min_profit" in self.settings:
+            self.settings[CONF_ARBITRAGE_PROFIT_THRESHOLD] = self.settings.pop("arbitrage_min_profit")
+            
         self.learned_standby_power = self.data.get("learned_standby_power", {})
         self.learned_real_power = self.data.get("learned_real_power", {})
         self.learned_avg_cycle_power = self.data.get("learned_avg_cycle_power", {})
