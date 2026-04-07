@@ -146,10 +146,11 @@ class StrategyEngine:
         
         return natural_morning_soc
 
-    def _calculate_sunrise_surplus(self, natural_morning_soc, min_soc, buffer_soc, batt_cap, eff):
-        """Strictly calculates surplus above the safety mark (e.g. 28%)."""
-        target_morning_soc = float(min_soc + buffer_soc)
-        extra_soc_pct = max(0.0, natural_morning_soc - target_morning_soc)
+    def _calculate_sunrise_surplus(self, natural_morning_soc, min_soc, buffer_soc, batt_cap, eff, user_soc_limit=0.0):
+        """Strictly calculates surplus above the highest floor (safety mark or user limit)."""
+        # v11.1.77: Respect the highest floor (Morning safety vs User defined min SOC)
+        target_mark = float(max(min_soc + buffer_soc, user_soc_limit))
+        extra_soc_pct = max(0.0, natural_morning_soc - target_mark)
         return float((extra_soc_pct * batt_cap / 100.0) * eff)
 
     def _calc_immediate_safety_floor(self, min_soc, active_buffer, total_cons_to_sunrise, base_deficit_tomorrow, total_solar_to_sunrise, batt_cap, eff):
@@ -1636,7 +1637,7 @@ class StrategyEngine:
                             all_buy_prices, threshold, eff, deg_cost, max_p
                         )
                         
-                        # 2. Available energy is the extra above target_morning_soc (Safety margin)
+                        # 2. Available energy is the extra above the HIGHER of target_morning_soc or base_target (v11.1.77)
                         available_sell_ac = self._calculate_sunrise_surplus(
                             natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, eff
                         )
