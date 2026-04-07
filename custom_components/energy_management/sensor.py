@@ -864,8 +864,8 @@ class EnergyProfileManager:
                     grid_cost = record_grid_imp * (p_buy or 0.0)
                     
                     # 3. Hidden Costs (Battery Amortization)
-                    # We apply degradation cost to any energy passing through the battery
-                    deg_price = float(man.get_setting("battery_degradation_cost", 0.05))
+                    # v11.1.85: Use the REAL calculated cost per kWh throughput (Cycle based)
+                    deg_price = float(self.manager.get_battery_degradation_cost() or 0.0)
                     battery_wear_cost = abs(batt_p) * deg_price
                     
                     # Total Step Delta in money
