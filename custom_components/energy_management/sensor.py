@@ -852,15 +852,24 @@ class EnergyProfileManager:
                         grid_import_kw = max(0.0, load_kw + p_charge - s_to_l - b_to_l - s_avail_for_batt)
                         grid_export_kw = max(0.0, gen_kw + batt_p - load_kw)
 
-                    # v11.1.84 - Total Economic Value (Wallet/Saldo)
-                    # Now includes "Avoided Cost": money we DIDN'T spend because we used PV/Battery.
-                    # Benefit = (Solar_to_house + Battery_to_house) * p_buy + (Export * p_sell) - (Import * p_buy)
+                    # v11.1.84 - Net Economic Profit (Wallet/Saldo)
+                    # "Сэкономлено или просрано" - The ultimate financial truth.
                     
-                    # 1. Real grid flow (Meter based)
-                    record_grid_imp = grid_import_kw
-                    record_grid_exp = grid_export_kw
+                    # 1. Avoided cost (Savings from PV and Battery self-consumption)
+                    # s_to_l and b_to_l are kW values calculated above
+                    avoided_cost = (s_to_l + b_to_l) * (p_buy or 0.0)
                     
-                    step_delta = (record_grid_exp * (p_sell or 0.0) * dt_h) - (record_grid_imp * (p_buy or 0.0) * dt_h)
+                    # 2. Grid Meter Revenue/Cost
+                    grid_revenue = record_grid_exp * (p_sell or 0.0)
+                    grid_cost = record_grid_imp * (p_buy or 0.0)
+                    
+                    # 3. Hidden Costs (Battery Amortization)
+                    # We apply degradation cost to any energy passing through the battery
+                    deg_price = float(man.get_setting("battery_degradation_cost", 0.05))
+                    battery_wear_cost = abs(batt_p) * deg_price
+                    
+                    # Total Step Delta in money
+                    step_delta = (grid_revenue + avoided_cost - grid_cost - battery_wear_cost) * dt_h
                     
                     # 2. Update wallet
                     current_bal = self.data.get("energy_balance", 0.0)
