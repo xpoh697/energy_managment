@@ -11,13 +11,11 @@ from .const import (
     CONF_PRICE_TOLERANCE,
     CONF_PRICE_SELL_TOLERANCE,
     CONF_BATTERY_MAX_POWER,
-    CONF_TARGET_SOC_BUY,
-    CONF_TARGET_SOC_SELL,
+    CONF_AI_CHARGE_LIMIT,
+    CONF_AI_DISCHARGE_LIMIT,
     CONF_MIN_SOC_BUY,
-    CONF_MIN_SOC_SELL,
-    CONF_MAX_SOC_BUY,
     CONF_SALE_PV_NO_BAT_MAX_HOUR,
-    CONF_ARBITRAGE_MIN_PROFIT,
+    CONF_ARBITRAGE_PROFIT_THRESHOLD,
     CONF_SOC_BUFFER
 )
 
@@ -28,17 +26,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = [
         EnergyProfileNumber(manager, CONF_PRICE_BUY_LIMIT, "Buy Price Limit", None, -99.0, 999.0, 0.001, "mdi:cash-minus", 99.0),
         EnergyProfileNumber(manager, CONF_PRICE_SELL_LIMIT, "Sell Price Limit", None, -99.0, 999.0, 0.001, "mdi:cash-plus", -99.0),
-        EnergyProfileNumber(manager, CONF_ARBITRAGE_MIN_PROFIT, "Arbitrage Price Limit", None, 0.0, 999.0, 0.05, "mdi:hand-coin", 0.1),
+        EnergyProfileNumber(manager, CONF_ARBITRAGE_PROFIT_THRESHOLD, "Arbitrage Profit Threshold", None, 0.0, 999.0, 0.05, "mdi:hand-coin", 0.1),
         EnergyProfileNumber(manager, CONF_PRICE_STOP_SELL, "Stop Sell Threshold", None, -99.0, 999.0, 0.001, "mdi:cash-remove", 0.0),
         EnergyProfileNumber(manager, CONF_PRICE_SELL_ONLY_PV, "Sell PV Only (Block Bat/Loads)", None, -99.0, 999.0, 0.001, "mdi:weather-sunny", 1.5),
         EnergyProfileNumber(manager, CONF_PRICE_TOLERANCE, "Buy Price Tolerance", None, 0.0, 999.0, 0.001, "mdi:tune", 0.0),
         EnergyProfileNumber(manager, CONF_PRICE_SELL_TOLERANCE, "Sell Price Tolerance", None, 0.0, 999.0, 0.001, "mdi:tune", 0.0),
         EnergyProfileNumber(manager, CONF_BATTERY_MAX_POWER, "Battery Max Power", UnitOfPower.KILO_WATT, 0.0, 100.0, 0.1, "mdi:flash", 5.0),
-        EnergyProfileNumber(manager, CONF_TARGET_SOC_BUY, "Target SOC Buy", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up", 100.0),
-        EnergyProfileNumber(manager, CONF_TARGET_SOC_SELL, "Target SOC Sell", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
+        EnergyProfileNumber(manager, CONF_AI_CHARGE_LIMIT, "AI Charge Limit SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up", 100.0),
+        EnergyProfileNumber(manager, CONF_AI_DISCHARGE_LIMIT, "AI Discharge Limit SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
         EnergyProfileNumber(manager, CONF_MIN_SOC_BUY, "Minimum SOC Level", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
-        EnergyProfileNumber(manager, CONF_MIN_SOC_SELL, "Minimum SOC Sell (AI Floor)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down-outline", 20.0),
-        EnergyProfileNumber(manager, CONF_MAX_SOC_BUY, "Maximum SOC Buy (AI Ceiling)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up-outline", 100.0),
         EnergyProfileNumber(manager, CONF_SOC_BUFFER, "Morning SOC Buffer", PERCENTAGE, 0.0, 50.0, 1.0, "mdi:battery-plus", 15.0),
         EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Max Hour for Sell PV Only", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
     ]
@@ -54,6 +50,8 @@ class EnergyProfileNumber(NumberEntity):
         self.key = key
         self._attr_translation_key = key
         self._attr_unique_id = f"{manager.entry.entry_id}_{key}"
+        # Set entity_id to DOMAIN + key to ensure descriptive IDs in Home Assistant
+        self.entity_id = f"number.{DOMAIN}_{key}"
         
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},

@@ -19,16 +19,12 @@ from .const import (
     CONF_PRICE_TOLERANCE,
     CONF_PRICE_SELL_TOLERANCE,
     CONF_BATTERY_MAX_POWER,
-    CONF_FORCE_MARKET_SELL,
-    CONF_ARBITRAGE_MIN_PROFIT,
-    CONF_TARGET_SOC_SELL,
-    CONF_TARGET_SOC_BUY,
+    CONF_AI_DISCHARGE_LIMIT,
+    CONF_AI_CHARGE_LIMIT,
     CONF_DYNAMIC_SOC_SELL,
     CONF_DYNAMIC_SOC_BUY,
     CONF_PRIORITY,
     CONF_SOC_BUFFER,
-    CONF_MIN_SOC_SELL,
-    CONF_MAX_SOC_BUY,
     DOMAIN
 )
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
@@ -1301,7 +1297,9 @@ class StrategyEngine:
             sim_soc_plan = b_soc
             if b_cap > 0.1:
                 if mode == "buy":
-                    base_target = float(man.get_setting(CONF_TARGET_SOC_BUY, 100.0))
+                    # Buy mode (v11.1.51)
+                    # Use existing Target SOC Buy as ceiling for AI charging (except negative price)
+                    base_target = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
                     
                     is_strict_arb = False
                     # Only buy for arbitrage if profit covers DOUBLE battery wear (charging + discharging)
@@ -1384,12 +1382,11 @@ class StrategyEngine:
                         res["charge_reason"] = "none"
                         pool = [] # Empty pool to clear attributes
                     
-                    # User-defined Ceiling (v11.1.62)
-                    max_soc_buy = float(man.get_setting(CONF_MAX_SOC_BUY, 100.0))
+                    # User-defined Ceiling (v11.1.62) - Using existing CONF_TARGET_SOC_BUY
                     # Skip check if price is negative as requested by USER
-                    if target_soc > max_soc_buy and not negative_hours:
-                        target_soc = max_soc_buy
-                        res["note"] = f"Цель ограничена пользователем (Макс. SOC Buy: {max_soc_buy}%)"
+                    if target_soc > base_target and not negative_hours:
+                        target_soc = base_target
+                        res["note"] = f"Цель ограничена пользователем (Target SOC Buy: {base_target}%)"
                     
                     target_soc = float(min(100.0, target_soc))
                     sim_soc_plan = b_soc
@@ -1525,6 +1522,9 @@ class StrategyEngine:
                             "error": str(e)
                         }
                 else: # sell
+                    # Sell mode (v11.1.51)
+                    # Use existing Target SOC Sell as floor for AI selling
+                    base_target = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
                     # Initial defaults for robustness
                     arb_gain = 0.0
                     cheap_h_back = None
@@ -1532,7 +1532,6 @@ class StrategyEngine:
                     cheap_p_back = 0.0
                     cur_p_f = float(normalize_float(today_prices.get(str(cur_hour), 0.0)))
                     
-                    base_target = float(man.get_setting(CONF_TARGET_SOC_SELL, 20.0))
                     occ_coeff = float(man.get_occupancy_coefficient())
                     
                     budget_data_sell = {}
@@ -1716,11 +1715,10 @@ class StrategyEngine:
                     power_needed = float(max(0.0, power_peak))
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # User-defined Floor (v11.1.62)
-                        min_soc_sell = float(man.get_setting(CONF_MIN_SOC_SELL, 20.0))
-                        if target_soc < min_soc_sell:
-                            target_soc = min_soc_sell
-                            res["note"] = f"Цель ограничена пользователем (Мин. SOC Sell: {min_soc_sell}%)"
+                        # User-defined Floor (v11.1.62) - Using existing CONF_TARGET_SOC_SELL
+                        if target_soc < base_target:
+                            target_soc = base_target
+                            res["note"] = f"Цель ограничена пользователем (Target SOC Sell: {base_target}%)"
                         target_soc = float(target_soc)
                     else:
                         target_soc = base_target
@@ -1753,8 +1751,8 @@ class StrategyEngine:
                     # and planned. Otherwise we "hallucinate" energy in the morning SOC.
                     if best_buy_h is not None and best_buy_h < sim_end_h:
                         pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
-                        min_profit = man.get_setting(CONF_ARBITRAGE_MIN_PROFIT, 0.05)
-                        if pot_gain_val >= min_profit:
+                        diff_threshold = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.1))
+                        if pot_gain_val >= diff_threshold:
                             sim_commands[int(best_buy_h)] = float(max_p)
 
                     _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_commands)

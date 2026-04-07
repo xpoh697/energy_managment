@@ -250,11 +250,11 @@
       "price_tolerance": { "name": "Допуск цены покупки" },
       "price_sell_tolerance": { "name": "Допуск цены продажи" },
       "battery_max_power": { "name": "Макс. мощность АКБ" },
-      "target_soc_buy": { "name": "Целевой SOC (Покупка)" },
-      "target_soc_sell": { "name": "Целевой SOC (Продажа)" },
+      "ai_charge_limit_soc": { "name": "Лимит заряда (Max SOC)" },
+      "ai_discharge_limit_soc": { "name": "Лимит разряда (Min SOC)" },
       "min_soc_buy": { "name": "Минимальный уровень SOC" },
       "sale_pv_no_bat_max_hour": { "name": "Макс. час для продажи только PV" },
-      "arbitrage_min_profit": { "name": "Лимит цены для арбитража (разница)" },
+      "arbitrage_profit_threshold": { "name": "Минимальная прибыль арбитража" },
       "soc_buffer": { "name": "Буфер SOC на утро (%)" }
     }
   }
