@@ -1712,10 +1712,20 @@ class StrategyEngine:
                         target_soc = target_morning_soc
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                     
-                    # Recommended power: Balanced nearest-window allocation (v5.5)
-                    # We spread the sunrise surplus evenly across the current contiguous peak block.
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
+                    
+                    # v11.1.80: Final sanity check - Ensure planned power doesn't over-discharge 
+                    # below the USER limit (base_target) during the current peak session.
+                    # This prevents the "57.3% vs 60%" discrepancy.
+                    current_surplus_dc = (b_soc - base_target) * b_cap / 100.0
+                    max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
+                    
+                    # Target hours left in current contiguous block (or total remaining)
+                    planned_kwh_to_sell = power_needed * (len(upcoming) or 1)
+                    if planned_kwh_to_sell > max_allowed_sell_ac:
+                        # Throttling to respect the floor TODAY, not just the morning target.
+                        power_needed = max_allowed_sell_ac / (len(upcoming) or 1)
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         # User-defined Floor (v11.1.62) - Using existing CONF_AI_DISCHARGE_LIMIT
