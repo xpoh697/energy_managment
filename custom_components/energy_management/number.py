@@ -43,21 +43,24 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class EnergyProfileNumber(NumberEntity):
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False
 
     def __init__(self, manager, key, name, unit, min_v, max_v, step, icon, default_value):
         self.manager = manager
         self.key = key
         self._attr_translation_key = key
-        # Fallback name if translations aren't loaded or HA caches device name
-        self._attr_name = name
+        
+        # v11.1.75: Force full name construction to bypass HA cache glitches
+        device_name = manager.entry.data.get("name", "Energy Management")
+        self._attr_name = f"{device_name} {name}"
+        
         self._attr_unique_id = f"{manager.entry.entry_id}_{key}"
         # Set entity_id to DOMAIN + key to ensure descriptive IDs in Home Assistant
         self.entity_id = f"number.{DOMAIN}_{key}"
         
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
-            name=manager.entry.data.get("name", "Energy Management"),
+            name=device_name,
             manufacturer="Energy AI",
             model="Energy Trader System",
         )
