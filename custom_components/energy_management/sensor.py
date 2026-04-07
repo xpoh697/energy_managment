@@ -859,6 +859,10 @@ class EnergyProfileManager:
                     # s_to_l and b_to_l are kW values calculated above
                     avoided_cost = (s_to_l + b_to_l) * (p_buy or 0.0)
                     
+                    # 1. Real grid flow (Meter based)
+                    record_grid_imp = grid_import_kw
+                    record_grid_exp = grid_export_kw
+                    
                     # 2. Grid Meter Revenue/Cost
                     grid_revenue = record_grid_exp * (p_sell or 0.0)
                     grid_cost = record_grid_imp * (p_buy or 0.0)
