@@ -830,9 +830,11 @@ class EnergyProfileManager:
             # Time delta in hours (polling is roughly 1 min)
             last_run = self.data.get("last_balance_poll_time")
             now_ts = now.timestamp()
+            _LOGGER.warning("WALLET DIAG: last_run=%s, now_ts=%s, diff=%s", last_run, now_ts, (now_ts - last_run) if last_run else "NO_ANCHOR")
             if last_run:
                 dt_h = (now_ts - last_run) / 3600.0
-                if 0 < dt_h < 24.0: # Removed 0.2 guard to allow instant recovery
+                _LOGGER.warning("WALLET DIAG: dt_h=%s (must be 0<x<24)", dt_h)
+                if 0 < dt_h < 24.0:
                     # 1. Solar to Load = energy we didn't buy because of PV
                     s_to_l = min(gen_kw, load_kw)
 
