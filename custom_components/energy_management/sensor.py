@@ -830,10 +830,8 @@ class EnergyProfileManager:
             # Time delta in hours (polling is roughly 1 min)
             last_run = self.data.get("last_balance_poll_time")
             now_ts = now.timestamp()
-            _LOGGER.warning("WALLET DIAG: last_run=%s, now_ts=%s, diff=%s", last_run, now_ts, (now_ts - last_run) if last_run else "NO_ANCHOR")
             if last_run:
                 dt_h = (now_ts - last_run) / 3600.0
-                _LOGGER.warning("WALLET DIAG: dt_h=%s (must be 0<x<24)", dt_h)
                 if 0 < dt_h < 24.0:
                     # 1. Solar to Load = energy we didn't buy because of PV
                     s_to_l = min(gen_kw, load_kw)
@@ -855,11 +853,6 @@ class EnergyProfileManager:
 
                     # v11.1.91 - Perfected Economic Logic (Avoided Cost Model)
                     try:
-                        # v11.1.94 - Detailed Debug Logging
-                        _LOGGER.debug("Wallet Calc: dt_h=%s, s_to_l=%s, b_to_l=%s, exp=%s, imp=%s, p_buy=%s, p_sell=%s", 
-                                     round_f(dt_h,6), round_f(s_to_l,3), round_f(b_to_l,3), 
-                                     round_f(record_grid_exp,3), round_f(record_grid_imp,3), p_buy, p_sell)
-
                         # 1. Self-Consumption Gain (PV and Battery used for House)
                         # All energy used at home is valued at p_buy (money saved)
                         self_consumption_gain = (s_to_l + b_to_l) * (p_buy or 0.0)
@@ -875,7 +868,6 @@ class EnergyProfileManager:
                         # Total Step Profit/Loss
                         if 0 < dt_h < 24.0:
                             step_delta = (self_consumption_gain + grid_revenue - grid_cost - battery_wear_total) * dt_h
-                            _LOGGER.debug("Wallet Step: +%s PLN (Total Bal: %s)", round_f(step_delta, 6), self.data.get("energy_balance"))
                             
                             current_bal = self.data.get("energy_balance", 0.0)
                             self.data["energy_balance"] = round_f(current_bal + step_delta, 6)
@@ -896,7 +888,7 @@ class EnergyProfileManager:
                    
                     is_neg_price = bool(p_buy is not None and p_buy <= 0)
                     if is_neg_price and step_delta > 0:
-                        _LOGGER.debug("Energy Management Wallet: Growing by %s PLN (Import %s kW at %s PLN/kWh)", round_f(step_delta, 4), record_grid_imp, p_buy)
+                        pass
 
             # v11.1.94 - Correct anchor update level (OUTSIDE if last_run)
             self.data["last_balance_poll_time"] = now_ts
