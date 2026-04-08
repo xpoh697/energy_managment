@@ -1785,11 +1785,11 @@ class EnergyProfileManager:
         If occupancy tracking is not configured, returns 1.0.
         """
         if not self.presence_sensors:
-            return 1.0
+            return 1.0, 0, 0
 
         current_occ = self.get_current_occupancy()
         if current_occ < 0:
-            return 1.0
+            return 1.0, 0, 0
 
         # Calculate average consumption for home vs away from historical data
         days = self.custom_period
@@ -1820,20 +1820,20 @@ class EnergyProfileManager:
 
         # Not enough data to distinguish — return 1.0
         if home_count < 5 or away_count < 3:
-            return 1.0
+            return 1.0, home_count, away_count
 
         avg_home = home_total / home_count
         avg_away = away_total / away_count
 
         if avg_home <= 0.01:
-            return 1.0
+            return 1.0, home_count, away_count
 
         # If nobody is home right now, return the away/home ratio
         if current_occ == 0:
-            return max(0.1, min(1.0, avg_away / avg_home))
+            return max(0.1, min(1.0, avg_away / avg_home)), home_count, away_count
 
         # Everyone is home — no adjustment needed
-        return 1.0
+        return 1.0, home_count, away_count
 
     def get_efficiency_coefficient(self):
         """Calculates historical inverter/system efficiency."""
@@ -3158,6 +3158,8 @@ class EnergyBudgetSensor(SensorEntity):
                 "forecast_coefficient": _sr(res.get("forecast_coefficient", 1.0), 1.0),
                 "forecast_coefficient_today": _sr(res.get("forecast_today_coefficient", 1.0), 1.0),
                 "occupancy_coefficient": _sr(res.get("occupancy_coefficient", 1.0), 1.0),
+                "debug_occ_home_hours": int(res.get("debug_occ_home_hours", 0)),
+                "debug_occ_away_hours": int(res.get("debug_occ_away_hours", 0)),
                 "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
                 "debug_actual_today": _sr(res.get("debug_actual_today")),
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),

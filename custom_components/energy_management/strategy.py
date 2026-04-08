@@ -438,7 +438,10 @@ class StrategyEngine:
                         
             # 3. Expected consumption (v7.9.4 - Base profile + Simulation Guard)
             # Use 'base' profile as the absolute essential house survival floor.
-            occ_coeff = float(man.get_occupancy_coefficient())
+            occ_coeff, occ_home, occ_away = man.get_occupancy_coefficient()
+            occ_coeff = float(occ_coeff)
+            occ_home = float(occ_home)
+            occ_away = float(occ_away)
             sunrise_hour = man.get_sunrise_hour() or 6
             base_rem_today = float(man.get_expected_remaining("consumption_base", eff_period, day_idx)) * occ_coeff
             base_night = float(man.get_expected_night("consumption_base", eff_period, day_idx, until_hour=sunrise_hour)) * occ_coeff
@@ -680,6 +683,8 @@ class StrategyEngine:
                 "debug_h_acc_cur": float(h_acc_cur),
                 "debug_h_count_cur": int(h_count_cur),
                 "debug_hist_coeff_rem": float(hist_coeff),
+                "debug_occ_home_hours": int(occ_home),
+                "debug_occ_away_hours": int(occ_away),
                 "forecast_distribution": active_dist,
                 "forecast_dist_source": dist_source,
                 "debug_sample_keys": [],
@@ -808,7 +813,8 @@ class StrategyEngine:
 
             # 3. Expected consumption (v7.9.4 - Base profile)
             p_cons = prof_cons_tom if is_tom else prof_cons_today
-            occ_coeff = float(man.get_occupancy_coefficient())
+            occ_coeff, _, _ = man.get_occupancy_coefficient()
+            occ_coeff = float(occ_coeff)
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
             
             # v11.1.15 - Blended Anchor: Smoothly transition from profile to real-time load
@@ -1543,7 +1549,8 @@ class StrategyEngine:
                     cheap_p_back = 0.0
                     cur_p_f = float(normalize_float(today_prices.get(str(cur_hour), 0.0)))
                     
-                    occ_coeff = float(man.get_occupancy_coefficient())
+                    occ_coeff, _, _ = man.get_occupancy_coefficient()
+                    occ_coeff = float(occ_coeff)
                     
                     budget_data_sell = {}
                     eff_coeff_val = 1.0
