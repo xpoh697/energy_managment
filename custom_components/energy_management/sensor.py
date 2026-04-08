@@ -1817,6 +1817,10 @@ class EnergyProfileManager:
                     continue
                 v = normalize_float(item.get("v", 0.0))
                 occ = item.get("occ")
+                # v11.1.102 - Robust type handling for legacy/corrupted tuple records
+                if isinstance(occ, (list, tuple)):
+                    occ = occ[0] if occ else 0
+
                 if occ is None:
                     continue  # Legacy data without occupancy tag
                 if occ > 0:
