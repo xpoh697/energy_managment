@@ -1793,11 +1793,11 @@ class EnergyProfileManager:
         If occupancy tracking is not configured, returns 1.0.
         """
         if not self.presence_sensors:
-            return 1.0, 0, 0, -1, []
+            return 1.0, 0, 0, -1, [], 0.0, 0.0
 
         current_occ, active_sensors = self.get_current_occupancy()
         if current_occ < 0:
-            return 1.0, 0, 0, current_occ, active_sensors
+            return 1.0, 0, 0, current_occ, active_sensors, 0.0, 0.0
 
         # Calculate average consumption for home vs away from historical data
         days = self.custom_period
@@ -1828,20 +1828,20 @@ class EnergyProfileManager:
 
         # Not enough data to distinguish — return 1.0
         if home_count < 5 or away_count < 3:
-            return 1.0, home_count, away_count, current_occ, active_sensors
+            return 1.0, home_count, away_count, current_occ, active_sensors, 0.0, 0.0
 
         avg_home = home_total / home_count
         avg_away = away_total / away_count
 
         if avg_home <= 0.01:
-            return 1.0, home_count, away_count, current_occ, active_sensors
+            return 1.0, home_count, away_count, current_occ, active_sensors, avg_home, avg_away
 
         # If nobody is home right now, return the away/home ratio
         if current_occ == 0:
-            return max(0.1, min(1.0, avg_away / avg_home)), home_count, away_count, current_occ, active_sensors
+            return max(0.1, min(1.0, avg_away / avg_home)), home_count, away_count, current_occ, active_sensors, avg_home, avg_away
 
         # Everyone is home — no adjustment needed
-        return 1.0, home_count, away_count, current_occ, active_sensors
+        return 1.0, home_count, away_count, current_occ, active_sensors, avg_home, avg_away
 
     def get_efficiency_coefficient(self):
         """Calculates historical inverter/system efficiency."""
@@ -3170,6 +3170,8 @@ class EnergyBudgetSensor(SensorEntity):
                 "debug_occ_away_hours": int(res.get("debug_occ_away_hours", 0)),
                 "debug_occ_current": int(res.get("debug_occ_current", 0)),
                 "debug_occ_sensors_home": res.get("debug_occ_sensors", []),
+                "debug_occ_avg_home": _sr(res.get("debug_occ_avg_home", 0.0)),
+                "debug_occ_avg_away": _sr(res.get("debug_occ_avg_away", 0.0)),
                 "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
                 "debug_actual_today": _sr(res.get("debug_actual_today")),
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
