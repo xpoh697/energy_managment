@@ -612,8 +612,16 @@ class StrategyEngine:
                 elif initial_power_kw > 0.5 and available_power_kw < 0:
                     power_bottleneck = True
 
+                # v11.1.97 - Block managed loads during active selling modes
+                inverter_mode = getattr(man, "current_inverter_mode", "")
+                is_selling_mode = inverter_mode in ("sale_pv_no_bat", "sale_pv_bat")
+
                 price_suffix = " (Беспл. цена)" if is_free_price else ""
-                if req_kwh > 0 and consumed >= req_kwh:
+                if is_selling_mode and not is_free_price:
+                    permissions[s_id_s] = False
+                    mode_label = "Продажа PV (без АКБ)" if inverter_mode == "sale_pv_no_bat" else "Продажа PV+АКБ"
+                    permissions_reasons[s_id_s] = f"Запрет: Режим '{mode_label}' — приоритет продажи"
+                elif req_kwh > 0 and consumed >= req_kwh:
                     permissions[s_id_s] = False
                     permissions_reasons[s_id_s] = f"Норма выполнена ({consumed:.2f}/{req_kwh}{price_suffix})"
                 elif power_bottleneck:
