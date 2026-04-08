@@ -1760,22 +1760,30 @@ class EnergyProfileManager:
         - zone.*:           state is numeric count (e.g. zone.home returns '2') → used directly
         """
         if not self.presence_sensors:
-            return -1  # -1 means "occupancy tracking not configured"
+            return -1, []
         count = 0
+        active_sensors = []
         for entity_id in self.presence_sensors:
             state = self.hass.states.get(entity_id)
             if not state or state.state in ("unknown", "unavailable"):
                 continue
+            
+            val = 0
             # zone.* — state is the number of people in the zone
             if entity_id.startswith("zone."):
                 try:
-                    count += int(float(state.state))
+                    val = int(float(state.state))
                 except (ValueError, TypeError):
                     pass
             # person.* or binary_sensor.*
             elif state.state in ("home", "on"):
-                count += 1
-        return count
+                val = 1
+            
+            if val > 0:
+                count += val
+                active_sensors.append(f"{entity_id}={state.state}")
+                
+        return count, active_sensors
 
     def get_occupancy_coefficient(self, hour=None):
         """Returns a multiplier (0.0-1.5+) to scale consumption forecast based on current occupancy.
@@ -1785,11 +1793,11 @@ class EnergyProfileManager:
         If occupancy tracking is not configured, returns 1.0.
         """
         if not self.presence_sensors:
-            return 1.0, 0, 0
+            return 1.0, 0, 0, -1, []
 
-        current_occ = self.get_current_occupancy()
+        current_occ, active_sensors = self.get_current_occupancy()
         if current_occ < 0:
-            return 1.0, 0, 0
+            return 1.0, 0, 0, current_occ, active_sensors
 
         # Calculate average consumption for home vs away from historical data
         days = self.custom_period
@@ -1820,20 +1828,20 @@ class EnergyProfileManager:
 
         # Not enough data to distinguish — return 1.0
         if home_count < 5 or away_count < 3:
-            return 1.0, home_count, away_count
+            return 1.0, home_count, away_count, current_occ, active_sensors
 
         avg_home = home_total / home_count
         avg_away = away_total / away_count
 
         if avg_home <= 0.01:
-            return 1.0, home_count, away_count
+            return 1.0, home_count, away_count, current_occ, active_sensors
 
         # If nobody is home right now, return the away/home ratio
         if current_occ == 0:
-            return max(0.1, min(1.0, avg_away / avg_home)), home_count, away_count
+            return max(0.1, min(1.0, avg_away / avg_home)), home_count, away_count, current_occ, active_sensors
 
         # Everyone is home — no adjustment needed
-        return 1.0, home_count, away_count
+        return 1.0, home_count, away_count, current_occ, active_sensors
 
     def get_efficiency_coefficient(self):
         """Calculates historical inverter/system efficiency."""
@@ -3160,6 +3168,8 @@ class EnergyBudgetSensor(SensorEntity):
                 "occupancy_coefficient": _sr(res.get("occupancy_coefficient", 1.0), 1.0),
                 "debug_occ_home_hours": int(res.get("debug_occ_home_hours", 0)),
                 "debug_occ_away_hours": int(res.get("debug_occ_away_hours", 0)),
+                "debug_occ_current": int(res.get("debug_occ_current", 0)),
+                "debug_occ_sensors_home": res.get("debug_occ_sensors", []),
                 "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
                 "debug_actual_today": _sr(res.get("debug_actual_today")),
                 "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
