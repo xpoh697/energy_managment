@@ -1246,7 +1246,7 @@ class EnergyProfileManager:
         today_wd = now.weekday()
 
         # Track occupancy at snapshot time
-        occ_count = self.get_current_occupancy()
+        occ_count, _ = self.get_current_occupancy()
 
         # Capture current forecast for the past hour to track accuracy
         f_dist = self.get_forecast_hourly_distribution(self.forecast_today_hourly_sensor)
@@ -1810,7 +1810,7 @@ class EnergyProfileManager:
 
         for h in hours_to_check:
             sh = str(h)
-            history = self.data.get("consumption_total", {}).get(sh, [])
+            history = self.data.get("consumption_base", {}).get(sh, [])
             relevant = history[-days:] if days > 0 else history
             for item in relevant:
                 if not isinstance(item, dict):
