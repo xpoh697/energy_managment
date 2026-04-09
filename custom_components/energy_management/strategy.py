@@ -1781,29 +1781,29 @@ class StrategyEngine:
                     sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     
-                    # --- DRAFT SIMULATION (v11.1.81) ---
+                    # --- DRAFT SIMULATION (v11.1.83) ---
                     # We run a draft simulation to see if the power_needed will over-discharge the battery
-                    # below the user limit (base_target) accounting for real projected loads.
+                    # below the morning target (target_morning_soc) accounting for ALL projected loads until sunrise.
                     sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     draft_cmds = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
                     
                     _, draft_log, _ = self.run_soc_simulation(b_soc, sim_range, now, draft_cmds)
                     
-                    # Check SOC at end of sale in draft
+                    # v11.1.83: CRITICAL FIX - Check SOC at SUNRISE, not just after the sale.
+                    # This accounts for the house load naturally and prevents "trapping" extra energy.
+                    key_morning_sim = f"{sunrise_h-1:02d}:59 (Завтра)"
+                    soc_at_sunrise_draft = self._get_soc_from_log(draft_log, key_morning_sim, b_soc)
+                    
+                    if soc_at_sunrise_draft < (target_morning_soc - 0.1):
+                        deficit_soc_pct = target_morning_soc - soc_at_sunrise_draft
+                        # Reduction in DC energy required to stay above floor
+                        reduction_kwh = (deficit_soc_pct * b_cap / 100.0)
+                        # Reduce hourly power (AC equivalent)
+                        power_reduction = (reduction_kwh * eff) / (len(upcoming) or 1)
+                        power_needed = float(max(0.0, power_needed - power_reduction))
+                    
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
-                    if last_h_sell is not None:
-                        key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
-                        soc_after_draft = self._get_soc_from_log(draft_log, key_after, b_soc)
-                        
-                        # Corrective Step: If draft goes below target, reduce power needed
-                        if soc_after_draft < (base_target - 0.1):
-                            deficit_soc_pct = base_target - soc_after_draft
-                            # Reduction in DC energy required to stay above floor
-                            reduction_kwh = (deficit_soc_pct * b_cap / 100.0)
-                            # Reduce hourly power (AC equivalent)
-                            power_reduction = (reduction_kwh * eff) / (len(upcoming) or 1)
-                            power_needed = float(max(0.0, power_needed - power_reduction))
                     
                     sell_commands = {int(h): power_needed for h in target_hours_sorted if h >= cur_hour}
                     
