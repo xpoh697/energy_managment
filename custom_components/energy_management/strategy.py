@@ -1739,15 +1739,15 @@ class StrategyEngine:
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
                     
-                    # v11.1.80: Final sanity check - Ensure planned power doesn't over-discharge 
-                    # below the USER limit (base_target) during the current peak session.
-                    # This prevents the "57.3% vs 60%" discrepancy.
+                    # v11.1.82: Selective Throttling - Only throttle power that would be DISCHARGED NOW.
+                    # Future hours rely on the Draft Simulation (v11.1.81) to determine feasibility.
+                    # This prevents 0kW plans at noon for evening peaks when solar hasn't arrived yet.
+                    is_currently_peak = bool(cur_hour in target_hours_sorted)
                     current_surplus_dc = (b_soc - base_target) * b_cap / 100.0
                     max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
-                    
-                    # Target hours left in current contiguous block (or total remaining)
+
                     planned_kwh_to_sell = power_needed * (len(upcoming) or 1)
-                    if planned_kwh_to_sell > max_allowed_sell_ac:
+                    if is_currently_peak and planned_kwh_to_sell > max_allowed_sell_ac:
                         # Throttling to respect the floor TODAY, not just the morning target.
                         power_needed = max_allowed_sell_ac / (len(upcoming) or 1)
                     
@@ -1804,6 +1804,8 @@ class StrategyEngine:
                             # Reduce hourly power (AC equivalent)
                             power_reduction = (reduction_kwh * eff) / (len(upcoming) or 1)
                             power_needed = float(max(0.0, power_needed - power_reduction))
+                    
+                    sell_commands = {int(h): power_needed for h in target_hours_sorted if h >= cur_hour}
                     
                     # --- FINAL SIMULATION ---
                     sim_commands = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
@@ -1928,7 +1930,13 @@ class StrategyEngine:
             p_distribution = {}
             for h in actual_active:
                 h_label = self._format_h(h)
-                p_val = charge_commands.get(h, 0.0) if mode == "buy" else float(res.get("recommended_power_kw", 0.0))
+                if mode == "buy":
+                    p_val = charge_commands.get(h, 0.0)
+                else: # sell
+                    # v11.1.82: Use the simulation-based power_needed for the breakdown
+                    # instead of the current real-time recommended_power_kw.
+                    p_val = sell_commands.get(h, 0.0)
+                
                 p_distribution[h_label] = float(round_f(p_val, 2))
                 
             res["planned_power_per_h"] = p_distribution
