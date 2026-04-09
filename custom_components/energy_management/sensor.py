@@ -3257,6 +3257,7 @@ class MarketStrategySensor(SensorEntity):
                 "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
                 "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
                 "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
+                "arbitrage_sell_status": res.get("arbitrage_sell_status", "Ожидание")
             })
         else: # buy
             attrs.update({
