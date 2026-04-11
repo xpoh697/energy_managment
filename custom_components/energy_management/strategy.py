@@ -1887,16 +1887,9 @@ class StrategyEngine:
 
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
             # Only show hours that actually have planned power OR negative price hours (v11.1.22)
-            if mode == "buy":
-                # v11.1.22: Include negative price hours even if charge power is 0 (to show grid-power status)
-                actual_active = [
-                    h for h in target_hours_sorted 
-                    if charge_commands.get(h, 0.0) > 0.01 or all_buy_prices.get(h, 999.0) <= 0.0
-                ]
-            else:
-                # v7.2.1: Always show future peak windows if they are identified, 
-                # even if current power_needed is 0 (e.g. waiting for peak or saving battery).
-                actual_active = [h for h in target_hours_sorted if h >= cur_hour]
+            # v11.3.3: Always show future target hours if they are identified (consistent for buy/sell)
+            # This allows the user to see cheap/expensive windows even if current power command is 0.
+            actual_active = [h for h in target_hours_sorted if h >= cur_hour]
 
             # Regenerate active_periods based on final filtered hours (v6.18)
             final_periods = []

@@ -1231,7 +1231,11 @@ class EnergyProfileManager:
         self._notify_update()
 
     async def _async_reset_hour(self, now):
-        # v2.1.1 - Forced clean indentation
+        # v11.3.2 - Reset hourly anchors for strategy fixing
+        self.fixed_strategy_data = {
+            "buy": {"id": -1, "power": 0.0, "target_soc": 0.0, "charge_amps": 0.0},
+            "sell": {"id": -1, "power": 0.0, "target_soc": 0.0, "charge_amps": 0.0}
+        }
         self._profile_cache = {}
         past_hour = (now.hour - 1) % 24
 
@@ -2119,27 +2123,37 @@ class EnergyProfileManager:
         """Complex market strategy solver."""
         res = self.strategy_engine.get_market_strategy(mode)
         
-        # Fixing logic: capture power and target_soc ONLY at the start of the window
+        # v11.3.2: Capture Power/SOC/Amps anchor at the start of the hour or mode entry
         now = dt_util.now()
         cur_hour = now.hour
         is_active = res.get("state") == "active"
-        active_hours = res.get("active_hours", [])
         
-        if is_active and active_hours:
-            # We use the first hour of the future block as a stable ID for the window
-            upcoming = [h for h in active_hours if h >= cur_hour]
-            if upcoming:
-                window_id = upcoming[0]
-                stored = self.fixed_strategy_data.get(mode, {"id": -1})
-                if stored["id"] != window_id:
-                    self.fixed_strategy_data[mode] = {
-                        "id": window_id,
-                        "power": float(res.get("recommended_power_kw", 0.0)),
-                        "target_soc": float(res.get("target_soc", 0.0))
-                    }
+        # Unified key for the current hour and mode
+        hour_key = f"{cur_hour}_{mode}"
+        stored = self.fixed_strategy_data.get(mode, {"hour_key": ""})
+        
+        if is_active:
+            if stored.get("hour_key") != hour_key:
+                # Capture fresh values for the remainder of this hour
+                p_val = float(res.get("recommended_power_kw", 0.0))
+                t_soc = float(res.get("target_soc", 0.0))
+                c_amps = 0.0
+                
+                # Calculate charge_amps once at capture time
+                if self.battery_voltage_sensor:
+                    v_val = self.get_sensor_float(self.battery_voltage_sensor)
+                    if v_val and v_val > 0.1 and p_val > 0.01:
+                        c_amps = round_f((p_val * 1000.0) / v_val, 2)
+                
+                self.fixed_strategy_data[mode] = {
+                    "hour_key": hour_key,
+                    "power": p_val,
+                    "target_soc": t_soc,
+                    "charge_amps": c_amps
+                }
         else:
-            # Reset values once window is no longer active
-            self.fixed_strategy_data[mode] = {"id": -1, "power": 0.0, "target_soc": 0.0}
+            # Wipe anchor if no longer active
+            self.fixed_strategy_data[mode] = {"hour_key": "", "power": 0.0, "target_soc": 0.0, "charge_amps": 0.0}
             
         return res
 
@@ -2928,20 +2942,44 @@ class InverterOperationModeSensor(SensorEntity):
             
             # v11.1.22/58: Synchronize with dynamic strategy results
             chg_reason = ""
+            # Check for fixed hourly anchors for stable display
+            fixed_buy = self.manager.fixed_strategy_data.get("buy", {})
+            fixed_sell = self.manager.fixed_strategy_data.get("sell", {})
+            hour_str = f"{now.hour}"
+            
+            p_val = 0.0
+            t_soc = 0.0
+            c_amps_fixed = 0.0
+            
             if mode == "buy":
-                p_val = buy_strategy.get("recommended_power_kw", 0.0)
-                t_soc = buy_strategy.get("target_soc", 0.0)
+                # Priority: use fixed hourly value if available
+                if fixed_buy.get("hour_key", "").startswith(hour_str):
+                    p_val = fixed_buy["power"]
+                    t_soc = fixed_buy["target_soc"]
+                    c_amps_fixed = fixed_buy.get("charge_amps", 0.0)
+                else:
+                    p_val = buy_strategy.get("recommended_power_kw", 0.0)
+                    t_soc = buy_strategy.get("target_soc", 0.0)
+                    c_amps_fixed = None
             elif mode == "no_pv_sale_no_bat":
-                # v11.1.39: Target is current SOC to prevent charging from PV
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
                 chg_reason = "wait_for_negative"
-            elif "sale" in mode and is_selling_active:
-                p_val = sell_strategy.get("recommended_power_kw", 0.0)
-                t_soc = sell_strategy.get("target_soc", 0.0)
+                c_amps_fixed = 0.0
+            elif mode == "sale_pv_bat":
+                # For sale_pv_bat, we ALSO use the fixed anchor if available
+                if fixed_sell.get("hour_key", "").startswith(hour_str):
+                    p_val = fixed_sell["power"]
+                    t_soc = fixed_sell["target_soc"]
+                    c_amps_fixed = fixed_sell.get("charge_amps", 0.0)
+                else:
+                    p_val = sell_strategy.get("recommended_power_kw", 0.0)
+                    t_soc = sell_strategy.get("target_soc", 0.0)
+                    c_amps_fixed = None
             else:
                 p_val = 0.0
                 t_soc = 0.0
+                c_amps_fixed = 0.0
 
             # Extract diagnostic info
             if not chg_reason:
@@ -2958,14 +2996,14 @@ class InverterOperationModeSensor(SensorEntity):
             
             # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
             if self.manager.battery_voltage_sensor:
-                v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor)
-                if v_val and v_val > 0.1:
-                    c_amps = 0.0
-                    if p_val > 0:
-                        c_amps = round_f((p_val * 1000.0) / v_val, 2)
-                    attrs["charge_amps"] = c_amps
+                if c_amps_fixed is not None:
+                    attrs["charge_amps"] = c_amps_fixed
                 else:
-                    attrs["charge_amps"] = 0.0
+                    v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor)
+                    if v_val and v_val > 0.1 and p_val > 0:
+                        attrs["charge_amps"] = round_f((p_val * 1000.0) / v_val, 2)
+                    else:
+                        attrs["charge_amps"] = 0.0
             
             attrs["is_preparing_for_peak"] = is_preparing_for_peak
             attrs["next_peak_start_hour"] = formatted_peak
