@@ -980,7 +980,8 @@ class StrategyEngine:
 
             buy_limit = float(man.get_setting(CONF_PRICE_BUY_LIMIT, 2.0))
             sell_limit = float(man.get_setting(CONF_PRICE_SELL_LIMIT, 5.0))
-            tolerance = float(man.get_setting(CONF_PRICE_TOLERANCE, 0.1))
+            buy_tolerance = float(man.get_setting(CONF_PRICE_TOLERANCE, 0.0))
+            sell_tolerance = float(man.get_setting(CONF_PRICE_SELL_TOLERANCE, 0.0))
             eff = float(eff_coeff)
             active_window = (cur_hour, 47) if tomorrow_prices else (cur_hour, 23)
             # End the window at :59 for clarity
@@ -1098,8 +1099,8 @@ class StrategyEngine:
                         combined = [(int(h), float(p)) for h, p in today_prices.items() if float(normalize_float(p)) <= buy_limit]
                         combined += [(int(h) + 24, float(p)) for h, p in tomorrow_prices.items() if float(normalize_float(p)) <= buy_limit]
                     else:
-                        peaks_today = get_peaks(wt_filtered, False, 999.0, tolerance)
-                        peaks_tom = get_peaks(wom_filtered, False, 999.0, tolerance)
+                        peaks_today = get_peaks(wt_filtered, False, 999.0, buy_tolerance)
+                        peaks_tom = get_peaks(wom_filtered, False, 999.0, buy_tolerance)
                         combined = peaks_today + peaks_tom
                     
                     if combined:
@@ -1146,8 +1147,8 @@ class StrategyEngine:
                     gain = float(price * eff - cheap_p_back - deg_cost)
                     return gain >= threshold, gain, cheap_p_back, cheap_h
 
-                raw_peaks_today = get_peaks(today_prices, True, 0.0, tolerance)
-                raw_peaks_tom = get_peaks(tomorrow_prices, True, 0.0, tolerance)
+                raw_peaks_today = get_peaks(today_prices, True, 0.0, sell_tolerance)
+                raw_peaks_tom = get_peaks(tomorrow_prices, True, 0.0, sell_tolerance)
                 
                 if not raw_peaks_today and not raw_peaks_tom:
                     res["state"] = "price_limit_not_met"
