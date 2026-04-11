@@ -1355,7 +1355,9 @@ class StrategyEngine:
                     solar_income = float(normalize_float(budget_data.get("forecast_val", 0.0) if budget_data else 0.0))
                     cons_until_morning = float(normalize_float(budget_data.get("expected_consumption", 2.0) if budget_data else 2.0))
                     
-                    survival_target_kwh = cons_until_morning + (min_soc * b_cap / 100.0)
+                    # v11.1.102: Include buffer in survival target to eliminate the "dead zone" (10% buy vs 25% sell limits)
+                    soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
+                    survival_target_kwh = cons_until_morning + ((min_soc + soc_buffer) * b_cap / 100.0)
                     available_today_kwh = (b_soc * b_cap / 100.0) + solar_income
                     
                     # --- Granular Solar Priority (v6.14) ---
@@ -1396,6 +1398,7 @@ class StrategyEngine:
                     elif available_today_kwh < survival_target_kwh:
                         res["charge_reason"] = "survival"
                         target_soc = float(min(base_target, survival_target_kwh / b_cap * 100.0))
+                        res["arbitrage_decision"] = f"Заряд для обеспечения буфера ({target_soc:.1f}%)"
                     else:
                         res["charge_reason"] = "none"
                         target_soc = b_soc
