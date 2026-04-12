@@ -1320,6 +1320,8 @@ class StrategyEngine:
                 
             # Target & Power Calculation
             power_needed = 0.0
+            charge_commands = {}
+            sell_commands = {}
             target_soc = b_soc
             sim_soc_plan = b_soc
             if b_cap > 0.1:
@@ -1421,7 +1423,6 @@ class StrategyEngine:
                     target_soc = float(min(100.0, target_soc))
                     sim_soc_plan = b_soc
                     
-                    charge_commands = {}
                     charge_commands = {int(h): 0.0 for h in target_hours_sorted if h >= cur_hour}
                     if target_hours_sorted:
                         # 1. Calculate how much kWh we roughly need to add

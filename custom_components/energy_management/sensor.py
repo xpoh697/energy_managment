@@ -2146,6 +2146,7 @@ class EnergyProfileManager:
                         c_amps = round_f((p_val * 1000.0) / v_val, 2)
                 
                 self.fixed_strategy_data[mode] = {
+                    "id": 1,
                     "hour_key": hour_key,
                     "power": p_val,
                     "target_soc": t_soc,
@@ -2153,7 +2154,7 @@ class EnergyProfileManager:
                 }
         else:
             # Wipe anchor if no longer active
-            self.fixed_strategy_data[mode] = {"hour_key": "", "power": 0.0, "target_soc": 0.0, "charge_amps": 0.0}
+            self.fixed_strategy_data[mode] = {"id": -1, "hour_key": "", "power": 0.0, "target_soc": 0.0, "charge_amps": 0.0}
             
         return res
 
