@@ -1880,13 +1880,15 @@ class StrategyEngine:
                     key_morning = f"{sunrise_h-1:02d}:59 (Tomorrow)"
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
 
-                    # v7.2 - CLEANUP: If no sale is currently planned for today, return current SOC
-                    # to avoid "nonsense" projections in the UI.
                     if not target_hours_sorted:
                         power_needed = 0.0
                         soc_at_start = b_soc
                         soc_after = b_soc
                         # soc_morning remains as natural discharge result
+
+                    # v11.3.25: Diagnose the exact key formatting issue
+                    ka_exists = key_after in sim_log if target_hours_sorted else False
+                    res["arbitrage_sell_limit_reason"] += f" | K-A:{ka_exists} V:{sim_log.get(key_after if target_hours_sorted else '', {})}"
 
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
