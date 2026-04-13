@@ -1628,7 +1628,7 @@ class StrategyEngine:
                             active_buffer = 0.0
 
                     min_soc_val = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
-                    # Hard Target for tomorrow morning (always includes full buffer)
+                    # Hard Target for tomorrow morning (strictly survival: reserve + buffer)
                     target_morning_soc = min_soc_val + soc_buffer_val
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
                     active_floor_soc = min_soc_val + active_buffer
@@ -1735,14 +1735,18 @@ class StrategyEngine:
                     )
                     
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
-                    # v11.3.7: FIX - Pass base_target (user limit) to ensure it's respected in surplus math!
-                    available_sell_dc = self._calculate_sunrise_surplus(
-                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, base_target
+                    # v11.3.8: CORRECT LOGIC - Sale is limited by BOTH current floor (User Limit) AND future safety (Morning Survival)
+                    surplus_for_morning = self._calculate_sunrise_surplus(
+                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, 0.0 # pass 0.0 limit here, it's strictly for morning safety
                     )
-                    surplus_soc_at_sunrise = (available_sell_dc / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     
-                    # Final safety floor
-                    ai_soc_floor_final = max(target_morning_soc, ai_soc_floor_base)
+                    surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0)
+                    available_sell_dc = min(surplus_for_morning, surplus_for_user_limit)
+                    
+                    surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
+                    
+                    # Final safety floor for UI attributes
+                    ai_soc_floor_final = target_morning_soc
                     
                     # Arbitrage math for the Gatekeeper logic
                     p_bb, h_bb = get_best_buyback(cur_hour) 
@@ -1773,12 +1777,8 @@ class StrategyEngine:
                         if is_in_peak and not arbitrage_is_best:
                             decision_tag = "Защита базы (Завтра мало солнца)"
                     else:
-                        # v11.3.7: Hard clamp target_soc to user floor immediately to avoid simulation overshoot
-                        if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                            if target_morning_soc < base_target:
-                                target_morning_soc = base_target
-                        
-                        target_soc = target_morning_soc
+                        # v11.3.8: Logic - We sell from surplus above morning safety, but stay above base_target.
+                        target_soc = base_target
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
