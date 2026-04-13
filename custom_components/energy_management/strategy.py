@@ -1710,6 +1710,14 @@ class StrategyEngine:
                         base_deficit_tomorrow, total_solar_to_sunrise, b_cap, eff
                     )
                     
+                    # 1. Projected SOC at START of the first peak (v11.3.20: Early detection)
+                    soc_at_start = b_soc
+                    first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else None
+                    if first_h_sell is not None and first_h_sell > cur_hour:
+                        prev_h = first_h_sell - 1
+                        key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                        soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc)
+                    
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
                     # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
                     # 1. User SOC Limit 2. Morning Survival 3. Physical Battery Power (C-rate/Time)
@@ -1717,7 +1725,8 @@ class StrategyEngine:
                         natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, 0.0 
                     )
                     
-                    surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0)
+                    # v11.3.20: Using soc_at_start (projected) for User Limit to account for tomorrow's solar
+                    surplus_for_user_limit = (max(0.0, soc_at_start - base_target) * b_cap / 100.0)
                     
                     # v11.3.11: Factor in physical energy capacity of the identified peaks
                     # Using global max_p which already accounts for CONF_BATTERY_MAX_POWER (e.g. 6.2kW)
@@ -1846,29 +1855,8 @@ class StrategyEngine:
 
                     _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_commands)
                     
-                    # 1. Projected SOC at START of the first peak
-                    first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else None
-                    if first_h_sell is not None and first_h_sell > cur_hour:
-                        prev_h = first_h_sell - 1
-                        key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                        soc_at_start = self._get_soc_from_log(sim_log, key_start, b_soc)
-                    else:
-                        soc_at_start = b_soc
-                        
-                    # 2. Daily Surplus Calculation (v11.3.19: Using soc_at_start to account for future solar)
-                    surplus_for_user_limit = (max(0.0, soc_at_start - base_target) * b_cap / 100.0)
-                    
-                    # Update Triple Constraint with better 'U'
-                    available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
-                    available_sell_ac = float(max(0.0, available_sell_dc * eff))
-                    power_peak = available_sell_ac / num_peaks_left
-                    power_needed = float(max(0.0, power_peak))
-
-                    # Update diagnosis for transparency
-                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f}"
-                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
-
-                    # 2. Projected SOC AFTER the first continuous peak
+                    # 1. Projected SOC at START (Already calculated early)
+                    # 2. Daily Surplus (Already calculated early)
                     if target_hours_sorted:
                         future_active_sell = [h for h in target_hours_sorted if h >= cur_hour]
                         if future_active_sell:
