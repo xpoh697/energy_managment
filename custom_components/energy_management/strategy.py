@@ -1517,10 +1517,24 @@ class StrategyEngine:
                         else:
                             soc_at_start = b_soc
 
-                        # 2. Projected SOC AFTER the last buy hour (or noon today if no buys)
-                        last_h_buy = max(target_hours_sorted) if target_hours_sorted else min(13, cur_hour + 6)
-                        key_end = f"{last_h_buy % 24:02d}:59" + (" (Завтра)" if last_h_buy >= 24 else "")
-                        soc_at_end = self._get_soc_from_log(sim_log, key_end, b_soc)
+                        # 2. Projected SOC AFTER the first continuous buy window
+                        if target_hours_sorted:
+                            future_active_buy = [h for h in target_hours_sorted if h >= cur_hour]
+                            if future_active_buy:
+                                # Find the last hour of the first continuous block
+                                last_h_buy_immediate = future_active_buy[0]
+                                for i in range(1, len(future_active_buy)):
+                                    if future_active_buy[i] == future_active_buy[i-1] + 1:
+                                        last_h_buy_immediate = future_active_buy[i]
+                                    else:
+                                        break
+                                
+                                key_end = f"{last_h_buy_immediate % 24:02d}:59" + (" (Завтра)" if last_h_buy_immediate >= 24 else "")
+                                soc_at_end = self._get_soc_from_log(sim_log, key_end, b_soc)
+                            else:
+                                soc_at_end = b_soc
+                        else:
+                            soc_at_end = b_soc
                             
                         # 3. Projected SOC TOMORROW MORNING (At actual sunrise)
                         # v7.9.8 - Ensure consistency with Energy Balance sensor
@@ -1835,10 +1849,22 @@ class StrategyEngine:
                     else:
                         soc_at_start = b_soc
                         
-                    # 2. Projected SOC AFTER the last peak
-                    if last_h_sell is not None:
-                        key_after = f"{last_h_sell % 24:02d}:59" + (" (Завтра)" if last_h_sell >= 24 else "")
-                        soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
+                    # 2. Projected SOC AFTER the first continuous peak
+                    if target_hours_sorted:
+                        future_active_sell = [h for h in target_hours_sorted if h >= cur_hour]
+                        if future_active_sell:
+                            # v11.3.6: Fix "multi-window junk" - anchor 'after sale' to the FIRST window only.
+                            last_h_sell_immediate = future_active_sell[0]
+                            for i in range(1, len(future_active_sell)):
+                                if future_active_sell[i] == future_active_sell[i-1] + 1:
+                                    last_h_sell_immediate = future_active_sell[i]
+                                else:
+                                    break
+                            
+                            key_after = f"{last_h_sell_immediate % 24:02d}:59" + (" (Завтра)" if last_h_sell_immediate >= 24 else "")
+                            soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
+                        else:
+                            soc_after = b_soc
                     else:
                         soc_after = b_soc
                     
