@@ -1734,13 +1734,15 @@ class StrategyEngine:
                     sell_diagnosis = "Рассчитано (Ок)"
                     # Using a small delta for float comparison safety
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
-                        sell_diagnosis = "Ограничено мощностью АКБ"
+                        sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        sell_diagnosis = "Лимит пользователя"
+                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)"
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
-                        sell_diagnosis = "Защита дома (Рассвет)"
+                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
+                    # v11.3.15: Refined Diagnostic Labels for UX transparency
+                    res["arbitrage_sell_limit_reason"] = sell_diagnosis
+                    res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
-                    res["arbitrage_sell_status"] = sell_diagnosis
                     surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     ai_soc_floor_final = target_morning_soc
                     
@@ -1857,12 +1859,12 @@ class StrategyEngine:
                     if target_hours_sorted:
                         future_active_sell = [h for h in target_hours_sorted if h >= cur_hour]
                         if future_active_sell:
-                            # v11.3.6: Fix "multi-window junk" - anchor 'after sale' to the FIRST window only.
-                            last_h_sell_immediate = future_active_sell[0]
+                            # v11.3.16: Anchor 'after sale' projection to the end of the WHOLE continuous block
+                            last_h_sell_immediate = future_active_sell[-1]
+                            # Search for the first break in the sequence to define the immediate block
                             for i in range(1, len(future_active_sell)):
-                                if future_active_sell[i] == future_active_sell[i-1] + 1:
-                                    last_h_sell_immediate = future_active_sell[i]
-                                else:
+                                if future_active_sell[i] != future_active_sell[i-1] + 1:
+                                    last_h_sell_immediate = future_active_sell[i-1]
                                     break
                             
                             key_after = f"{last_h_sell_immediate % 24:02d}:59" + (" (Завтра)" if last_h_sell_immediate >= 24 else "")
