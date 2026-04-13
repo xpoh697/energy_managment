@@ -1743,15 +1743,16 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left # we already calculated this based on (num - 1) + rem_min
                     physical_limit_dc = (max_p_discharge * total_h_allowed) / eff
                     
-                    # v11.3.10: Final Triple Constraint Diagnosis
+                    # v11.3.11: Final Triple Constraint Diagnosis (Fixed Priority)
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     
                     sell_diagnosis = "Рассчитано (Ок)"
-                    if available_sell_dc == physical_limit_dc and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
+                    # Using a small delta for float comparison safety
+                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
                         sell_diagnosis = "Ограничено мощностью АКБ"
-                    elif available_sell_dc == surplus_for_user_limit and surplus_for_user_limit < surplus_for_morning:
+                    elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
                         sell_diagnosis = "Лимит пользователя"
-                    elif available_sell_dc == surplus_for_morning:
+                    elif available_sell_dc <= (surplus_for_morning + 0.001):
                         sell_diagnosis = "Защита дома (Рассвет)"
                     
                     res["arbitrage_sell_status"] = sell_diagnosis
