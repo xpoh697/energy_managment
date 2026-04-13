@@ -2887,11 +2887,6 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv_bat"
             reason = "Активна стратегия ПРОДАЖИ (AI)"
             
-        elif cur_price is not None and cur_price < price_stop_sell:
-            # Global price floor for ANY selling
-            mode = "stop_sale"
-            reason = f"Продажа заблокирована: Цена ({cur_price or 0.0:.2f}) < Порога ({price_stop_sell or 0.0:.2f})"
-            
         elif cur_price is not None and cur_price >= price_sell_only_pv:
             # SAFE MORNING MODE (User's 4 conditions)
             # 1. Price >= Threshold
@@ -2908,9 +2903,14 @@ class InverterOperationModeSensor(SensorEntity):
             
             is_energy_low_for_evening = bool(is_preparing_for_peak or is_low_for_morning)
             
-            if is_before_limit_hour and has_surplus and not is_energy_low_for_evening:
+            # v11.1.91 - Priority check: price must be > 0 at least
+            if is_before_limit_hour and has_surplus and not is_energy_low_for_evening and cur_price > 0:
                 mode = "sale_pv_no_bat"
-                reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога, утро, есть излишек и запас энергии"
+                reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f}), утро, есть излишек и запас энергии"
+            elif cur_price < price_stop_sell:
+                # If specific morning conditions not met, we must STILL respect the global stop_sell floor
+                mode = "stop_sale"
+                reason = f"Продажа заблокирована: Цена ({cur_price or 0.0:.2f}) < Порога ({price_stop_sell or 0.0:.2f})"
             else:
                 # If conditions for sale_pv_no_bat not met, fallback to standard or charge
                 mode = "sale_pv"
@@ -2925,6 +2925,11 @@ class InverterOperationModeSensor(SensorEntity):
                     reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но нет излишка солнца"
                 else:
                     reason = "Стандартная работа: цена высокая, но условия sale_pv_no_bat не соблюдены"
+            
+        elif cur_price is not None and cur_price < price_stop_sell:
+            # Global price floor for ANY selling
+            mode = "stop_sale"
+            reason = f"Продажа заблокирована: Цена ({cur_price or 0.0:.2f}) < Порога ({price_stop_sell or 0.0:.2f})"
             
         elif cur_price is not None and cur_price >= price_sell_limit:
             # FIXED PRICE LIMIT: Price is so good we sell from battery even without AI
