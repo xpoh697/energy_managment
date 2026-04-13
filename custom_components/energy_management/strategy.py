@@ -1673,12 +1673,11 @@ class StrategyEngine:
                     # 2. Planning: Total consumption (full profile with all historical loads)
                     tomorrow_cons_total = float(sum(man.get_average_profile("consumption_total", man.custom_period, tom_idx).values())) * occ_coeff
                     
-                    # Deficit for the full profile (used for conservative solar_is_excess check)
+                    # Deficit for the full profile
                     tomorrow_deficit_full = max(0.0, tomorrow_cons_total - tomorrow_solar_total)
                     solar_is_excess = bool(tomorrow_solar_total > tomorrow_cons_total + 1.5) # 1.5kWh buffer
                     
                     # PRECISE SIMULATION-BASED CALCULATION (v6.2 Modular)
-
                     upcoming = [h for h in target_hours_sorted if h >= cur_hour]
                     block_len = 0
                     if upcoming:
