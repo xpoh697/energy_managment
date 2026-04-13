@@ -1735,8 +1735,9 @@ class StrategyEngine:
                     )
                     
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
+                    # v11.3.7: FIX - Pass base_target (user limit) to ensure it's respected in surplus math!
                     available_sell_dc = self._calculate_sunrise_surplus(
-                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0
+                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, base_target
                     )
                     surplus_soc_at_sunrise = (available_sell_dc / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     
@@ -1772,24 +1773,29 @@ class StrategyEngine:
                         if is_in_peak and not arbitrage_is_best:
                             decision_tag = "Защита базы (Завтра мало солнца)"
                     else:
-                        # We are allowed to sell the surplus!
+                        # v11.3.7: Hard clamp target_soc to user floor immediately to avoid simulation overshoot
+                        if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                            if target_morning_soc < base_target:
+                                target_morning_soc = base_target
+                        
                         target_soc = target_morning_soc
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
-                    
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
                     
-                    # v11.1.82: Selective Throttling - Only throttle power that would be DISCHARGED NOW.
-                    # Future hours rely on the Draft Simulation (v11.1.81) to determine feasibility.
-                    # This prevents 0kW plans at noon for evening peaks when solar hasn't arrived yet.
+                    # v11.3.7: Selective Throttling - Account for house consumption to avoid over-discharging below base_target.
                     is_currently_peak = bool(cur_hour in target_hours_sorted)
-                    current_surplus_dc = (b_soc - base_target) * b_cap / 100.0
+                    rem_h = max(0.1, (60 - now.minute) / 60.0)
+                    house_cons_hourly = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
+                    house_rem_dc = (house_cons_hourly * rem_h) / eff
+                    
+                    current_surplus_dc = max(0.0, (b_soc - base_target) * b_cap / 100.0 - house_rem_dc)
                     max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
 
-                    planned_kwh_to_sell = power_needed * (len(upcoming) or 1)
+                    planned_kwh_to_sell = power_needed * rem_h
                     if is_currently_peak and planned_kwh_to_sell > max_allowed_sell_ac:
                         # Throttling to respect the floor TODAY, not just the morning target.
-                        power_needed = max_allowed_sell_ac / (len(upcoming) or 1)
+                        power_needed = max_allowed_sell_ac / rem_h
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         # User-defined Floor (v11.1.62) - Using existing CONF_AI_DISCHARGE_LIMIT
