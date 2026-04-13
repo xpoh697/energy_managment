@@ -1678,27 +1678,6 @@ class StrategyEngine:
                     solar_is_excess = bool(tomorrow_solar_total > tomorrow_cons_total + 1.5) # 1.5kWh buffer
                     
                     # PRECISE SIMULATION-BASED CALCULATION (v6.2 Modular)
-                    if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # 1. Run Baseline Simulation
-                        natural_morning_soc = self._get_sunrise_baseline_soc(
-                            b_soc, now, sunrise_h, best_buy_pair, 
-                            all_buy_prices, threshold, eff, deg_cost, max_p
-                        )
-                        
-                        # 1. Available surplus to reach Morning Target (Sunrise protection)
-                        # We use natural_morning_soc (baseline) to find how much DC we can spare.
-                        available_morning_ac = self._calculate_sunrise_surplus(
-                            natural_morning_soc, target_morning_soc, 0.0, b_cap, eff
-                        )
-                        
-                        # 2. Available surplus to reach User Limit (Min SOC Sell) right now (v11.1.85)
-                        available_user_dc = max(0.0, (b_soc - base_target) * b_cap / 100.0)
-                        available_user_ac = available_user_dc * eff
-                        
-                        # 3. Final available energy is the MOST restrictive of the two
-                        available_sell_ac = min(available_morning_ac, available_user_ac)
-                        
-                        # (Diagnostic block moved lower to account for all constraints)
                     else:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
@@ -1721,6 +1700,13 @@ class StrategyEngine:
                     else:
                         num_peaks_left = float(num_peaks_left_raw) or 1.0
                     
+                    if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                        # 1. Run Baseline Simulation
+                        natural_morning_soc = self._get_sunrise_baseline_soc(
+                            b_soc, now, sunrise_h, best_buy_pair, 
+                            all_buy_prices, threshold, eff, deg_cost, max_p
+                        )
+                    
                     # --- TWO-STEP SAFETY CHECK (Refined v6.2) ---
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
                     ai_soc_floor_base = self._calc_immediate_safety_floor(
@@ -1737,11 +1723,14 @@ class StrategyEngine:
                     
                     surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0)
                     
-                    # v11.3.9: Factor in physical energy capacity of the identified peaks
-                    max_p_discharge = float(getattr(man, "max_battery_discharge_power", 5.0))
+                    # v11.3.11: Factor in physical energy capacity of the identified peaks
+                    # Using global max_p which already accounts for CONF_BATTERY_MAX_POWER (e.g. 6.2kW)
+                    # Auto-convert Watts to kW if user entered 6200 instead of 6.2
+                    work_max_p = max_p if max_p < 100 else max_p / 1000.0
+                    
                     # Account for remaining minutes in the current hour if it's a peak
-                    total_h_allowed = num_peaks_left # we already calculated this based on (num - 1) + rem_min
-                    physical_limit_dc = (max_p_discharge * total_h_allowed) / eff
+                    total_h_allowed = num_peaks_left
+                    physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
                     # v11.3.11: Final Triple Constraint Diagnosis (Fixed Priority)
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
