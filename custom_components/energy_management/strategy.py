@@ -1735,13 +1735,21 @@ class StrategyEngine:
                     )
                     
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
-                    # v11.3.8: CORRECT LOGIC - Sale is limited by BOTH current floor (User Limit) AND future safety (Morning Survival)
+                    # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
+                    # 1. User SOC Limit 2. Morning Survival 3. Physical Battery Power (C-rate/Time)
                     surplus_for_morning = self._calculate_sunrise_surplus(
-                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, 0.0 # pass 0.0 limit here, it's strictly for morning safety
+                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, 0.0 
                     )
                     
                     surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0)
-                    available_sell_dc = min(surplus_for_morning, surplus_for_user_limit)
+                    
+                    # v11.3.9: Factor in physical energy capacity of the identified peaks
+                    max_p_discharge = float(getattr(man, "max_battery_discharge_power", 5.0))
+                    # Account for remaining minutes in the current hour if it's a peak
+                    total_h_allowed = num_peaks_left # we already calculated this based on (num - 1) + rem_min
+                    physical_limit_dc = (max_p_discharge * total_h_allowed) / eff
+                    
+                    available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     
                     surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     
