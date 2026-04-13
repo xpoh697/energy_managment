@@ -1697,11 +1697,10 @@ class StrategyEngine:
                         num_peaks_left = float(num_peaks_left_raw) or 1.0
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # 1. Run Baseline Simulation
-                        natural_morning_soc = self._get_sunrise_baseline_soc(
-                            b_soc, now, sunrise_h, best_buy_pair, 
-                            all_buy_prices, threshold, eff, deg_cost, max_p
-                        )
+                        # 1. Run Baseline Simulation (v11.3.21: Get full log for start_soc detection)
+                        sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
+                        sim_range = list(range(cur_hour, sim_end_h))
+                        natural_morning_soc, sim_log_base, _ = self.run_soc_simulation(b_soc, sim_range, now, {})
                     
                     # --- TWO-STEP SAFETY CHECK (Refined v6.2) ---
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
