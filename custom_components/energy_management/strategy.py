@@ -1163,18 +1163,44 @@ class StrategyEngine:
                         peaks_today = [(int(h), float(p)) for h, p in today_prices.items() if float(normalize_float(p)) >= sell_limit]
                         peaks_tom = [(int(h) + 24, float(p)) for h, p in tomorrow_prices.items() if float(normalize_float(p)) >= sell_limit]
                     else:
+                        def _can_recharge_between(start_h, end_h):
+                            if end_h <= start_h: return False, ""
+                            for h_ch in range(int(start_h) + 1, int(end_h)):
+                                if all_buy_prices.get(h_ch, 99.0) <= buy_limit:
+                                    return True, "Благоприятно (Дешевая сеть ночью)"
+                                if 8 <= (h_ch % 24) <= 16:
+                                    val_s = 0.0
+                                    fsensors = man.forecast_tomorrow_sensor if h_ch >= 24 else man.forecast_solar_sensor
+                                    if fsensors:
+                                        if isinstance(fsensors, str): fsensors = [fsensors]
+                                        for fsensor in fsensors:
+                                            st = man.hass.states.get(fsensor)
+                                            v = get_kwh_val(st)
+                                            if v is not None: val_s += float(v)
+                                    if val_s > 3.0:
+                                        return True, "Благоприятно (Ожидается солнце)"
+                            return False, "Неблагоприятно (Нет условий для дозарядки)"
+
                         peaks_today = []
                         for h, p in raw_peaks_today:
                             ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h))
                             if float(normalize_float(p)) >= sell_limit or ok_arb: # when AI is on, any arb or limit peak is ok
                                 peaks_today.append((int(h), float(normalize_float(p))))
                                 
-                        # v11.3.27: LIFT TOLERANCE FOR EXPLICIT SELL LIMIT
+                        # v11.3.28: LIFT TOLERANCE FOR EXPLICIT SELL LIMIT (with recharge check)
                         if sell_limit > -90.0:
+                            ai_peaks = sorted([int(ph) for ph, _ in raw_peaks_today] + [int(ph)+24 for ph, _ in raw_peaks_tom])
                             for h, p in today_p_future.items():
                                 norm_p = float(normalize_float(p))
-                                if (int(h), norm_p) not in peaks_today and norm_p >= sell_limit:
-                                    peaks_today.append((int(h), norm_p))
+                                h_int = int(h)
+                                if (h_int, norm_p) not in peaks_today and norm_p >= sell_limit:
+                                    can_add = True
+                                    next_ai = next((ah for ah in ai_peaks if ah > h_int), None)
+                                    if next_ai is not None:
+                                        cr, _ = _can_recharge_between(h_int, next_ai)
+                                        if not cr: can_add = False
+                                    if can_add:
+                                        peaks_today.append((h_int, norm_p))
                                 
                         peaks_tom = []
                         for h, p in raw_peaks_tom:
@@ -1183,10 +1209,18 @@ class StrategyEngine:
                                 peaks_tom.append((int(h) + 24, float(normalize_float(p))))
                                 
                         if sell_limit > -90.0:
+                            ai_peaks = sorted([int(ph) for ph, _ in raw_peaks_today] + [int(ph)+24 for ph, _ in raw_peaks_tom])
                             for h, p in tomorrow_prices.items():
                                 norm_p = float(normalize_float(p))
-                                if (int(h) + 24, norm_p) not in peaks_tom and norm_p >= sell_limit:
-                                    peaks_tom.append((int(h) + 24, norm_p))
+                                h_int = int(h) + 24
+                                if (h_int, norm_p) not in peaks_tom and norm_p >= sell_limit:
+                                    can_add = True
+                                    next_ai = next((ah for ah in ai_peaks if ah > h_int), None)
+                                    if next_ai is not None:
+                                        cr, _ = _can_recharge_between(h_int, next_ai)
+                                        if not cr: can_add = False
+                                    if can_add:
+                                        peaks_tom.append((h_int, norm_p))
                     
                     if not peaks_today and not peaks_tom:
                         res["state"] = "price_limit_not_met"
@@ -1200,28 +1234,9 @@ class StrategyEngine:
                             max_h_today = max(h for h, p in peaks_today)
                             min_h_tom = min(h for h, p in peaks_tom)
                             
-                            can_recharge = False
-                            for h in range(max_h_today + 1, min_h_tom):
-                                if all_buy_prices.get(h, 99.0) <= buy_limit:
-                                    can_recharge = True
-                                    res["multi_cycle"] = "Благоприятно (Дешевая сеть ночью)"
-                                    break
-                                if 8 <= (h % 24) <= 16:
-                                    val_sum = 0.0
-                                    fsensors = man.forecast_tomorrow_sensor
-                                    if fsensors:
-                                        if isinstance(fsensors, str): fsensors = [fsensors]
-                                        for fsensor in fsensors:
-                                            st = man.hass.states.get(fsensor)
-                                            v = get_kwh_val(st)
-                                            if v is not None: val_sum += float(v)
-                                    
-                                    if val_sum > 3.0:
-                                        can_recharge = True
-                                        res["multi_cycle"] = "Благоприятно (Ожидается солнце)"
-                                        break
-                                
+                            can_recharge, reason = _can_recharge_between(max_h_today, min_h_tom)
                             if can_recharge:
+                                res["multi_cycle"] = reason
                                 combined = peaks_today + peaks_tom
                                 target_hours = sorted(list(set([int(h) for h, p in combined])))
                                 target_price = float(max(p for h, p in combined))
