@@ -883,8 +883,8 @@ class StrategyEngine:
                 if b_cap_f > 0.1:
                     simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
             
-            # Store enriched data for the 24h forecast sensors
-            history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
+            # Store enriched data for the 24h forecast sensors (v11.3.23: Unified EN keys)
+            history_log[f"{real_h:0>2}:59" + (" (Tomorrow)" if is_tom else "")] = {
                 "soc": round_f(float(simulated_soc), 1),
                 "gen_kw": round_f(float(expected_gen_kw), 3),
                 "load_kw": round_f(float(expected_cons_kw), 3)
@@ -1747,7 +1747,9 @@ class StrategyEngine:
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
 
-                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f}"
+                    # v11.3.23: Full transparency diagnostics
+                    # v11.3.23: Full transparency diagnostics
+                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
                     res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
                     res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
