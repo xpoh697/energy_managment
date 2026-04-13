@@ -1169,11 +1169,24 @@ class StrategyEngine:
                             if float(normalize_float(p)) >= sell_limit or ok_arb: # when AI is on, any arb or limit peak is ok
                                 peaks_today.append((int(h), float(normalize_float(p))))
                                 
+                        # v11.3.27: LIFT TOLERANCE FOR EXPLICIT SELL LIMIT
+                        if sell_limit > -90.0:
+                            for h, p in today_p_future.items():
+                                norm_p = float(normalize_float(p))
+                                if (int(h), norm_p) not in peaks_today and norm_p >= sell_limit:
+                                    peaks_today.append((int(h), norm_p))
+                                
                         peaks_tom = []
                         for h, p in raw_peaks_tom:
                             ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h) + 24)
                             if float(normalize_float(p)) >= sell_limit or ok_arb:
                                 peaks_tom.append((int(h) + 24, float(normalize_float(p))))
+                                
+                        if sell_limit > -90.0:
+                            for h, p in tomorrow_prices.items():
+                                norm_p = float(normalize_float(p))
+                                if (int(h) + 24, norm_p) not in peaks_tom and norm_p >= sell_limit:
+                                    peaks_tom.append((int(h) + 24, norm_p))
                     
                     if not peaks_today and not peaks_tom:
                         res["state"] = "price_limit_not_met"
