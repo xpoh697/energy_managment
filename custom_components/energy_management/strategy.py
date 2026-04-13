@@ -1843,25 +1843,35 @@ class StrategyEngine:
                         target_soc = base_target
                         decision_tag = f"{decision_tag} | {sell_diagnosis}"
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
-                    power_peak = available_sell_ac / num_peaks_left
-                    power_needed = float(max(0.0, power_peak))
+                        
+                    # --- v11.3.31: Greedy Profit Allocation ---
+                    sell_pool = [h for h in target_hours_sorted if h >= cur_hour]
+                    sell_pool_sorted = sorted(sell_pool, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                     
-                    # v11.3.7: Selective Throttling - Account for house consumption to avoid over-discharging below base_target.
-                    is_currently_peak = bool(cur_hour in target_hours_sorted)
-                    rem_h = max(0.1, (60 - now.minute) / 60.0)
-                    house_cons_hourly = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
-                    house_rem_dc = (house_cons_hourly * rem_h) / eff
+                    sell_commands = {int(h): 0.0 for h in sell_pool}
+                    rem_kwh_sell = available_sell_ac
                     
-                    current_surplus_dc = max(0.0, (b_soc - base_target) * b_cap / 100.0 - house_rem_dc)
-                    max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
-
-                    planned_kwh_to_sell = power_needed * rem_h
-                    if is_currently_peak and planned_kwh_to_sell > max_allowed_sell_ac:
-                        # Throttling to respect the floor TODAY, not just the morning target.
-                        power_needed = max_allowed_sell_ac / rem_h
+                    for h in sell_pool_sorted:
+                        h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
+                        
+                        p_alloc = max_p
+                        
+                        # Selective Throttling strictly for the current hour
+                        if h == cur_hour:
+                            house_cons_hourly = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
+                            house_rem_dc = (house_cons_hourly * h_f) / eff
+                            current_surplus_dc = max(0.0, (b_soc - base_target) * b_cap / 100.0 - house_rem_dc)
+                            max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
+                            p_alloc = min(max_p, max_allowed_sell_ac / h_f)
+                            
+                        if rem_kwh_sell > 0.05:
+                            actual_power = min(p_alloc, rem_kwh_sell / h_f)
+                            sell_commands[int(h)] = round_f(actual_power, 3)
+                            rem_kwh_sell -= (actual_power * h_f)
+                    
+                    power_needed = sell_commands.get(int(cur_hour), 0.0)
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        # User-defined Floor (v11.1.62) - Using existing CONF_AI_DISCHARGE_LIMIT
                         if target_soc < base_target:
                             target_soc = base_target
                             res["note"] = f"Цель ограничена пользователем (Target SOC Sell: {base_target}%)"
@@ -1881,26 +1891,22 @@ class StrategyEngine:
                         res["arbitrage_decision"] = f"{decision_tag} | {global_arb_note}"
                     else:
                         res["arbitrage_decision"] = "Ручной режим (AI выкл.)"
+                        
                     target_soc = float(min(100.0, target_soc))
                     delta_available_dc = available_sell_ac / eff
 
                     # --- SELL SIMULATION ---
-                    # Extend simulation to tomorrow morning (Sunrise) or end of peaks, whichever is later
-                    # v7.8 - Ensure simulation covers at least 24h OR until sunrise tomorrow
                     sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     
-                    # Check for battery power limit in attributes
-                    # v11.1.85: If power needed is higher than physical discharge cap, show it.
-                    if power_needed > (max_p + 0.01):
+                    # If we couldn't place all our surplus in the hours because of max_p limits
+                    if rem_kwh_sell > 0.1:
                         res["arbitrage_sell_status"] = "Ограничено мощностью АКБ"
-                    
+
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
-                    
-                    sell_commands = {int(h): power_needed for h in target_hours_sorted if h >= cur_hour}
-                    
+
                     # --- FINAL SIMULATION ---
-                    sim_commands = {int(h): -power_needed for h in target_hours_sorted if h >= cur_hour}
+                    sim_commands = {int(h): -cmd for h, cmd in sell_commands.items()}
                     if best_buy_h is not None and best_buy_h < sim_end_h:
                         pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
                         diff_threshold = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.1))
