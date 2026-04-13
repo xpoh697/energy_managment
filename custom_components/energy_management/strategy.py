@@ -1855,6 +1855,19 @@ class StrategyEngine:
                     else:
                         soc_at_start = b_soc
                         
+                    # 2. Daily Surplus Calculation (v11.3.19: Using soc_at_start to account for future solar)
+                    surplus_for_user_limit = (max(0.0, soc_at_start - base_target) * b_cap / 100.0)
+                    
+                    # Update Triple Constraint with better 'U'
+                    available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
+                    available_sell_ac = float(max(0.0, available_sell_dc * eff))
+                    power_peak = available_sell_ac / num_peaks_left
+                    power_needed = float(max(0.0, power_peak))
+
+                    # Update diagnosis for transparency
+                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f}"
+                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
+
                     # 2. Projected SOC AFTER the first continuous peak
                     if target_hours_sorted:
                         future_active_sell = [h for h in target_hours_sorted if h >= cur_hour]
