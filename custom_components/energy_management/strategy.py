@@ -1728,9 +1728,8 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
-                    # v11.3.11: Final Triple Constraint Diagnosis (Fixed Priority)
+                    # v11.3.18: Recovery & Hyper-Detailed Diagnostic
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
-                    
                     sell_diagnosis = "Рассчитано (Ок)"
                     # Using a small delta for float comparison safety
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
@@ -1739,8 +1738,9 @@ class StrategyEngine:
                         sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)"
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
-                    # v11.3.17: Ultimate Diagnostic for Capacity/Limit Troubleshooting
-                    res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis} | Cap: {b_cap:.1f}kWh | Target: {base_target:.0f}%"
+
+                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f}"
+                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
                     res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
                     surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
