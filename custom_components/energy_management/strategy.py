@@ -1825,30 +1825,49 @@ class StrategyEngine:
                         decision_tag = f"{decision_tag} | {sell_diagnosis}"
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                         
-                    # --- v11.3.31: Greedy Profit Allocation ---
+                    # --- v11.3.34: Epoched Greedy Allocation ---
+                    # Group hours into epochs (separated by >3h gap) so Evening doesn't cannibalize Morning's current surplus.
                     sell_pool = [h for h in target_hours_sorted if h >= cur_hour]
-                    sell_pool_sorted = sorted(sell_pool, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                     
+                    epochs = []
+                    current_epoch = []
+                    for h in sorted(sell_pool):
+                        if not current_epoch or h - current_epoch[-1] <= 3:
+                            current_epoch.append(h)
+                        else:
+                            epochs.append(current_epoch)
+                            current_epoch = [h]
+                    if current_epoch:
+                        epochs.append(current_epoch)
+                        
                     sell_commands = {int(h): 0.0 for h in sell_pool}
                     rem_kwh_sell = available_sell_ac
                     
-                    for h in sell_pool_sorted:
-                        h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
+                    for i, epoch in enumerate(epochs):
+                        epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                         
-                        p_alloc = max_p
-                        
-                        # Selective Throttling strictly for the current hour
-                        if h == cur_hour:
-                            house_cons_hourly = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
-                            house_rem_dc = (house_cons_hourly * h_f) / eff
-                            current_surplus_dc = max(0.0, (b_soc - base_target) * b_cap / 100.0 - house_rem_dc)
-                            max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
-                            p_alloc = min(max_p, max_allowed_sell_ac / h_f)
+                        # If this is a future epoch (e.g. evening peak when we are in the morning),
+                        # assume the battery will be recharged by the sun up to ~100% capacity.
+                        if i > 0:
+                            fresh_surplus = max(0.0, (100.0 - base_target) * b_cap / 100.0) * eff
+                            rem_kwh_sell = max(rem_kwh_sell, fresh_surplus)
                             
-                        if rem_kwh_sell > 0.05:
-                            actual_power = min(p_alloc, rem_kwh_sell / h_f)
-                            sell_commands[int(h)] = round_f(actual_power, 3)
-                            rem_kwh_sell -= (actual_power * h_f)
+                        for h in epoch_sorted:
+                            h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
+                            p_alloc = max_p
+                            
+                            # Selective Throttling strictly for the current hour
+                            if h == cur_hour:
+                                house_cons_hourly = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
+                                house_rem_dc = (house_cons_hourly * h_f) / eff
+                                current_surplus_dc = max(0.0, (b_soc - base_target) * b_cap / 100.0 - house_rem_dc)
+                                max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
+                                p_alloc = min(max_p, max_allowed_sell_ac / h_f)
+                                
+                            if rem_kwh_sell > 0.05:
+                                actual_power = min(p_alloc, rem_kwh_sell / h_f)
+                                sell_commands[int(h)] = round_f(actual_power, 3)
+                                rem_kwh_sell -= (actual_power * h_f)
                     
                     power_needed = sell_commands.get(int(cur_hour), 0.0)
                     
