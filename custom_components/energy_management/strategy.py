@@ -1148,10 +1148,16 @@ class StrategyEngine:
                     gain = float(price * eff - cheap_p_back - deg_cost)
                     return gain >= threshold, gain, cheap_p_back, cheap_h
 
-                # v11.3.5: Avoid "Past Shadowing" - only look at current and future hours for planning.
-                today_p_future = {h: p for h, p in today_prices.items() if int(h) >= cur_hour}
-                raw_peaks_today = get_peaks(today_p_future, True, 0.0, sell_tolerance)
-                raw_peaks_tom = get_peaks(tomorrow_prices, True, 0.0, sell_tolerance)
+                # v11.3.32: Bi-Modal Daily Peak Strategy (Morning vs Evening)
+                # Split day at 13:00 to naturally find optimal peaks for both halves.
+                today_morn = {h: p for h, p in today_prices.items() if cur_hour <= int(h) < 13}
+                today_eve = {h: p for h, p in today_prices.items() if cur_hour <= int(h) and int(h) >= 13}
+                
+                tom_morn = {h: p for h, p in tomorrow_prices.items() if int(h) < 13}
+                tom_eve = {h: p for h, p in tomorrow_prices.items() if int(h) >= 13}
+
+                raw_peaks_today = get_peaks(today_morn, True, 0.0, sell_tolerance) + get_peaks(today_eve, True, 0.0, sell_tolerance)
+                raw_peaks_tom = get_peaks(tom_morn, True, 0.0, sell_tolerance) + get_peaks(tom_eve, True, 0.0, sell_tolerance)
                 
                 if not raw_peaks_today and not raw_peaks_tom:
                     res["state"] = "price_limit_not_met"
@@ -1162,6 +1168,10 @@ class StrategyEngine:
                         # Use all hours meeting the limit
                         peaks_today = [(int(h), float(p)) for h, p in today_prices.items() if float(normalize_float(p)) >= sell_limit]
                         peaks_tom = [(int(h) + 24, float(p)) for h, p in tomorrow_prices.items() if float(normalize_float(p)) >= sell_limit]
+                        
+                        combined = peaks_today + peaks_tom
+                        target_hours = sorted(list(set([int(h) for h, p in combined])))
+                        target_price = float(max((p for h, p in combined), default=0.0))
                     else:
                         def _can_recharge_between(start_h, end_h, p_c, p_m):
                             if end_h <= start_h: return False, ""
@@ -1189,78 +1199,55 @@ class StrategyEngine:
                                 return True, f"Благоприятно (Сим. {max_r:.1f}% >= Треб. {req_soc:.1f}%)"
                             return False, f"Неблагоприятно (Сим. {max_r:.1f}% < Треб. {req_soc:.1f}%)"
 
-                        peaks_today = []
+                        peaks_combined_raw = []
                         for h, p in raw_peaks_today:
-                            ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h))
-                            if float(normalize_float(p)) >= sell_limit or ok_arb: # when AI is on, any arb or limit peak is ok
-                                peaks_today.append((int(h), float(normalize_float(p))))
+                            norm_p = float(normalize_float(p))
+                            ok_arb, _, _, _ = is_profitable(norm_p, int(h))
+                            if norm_p >= sell_limit or ok_arb:
+                                peaks_combined_raw.append((int(h), norm_p))
                                 
-                        # v11.3.28: LIFT TOLERANCE FOR EXPLICIT SELL LIMIT (with recharge check)
-                        if sell_limit > -90.0:
-                            ai_peaks = sorted([int(ph) for ph, _ in raw_peaks_today] + [int(ph)+24 for ph, _ in raw_peaks_tom])
-                            for h, p in today_p_future.items():
-                                norm_p = float(normalize_float(p))
-                                h_int = int(h)
-                                if (h_int, norm_p) not in peaks_today and norm_p >= sell_limit:
-                                    can_add = True
-                                    next_ai = next((ah for ah in ai_peaks if ah > h_int), None)
-                                    if next_ai is not None:
-                                        next_ai_p = float(normalize_float(all_sell_prices.get(next_ai, 0.0)))
-                                        cr, _ = _can_recharge_between(h_int, next_ai, norm_p, next_ai_p)
-                                        if not cr: can_add = False
-                                    if can_add:
-                                        peaks_today.append((h_int, norm_p))
-                                
-                        peaks_tom = []
                         for h, p in raw_peaks_tom:
-                            ok_arb, _, _, _ = is_profitable(float(normalize_float(p)), int(h) + 24)
-                            if float(normalize_float(p)) >= sell_limit or ok_arb:
-                                peaks_tom.append((int(h) + 24, float(normalize_float(p))))
+                            norm_p = float(normalize_float(p))
+                            ok_arb, _, _, _ = is_profitable(norm_p, int(h) + 24)
+                            if norm_p >= sell_limit or ok_arb:
+                                peaks_combined_raw.append((int(h) + 24, norm_p))
                                 
-                        if sell_limit > -90.0:
-                            ai_peaks = sorted([int(ph) for ph, _ in raw_peaks_today] + [int(ph)+24 for ph, _ in raw_peaks_tom])
-                            for h, p in tomorrow_prices.items():
-                                norm_p = float(normalize_float(p))
-                                h_int = int(h) + 24
-                                if (h_int, norm_p) not in peaks_tom and norm_p >= sell_limit:
-                                    can_add = True
-                                    next_ai = next((ah for ah in ai_peaks if ah > h_int), None)
-                                    if next_ai is not None:
-                                        next_ai_p = float(normalize_float(all_sell_prices.get(next_ai, 0.0)))
-                                        cr, _ = _can_recharge_between(h_int, next_ai, norm_p, next_ai_p)
-                                        if not cr: can_add = False
-                                    if can_add:
-                                        peaks_tom.append((h_int, norm_p))
-                    
-                    if not peaks_today and not peaks_tom:
-                        res["state"] = "price_limit_not_met"
-                        res["multi_cycle"] = "Не предвидится"
-                        res["arbitrage_decision"] = "Нет ценового окна"
-                    else:
-                        if dynamic_sell_ai and not any(p >= sell_limit for h, p in peaks_today + peaks_tom):
-                            res["state"] = "preparing_arbitrage"
+                        # v11.3.32: Unified chronological anti-cannibalization check
+                        peaks_combined_raw.sort(key=lambda x: x[0])
                         
-                        if peaks_today and peaks_tom:
-                            max_h_today = max(h for h, p in peaks_today)
-                            min_h_tom = min(h for h, p in peaks_tom)
-                            
-                            max_today_p = float(max(p for h, p in peaks_today))
-                            max_tom_p = float(max(p for h, p in peaks_tom))
-                            can_recharge, reason = _can_recharge_between(max_h_today, min_h_tom, max_today_p, max_tom_p)
-                            
-                            if can_recharge:
-                                res["multi_cycle"] = reason
-                                combined = peaks_today + peaks_tom
-                                target_hours = sorted(list(set([int(h) for h, p in combined])))
-                                target_price = float(max(p for h, p in combined))
+                        safe_peaks = []
+                        last_recharge_reason = "Единичный пик"
+                        
+                        for i, (curr_h, curr_p) in enumerate(peaks_combined_raw):
+                            future_peaks = peaks_combined_raw[i+1:]
+                            if not future_peaks:
+                                safe_peaks.append((curr_h, curr_p))
+                                continue
+                                
+                            best_future_p = max(fp[1] for fp in future_peaks)
+                            if curr_p < best_future_p:
+                                best_future_h = next(fp[0] for fp in future_peaks if fp[1] == best_future_p)
+                                cr, reason = _can_recharge_between(curr_h, best_future_h, curr_p, best_future_p)
+                                if cr:
+                                    safe_peaks.append((curr_h, curr_p))
+                                    last_recharge_reason = reason
+                                # Else: dropped to prevent cannibalization
                             else:
-                                res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
-                                if max_today_p >= max_tom_p:
-                                    target_hours = [int(h) for h, p in peaks_today]
-                                    target_price = max_today_p
-                                else:
-                                    target_hours = [int(h) for h, p in peaks_tom]
-                                    target_price = max_tom_p
+                                safe_peaks.append((curr_h, curr_p))
+                                
+                        if not safe_peaks:
+                            res["state"] = "preparing_arbitrage"
+                            res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
+                            target_hours = []
+                            target_price = 0.0
+                        else:
+                            if len(safe_peaks) > 1:
+                                res["multi_cycle"] = last_recharge_reason
+                            else:
+                                res["multi_cycle"] = "Не предвидится"
+                                
+                            target_hours = sorted(list(set([h for h, p in safe_peaks])))
+                            target_price = float(max((p for h, p in safe_peaks), default=0.0))
                         elif peaks_today:
                             target_hours = [int(h) for h, p in peaks_today]
                             target_price = float(max(p for h, p in peaks_today))
