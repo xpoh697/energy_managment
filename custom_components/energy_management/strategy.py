@@ -1160,26 +1160,32 @@ class StrategyEngine:
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
-                        peaks_today = [(int(h), float(p)) for h, p in today_prices.items() if float(normalize_float(p)) >= sell_limit]
-                        peaks_tom = [(int(h) + 24, float(p)) for h, p in tomorrow_prices.items() if float(normalize_float(p)) >= sell_limit]
                     else:
-                        def _can_recharge_between(start_h, end_h):
+                        def _can_recharge_between(start_h, end_h, p_c, p_m):
                             if end_h <= start_h: return False, ""
                             for h_ch in range(int(start_h) + 1, int(end_h)):
                                 if all_buy_prices.get(h_ch, 99.0) <= buy_limit:
                                     return True, "Благоприятно (Дешевая сеть ночью)"
-                                if 8 <= (h_ch % 24) <= 16:
-                                    val_s = 0.0
-                                    fsensors = man.forecast_tomorrow_sensor if h_ch >= 24 else man.forecast_solar_sensor
-                                    if fsensors:
-                                        if isinstance(fsensors, str): fsensors = [fsensors]
-                                        for fsensor in fsensors:
-                                            st = man.hass.states.get(fsensor)
-                                            v = get_kwh_val(st)
-                                            if v is not None: val_s += float(v)
-                                    if val_s > 3.0:
-                                        return True, "Благоприятно (Ожидается солнце)"
-                            return False, "Неблагоприятно (Нет условий для дозарядки)"
+                                    
+                            start_soc = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+                            sim_r = list(range(int(start_h) + 1, int(end_h)))
+                            if not sim_r: return False, "Слишком короткий период"
+                            
+                            sim_s = now if start_h == cur_hour else now.replace(minute=0, second=0, microsecond=0)
+                            _, log_d, _ = self.run_soc_simulation(start_soc, sim_r, sim_s, commands=None)
+                            
+                            max_r = start_soc
+                            for st in log_d.values():
+                                max_r = max(max_r, float(st.get("soc", 0)))
+                                
+                            max_s = 100.0 - start_soc
+                            p_x = max(0.01, p_m)
+                            req_rec = max_s * max(0.0, (p_x - p_c) / p_x)
+                            req_soc = min(95.0, start_soc + req_rec + 1.0)
+                            
+                            if max_r >= req_soc:
+                                return True, f"Благоприятно (Сим. {max_r:.1f}% >= Треб. {req_soc:.1f}%)"
+                            return False, f"Неблагоприятно (Сим. {max_r:.1f}% < Треб. {req_soc:.1f}%)"
 
                         peaks_today = []
                         for h, p in raw_peaks_today:
@@ -1197,7 +1203,8 @@ class StrategyEngine:
                                     can_add = True
                                     next_ai = next((ah for ah in ai_peaks if ah > h_int), None)
                                     if next_ai is not None:
-                                        cr, _ = _can_recharge_between(h_int, next_ai)
+                                        next_ai_p = float(normalize_float(all_sell_prices.get(next_ai, 0.0)))
+                                        cr, _ = _can_recharge_between(h_int, next_ai, norm_p, next_ai_p)
                                         if not cr: can_add = False
                                     if can_add:
                                         peaks_today.append((h_int, norm_p))
@@ -1217,7 +1224,8 @@ class StrategyEngine:
                                     can_add = True
                                     next_ai = next((ah for ah in ai_peaks if ah > h_int), None)
                                     if next_ai is not None:
-                                        cr, _ = _can_recharge_between(h_int, next_ai)
+                                        next_ai_p = float(normalize_float(all_sell_prices.get(next_ai, 0.0)))
+                                        cr, _ = _can_recharge_between(h_int, next_ai, norm_p, next_ai_p)
                                         if not cr: can_add = False
                                     if can_add:
                                         peaks_tom.append((h_int, norm_p))
@@ -1234,7 +1242,10 @@ class StrategyEngine:
                             max_h_today = max(h for h, p in peaks_today)
                             min_h_tom = min(h for h, p in peaks_tom)
                             
-                            can_recharge, reason = _can_recharge_between(max_h_today, min_h_tom)
+                            max_today_p = float(max(p for h, p in peaks_today))
+                            max_tom_p = float(max(p for h, p in peaks_tom))
+                            can_recharge, reason = _can_recharge_between(max_h_today, min_h_tom, max_today_p, max_tom_p)
+                            
                             if can_recharge:
                                 res["multi_cycle"] = reason
                                 combined = peaks_today + peaks_tom
@@ -1242,8 +1253,6 @@ class StrategyEngine:
                                 target_price = float(max(p for h, p in combined))
                             else:
                                 res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
-                                max_today_p = float(max(p for h, p in peaks_today))
-                                max_tom_p = float(max(p for h, p in peaks_tom))
                                 if max_today_p >= max_tom_p:
                                     target_hours = [int(h) for h, p in peaks_today]
                                     target_price = max_today_p
