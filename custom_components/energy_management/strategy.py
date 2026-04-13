@@ -1678,9 +1678,6 @@ class StrategyEngine:
                     solar_is_excess = bool(tomorrow_solar_total > tomorrow_cons_total + 1.5) # 1.5kWh buffer
                     
                     # PRECISE SIMULATION-BASED CALCULATION (v6.2 Modular)
-                    else:
-                        # Simple mode: energy above target SOC is sellable
-                        available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
 
                     upcoming = [h for h in target_hours_sorted if h >= cur_hour]
                     block_len = 0
