@@ -1749,6 +1749,40 @@ class StrategyEngine:
                     natural_soc_after_sale = soc_at_start
                     if target_hours_sorted:
                         future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
+                        
+                        # --- v11.3.35: Smart Deficit Throttling (Double Cycle Optimizer) ---
+                        # If the sun cannot recharge the battery to 100% between Morning and Evening peaks,
+                        # it is mathematically optimal to HOLD the deficit energy in the Morning 
+                        # and sell it in the Evening at the higher price.
+                        epochs_eval = []
+                        current_ep = []
+                        for h in sorted(future_active_sell_base):
+                            if not current_ep or h - current_ep[-1] <= 3:
+                                current_ep.append(h)
+                            else:
+                                epochs_eval.append(current_ep)
+                                current_ep = [h]
+                        if current_ep:
+                            epochs_eval.append(current_ep)
+                            
+                        # Apply ONLY if we are in the first epoch of a multi-epoch cycle
+                        if len(epochs_eval) > 1 and cur_hour <= max(epochs_eval[0]):
+                            end_first = max(epochs_eval[0])
+                            start_second = min(epochs_eval[1])
+                            max_recharge_soc = b_soc
+                            
+                            # Scan the baseline daylight physics simulation for maximum solar accumulation
+                            for hr_step in range(end_first + 1, start_second):
+                                step_key = f"{hr_step % 24:02d}:59" + (" (Tomorrow)" if hr_step >= 24 else "")
+                                test_soc = self._get_soc_from_log(sim_log_base, step_key, b_soc)
+                                if test_soc is not None and test_soc > max_recharge_soc:
+                                    max_recharge_soc = test_soc
+                            
+                            # If solar cannot fill it up, raise the discharge floor (base_target) by the deficit
+                            if max_recharge_soc < 99.0:
+                                deficit_pct = 100.0 - max_recharge_soc
+                                base_target = min(100.0, base_target + deficit_pct)
+                                
                         if future_active_sell_base:
                             last_h_base = future_active_sell_base[-1]
                             for i in range(1, len(future_active_sell_base)):
