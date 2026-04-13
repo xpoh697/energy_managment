@@ -1869,7 +1869,7 @@ class StrategyEngine:
                                     last_h_sell_immediate = future_active_sell[i-1]
                                     break
                             
-                            key_after = f"{last_h_sell_immediate % 24:02d}:59" + (" (Завтра)" if last_h_sell_immediate >= 24 else "")
+                            key_after = f"{last_h_sell_immediate % 24:02d}:59" + (" (Tomorrow)" if last_h_sell_immediate >= 24 else "")
                             soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
                         else:
                             soc_after = b_soc
@@ -1877,7 +1877,7 @@ class StrategyEngine:
                         soc_after = b_soc
                     
                     # 3. Projected SOC TOMORROW MORNING (at Dynamic Sunrise)
-                    key_morning = f"{sunrise_h-1:02d}:59 (Завтра)"
+                    key_morning = f"{sunrise_h-1:02d}:59 (Tomorrow)"
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
 
                     # v7.2 - CLEANUP: If no sale is currently planned for today, return current SOC
