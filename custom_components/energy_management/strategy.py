@@ -1248,12 +1248,6 @@ class StrategyEngine:
                                 
                             target_hours = sorted(list(set([h for h, p in safe_peaks])))
                             target_price = float(max((p for h, p in safe_peaks), default=0.0))
-                        elif peaks_today:
-                            target_hours = [int(h) for h, p in peaks_today]
-                            target_price = float(max(p for h, p in peaks_today))
-                        elif peaks_tom:
-                            target_hours = [int(h) for h, p in peaks_tom]
-                            target_price = float(max(p for h, p in peaks_tom))
 
                         # Arbitrage note for the sensor
                         cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
