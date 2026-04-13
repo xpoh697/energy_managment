@@ -1698,13 +1698,7 @@ class StrategyEngine:
                         # 3. Final available energy is the MOST restrictive of the two
                         available_sell_ac = min(available_morning_ac, available_user_ac)
                         
-                        # Status Diagnosis
-                        if available_morning_ac < (available_user_ac - 0.01):
-                            res["arbitrage_sell_status"] = "Защита дома (Sunrise)"
-                        elif available_user_ac < (available_morning_ac - 0.01):
-                            res["arbitrage_sell_status"] = "Лимит пользователя"
-                        else:
-                            res["arbitrage_sell_status"] = "Рассчитано (Ок)"
+                        # (Diagnostic block moved lower to account for all constraints)
                     else:
                         # Simple mode: energy above target SOC is sellable
                         available_sell_ac = float(max(0.0, (batt_energy_val - (base_target * b_cap / 100.0)) * eff))
@@ -1749,11 +1743,19 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left # we already calculated this based on (num - 1) + rem_min
                     physical_limit_dc = (max_p_discharge * total_h_allowed) / eff
                     
+                    # v11.3.10: Final Triple Constraint Diagnosis
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     
-                    surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
+                    sell_diagnosis = "Рассчитано (Ок)"
+                    if available_sell_dc == physical_limit_dc and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
+                        sell_diagnosis = "Ограничено мощностью АКБ"
+                    elif available_sell_dc == surplus_for_user_limit and surplus_for_user_limit < surplus_for_morning:
+                        sell_diagnosis = "Лимит пользователя"
+                    elif available_sell_dc == surplus_for_morning:
+                        sell_diagnosis = "Защита дома (Рассвет)"
                     
-                    # Final safety floor for UI attributes
+                    res["arbitrage_sell_status"] = sell_diagnosis
+                    surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     ai_soc_floor_final = target_morning_soc
                     
                     # Arbitrage math for the Gatekeeper logic
@@ -1784,9 +1786,11 @@ class StrategyEngine:
                         available_sell_ac = 0.0
                         if is_in_peak and not arbitrage_is_best:
                             decision_tag = "Защита базы (Завтра мало солнца)"
+                        else:
+                            decision_tag = f"Ожидание ({sell_diagnosis})"
                     else:
-                        # v11.3.8: Logic - We sell from surplus above morning safety, but stay above base_target.
                         target_soc = base_target
+                        decision_tag = f"{decision_tag} | {sell_diagnosis}"
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                     power_peak = available_sell_ac / num_peaks_left
                     power_needed = float(max(0.0, power_peak))
