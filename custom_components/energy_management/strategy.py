@@ -1724,8 +1724,22 @@ class StrategyEngine:
                         natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, 0.0 
                     )
                     
-                    # v11.3.20: Using soc_at_start (projected) for User Limit to account for tomorrow's solar
-                    surplus_for_user_limit = (max(0.0, soc_at_start - base_target) * b_cap / 100.0)
+                    # v11.3.26: Calculate User Limit using natural SOC at the END of the sale window.
+                    # This guarantees we account for the house background load during the sale.
+                    natural_soc_after_sale = soc_at_start
+                    if target_hours_sorted:
+                        future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
+                        if future_active_sell_base:
+                            last_h_base = future_active_sell_base[-1]
+                            for i in range(1, len(future_active_sell_base)):
+                                if future_active_sell_base[i] != future_active_sell_base[i-1] + 1:
+                                    last_h_base = future_active_sell_base[i-1]
+                                    break
+                            key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Tomorrow)" if last_h_base >= 24 else "")
+                            natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_nat_end, soc_at_start)
+                    
+                    # Use natural_soc_after_sale instead of soc_at_start to find the True available surplus
+                    surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
                     
                     # v11.3.11: Factor in physical energy capacity of the identified peaks
                     # Using global max_p which already accounts for CONF_BATTERY_MAX_POWER (e.g. 6.2kW)
@@ -1886,9 +1900,7 @@ class StrategyEngine:
                         soc_after = b_soc
                         # soc_morning remains as natural discharge result
 
-                    # v11.3.25: Diagnose the exact key formatting issue
-                    ka_exists = key_after in sim_log if target_hours_sorted else False
-                    res["arbitrage_sell_limit_reason"] += f" | K-A:{ka_exists} V:{sim_log.get(key_after if target_hours_sorted else '', {})}"
+                    # Removed temporary debug diagnostics
 
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
