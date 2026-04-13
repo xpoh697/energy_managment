@@ -1714,8 +1714,8 @@ class StrategyEngine:
                     first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else None
                     if first_h_sell is not None and first_h_sell > cur_hour:
                         prev_h = first_h_sell - 1
-                        key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                        soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc)
+                        key_start = f"{prev_h % 24:02d}:59" + (" (Tomorrow)" if prev_h >= 24 else "")
+                        soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
                     # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
