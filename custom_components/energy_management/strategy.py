@@ -919,6 +919,7 @@ class StrategyEngine:
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
         charge_commands = {}
+        can_recharge = False
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
@@ -1147,7 +1148,9 @@ class StrategyEngine:
                     gain = float(price * eff - cheap_p_back - deg_cost)
                     return gain >= threshold, gain, cheap_p_back, cheap_h
 
-                raw_peaks_today = get_peaks(today_prices, True, 0.0, sell_tolerance)
+                # v11.3.5: Avoid "Past Shadowing" - only look at current and future hours for planning.
+                today_p_future = {h: p for h, p in today_prices.items() if int(h) >= cur_hour}
+                raw_peaks_today = get_peaks(today_p_future, True, 0.0, sell_tolerance)
                 raw_peaks_tom = get_peaks(tomorrow_prices, True, 0.0, sell_tolerance)
                 
                 if not raw_peaks_today and not raw_peaks_tom:
@@ -1207,7 +1210,7 @@ class StrategyEngine:
                                 
                             if can_recharge:
                                 combined = peaks_today + peaks_tom
-                                target_hours = [int(h) for h, p in combined]
+                                target_hours = sorted(list(set([int(h) for h, p in combined])))
                                 target_price = float(max(p for h, p in combined))
                             else:
                                 res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
@@ -1247,7 +1250,9 @@ class StrategyEngine:
             if target_hours:
                 truncated = [target_hours[0]]
                 for i in range(1, len(target_hours)):
-                    if target_hours[i] - target_hours[i-1] <= 12:
+                    # v11.3.4: If we have a double-cycle opportunity, allow large gaps between cycles.
+                    # Otherwise, only plan for the immediate block of peaks (standard behavior).
+                    if (target_hours[i] - target_hours[i-1] <= 12) or can_recharge:
                         truncated.append(target_hours[i])
                     else:
                         break
