@@ -916,6 +916,7 @@ class StrategyEngine:
             return cached["res"]
 
         res = {
+            "strategy_version": "v11.4.12",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
