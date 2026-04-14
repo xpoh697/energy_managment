@@ -1163,7 +1163,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.55"
+                    res["strategy_version"] = "v11.3.60"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1845,6 +1845,18 @@ class StrategyEngine:
                                     break
                             key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Tomorrow)" if last_h_base >= 24 else "")
                             natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_nat_end, soc_at_start)
+                        
+                        # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
+                        # We calculate the exact SOC floor needed to guarantee the morning target.
+                        target_sunrise_soc = min_soc_val + soc_buffer_val
+                        # Energy drain between end of sale and sunrise (in SOC %)
+                        night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
+                        survival_floor = target_sunrise_soc + night_drain_pct
+                        
+                        if survival_floor > base_target:
+                            res["morning_autopilot_active"] = True
+                            res["morning_autopilot_floor"] = round_f(survival_floor, 1)
+                            base_target = survival_floor
                     
                     # Use natural_soc_after_sale instead of soc_at_start to find the True available surplus
                     surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
