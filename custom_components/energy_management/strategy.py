@@ -1217,6 +1217,7 @@ class StrategyEngine:
                         
                         safe_peaks = []
                         last_recharge_reason = "Единичный пик"
+                        skipped_reasons = []
                         
                         for i, (curr_h, curr_p) in enumerate(peaks_combined_raw):
                             future_peaks = peaks_combined_raw[i+1:]
@@ -1231,7 +1232,11 @@ class StrategyEngine:
                                 if cr:
                                     safe_peaks.append((curr_h, curr_p))
                                     last_recharge_reason = reason
-                                # Else: dropped to prevent cannibalization
+                                else:
+                                    # v11.3.41: Capture why the peak was dropped
+                                    # Shorten "Неблагоприятно" for UI space
+                                    short_reason = reason.replace("Неблагоприятно", "Нет условий").replace("Благоприятно", "Ок")
+                                    skipped_reasons.append(f"{curr_h%24:02d}:00 ({short_reason})")
                             else:
                                 safe_peaks.append((curr_h, curr_p))
                                 
@@ -1244,7 +1249,11 @@ class StrategyEngine:
                             if len(safe_peaks) > 1:
                                 res["multi_cycle"] = last_recharge_reason
                             else:
-                                res["multi_cycle"] = "Не предвидится"
+                                # v11.3.41: Inform the user why they see only one peak
+                                if skipped_reasons:
+                                    res["multi_cycle"] = f"Единичный пик (Пропуск: {', '.join(skipped_reasons)})"
+                                else:
+                                    res["multi_cycle"] = "Единичный пик"
                                 
                             target_hours = sorted(list(set([h for h, p in safe_peaks])))
                             target_price = float(max((p for h, p in safe_peaks), default=0.0))
