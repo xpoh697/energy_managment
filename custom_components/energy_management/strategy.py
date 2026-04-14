@@ -1815,11 +1815,18 @@ class StrategyEngine:
                         key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
                         soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     
+                    # v11.4.27: Determine Effective Buffer EARLY for consistency
+                    effective_buffer = soc_buffer_val
+                    # Identify if we are in the morning peak with imminent solar
+                    is_morning_solar = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.1)
+                    if is_morning_solar:
+                         effective_buffer = 3.0 # v11.4.25: Liberalized morning buffer
+                    
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
                     # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
                     # 1. User SOC Limit 2. Morning Survival 3. Physical Battery Power (C-rate/Time)
                     surplus_for_morning = self._calculate_sunrise_surplus(
-                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, 0.0 
+                        natural_morning_soc, min_soc_val, effective_buffer, b_cap, 1.0, 0.0 
                     )
                     
                     # v11.3.26: Calculate User Limit using natural SOC at the END of the sale window.
@@ -1883,28 +1890,18 @@ class StrategyEngine:
                         
                         # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
                         # We calculate the exact SOC floor needed to guarantee the morning target.
-                        # v11.4.25: Relaxed buffer in total sunrise window (04:00 - 12:00)
-                        effective_buffer = soc_buffer_val
-                        if (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.1):
-                            effective_buffer = 3.0 # User requested 3% safety during morning solar window
-                            
+                        # v11.4.27: Unified buffer logic (already calculated above as effective_buffer)
                         target_sunrise_soc = min_soc_val + effective_buffer
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         survival_floor = target_sunrise_soc + night_drain_pct
                         
-                        # v11.4.26: Absolute Liberalization - Bypass the survival floor during morning solar peak.
-                        # We allow discharging down to the absolute MIN_SOC (reserve) locally, 
-                        # as long as the 24h simulation (natural_morning_soc) shows we reach the goal (min_soc + 3.0).
-                        is_morning_solar = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.1)
-                        if survival_floor > base_target and not is_morning_solar:
+                        if survival_floor > base_target:
                              res["morning_autopilot_active"] = True
                              res["morning_autopilot_floor"] = round_f(survival_floor, 1)
                              base_target = survival_floor
                          
-                        if is_morning_solar:
-                             # In the morning window, use the bare min_soc as the current discharge limit.
-                             base_target = min_soc_val
+                        target_morning_soc = target_sunrise_soc # For consistency in diagnostics
                     
                     # Use natural_soc_after_sale instead of soc_at_start to find the True available surplus
                     surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
