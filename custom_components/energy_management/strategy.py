@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.72"
+                    res["strategy_version"] = "v11.3.73"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1883,7 +1883,7 @@ class StrategyEngine:
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)"
+                        sell_diagnosis = f"Лимит пользователя ({user_limit_soc:.0f}%)"
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
 
