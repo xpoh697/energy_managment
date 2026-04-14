@@ -2940,9 +2940,9 @@ class InverterOperationModeSensor(SensorEntity):
                     else:
                         reason = "Коплю заряд"
                 elif not is_before_limit_hour:
-                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f})"
+                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f})"
                 elif not has_surplus:
-                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f}), но нет излишка солнца"
+                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f}), но нет излишка солнца"
                 else:
                     reason = "Стандартная работа: цена высокая, но условия sale_pv_no_bat не соблюдены"
             
