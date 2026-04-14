@@ -1862,7 +1862,13 @@ class StrategyEngine:
                                     max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                     
                                     # If solar cannot fill it up, raise the discharge floor (base_target) by the deficit
-                                    if max_recharge_soc < 99.0:
+                                    # v11.4.25: Price-Aware Deficit Throttling
+                                    # Only hold the energy if the Evening peak price is actually higher than current Morning price.
+                                    prices_all = all_sell_prices
+                                    avg_p1 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[0]) / len(epochs_eval[0])
+                                    avg_p2 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[1]) / len(epochs_eval[1])
+                                    
+                                    if max_recharge_soc < 99.0 and avg_p2 > (avg_p1 + 0.05):
                                         deficit_pct = 100.0 - max_recharge_soc
                                         base_target = min(100.0, base_target + deficit_pct)
                                     
@@ -1877,7 +1883,12 @@ class StrategyEngine:
                         
                         # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
                         # We calculate the exact SOC floor needed to guarantee the morning target.
-                        target_sunrise_soc = min_soc_val + soc_buffer_val
+                        # v11.4.25: Relaxed buffer in total sunrise window (04:00 - 12:00)
+                        effective_buffer = soc_buffer_val
+                        if (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.1):
+                            effective_buffer = 3.0 # User requested 3% safety during morning solar window
+                            
+                        target_sunrise_soc = min_soc_val + effective_buffer
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         survival_floor = target_sunrise_soc + night_drain_pct
