@@ -990,6 +990,7 @@ class StrategyEngine:
             all_prices = {}
             for h, p in today_prices.items(): all_prices[int(h)] = float(normalize_float(p))
             for h, p in tomorrow_prices.items(): all_prices[int(h) + 24] = float(normalize_float(p))
+            cur_p_f = all_prices.get(cur_hour, 0.0)
                 
             negative_hours = [int(h) for h, p in all_prices.items() if p < 0 and h >= cur_hour]
 
