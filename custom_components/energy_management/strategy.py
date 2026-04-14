@@ -898,7 +898,7 @@ class StrategyEngine:
                     simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
             
             # Store enriched data for the 24h forecast sensors (v11.3.23: Unified EN keys)
-            history_log[f"{real_h:0>2}:59" + (" (Tomorrow)" if is_tom else "")] = {
+            history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
                 "soc": round_f(float(simulated_soc), 1),
                 "gen_kw": round_f(float(expected_gen_kw), 3),
                 "load_kw": round_f(float(expected_cons_kw), 3)
@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.67"
+                    res["strategy_version"] = "v11.3.90 (v67 engine restored)"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1644,8 +1644,11 @@ class StrategyEngine:
 
                         res["buy_simulation"] = {
                             "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
+                            "projected_soc_at_buy_start": float(round_f(soc_at_start, 1)),
                             "projected_soc_at_end_pct": float(round_f(min(soc_at_end, target_soc), 1)),
+                            "projected_soc_at_end": float(round_f(min(soc_at_end, target_soc), 1)),
                             "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
+                            "projected_soc_morning": float(round_f(soc_morning, 1)),
                             "log": sim_log
                         }
 
@@ -1802,7 +1805,7 @@ class StrategyEngine:
                     first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else None
                     if first_h_sell is not None and first_h_sell > cur_hour:
                         prev_h = first_h_sell - 1
-                        key_start = f"{prev_h % 24:02d}:59" + (" (Tomorrow)" if prev_h >= 24 else "")
+                        key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
                         soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
@@ -1857,7 +1860,7 @@ class StrategyEngine:
                                 if future_active_sell_base[i] != future_active_sell_base[i-1] + 1:
                                     last_h_base = future_active_sell_base[i-1]
                                     break
-                            key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Tomorrow)" if last_h_base >= 24 else "")
+                            key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Завтра)" if last_h_base >= 24 else "")
                             natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_nat_end, soc_at_start)
                         
                         # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
@@ -2048,7 +2051,7 @@ class StrategyEngine:
                                     last_h_sell_immediate = future_active_sell[i-1]
                                     break
                             
-                            key_after = f"{last_h_sell_immediate % 24:02d}:59" + (" (Tomorrow)" if last_h_sell_immediate >= 24 else "")
+                            key_after = f"{last_h_sell_immediate % 24:02d}:59" + (" (Завтра)" if last_h_sell_immediate >= 24 else "")
                             soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
                         else:
                             soc_after = b_soc
@@ -2056,7 +2059,7 @@ class StrategyEngine:
                         soc_after = b_soc
                     
                     # 3. Projected SOC TOMORROW MORNING (at Dynamic Sunrise)
-                    key_morning = f"{sunrise_h-1:02d}:59 (Tomorrow)"
+                    key_morning = f"{sunrise_h-1:02d}:59 (Завтра)"
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
 
                     # v11.3.61: RECURSIVE MORNING DEFICIT CORRECTION
@@ -2120,6 +2123,7 @@ class StrategyEngine:
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
                         "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
+                            "projected_soc_morning": float(round_f(soc_morning, 1)),
                         "log": sim_log
                     }
 
@@ -2140,6 +2144,7 @@ class StrategyEngine:
                         "reserve_kwh": float(round_f(target_morning_soc * b_cap / 100.0, 2)),
                         "energy_to_wait_kwh": float(round_f(total_cons_to_sunrise, 2)),
                         "ai_floor_soc_pct": float(round_f(ai_soc_floor_final, 1)),
+                        "gatekeeper_floor": float(round_f(res.get("morning_autopilot_floor", ai_soc_floor_final), 1)),
                     }
                     if h_bb is not None and (gain_for_attr >= threshold):
                         res["arbitrage_buyback"]["power_kw"] = max_p
