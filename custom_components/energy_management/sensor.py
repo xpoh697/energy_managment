@@ -2925,11 +2925,11 @@ class InverterOperationModeSensor(SensorEntity):
                 mode = "sale_pv"
                 if is_throttled or is_energy_low_for_evening:
                     if is_throttled:
-                         reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, подгот. к пику (ограничено солнцем)"
+                         reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_hour)} (мало солнца)"
                     elif is_low_for_morning:
-                        reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (мало на утро: {morning_soc_proj:.1f}%)"
+                        reason = f"Резерв на утро (SOC {morning_soc_proj:.0f}%)"
                     else:
-                        reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (не успею к пику)"
+                        reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_hour)}"
                 elif not is_before_limit_hour:
                     reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но уже не утро"
                 elif not has_surplus:
@@ -3024,6 +3024,8 @@ class InverterOperationModeSensor(SensorEntity):
             
             attrs["is_preparing_for_peak"] = is_preparing_for_peak
             attrs["next_peak_start_hour"] = formatted_peak
+            attrs["morning_soc_target"] = sell_strategy.get("arbitrage_buyback", {}).get("target_morning_soc_pct", 25.0)
+            attrs["morning_soc_projected"] = sell_strategy.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0)
             
             self.manager.current_inverter_mode = mode
 
