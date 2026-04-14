@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.91 (v67 engine restored + night_gap_fix)"
+                    res["strategy_version"] = "v11.3.92 (v67 engine restored + honest_status)"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1894,20 +1894,6 @@ class StrategyEngine:
                     
                     # v11.3.18: Recovery & Hyper-Detailed Diagnostic
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
-                    sell_diagnosis = "Рассчитано (Ок)"
-                    # Using a small delta for float comparison safety
-                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
-                        sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
-                    elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)"
-                    elif available_sell_dc <= (surplus_for_morning + 0.001):
-                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
-
-                    # v11.3.23: Full transparency diagnostics
-                    # v11.3.23: Full transparency diagnostics
-                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
-                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
-                    res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
                     # v11.3.37: UI Feedback for Smart Deficit Throttling
                     if available_sell_dc < 0.05 and num_peaks_left > 0.1 and cur_hour < 13:
@@ -2124,6 +2110,25 @@ class StrategyEngine:
 
                     # Removed temporary debug diagnostics
 
+
+                    # v11.3.92: Force update status if morning deficit fix was applied
+                    if morning_deficit_fix > 0.1:
+                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
+
+                    sell_diagnosis = "Рассчитано (Ок)"
+                    # Using a small delta for float comparison safety
+                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
+                        sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
+                    elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
+                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)"
+                    elif available_sell_dc <= (surplus_for_morning + 0.001):
+                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
+
+                    # v11.3.23: Full transparency diagnostics
+                    # v11.3.23: Full transparency diagnostics
+                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
+                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
+                    res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
