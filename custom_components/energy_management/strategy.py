@@ -1163,7 +1163,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.60"
+                    res["strategy_version"] = "v11.3.61"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -2044,6 +2044,55 @@ class StrategyEngine:
                     # 3. Projected SOC TOMORROW MORNING (at Dynamic Sunrise)
                     key_morning = f"{sunrise_h-1:02d}:59 (Tomorrow)"
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
+
+                    # v11.3.61: RECURSIVE MORNING DEFICIT CORRECTION
+                    # If the simulation result says we are below target, we adjust the floor and RE-CALCULATE everything.
+                    morning_deficit_fix = max(0.0, target_morning_soc - soc_morning)
+                    if morning_deficit_fix > 0.1:
+                        # 1. Update the base target floor
+                        base_target = min(100.0, base_target + morning_deficit_fix)
+                        
+                        # 2. Re-calculate available volume
+                        surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
+                        available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
+                        available_sell_ac = float(max(0.0, available_sell_dc * eff))
+                        
+                        # 3. Re-distribute sell_commands
+                        rem_kwh_sell_fix = available_sell_ac
+                        for i, epoch in enumerate(epochs):
+                            epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
+                            if i > 0:
+                                fresh_surplus_fix = max(0.0, (100.0 - base_target) * b_cap / 100.0) * eff
+                                rem_kwh_sell_fix = max(rem_kwh_sell_fix, fresh_surplus_fix)
+                            for h in epoch_sorted:
+                                h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
+                                p_alloc_fix = max_p
+                                if h == cur_hour:
+                                    house_cons_fix = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
+                                    house_rem_dc_fix = (house_cons_fix * h_f) / eff
+                                    current_surplus_dc_fix = max(0.0, (b_soc - base_target) * b_cap / 100.0 - house_rem_dc_fix)
+                                    p_alloc_fix = min(max_p, (current_surplus_dc_fix * eff) / h_f)
+                                if rem_kwh_sell_fix > 0.05:
+                                    actual_p_fix = min(p_alloc_fix, rem_kwh_sell_fix / h_f)
+                                    sell_commands[int(h)] = round_f(actual_p_fix, 3)
+                                    rem_kwh_sell_fix -= (actual_p_fix * h_f)
+                                else:
+                                    sell_commands[int(h)] = 0.0
+                        
+                        # 4. Re-run final simulation
+                        sim_commands_fix = {int(h): -cmd for h, cmd in sell_commands.items()}
+                        if best_buy_h is not None and best_buy_h < sim_end_h:
+                            sim_commands_fix[int(best_buy_h)] = float(max_p)
+                        
+                        _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_commands_fix)
+                        
+                        # 5. Re-extract markers
+                        if future_active_sell:
+                            soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
+                        soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
+                        
+                        res["morning_autopilot_active"] = True
+                        res["morning_autopilot_floor"] = round_f(base_target, 1)
 
                     if not target_hours_sorted:
                         power_needed = 0.0
