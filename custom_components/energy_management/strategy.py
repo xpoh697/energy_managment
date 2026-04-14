@@ -1893,10 +1893,18 @@ class StrategyEngine:
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         survival_floor = target_sunrise_soc + night_drain_pct
                         
-                        if survival_floor > base_target:
-                            res["morning_autopilot_active"] = True
-                            res["morning_autopilot_floor"] = round_f(survival_floor, 1)
-                            base_target = survival_floor
+                        # v11.4.26: Absolute Liberalization - Bypass the survival floor during morning solar peak.
+                        # We allow discharging down to the absolute MIN_SOC (reserve) locally, 
+                        # as long as the 24h simulation (natural_morning_soc) shows we reach the goal (min_soc + 3.0).
+                        is_morning_solar = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.1)
+                        if survival_floor > base_target and not is_morning_solar:
+                             res["morning_autopilot_active"] = True
+                             res["morning_autopilot_floor"] = round_f(survival_floor, 1)
+                             base_target = survival_floor
+                         
+                        if is_morning_solar:
+                             # In the morning window, use the bare min_soc as the current discharge limit.
+                             base_target = min_soc_val
                     
                     # Use natural_soc_after_sale instead of soc_at_start to find the True available surplus
                     surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
