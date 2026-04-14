@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.69"
+                    res["strategy_version"] = "v11.3.70"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1834,22 +1834,27 @@ class StrategyEngine:
                             epochs_eval.append(current_ep)
                             
                         # Apply ONLY if we are in the first epoch of a multi-epoch cycle
+                        # and ONLY if the gap between peaks includes significant daylight hours.
                         if len(epochs_eval) > 1 and cur_hour <= max(epochs_eval[0]):
                             end_first = max(epochs_eval[0])
                             start_second = min(epochs_eval[1])
                             
-                            # We MUST run a micro-simulation starting exactly at the discharge floor (base_target)
-                            # to accurately measure the true charging capacity of the daytime sun.
-                            # Baseline sim_log_base starts at current SOC, which masks the true solar potential.
-                            throttle_sim_hours = list(range(int(end_first) + 1, int(start_second)))
-                            if throttle_sim_hours:
-                                _, throttle_log, _ = self.run_soc_simulation(base_target, throttle_sim_hours, now, {})
+                            # v11.3.70: Only run if the gap actually has solar potential (Daytime gap)
+                            # Gap is "daytime" if it starts before 15:00 or ends after 08:00
+                            gap_h_list = list(range(int(end_first) + 1, int(start_second)))
+                            has_daylight = any(6 <= (h % 24) <= 18 for h in gap_h_list)
+                            
+                            if has_daylight and gap_h_list:
+                                _, throttle_log, _ = self.run_soc_simulation(base_target, gap_h_list, now, {})
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 
                                 # If solar cannot fill it up, raise the discharge floor (base_target) by the deficit
+                                # but NEVER above the survival_floor to prevent 100% lock-ups.
                                 if max_recharge_soc < 99.0:
                                     deficit_pct = 100.0 - max_recharge_soc
-                                    base_target = min(100.0, base_target + deficit_pct)
+                                    # Use survival_floor as the ABSOLUTE CEILING for this optimization
+                                    limit_ceiling = survival_floor if 'survival_floor' in locals() else 80.0
+                                    base_target = min(limit_ceiling, base_target + deficit_pct)
                                     
                         if future_active_sell_base:
                             last_h_base = future_active_sell_base[-1]
