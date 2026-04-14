@@ -649,13 +649,13 @@ class StrategyEngine:
                     permissions_reasons[s_id_s] = f"Đ”ĐµŃ„Đ¸Ń†Đ¸Ń‚ ĐĽĐľŃ‰Đ˝ĐľŃŃ‚Đ¸ ({available_power_kw:.2f} < {p_thresh if not is_pulling else p_lim:.2f}{price_suffix})"
                 elif gen_bottleneck:
                     permissions[s_id_s] = False
-                    permissions_reasons[s_id_s] = "ĐťĐµĐ´ĐľŃŃ‚Đ°Ń‚ĐľŃ‡Đ˝Đľ ĐłĐµĐ˝ĐµŃ€Đ°Ń†Đ¸Đ¸ (Đ˘ĐľĐ»ŃŚĐşĐľ ŃĐľĐ»Đ˝Ń†Đµ)"
+                    permissions_reasons[s_id_s] = "ĐťĐµĐ´ĐľŃŃ‚Đ°Ń‚ĐľчĐ˝Đľ ĐłĐµĐ˝ĐµŃ€Đ°Ń†Đ¸Đ¸ (Đ˘ĐľĐ»ŃŚĐşĐľ ŃĐľĐ»Đ˝Ń†Đµ)"
                 elif available_budget < 0.1 and not only_solar and not is_free_price:
                     permissions[s_id_s] = False
-                    permissions_reasons[s_id_s] = f"Đ›Đ¸ĐĽĐ¸Ń‚ Đ¸ŃŃ‡ĐµŃ€ĐżĐ°Đ˝ ({available_budget:.2f} < 0.1)"
+                    permissions_reasons[s_id_s] = f"Đ›Đ¸ĐĽĐ¸Ń‚ Đ¸ŃчĐµŃ€ĐżĐ°Đ˝ ({available_budget:.2f} < 0.1)"
                 else:
                     permissions[s_id_s] = True
-                    permissions_reasons[s_id_s] = f"ĐžĐş ({available_budget:.2f} ĐşĐ’Ń‚Â·Ń‡ Đ´ĐľŃŃ‚ŃĐżĐ˝Đľ{price_suffix})"
+                    permissions_reasons[s_id_s] = f"ĐžĐş ({available_budget:.2f} кВтÂ·ч Đ´ĐľŃŃ‚ŃĐżĐ˝Đľ{price_suffix})"
                     
                     # Reservation logic:
                     # - Non-cyclic (boilers/heaters): Reservation is always active.
@@ -1085,7 +1085,7 @@ class StrategyEngine:
             if max_arb_gain >= threshold:
                 s_h, b_h = best_arb_pair
                 if s_h is not None and b_h is not None:
-                    global_arb_note = f"ĐŃ€Đ±Đ¸Ń‚Ń€Đ°Đ¶: ĐźŃ€ĐľĐ´Đ°Đ¶Đ° Đ˛ {self._format_h(s_h)} (ĐżĐľ {all_sell_prices[s_h]:.2f}), Đ˛Ń‹ĐłĐľĐ´Đ° {max_arb_gain:.2f} {currency}/ĐşĐ’Ń‚Â·Ń‡"
+                    global_arb_note = f"ĐŃ€Đ±Đ¸Ń‚Ń€Đ°Đ¶: ĐźŃ€ĐľĐ´Đ°Đ¶Đ° Đ˛ {self._format_h(s_h)} (ĐżĐľ {all_sell_prices[s_h]:.2f}), Đ˛Ń‹ĐłĐľĐ´Đ° {max_arb_gain:.2f} {currency}/кВтÂ·ч"
 
 
             if mode == "buy":
@@ -1142,16 +1142,16 @@ class StrategyEngine:
                     if res.get("state") == "preparing_arbitrage":
                         if is_arb_window:
                             s_h, b_h = best_arb_pair
-                            res["arbitrage_decision"] = f"Đ—Đ°Ń€ŃŹĐ´ Đ´Đ»ŃŹ ĐżŃ€ĐľĐ´Đ°Đ¶Đ¸ Đ˛ {self._format_h(s_h)}, Đ˛Ń‹ĐłĐľĐ´Đ° {max_arb_gain:.2f} {currency}/ĐşĐ’Ń‚Â·Ń‡"
+                            res["arbitrage_decision"] = f"Đ—Đ°Ń€ŃŹĐ´ Đ´Đ»ŃŹ ĐżŃ€ĐľĐ´Đ°Đ¶Đ¸ Đ˛ {self._format_h(s_h)}, Đ˛Ń‹ĐłĐľĐ´Đ° {max_arb_gain:.2f} {currency}/кВтÂ·ч"
                         else:
-                            res["arbitrage_decision"] = "Đ—Đ°Ń€ŃŹĐ´ Đ´Đ»ŃŹ ĐľĐ±ĐµŃĐżĐµŃ‡ĐµĐ˝Đ¸ŃŹ Đ´ĐľĐĽĐ° (Survival)"
+                            res["arbitrage_decision"] = "Нет ценового окна"
                     else:
                         res["arbitrage_decision"] = global_arb_note
             else: # sell
                 res["limit_used"] = sell_limit
                 if negative_hours and cur_hour in negative_hours:
                     res["state"] = "price_limit_not_met"
-                    res["arbitrage_decision"] = "ĐžŃ‚Ń€Đ¸Ń†Đ°Ń‚ĐµĐ»ŃŚĐ˝Đ°ŃŹ Ń†ĐµĐ˝Đ°"
+                    res["arbitrage_decision"] = "Нет ценового окна"
                     self._calculating_strategy = old_calc
                     return res
                 
@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.77"
+                    res["strategy_version"] = "v11.3.78"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1245,7 +1245,7 @@ class StrategyEngine:
                         peaks_candidates_all.sort(key=lambda x: x[0])
                         
                         safe_peaks = []
-                        last_recharge_reason = "Đ•Đ´Đ¸Đ˝Đ¸Ń‡Đ˝Ń‹Đą ĐżĐ¸Đş"
+                        last_recharge_reason = "Đ•Đ´Đ¸Đ˝Đ¸чĐ˝Ń‹Đą ĐżĐ¸Đş"
                         skipped_reasons = []
                         
                         for i, (curr_h, curr_p) in enumerate(peaks_candidates_all):
@@ -1296,7 +1296,7 @@ class StrategyEngine:
                         txt = format_skipped(skipped_reasons)
                         if not safe_peaks:
                             res["state"] = "preparing_arbitrage"
-                            res["multi_cycle"] = f"Đ•Đ´Đ¸Đ˝Đ¸Ń‡Đ˝Ń‹Đą ĐżĐ¸Đş (ĐźŃ€ĐľĐżŃŃĐş: {txt})" if txt else "ĐťĐµŃ‚ ŃŃĐ»ĐľĐ˛Đ¸Đą"
+                            res["multi_cycle"] = f"Đ•Đ´Đ¸Đ˝Đ¸чĐ˝Ń‹Đą ĐżĐ¸Đş (ĐźŃ€ĐľĐżŃŃĐş: {txt})" if txt else "ĐťĐµŃ‚ ŃŃĐ»ĐľĐ˛Đ¸Đą"
                             target_hours = []
                             target_price = 0.0
                         else:
@@ -1304,13 +1304,13 @@ class StrategyEngine:
                             # If we have distinct peak windows (e.g. 09:00 and 19:00), show last_recharge_reason.
                             # If we have a cluster (19,20), but something was skipped, show skipped reasons.
                             unique_periods = len(set(h // 4 for h, p in safe_peaks)) # simplified grouping
-                            if len(safe_peaks) > 1 and unique_periods > 1 and last_recharge_reason != "Đ•Đ´Đ¸Đ˝Đ¸Ń‡Đ˝Ń‹Đą ĐżĐ¸Đş":
+                            if len(safe_peaks) > 1 and unique_periods > 1 and last_recharge_reason != "Đ•Đ´Đ¸Đ˝Đ¸чĐ˝Ń‹Đą ĐżĐ¸Đş":
                                 res["multi_cycle"] = last_recharge_reason
                             else:
                                 if txt:
-                                    res["multi_cycle"] = f"Đ•Đ´Đ¸Đ˝Đ¸Ń‡Đ˝Ń‹Đą ĐżĐ¸Đş (ĐźŃ€ĐľĐżŃŃĐş: {txt})"
+                                    res["multi_cycle"] = f"Đ•Đ´Đ¸Đ˝Đ¸чĐ˝Ń‹Đą ĐżĐ¸Đş (ĐźŃ€ĐľĐżŃŃĐş: {txt})"
                                 else:
-                                    res["multi_cycle"] = "Đ•Đ´Đ¸Đ˝Đ¸Ń‡Đ˝Ń‹Đą ĐżĐ¸Đş"
+                                    res["multi_cycle"] = "Đ•Đ´Đ¸Đ˝Đ¸чĐ˝Ń‹Đą ĐżĐ¸Đş"
                                 
                             target_hours = sorted(list(set([h for h, p in safe_peaks])))
                             target_price = float(max((p for h, p in safe_peaks), default=0.0))
@@ -1326,7 +1326,7 @@ class StrategyEngine:
                         if cur_p_f >= sell_limit: status = "ĐźŃ€ĐľĐ´Đ°Đ¶Đ° (Đ›Đ¸ĐĽĐ¸Ń‚)"
                         elif cur_gain >= threshold: status = "ĐźŃ€ĐľĐ´Đ°Đ¶Đ° (ĐŃ€Đ±Đ¸Ń‚Ń€Đ°Đ¶)"
                         
-                        detail = f"ĐˇĐµĐąŃ‡Đ°Ń {cur_p_f:.2f}. {global_arb_note}"
+                        detail = f"ĐˇĐµĐąчĐ°Ń {cur_p_f:.2f}. {global_arb_note}"
                         if best_arb_pair[0] is not None and best_arb_pair[0] > cur_hour and all_sell_prices.get(best_arb_pair[0], 0) > cur_p_f + 0.01:
                              detail += f" | Đ–Đ´ĐµĐĽ ĐłĐ»Đ°Đ˛Đ˝ĐľĐłĐľ ĐżĐ¸ĐşĐ° Đ˛ {self._format_h(best_arb_pair[0])}"
                         
@@ -1493,7 +1493,7 @@ class StrategyEngine:
                     elif available_today_kwh < survival_target_kwh:
                         res["charge_reason"] = "survival"
                         target_soc = float(min(base_target, survival_target_kwh / b_cap * 100.0))
-                        res["arbitrage_decision"] = f"Đ—Đ°Ń€ŃŹĐ´ Đ´Đ»ŃŹ ĐľĐ±ĐµŃĐżĐµŃ‡ĐµĐ˝Đ¸ŃŹ Đ±ŃŃ„ĐµŃ€Đ° ({target_soc:.1f}%)"
+                        res["arbitrage_decision"] = f"Đ—Đ°Ń€ŃŹĐ´ Đ´Đ»ŃŹ ĐľĐ±ĐµŃĐżĐµчĐµĐ˝Đ¸ŃŹ Đ±ŃŃ„ĐµŃ€Đ° ({target_soc:.1f}%)"
                     else:
                         res["charge_reason"] = "none"
                         target_soc = b_soc
@@ -1511,7 +1511,7 @@ class StrategyEngine:
                     # Skip check if price is negative as requested by USER
                     if target_soc > base_target and not negative_hours:
                         target_soc = base_target
-                        res["note"] = f"Đ¦ĐµĐ»ŃŚ ĐľĐłŃ€Đ°Đ˝Đ¸Ń‡ĐµĐ˝Đ° ĐżĐľĐ»ŃŚĐ·ĐľĐ˛Đ°Ń‚ĐµĐ»ĐµĐĽ (Target SOC Buy: {base_target}%)"
+                        res["note"] = f"Đ¦ĐµĐ»ŃŚ ĐľĐłŃ€Đ°Đ˝Đ¸чĐµĐ˝Đ° ĐżĐľĐ»ŃŚĐ·ĐľĐ˛Đ°Ń‚ĐµĐ»ĐµĐĽ (Target SOC Buy: {base_target}%)"
                     
                     target_soc = float(min(100.0, target_soc))
                     sim_soc_plan = b_soc
@@ -1806,7 +1806,7 @@ class StrategyEngine:
                         key_start = f"{prev_h % 24:02d}:59" + (" (Tomorrow)" if prev_h >= 24 else "")
                         soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     
-                    # v11.3.77: Triple Constraint Planning Logic (Refined v11.4)
+                    # v11.3.78: Triple Constraint Planning Logic (Refined v11.4)
                     # We will calculate M, U, and P later in the loop after all simulations are complete.
                     natural_soc_after_sale = soc_at_start
                     if target_hours_sorted:
@@ -1876,15 +1876,16 @@ class StrategyEngine:
                     # v11.3.75: Calculate morning surplus based on the MOST ACCURATE step-by-step simulation
                     # target_morning_soc is the hard survival line (Emergency + Buffer)
                     # natural_morning_soc is where we land WITHOUT any sales today.
-                    # v11.3.77: FINAL TRIPLE CONSTRAINT HARMONY
+                    # v11.3.78: FINAL TRIPLE CONSTRAINT HARMONY
                     # 1. Physical Limit (Max Power * Time left)
                     # 2. Morning Surplus (Survival of House until tomorrow sunrise)
                     # 3. User Surplus (Honoring UI settings)
                     
-                    # Correct morning surplus based on simulation end (v11.3.77)
-                    target_key_morning = f"{sunrise_h:0>2}:59 (Tomorrow)"
-                    nat_soc_morning_sim = self._get_soc_from_log(sim_log_base, target_key_morning, natural_morning_soc) or natural_morning_soc
-                    surplus_for_morning = max(0.0, (nat_soc_morning_sim - target_morning_soc) * b_cap / 100.0)
+                    # Correct morning surplus based on simulation end (v11.3.78)
+                                        # v11.3.78: FINAL TRIPLE CONSTRAINT HARMONY (Robust Edition)
+                    # Use natural_morning_soc DIRECTLY (it is the final SOC of the simulation)
+                    # NO extra buffers: we strictly follow User's (Min SOC + Buffer) threshold.
+                    surplus_for_morning = max(0.0, (natural_morning_soc - target_morning_soc) * b_cap / 100.0)
 
                     # v11.3.72: Surplus is calculated strictly against the IMMUTABLE User Limit
                     surplus_for_user_limit = (max(0.0, natural_soc_after_sale - user_limit_soc) * b_cap / 100.0)
@@ -1898,28 +1899,28 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
-                    # bottleneck calculation
+                                        # bottleneck calculation
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
-                    sell_diagnosis = "Đ Đ°ŃŃŃ‡Đ¸Ń‚Đ°Đ˝Đľ (ĐžĐş)"
+                    sell_diagnosis = "Рассчитано (Ок)"
                     
-                    # Diagnostics & Labels (v11.3.77: Consistent bottling detection)
+                    # Diagnostics & Labels (v11.3.78: Consistent bottling detection)
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
-                        sell_diagnosis = f"Đ›Đ¸ĐĽĐ¸Ń‚ ĐĽĐľŃ‰Đ˝ĐľŃŃ‚Đ¸ ĐĐšĐ‘ ({work_max_p:.1f}ĐşĐ’Ń‚)"
+                        sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        sell_diagnosis = f"Đ›Đ¸ĐĽĐ¸Ń‚ ĐżĐľĐ»ŃŚĐ·ĐľĐ˛Đ°Ń‚ĐµĐ»ŃŹ ({user_limit_soc:.0f}%)"
+                        sell_diagnosis = f"Лимит пользователя ({user_limit_soc:.0f}%)"
                     else:
-                        sell_diagnosis = f"Đ—Đ°Ń‰Đ¸Ń‚Đ° Đ´ĐľĐĽĐ° (Đ Đ°ŃŃĐ˛ĐµŃ‚ {target_morning_soc:.0f}%)"
+                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
 
                     # v11.3.23: Full transparency diagnostics
                     diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
                     res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} UI:{user_limit_soc:.0f}% T:{base_target:.0f}%"
-                    res["arbitrage_sell_status"] = f"Đ Đ°ŃĐżŃ€ĐµĐ´ĐµĐ»ĐµĐ˝Đ¸Đµ Đ˝Đ° {num_peaks_left:.1f}Ń‡" if num_peaks_left > 1.1 else sell_diagnosis
+                    res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
                     # v11.3.37: UI Feedback for Smart Deficit Throttling
                     if available_sell_dc < 0.05 and num_peaks_left > 0.1 and cur_hour < 13:
                         mc_status = res.get("multi_cycle", "")
                         if "Đ‘Đ»Đ°ĐłĐľĐżŃ€Đ¸ŃŹŃ‚Đ˝Đľ" in mc_status:
-                            res["multi_cycle"] = mc_status.replace("Đ‘Đ»Đ°ĐłĐľĐżŃ€Đ¸ŃŹŃ‚Đ˝Đľ", "ĐžĐłŃ€Đ°Đ˝Đ¸Ń‡ĐµĐ˝Đľ (ĐĽĐ°Đ»Đľ ŃĐľĐ»Đ˝Ń†Đ°)")
+                            res["multi_cycle"] = mc_status.replace("Đ‘Đ»Đ°ĐłĐľĐżŃ€Đ¸ŃŹŃ‚Đ˝Đľ", "ĐžĐłŃ€Đ°Đ˝Đ¸чĐµĐ˝Đľ (ĐĽĐ°Đ»Đľ ŃĐľĐ»Đ˝Ń†Đ°)")
                     
                     surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     ai_soc_floor_final = target_morning_soc
@@ -2010,7 +2011,7 @@ class StrategyEngine:
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         if target_soc < base_target:
                             target_soc = base_target
-                            res["note"] = f"Đ¦ĐµĐ»ŃŚ ĐľĐłŃ€Đ°Đ˝Đ¸Ń‡ĐµĐ˝Đ° ĐżĐľĐ»ŃŚĐ·ĐľĐ˛Đ°Ń‚ĐµĐ»ĐµĐĽ (Target SOC Sell: {base_target}%)"
+                            res["note"] = f"Đ¦ĐµĐ»ŃŚ ĐľĐłŃ€Đ°Đ˝Đ¸чĐµĐ˝Đ° ĐżĐľĐ»ŃŚĐ·ĐľĐ˛Đ°Ń‚ĐµĐ»ĐµĐĽ (Target SOC Sell: {base_target}%)"
                         target_soc = float(target_soc)
                     else:
                         target_soc = base_target
@@ -2026,7 +2027,7 @@ class StrategyEngine:
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         res["arbitrage_decision"] = f"{decision_tag} | {global_arb_note}"
                     else:
-                        res["arbitrage_decision"] = "Đ ŃŃ‡Đ˝ĐľĐą Ń€ĐµĐ¶Đ¸ĐĽ (AI Đ˛Ń‹ĐşĐ».)"
+                        res["arbitrage_decision"] = "Нет ценового окна"
                         
                     target_soc = float(min(100.0, target_soc))
                     delta_available_dc = available_sell_ac / eff
@@ -2037,7 +2038,7 @@ class StrategyEngine:
                     
                     # If we couldn't place all our surplus in the hours because of max_p limits
                     if rem_kwh_sell > 0.1:
-                        res["arbitrage_sell_status"] = "ĐžĐłŃ€Đ°Đ˝Đ¸Ń‡ĐµĐ˝Đľ ĐĽĐľŃ‰Đ˝ĐľŃŃ‚ŃŚŃŽ ĐĐšĐ‘"
+                        res["arbitrage_sell_status"] = "ĐžĐłŃ€Đ°Đ˝Đ¸чĐµĐ˝Đľ ĐĽĐľŃ‰Đ˝ĐľŃŃ‚ŃŚŃŽ ĐĐšĐ‘"
 
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
 
