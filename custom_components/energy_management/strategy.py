@@ -401,11 +401,13 @@ class StrategyEngine:
             
             expected_today_total = float(man.data.get("temp_max_forecast", 0.0) or 0.1)
             
-            # B. Today's Performance (Current Estimate vs Morning Promise)
-            # This avoids 'timing shift' errors because it doesn't care about the hourly distribution curves.
+            # B. Today's Performance (Current Efficiency vs Time-Proportional Plan)
+            # v11.3.64: Reactive "Local" coefficient (Actual / Expected So Far).
+            # This allows faster recovery after clouds pass, as it doesn't penalize future
+            # forecast by comparing to a "perfect morning promise" total.
             today_coeff = 1.0
-            if expected_today_total > 0.5:
-                today_coeff = float(max(0.2, min(predicted_total / expected_today_total, 2.0)))
+            if hist_gen_so_far > 0.5:
+                today_coeff = float(max(0.2, min(actual_today / hist_gen_so_far, 2.0)))
             
             # --- Curtailment Correction (v4.2) ---
             # The inverter only chokes PV panels in 'stop_sale' mode if there is "no room for energy"
@@ -422,10 +424,9 @@ class StrategyEngine:
                     if abs(today_coeff - old_today) > 0.01:
                         _LOGGER.debug(f"[Strategy] Curtailment detected (mode=stop_sale, SOC={b_soc_cur}%). Corrected today_coeff: {old_today:.2f} -> {today_coeff:.2f}")
 
-            # C. Blended Coeff: Weighted average of Today vs History
-            # We trust today's data more as the day progresses (using the external forecast's own timing).
-            external_progress = 1.0 - (forecast_val / expected_today_total) if expected_today_total > 0.1 else fraction_so_far
-            external_progress = max(0.0, min(external_progress, 1.0))
+            # C. Blended Coeff: Weighted average of Today vs 1.0 (Baseline)
+            # v11.3.64: Using fraction_so_far as the stable progress measure.
+            external_progress = max(0.0, min(fraction_so_far, 1.0))
             
             # v7.6.1 - Correct blended multiplier: We blend today's consistency with 1.0 baseline,
             # because historical bias (h_acc) is handled per-hour in simulation steps.
@@ -1176,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.63"
+                    res["strategy_version"] = "v11.3.64"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
