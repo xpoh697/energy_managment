@@ -1296,8 +1296,8 @@ class StrategyEngine:
                         # Determine multi_cycle status
                         txt = format_skipped(skipped_reasons)
                         if not safe_peaks:
-                            res["state"] = "preparing_arbitrage"
-                            res["multi_cycle"] = f"Единичный пик (Пропуск: {txt})" if txt else "Нет условий"
+                            res["state"] = "price_limit_not_met"
+                            res["multi_cycle"] = f"Лимит цены не достигнут (Пропуск: {txt})" if txt else "Нет выгодных окон"
                             target_hours = []
                             target_price = 0.0
                         else:
