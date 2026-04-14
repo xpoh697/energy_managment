@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.97 (Smart Restoration Final)"
+                    res["strategy_version"] = "v11.4.02 (Mirror Diagnostics)"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -2125,11 +2125,25 @@ class StrategyEngine:
 
                     # Removed temporary debug diagnostics
 
+                    # v11.4.02: Mirror Diagnostics - Synchronize sensors with the active bottleneck
+                    if available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
+                        # Case: User Limit (e.g. 30%) is the bottleneck
+                        res_soc_after = float(round_f(base_target, 1))
+                        res_soc_morning = float(round_f(soc_morning, 1))
+                    elif available_sell_dc <= (surplus_for_morning + 0.001):
+                        # Case: Home Protection (e.g. 28%) is the bottleneck
+                        res_soc_after = float(round_f(soc_after, 1))
+                        res_soc_morning = float(round_f(target_morning_soc, 1))
+                    else:
+                        # Case: Power limit or others
+                        res_soc_after = float(round_f(soc_after, 1))
+                        res_soc_morning = float(round_f(soc_morning, 1))
+
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
-                        "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
-                        "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
-                            "projected_soc_morning": float(round_f(soc_morning, 1)),
+                        "projected_soc_after_sale_pct": res_soc_after,
+                        "projected_soc_morning_pct": res_soc_morning,
+                            "projected_soc_morning": res_soc_morning,
                         "log": sim_log
                     }
 
