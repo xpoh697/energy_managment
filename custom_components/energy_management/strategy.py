@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.74"
+                    res["strategy_version"] = "v11.3.75"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1809,9 +1809,9 @@ class StrategyEngine:
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
                     # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
                     # 1. User SOC Limit 2. Morning Survival 3. Physical Battery Power (C-rate/Time)
-                    surplus_for_morning = self._calculate_sunrise_surplus(
-                        natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, 0.0 
-                    )
+                    # v11.3.75: DEPRECATED legacy linear calculation.
+                    # We will calculate surplus_for_morning LATER using the step-by-step simulation result.
+                    surplus_for_morning = 99.0 # Placeholder
                     
                     # v11.3.26: Calculate User Limit using natural SOC at the END of the sale window.
                     # This guarantees we account for the house background load during the sale.
@@ -1880,6 +1880,11 @@ class StrategyEngine:
                         if survival_floor > base_target:
                             res["morning_autopilot_active"] = True
                             
+                    # v11.3.75: Calculate morning surplus based on the MOST ACCURATE step-by-step simulation
+                    # target_morning_soc is the hard survival line (Emergency + Buffer)
+                    # natural_morning_soc is where we land WITHOUT any sales today.
+                    surplus_for_morning = max(0.0, (natural_morning_soc - target_morning_soc) * b_cap / 100.0)
+
                     # v11.3.72: Surplus is calculated strictly against the IMMUTABLE User Limit
                     surplus_for_user_limit = (max(0.0, natural_soc_after_sale - user_limit_soc) * b_cap / 100.0)
                     
