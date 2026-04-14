@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.75"
+                    res["strategy_version"] = "v11.3.76"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1806,15 +1806,8 @@ class StrategyEngine:
                         key_start = f"{prev_h % 24:02d}:59" + (" (Tomorrow)" if prev_h >= 24 else "")
                         soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     
-                    # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
-                    # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
-                    # 1. User SOC Limit 2. Morning Survival 3. Physical Battery Power (C-rate/Time)
-                    # v11.3.75: DEPRECATED legacy linear calculation.
-                    # We will calculate surplus_for_morning LATER using the step-by-step simulation result.
-                    surplus_for_morning = 99.0 # Placeholder
-                    
-                    # v11.3.26: Calculate User Limit using natural SOC at the END of the sale window.
-                    # This guarantees we account for the house background load during the sale.
+                    # v11.3.76: Triple Constraint Planning Logic (Refined v11.4)
+                    # We will calculate M, U, and P later in the loop after all simulations are complete.
                     natural_soc_after_sale = soc_at_start
                     if target_hours_sorted:
                         future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
@@ -1883,7 +1876,15 @@ class StrategyEngine:
                     # v11.3.75: Calculate morning surplus based on the MOST ACCURATE step-by-step simulation
                     # target_morning_soc is the hard survival line (Emergency + Buffer)
                     # natural_morning_soc is where we land WITHOUT any sales today.
-                    surplus_for_morning = max(0.0, (natural_morning_soc - target_morning_soc) * b_cap / 100.0)
+                    # v11.3.76: FINAL TRIPLE CONSTRAINT HARMONY
+                    # 1. Physical Limit (Max Power * Time left)
+                    # 2. Morning Surplus (Survival of House until tomorrow sunrise)
+                    # 3. User Surplus (Honoring UI settings)
+                    
+                    # Correct morning surplus based on simulation end (v11.3.76)
+                    target_key_morning = f"{sunrise_h:0>2}:59 (Завтра)"
+                    nat_soc_morning_sim = self._get_soc_from_log(sim_log_base, target_key_morning, natural_morning_soc) or natural_morning_soc
+                    surplus_for_morning = max(0.0, (nat_soc_morning_sim - target_morning_soc) * b_cap / 100.0)
 
                     # v11.3.72: Surplus is calculated strictly against the IMMUTABLE User Limit
                     surplus_for_user_limit = (max(0.0, natural_soc_after_sale - user_limit_soc) * b_cap / 100.0)
@@ -1897,18 +1898,18 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
-                    # v11.3.18: Recovery & Hyper-Detailed Diagnostic
+                    # bottleneck calculation
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     sell_diagnosis = "Рассчитано (Ок)"
-                    # Using a small delta for float comparison safety
+                    
+                    # Diagnostics & Labels (v11.3.76: Consistent bottling detection)
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
                         sell_diagnosis = f"Лимит пользователя ({user_limit_soc:.0f}%)"
-                    elif available_sell_dc <= (surplus_for_morning + 0.001):
+                    else:
                         sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
 
-                    # v11.3.23: Full transparency diagnostics
                     # v11.3.23: Full transparency diagnostics
                     diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
                     res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} UI:{user_limit_soc:.0f}% T:{base_target:.0f}%"
