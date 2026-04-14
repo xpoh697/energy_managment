@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.73"
+                    res["strategy_version"] = "v11.3.74"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1819,7 +1819,23 @@ class StrategyEngine:
                     if target_hours_sorted:
                         future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
                         
-                        # v11.3.71: Calculate survival_floor EARLY for the Double Cycle Optimizer.
+                        # v11.3.74: Find the SOC at the END of the current peak window (considering Home Consumption ONLY)
+                        # This is the "natural" point from which we calculate available surplus.
+                        natural_soc_after_sale = soc_at_start
+                        if target_hours_sorted:
+                            future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
+                            # Find the end of the continuous current peak hour block
+                            last_h_of_peak = future_active_sell_base[0]
+                            for i in range(1, len(future_active_sell_base)):
+                                if future_active_sell_base[i] == future_active_sell_base[i-1] + 1:
+                                    last_h_of_peak = future_active_sell_base[i]
+                                else:
+                                    break
+                            
+                            key_peak_end = f"{last_h_of_peak % 24:02d}:59" + (" (Tomorrow)" if last_h_of_peak >= 24 else "")
+                            natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_peak_end, soc_at_start) or soc_at_start
+                        
+                        # Calculate survival_floor EARLY for the Double Cycle Optimizer.
                         target_sunrise_soc = min_soc_val + soc_buffer_val
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         survival_floor = target_sunrise_soc + night_drain_pct
