@@ -1118,6 +1118,7 @@ class StrategyEngine:
                         peaks_tom = get_peaks(wom_filtered, False, 999.0, buy_tolerance)
                         combined = peaks_today + peaks_tom
                     
+                    is_arb_window = False
                     if combined:
                         target_hours = [int(h) for h, p in combined]
                         
