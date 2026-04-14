@@ -14,57 +14,56 @@
 **Skeptic**: Если мы не занулим бюджет, мы можем запланировать продажу энергии, которой у нас нет, что приведет к глубокому разряду, если солнце не выйдет.
 **Итог**: Разделили планирование и ограничение (throttling). `available_sell_ac` теперь представляет глобальный излишек. Только `recommended_power_kw` обнуляется для текущего часа, если `SOC < gatekeeper_floor`.
 
+---
+
 ### Раунд 2: Настройка лимита разряда через ИИ (v11.3.69)
 **Skeptic**: Мы используем `CONF_DYNAMIC_SOC_SELL`, но в интерфейсе пользователь видит `CONF_AI_DISCHARGE_LIMIT`. Это классическое несовпадение конфигов. Движок читает 20%, а пользователь ставит 13% в UI.
 **Archi**: Согласен, давай объединим их. Базовый таргет должен строго следовать `CONF_AI_DISCHARGE_LIMIT`.
 **Итог**: Установили `base_target` равным `CONF_AI_DISCHARGE_LIMIT`. Убрали принудительную перезапись базового таргета утренним порогом выживания, оставив его как отдельную проверку безопасности.
+
+---
 
 ### Раунд 3: Оптимизатор двойного цикла и «Ночной замок» (v11.3.70 - v11.3.71)
 **Archi**: В 3 часа ночи оптимизатор видит нулевую солнечную генерацию, паникует и ставит порог 100%, потому что думает, что у нас вечный дефицит. Нам нужна проверка на наличие светового дня.
 **Skeptic**: Согласен. Также порядок расчетов в v11.3.70 был неверным. `survival_floor` (порог выживания) должен вычисляться ДО запуска оптимизатора, чтобы оптимизатор знал свой абсолютный потолок.
 **Итог (v11.3.71)**: Перенесли расчет `survival_floor` выше. Добавили проверку `has_daylight` в оптимизатор. Гарантировали, что `base_target` ограничен порогом выживания.
 
+---
+
 ### Раунд 4: Изоляция пользовательского лимита (v11.3.72 - v11.3.73)
 **Archi**: Пользователь поставил 80%, но система использует 28% и выдает 6.6кВт. Она игнорирует человека!
 **Skeptic**: Это происходит потому, что `base_target` используется как «черновик» и оптимизатором, и логикой утренней безопасности.
 **Итог**: Создали переменную `user_limit_soc` как неприкосновенную константу. Все расчеты излишков (`U`) теперь используют это фиксированное значение. Добавили метку `UI:` в диагностику для прозрачности.
 
-### Round 10: Operation Restoration (v11.3.88)
-**Archi**: Current `strategy.py` is corrupted (mojibake). Logic v11.3.87 is great but unreadable. Proposal: Rollback to v11.3.76 as root, then manually port specific math fixes (M/U/P sync, recursive deficit fix).
-**Skeptic**: Porting math from a corrupted file is dangerous. We must verify every variable. Use `py_compile` and string search for `đ`.
-**Consensus**: Restore to v11.3.76, then patch math, ensuring UTF-8 encoding.
-
-### Round 11: Final Verification & Logic Sync
-**Archi**: During execution, we found that even v11.3.76 had partial corruption. Decided to perform a **Manual Core Restoration**: I rebuilt the file using logic from v11.3.76 and v11.3.85, but with 100% manual cleanup of Cyrillic strings. Added fallback to `avg_base_load_kw` for House Protection (M).
-**Skeptic**: Manual string recovery is tedious but effective. `py_compile` status is green. One concern: check if `sunrise_h` defaults are consistent across all methods.
-**Archi**: Confirmed. All methods use 8:00 AM as fallback or calculated sunrise.
-**Skeptic**: Logic looks solid. **MERGE APPROVED.**
-
-### Round 12: Telemetry & UI Fix (v11.3.89)
-**Archi**: The manual restoration broke some UI sensors because many diagnostic keys were missing in the simplified code.
-**Skeptic**: We lost all SOC projections in the Home Assistant interface.
-**Archi**: Restored full `res` structure with `sell_simulation`, `buy_simulation`, and formatted hours. Version updated to v11.3.89.
-**Skeptic**: Telemetry and API compatibility restored. **MERGE APPROVED.**
+---
 
 ### Раунд 5: Компенсация нагрузки дома (v11.3.74)
 **Archi**: Пользователь прав, что злится. Лимит 90% привел к 87% SOC в конце часа. Мы забыли, что дом сам «ест» батарею ПОКА мы продаем излишки.
 **Skeptic**: Формула была «Начало - Лимит». Должна быть «Конец_без_продажи - Лимит».
 **Итог**: Восстановили симуляцию `natural_soc_after_sale`. Бюджет продажи теперь учитывает фоновое потребление дома во время окна продажи.
 
+---
+
 ### Раунд 6: Синхронизация симуляций (v11.3.75 - v11.3.76)
 **Archi**: Почему `M` (Дом) всё еще 12.0, а прогноз на утро 25%? Они врут друг другу!
 **Skeptic**: `M` использовал текущий SOC вместо утреннего. Мы обязаны использовать конечную точку симуляции. 
 **Итог (v11.3.76)**: Объединили `M` с точным результатом симуляции на 07:00 утра. Перенесли логику поиска «бутылочного горлышка» в самый конец цикла, чтобы все ограничения были полностью вычислены.
+
+---
 
 ### Раунд 7: Тройное ограничение и рекурсивная коррекция (v11.3.77 - v11.3.85)
 **Archi**: Мы внедрили модель M/U/P (Morning/User/Physical). Система теперь выбирает МИНИМУМ из трех излишков. Это гарантирует, что мы и дом защитим, и лимит пользователя не прошьем, и инвертор не перегрузим.
 **Skeptic**: Да, но в v11.3.61 мы добавили рекурсивную коррекцию дефицита. Если итоговая симуляция показывает, что мы всё-таки провалились ниже таргета на утро, мы поднимаем планку и пересчитываем всё заново. Это надежно, но требует одного цикла повтора.
 **Итог (v11.3.85)**: Реализована логика `morning_deficit_fix`. Тройное ограничение (`available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)`) стало основой планирования.
 
+---
+
 ### Раунд 8: Реставрация интерфейса (v11.3.86)
 **Archi**: У нас тотальная проблема с кодировкой строк диагностики. Пользователь видит "ĐťĐµŃ‚ Đ´Đ°Đ˝Đ˝Ń‹Ń…" вместо "нет данных". Нужно всё переписать в чистый UTF-8. Никакой новой логики, только возврат читаемости.
 **Skeptic**: Поддерживаю. Логика M/U/P уже утверждена в v11.3.85, мы просто обеспечиваем её единообразное отображение и работу fallback нагрузки.
 **Итог (v11.3.86)**: Проводится полная замена поврежденных строк на русский текст. Текущая логика M/U/P остается без изменений.
+
+---
 
 ### Раунд 9: Финализация M/U/P и Чистка (v11.3.87)
 **Archi**: Я проверил `strategy.py`. Логика M/U/P (Утро/Пользователь/Физика) реализована, но строки интерфейса всё еще в "Đ" кодировке. Нужно завершить Раунд 8 и убедиться, что `Gatekeeper` (Привратник) в `get_budget_and_permissions` синхронизирован с основным движком.
@@ -76,18 +75,6 @@
 
 **Одобрение Skeptic (v11.3.87)**: ✅
 **Одобрение Archi (v11.3.87)**: ✅
-
-### Раунд 13: Оптимизация ночного дефицита (v11.3.91)
-**Archi**: Мы заметили, что система слишком часто блокирует продажи вечером, ошибочно принимая отсутствие солнца за дефицит энергии.
-**Skeptic**: Согласен. Сначала аудит констант, потом — правка логики. **ДЕЙСТВУЙ.**
-
-**Итог (v11.3.91)**: 
-1. **Аудит**: Константы верны (30% лимит разряда, 100% лимит заряда). 
-2. **Баг**: `Smart Deficit Throttling` ошибочно блокировал вечернюю продажу, считая ночной перерыв за дефицит подзарядки. 
-3. **Фикс**: Внедрена проверка `total_window_gen > 0.2`. Если между пиками солнца нет, система не наказывает текущий SOC.
-
-**Одобрение Skeptic (v11.3.91)**: ✅
-**Одобрение Archi (v11.3.91)**: ✅
 
 ---
 
@@ -105,3 +92,46 @@
 
 **Одобрение Skeptic (v11.3.88)**: ⚠️ (Одобрено при условии полной верификации M/U/P после переноса)
 **Одобрение Archi (v11.3.88)**: ✅
+
+---
+
+### Round 11: Final Verification & Logic Sync
+**Archi**: During execution, we found that even v11.3.76 had partial corruption. Decided to perform a **Manual Core Restoration**: I rebuilt the file using logic from v11.3.76 and v11.3.85, but with 100% manual cleanup of Cyrillic strings. Added fallback to `avg_base_load_kw` for House Protection (M).
+**Skeptic**: Manual string recovery is tedious but effective. `py_compile` status is green. One concern: check if `sunrise_h` defaults are consistent across all methods.
+**Archi**: Confirmed. All methods use 8:00 AM as fallback or calculated sunrise.
+**Skeptic**: Logic looks solid. **MERGE APPROVED.**
+
+---
+
+### Round 12: Telemetry & UI Fix (v11.3.89)
+**Archi**: The manual restoration broke some UI sensors because many diagnostic keys were missing in the simplified code.
+**Skeptic**: We lost all SOC projections in the Home Assistant interface.
+**Archi**: Restored full `res` structure with `sell_simulation`, `buy_simulation`, and formatted hours. Version updated to v11.3.89.
+**Skeptic**: Telemetry and API compatibility restored. **MERGE APPROVED.**
+
+---
+
+### Раунд 13: Оптимизация ночного дефицита (v11.3.91)
+**Archi**: Мы заметили, что система слишком часто блокирует продажи вечером, ошибочно принимая отсутствие солнца за дефицит энергии.
+**Skeptic**: Согласен. Сначала аудит констант, потом — правка логики. **ДЕЙСТВУЙ.**
+
+**Итог (v11.3.91)**: 
+1. **Аудит**: Константы верны (30% лимит разряда, 100% лимит заряда). 
+2. **Баг**: `Smart Deficit Throttling` ошибочно блокировал вечернюю продажу, считая ночной перерыв за дефицит подзарядки. 
+3. **Фикс**: Внедрена проверка `total_window_gen > 0.2`. Если между пиками солнца нет, система не наказывает текущий SOC.
+
+**Одобрение Skeptic (v11.3.91)**: ✅
+**Одобрение Archi (v11.3.91)**: ✅
+
+---
+
+
+### Раунд 14: Честная диагностика и «Статус-призрак» (v11.3.92)
+**Archi**: Пользователь видит SOC 27.4%, но статус пишет «Лимит пользователя». Это «статус-призрак» — он берется до финальной коррекции безопасности.
+**Skeptic**: Это вводит в заблуждение. Диагностика должна формироваться ПОСЛЕ всех расчетов и правок. Если сработал morning_deficit_fix, мы обязаны это отразить.
+**Итог (v11.3.92)**: Формирование диагностической строки перенесено в конец функции. Добавлено принудительное обновление статуса при срабатывании рекурсивной защиты дома.
+
+**Одобрение Skeptic (v11.3.92)**: ✅
+**Одобрение Archi (v11.3.92)**: ✅
+
+---
