@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.67"
+                    res["strategy_version"] = "v11.3.68"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1931,11 +1931,13 @@ class StrategyEngine:
                             decision_tag = "Экономия (Солнца мало, откупа нет)"
                             arbitrage_is_best = False
 
-                    # Final Permission Check
+                    # Final Permission Check (v11.3.68)
+                    available_sell_ac = float(max(0.0, available_sell_dc * eff))
+                    
                     if b_soc < ai_soc_floor_base and not (arbitrage_is_best and result_is_profitable):
                         # Throttled/Idle because base needs for tomorrow are not guaranteed
+                        # Now only affects current hour power, budget is kept for planning.
                         target_soc = ai_soc_floor_base
-                        available_sell_ac = 0.0
                         if is_in_peak and not arbitrage_is_best:
                             decision_tag = "Защита базы (Завтра мало солнца)"
                         else:
@@ -2140,6 +2142,7 @@ class StrategyEngine:
                         "reserve_kwh": float(round_f(target_morning_soc * b_cap / 100.0, 2)),
                         "energy_to_wait_kwh": float(round_f(total_cons_to_sunrise, 2)),
                         "ai_floor_soc_pct": float(round_f(ai_soc_floor_final, 1)),
+                        "gatekeeper_floor": float(round_f(ai_soc_floor_base if 'ai_soc_floor_base' in locals() else 0.0, 1)),
                     }
                     if h_bb is not None and (gain_for_attr >= threshold):
                         res["arbitrage_buyback"]["power_kw"] = max_p
