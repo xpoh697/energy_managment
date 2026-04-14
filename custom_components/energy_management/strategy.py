@@ -1910,7 +1910,7 @@ class StrategyEngine:
                     # v11.3.23: Full transparency diagnostics
                     diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
                     res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
-                    res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
+                    res["power_decision"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
                     # v11.3.37: UI Feedback for Smart Deficit Throttling
                     if available_sell_dc < 0.05 and num_peaks_left > 0.1 and cur_hour < 13:
@@ -2032,7 +2032,7 @@ class StrategyEngine:
                     
                     # If we couldn't place all our surplus in the hours because of max_p limits
                     if rem_kwh_sell > 0.1:
-                        res["arbitrage_sell_status"] = "Ограничено мощностью АКБ"
+                        res["power_decision"] = "Ограничено мощностью АКБ"
 
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
 

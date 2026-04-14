@@ -3303,7 +3303,8 @@ class MarketStrategySensor(SensorEntity):
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
-            "planned_power": res.get("planned_power_per_h", {})
+            "planned_power": res.get("planned_power_per_h", {}),
+            "power_decision": res.get("power_decision", "Ожидание")
         }
 
         # v7.2 - Hide detailed projections if nothing is planned for today
@@ -3323,7 +3324,6 @@ class MarketStrategySensor(SensorEntity):
                 "arbitrage_available_kwh": res.get("arbitrage_buyback", {}).get("available_kwh", 0.0),
                 "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
                 "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
-                "arbitrage_sell_status": res.get("arbitrage_sell_status", "Ожидание"),
                 "arbitrage_limit_reason": res.get("arbitrage_sell_limit_reason", ""),
                 "arbitrage_gatekeeper_floor": res.get("arbitrage_buyback", {}).get("gatekeeper_floor", 0.0)
             })
