@@ -1139,14 +1139,16 @@ class StrategyEngine:
                         if dynamic_buy_ai and (not any(float(normalize_float(p)) <= buy_limit for h, p in combined) or is_arb_window):
                             res["state"] = "preparing_arbitrage"
                     
-                    if res.get("state") == "preparing_arbitrage":
-                        if is_arb_window:
-                            s_h, b_h = best_arb_pair
-                            res["arbitrage_decision"] = f"Заряд для продажи в {self._format_h(s_h)}, выгода {max_arb_gain:.2f} {currency}/кВт·ч"
-                        else:
-                            res["arbitrage_decision"] = "Заряд для обеспечения дома (Survival)"
+                    # v11.4.06: Clean Arbitrage reporting (Buy mode)
+                    if is_arb_window:
+                        s_h, b_h = best_arb_pair
+                        res["arbitrage_decision"] = f"Покупаем сейчас по {cur_p_f:.2f} | Продадим в {self._format_h(s_h)} по {all_sell_prices.get(s_h, 0.0):.2f} | Выгода {max_arb_gain:.2f}"
                     else:
-                        res["arbitrage_decision"] = global_arb_note
+                        c_reason = res.get("charge_reason", "manual")
+                        if c_reason == "survival":
+                            res["arbitrage_decision"] = f"Зарядка для дома по {cur_p_f:.2f} (Выживание)"
+                        else:
+                            res["arbitrage_decision"] = f"Покупаем сейчас по {cur_p_f:.2f} | Нет выгодной цели продажи"
             else: # sell
                 res["limit_used"] = sell_limit
                 if negative_hours and cur_hour in negative_hours:
@@ -1177,7 +1179,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.4.04 (Simulation Monarchy)"
+                    res["strategy_version"] = "v11.4.06 (Clean Arbitrage)"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -2008,16 +2010,16 @@ class StrategyEngine:
                     else:
                         target_soc = base_target
 
-                    # Ensure global_arb_note is always consistent
+                    # v11.4.06: Clean Arbitrage reporting (Sell mode)
                     best_buy_p, best_buy_h = get_best_buyback(cur_hour)
                     if best_buy_h is not None:
                         pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
-                        global_arb_note = f"Откуп в {self._format_h(best_buy_h)} (выгода {pot_gain_val:.2f})"
+                        global_arb_note = f"Купим в {self._format_h(best_buy_h)} по {best_buy_p:.2f} | Выгода {pot_gain_val:.2f}"
                     else:
                         global_arb_note = "Нет окна откупа"
 
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        res["arbitrage_decision"] = f"{decision_tag} | {global_arb_note}"
+                        res["arbitrage_decision"] = f"Продаем сейчас по {cur_p_f:.2f} | {global_arb_note}"
                     else:
                         res["arbitrage_decision"] = "Ручной режим (AI выкл.)"
                         
