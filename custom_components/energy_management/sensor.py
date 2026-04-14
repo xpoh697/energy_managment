@@ -2722,15 +2722,15 @@ class InverterOperationModeSensor(SensorEntity):
         now_wall = dt_now
         now_h_wall = now_wall.hour
         
-        # v11.4.20: Fix date and hour alignment for forecast
-        # today_str MUST be relative to the simulated time (dt)
-        today_str = dt.strftime("%Y-%m-%d")
-        sim_h = dt.hour
+        # v11.4.21: Fix date and hour alignment for forecast
+        # today_str MUST be relative to the simulated time (dt_now)
+        today_str = dt_now.strftime("%Y-%m-%d")
+        sim_h = dt_now.hour
         
         # Calculate relative hour from simulation start for indexing into strategy results
         # This prevents the 'Ghost Tomorrow' issue where indices and hours mismatch.
         now_h_start = now_wall.replace(minute=0, second=0, microsecond=0)
-        dt_h_start = dt.replace(minute=0, second=0, microsecond=0)
+        dt_h_start = dt_now.replace(minute=0, second=0, microsecond=0)
         rel_h = int((dt_h_start - now_h_start).total_seconds() // 3600)
         
         # Target check hour (use rel_h for strategy alignment, sim_h for price alignment)
