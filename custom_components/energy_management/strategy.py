@@ -1163,7 +1163,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.42"
+                    res["strategy_version"] = "v11.3.44"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1233,9 +1233,15 @@ class StrategyEngine:
                         skipped_reasons = []
                         
                         for i, (curr_h, curr_p) in enumerate(peaks_candidates_all):
+                            is_tech_peak = bool(curr_h in tech_peaks_all)
                             future_peaks = peaks_candidates_all[i+1:]
+                            
                             if not future_peaks:
-                                safe_peaks.append((curr_h, curr_p))
+                                if is_tech_peak:
+                                    safe_peaks.append((curr_h, curr_p))
+                                else:
+                                    # High price, but not a technical peak (slope/shoulder)
+                                    skipped_reasons.append(f"{curr_h%24:02d}:00 (Ниже пика)")
                                 continue
                                 
                             best_future_p = max(fp[1] for fp in future_peaks)
@@ -1243,19 +1249,34 @@ class StrategyEngine:
                                 best_future_h = next(fp[0] for fp in future_peaks if fp[1] == best_future_p)
                                 cr, reason = _can_recharge_between(curr_h, best_future_h, curr_p, best_future_p)
                                 if cr:
-                                    safe_peaks.append((curr_h, curr_p))
-                                    last_recharge_reason = reason
+                                    if is_tech_peak:
+                                        safe_peaks.append((curr_h, curr_p))
+                                        last_recharge_reason = reason
+                                    else:
+                                        skipped_reasons.append(f"{curr_h%24:02d}:00 (Ниже пика)")
                                 else:
-                                    # v11.3.42: Only report as skipped if it met the price threshold
-                                    # This avoids spamming every single hour.
-                                    norm_p_f = float(normalize_float(all_sell_prices.get(curr_h, 0.0)))
-                                    ok_arb_f, _, _, _ = is_profitable(norm_p_f, curr_h)
-                                    if norm_p_f >= sell_limit or ok_arb_f:
-                                        short_reason = reason.replace("Неблагоприятно", "Нет усл.").replace("Благоприятно", "Ок")
-                                        skipped_reasons.append(f"{curr_h%24:02d}:00 ({short_reason})")
+                                    # v11.3.42+44: Report skipped due to recharge deficiency
+                                    short_reason = reason.replace("Неблагоприятно", "Нет усл.").replace("Благоприятно", "Ок")
+                                    skipped_reasons.append(f"{curr_h%24:02d}:00 ({short_reason})")
                             else:
-                                safe_peaks.append((curr_h, curr_p))
-                                
+                                # Primary peak (no higher future peak)
+                                if is_tech_peak:
+                                    safe_peaks.append((curr_h, curr_p))
+                                else:
+                                    skipped_reasons.append(f"{curr_h%24:02d}:00 (Ниже пика)")
+                                    
+                        # v11.3.44: Final filtering of skipped reasons (deduplicate and sort)
+                        def format_skipped(reasons):
+                            if not reasons: return ""
+                            # Unique and sorted by hour
+                            seen = set()
+                            res_clean = []
+                            for r in reasons:
+                                if r not in seen:
+                                    res_clean.append(r)
+                                    seen.add(r)
+                            return ", ".join(res_clean)
+                        
                         if not safe_peaks:
                             res["state"] = "preparing_arbitrage"
                             res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
@@ -1265,9 +1286,10 @@ class StrategyEngine:
                             if len(safe_peaks) > 1:
                                 res["multi_cycle"] = last_recharge_reason
                             else:
-                                # v11.3.41: Inform the user why they see only one peak
-                                if skipped_reasons:
-                                    res["multi_cycle"] = f"Единичный пик (Пропуск: {', '.join(skipped_reasons)})"
+                                # v11.3.44: Clear reporting
+                                txt = format_skipped(skipped_reasons)
+                                if txt:
+                                    res["multi_cycle"] = f"Единичный пик (Пропуск: {txt})"
                                 else:
                                     res["multi_cycle"] = "Единичный пик"
                                 
