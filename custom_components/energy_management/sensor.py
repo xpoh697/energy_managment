@@ -3284,7 +3284,7 @@ class MarketStrategySensor(SensorEntity):
             "strategy_version": res.get("strategy_version", "v11.3.36 (legacy)"),
             "strategy_candidates": res.get("strategy_candidates", []),
             "deg_cost": res.get("deg_cost", 0.0),
-            "profit_threshold": res.get("profit_threshold", 0.0),
+            "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
             "analyzed_window": res.get("analyzed_window", "Неизвестно"),
             "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
             "active_hours": res.get("active_hours_formatted", ""),
