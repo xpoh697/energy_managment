@@ -344,12 +344,18 @@ class StrategyEngine:
             if dist:
                 dist_source = "forecast_hourly"
                 # Use Solcast curve if available
-                hist_gen_so_far = float(sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour + 1)))
+                # v11.3.62: Proportional current hour to prevent "sawtooth" effects at hour boundaries
+                past_h_gen = float(sum(float(dist.get(str(h), 0.0)) for h in range(cur_hour)))
+                current_h_gen = float(dist.get(str(cur_hour), 0.0)) * (now.minute / 60.0)
+                hist_gen_so_far = past_h_gen + current_h_gen
                 total_hist_gen = float(sum(float(dist.get(str(h), 0.0)) for h in range(24)))
                 active_dist = dist
             else:
-                hist_gen_so_far = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(cur_hour + 1)))
-                total_hist_gen = float(sum(float(normalize_float(p_gen.get(str(h), 0.0))) for h in range(24)))
+                p_gen_norm = {h: float(normalize_float(v)) for h, v in p_gen.items()}
+                past_h_gen = float(sum(p_gen_norm.get(str(h), 0.0) for h in range(cur_hour)))
+                current_h_gen = float(p_gen_norm.get(str(cur_hour), 0.0)) * (now.minute / 60.0)
+                hist_gen_so_far = past_h_gen + current_h_gen
+                total_hist_gen = float(sum(p_gen_norm.values()))
                 active_dist = p_gen
             
             # --- Improved Performance Coefficients (v4.0 + Hourly Awareness v7.4) ---
@@ -1163,7 +1169,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.61"
+                    res["strategy_version"] = "v11.3.62"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit

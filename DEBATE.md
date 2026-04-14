@@ -1,28 +1,36 @@
-# DEBATE: Energy Management Strategy Evolution
+# DEBATE: Эволюция стратегии управления энергией
 
-## v11.3.40 - Transparency Mission
-**Archi**: We need to show why peaks are skipped. The "Black Box" is annoying the user.
+> [!IMPORTANT]
+> **ПРАВИЛО**: Все дебаты Archi и Skeptic ведутся ТОЛЬКО в этом файле. В консоль (чат) выдается только финальный результат на русском языке.
+
+## v11.3.40 - Миссия Прозрачности
+**Archi**: Нам нужно показывать, почему часы пропускаются. «Черный ящик» раздражает пользователя.
 **Skeptic**: 
-1. Excess noise in the UI (non-peak hours).
-2. Risk of leaking internal strategy state.
-3. Performance overhead of collecting reasons for every hour.
-**Resolution**: Implement skip reasons only for technical peaks. Add `strategy_version`.
+1. Лишний шум в UI (непиковые часы).
+2. Риск утечки внутреннего состояния стратегии.
+3. Нагрузка на систему при сборе причин для каждого часа.
+**Решение**: Реализовать фиксацию причин только для технических пиков. Добавить `strategy_version`.
 
-## v11.3.49 - Threshold Clarification
-**Archi**: Rename `profit_threshold` to `arbitrage_profit_threshold` for clarity.
+## v11.3.49 - Уточнение порогов
+**Archi**: Переименовать `profit_threshold` в `arbitrage_profit_threshold` для ясности.
 **Skeptic**: 
-1. Breaking change for existing dashboards? (Checked: dashboard uses dynamic attributes).
-2. Need to ensure the value is actually used for arbitrage.
-3. Version bump mandatory.
-**Resolution**: Renamed and exposed in sensor attributes.
+1. Критическое изменение для существующих дашбордов? (Проверено: дашборд использует динамические атрибуты).
+2. Нужно убедиться, что значение реально используется для арбитража.
+3. Обязательное повышение версии.
+**Решение**: Переименовано и выведено в атрибуты сенсора.
 
-## v11.3.60 - Auto-Correcting Morning Survival (Autopilot)
-**Archi**: Don't just show a deficit. Automatically raise `target_soc` to guarantee the morning buffer.
+## v11.3.60 - Автокоррекция выживания утром (Автопилот)
+**Archi**: Не просто показывай дефицит. Автоматически поднимай `target_soc`, чтобы гарантировать утренний буфер.
 **Skeptic**: 
-1. Iterative simulation might be slow.
-2. Need to account for discharge efficiency (eff ~0.95).
-3. Status messages must clearly explain the new "Partial Sale" behavior.
-**Resolution**: Implemented the feedback loop. `target_soc` now dynamically tracks the safety floor.
+1. Итеративная симуляция может быть медленной.
+2. Нужно учитывать КПД разряда (eff ~0.95).
+3. Статусные сообщения должны четко объяснять новое поведение «частичной продажи».
+**Решение**: Внедрена петля обратной связи. `target_soc` теперь динамически подстраивается под «безопасное дно».
 
-## v11.3.60 Final Approval
-**Skeptic**: Reviewed the implementation of `survival_floor`. It correctly factors in the night drain. Code is safe for deployment. **APPROVED**.
+## v11.3.61 - Рекурсивная коррекция дефицита (Финальный фикс)
+**Archi**: У первого прогона была погрешность округления. Внедряем рекурсивный второй проход, чтобы измерить и устранить дефицит.
+**Skeptic**: 
+1. Проверил цикл (разрешен только 1 дополнительный проход).
+2. Проверил логику распределения мощности во втором проходе.
+3. Подтвердил консистентность UI.
+**Решение**: Реализовано. **ОДОБРЕНО**.
