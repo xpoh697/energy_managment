@@ -3288,9 +3288,6 @@ class MarketStrategySensor(SensorEntity):
         today_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["today_prices"].items(), key=lambda item: int(item[0])) if int(k) >= cur_hour}
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
-        # Determine the user-friendly mode string
-        current_mode = res.get("current_mode_text", "Ожидание")
-
         attrs = {
             "strategy_version": res.get("strategy_version", "v11.3.36 (legacy)"),
             "strategy_candidates": res.get("strategy_candidates", []),
@@ -3303,7 +3300,6 @@ class MarketStrategySensor(SensorEntity):
             "target_price": round_f(float(res.get("target_price", 0.0) or 0.0), 3),
             "limit_used": round_f(float(res.get("limit_used", 0.0) or 0.0), 3),
             "recommended_power_kw": res.get("recommended_power_kw", 0.0),
-            "current_mode": current_mode,
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
