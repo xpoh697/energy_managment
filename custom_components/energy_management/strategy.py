@@ -2133,22 +2133,23 @@ class StrategyEngine:
                         # Safety Block Active
                         power_needed = 0.0
                         res["recommended_power_kw"] = 0.0
-                        res["arbitrage_sell_status"] = f"Защита дома (Прогноз {soc_morning:.1f}%)"
+                        res["power_decision"] = f"Защита дома (Прогноз {soc_morning:.1f}%)"
+                        res["planned_power_per_h"] = {} # Clear the plan - nothing to sell!
                         res_soc_after = float(round_f(soc_after, 1))
                         res_soc_morning = float(round_f(soc_morning, 1)) # Be honest about the deficit
                         res["note"] = f"Блокировка: прогноз на утро ({soc_morning:.1f}%) ниже резерва ({target_morning_soc}%)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
                         # Controlled by User Limit
-                        res["arbitrage_sell_status"] = f"Лимит пользователя ({int(base_target)}%)"
+                        res["power_decision"] = f"Лимит пользователя ({int(base_target)}%)"
                         res_soc_after = float(round_f(base_target, 1))
                         res_soc_morning = float(round_f(soc_morning, 1))
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         # Controlled by Home Protection (Calculated)
-                        res["arbitrage_sell_status"] = "Защита дома (M)"
+                        res["power_decision"] = "Защита дома (M)"
                         res_soc_after = float(round_f(soc_after, 1))
                         res_soc_morning = float(round_f(target_morning_soc, 1))
                     else:
-                        res["arbitrage_sell_status"] = sell_diagnosis
+                        res["power_decision"] = sell_diagnosis
                         res_soc_after = float(round_f(soc_after, 1))
                         res_soc_morning = float(round_f(soc_morning, 1))
 
@@ -2166,7 +2167,7 @@ class StrategyEngine:
                     true_u_surplus = round(((soc_after - base_target) * b_cap / 100.0), 1)
                     
                     # Update the Diagnostic Reason string to be HONEST
-                    true_sell_diag = res["arbitrage_sell_status"]
+                    true_sell_diag = res["power_decision"]
                     if "Защита дома" in true_sell_diag:
                         true_sell_diag = "Защита дома"
                     
