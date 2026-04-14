@@ -1261,7 +1261,7 @@ class StrategyEngine:
                             if curr_p < best_future_p:
                                 best_future_h = next(fp[0] for fp in future_peaks if fp[1] == best_future_p)
                                 cr, reason = _can_recharge_between(curr_h, best_future_h, curr_p, best_future_p)
-                                    if curr_p >= sell_limit: cr = True # v11.3.97: Respect User Limit
+                                if curr_p >= sell_limit: cr = True # v11.3.97: Respect User Limit
                                 if cr:
                                     if is_tech_peak:
                                         safe_peaks.append((curr_h, curr_p))
