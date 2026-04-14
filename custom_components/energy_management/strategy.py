@@ -1163,6 +1163,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
+                    res["strategy_version"] = "v11.3.42"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1174,10 +1175,11 @@ class StrategyEngine:
                         target_price = float(max((p for h, p in combined), default=0.0))
                     else:
                         def _can_recharge_between(start_h, end_h, p_c, p_m):
-                            if end_h <= start_h: return False, ""
+                            if end_h <= start_h: return False, "Слишком короткий период"
+                            # v11.3.42: Return True if cheap grid window exists
                             for h_ch in range(int(start_h) + 1, int(end_h)):
                                 if all_buy_prices.get(h_ch, 99.0) <= buy_limit:
-                                    return True, "Благоприятно (Дешевая сеть ночью)"
+                                    return True, "Ок (Дешевая сеть)"
                                     
                             start_soc = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
                             sim_r = list(range(int(start_h) + 1, int(end_h)))
@@ -1196,31 +1198,42 @@ class StrategyEngine:
                             req_soc = min(95.0, start_soc + req_rec + 1.0)
                             
                             if max_r >= req_soc:
-                                return True, f"Благоприятно (Сим. {max_r:.1f}% >= Треб. {req_soc:.1f}%)"
+                                return True, f"Ок (Сим. {max_r:.1f}% >= Треб. {req_soc:.1f}%)"
                             return False, f"Неблагоприятно (Сим. {max_r:.1f}% < Треб. {req_soc:.1f}%)"
 
-                        peaks_combined_raw = []
-                        for h, p in raw_peaks_today:
-                            norm_p = float(normalize_float(p))
-                            ok_arb, _, _, _ = is_profitable(norm_p, int(h))
-                            if norm_p >= sell_limit or ok_arb:
-                                peaks_combined_raw.append((int(h), norm_p))
+                        # v11.3.42: Be more inclusive in candidates for 'skipped' reporting
+                        # Instead of just get_peaks, start with ALL hours above sell_limit or profitable
+                        peaks_candidates_all = []
+                        all_h_possible = sorted(list(set(list(today_prices.keys()) + list(tomorrow_prices.keys()))), key=lambda x: int(x))
+                        
+                        # Get technical peaks for comparison
+                        tech_peaks_today = [int(h) for h, p in get_peaks(today_morn, True, 0.0, sell_tolerance) + get_peaks(today_eve, True, 0.0, sell_tolerance)]
+                        tech_peaks_tom = [int(h) + 24 for h, p in get_peaks(tom_morn, True, 0.0, sell_tolerance) + get_peaks(tom_eve, True, 0.0, sell_tolerance)]
+                        tech_peaks_all = set(tech_peaks_today + tech_peaks_tom)
+
+                        for h_str, p_val in today_prices.items():
+                            h_int = int(h_str)
+                            if h_int < cur_hour: continue
+                            norm_p = float(normalize_float(p_val))
+                            ok_arb, _, _, _ = is_profitable(norm_p, h_int)
+                            if norm_p >= sell_limit or ok_arb or h_int in tech_peaks_all:
+                                peaks_candidates_all.append((h_int, norm_p))
                                 
-                        for h, p in raw_peaks_tom:
-                            norm_p = float(normalize_float(p))
-                            ok_arb, _, _, _ = is_profitable(norm_p, int(h) + 24)
-                            if norm_p >= sell_limit or ok_arb:
-                                peaks_combined_raw.append((int(h) + 24, norm_p))
+                        for h_str, p_val in tomorrow_prices.items():
+                            h_int = int(h_str) + 24
+                            norm_p = float(normalize_float(p_val))
+                            ok_arb, _, _, _ = is_profitable(norm_p, h_int)
+                            if norm_p >= sell_limit or ok_arb or h_int in tech_peaks_all:
+                                peaks_candidates_all.append((h_int, norm_p))
                                 
-                        # v11.3.32: Unified chronological anti-cannibalization check
-                        peaks_combined_raw.sort(key=lambda x: x[0])
+                        peaks_candidates_all.sort(key=lambda x: x[0])
                         
                         safe_peaks = []
                         last_recharge_reason = "Единичный пик"
                         skipped_reasons = []
                         
-                        for i, (curr_h, curr_p) in enumerate(peaks_combined_raw):
-                            future_peaks = peaks_combined_raw[i+1:]
+                        for i, (curr_h, curr_p) in enumerate(peaks_candidates_all):
+                            future_peaks = peaks_candidates_all[i+1:]
                             if not future_peaks:
                                 safe_peaks.append((curr_h, curr_p))
                                 continue
@@ -1233,10 +1246,13 @@ class StrategyEngine:
                                     safe_peaks.append((curr_h, curr_p))
                                     last_recharge_reason = reason
                                 else:
-                                    # v11.3.41: Capture why the peak was dropped
-                                    # Shorten "Неблагоприятно" for UI space
-                                    short_reason = reason.replace("Неблагоприятно", "Нет условий").replace("Благоприятно", "Ок")
-                                    skipped_reasons.append(f"{curr_h%24:02d}:00 ({short_reason})")
+                                    # v11.3.42: Only report as skipped if it met the price threshold
+                                    # This avoids spamming every single hour.
+                                    norm_p_f = float(normalize_float(all_sell_prices.get(curr_h, 0.0)))
+                                    ok_arb_f, _, _, _ = is_profitable(norm_p_f, curr_h)
+                                    if norm_p_f >= sell_limit or ok_arb_f:
+                                        short_reason = reason.replace("Неблагоприятно", "Нет усл.").replace("Благоприятно", "Ок")
+                                        skipped_reasons.append(f"{curr_h%24:02d}:00 ({short_reason})")
                             else:
                                 safe_peaks.append((curr_h, curr_p))
                                 
