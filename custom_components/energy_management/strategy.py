@@ -563,9 +563,11 @@ class StrategyEngine:
             return cached["res"]
 
         res = {
+            "strategy_version": "v11.3.89",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
+            "active_hours_formatted": "",
             "active_periods": "",
             "recommended_power_kw": 0.0,
             "target_price": 0.0,
@@ -573,11 +575,28 @@ class StrategyEngine:
             "today_prices": {},
             "tomorrow_prices": {},
             "multi_cycle": "Нет прогноза",
-            "buy_simulation": {"projected_soc_at_start_pct": 0.0, "projected_soc_at_end_pct": 0.0, "projected_soc_morning_pct": 0.0},
-            "sell_simulation": {"projected_soc_at_start_pct": 0.0, "projected_soc_after_sale_pct": 0.0, "projected_soc_morning_pct": 0.0},
+            "buy_simulation": {
+                "projected_soc_at_start_pct": 0.0,
+                "projected_soc_at_end_pct": 0.0,
+                "projected_soc_morning_pct": 0.0
+            },
+            "sell_simulation": {
+                "projected_soc_at_sale_start_pct": 0.0,
+                "projected_soc_after_sale_pct": 0.0,
+                "projected_soc_morning_pct": 0.0
+            },
             "arbitrage_decision": "Нет данных",
             "charge_reason": "none",
-            "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
+            "arbitrage_buyback": {
+                "opportunity": False,
+                "power_kw": 0.0,
+                "note": "",
+                "available_kwh": 0.0,
+                "reserve_kwh": 0.0,
+                "energy_to_wait_kwh": 0.0,
+                "sunrise_hour": 0
+            },
+            "planned_power_per_h": {}
         }
         
         old_calc = bool(self._calculating_strategy)
@@ -642,6 +661,20 @@ class StrategyEngine:
                                 target_hours.append(h)
                     res["active_hours"] = target_hours
                     res["charge_reason"] = "arbitrage" if target_hours else "none"
+
+                if target_hours:
+                    res["active_hours_formatted"] = ", ".join([f"{h % 24:02d}:00" for h in sorted(target_hours)])
+                    # Buy Simulation Projections
+                    sim_range_morning = range(cur_hour, 24 + sunrise_h)
+                    buy_cmds = {h: max_p for h in target_hours}
+                    m_soc, sim_log_buy, _ = self.run_soc_simulation(b_soc, sim_range_morning, now, buy_cmds)
+                    res["buy_simulation"]["projected_soc_morning_pct"] = round_f(m_soc, 1)
+                    res["buy_simulation"]["projected_soc_at_start_pct"] = b_soc
+                   
+                    last_h = max(target_hours)
+                    key_end = f"{last_h % 24:02d}:59" + (" (Tomorrow)" if last_h >= 24 else "")
+                    res["buy_simulation"]["projected_soc_at_end_pct"] = self._get_soc_from_log(sim_log_buy, key_end, b_soc)
+
             else: # sell
                 res["limit_used"] = sell_limit
                 user_limit_soc = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
@@ -660,6 +693,7 @@ class StrategyEngine:
                 
                 # v11.3.82: UNIFIED TRIPLE CONSTRAINT HARMONY
                 surplus_for_morning = max(0.0, (natural_morning_soc - target_morning_soc) * b_cap / 100.0)
+                res["arbitrage_buyback"]["reserve_kwh"] = round_f(total_cons_to_sunrise, 3)
                 
                 # Find SOC after household consumption before selling
                 target_h_sell = [h for h, p in all_prices.items() if h >= cur_hour and p >= sell_limit]
@@ -667,6 +701,7 @@ class StrategyEngine:
                 
                 natural_soc_after_sale = b_soc
                 if target_h_sell:
+                    res["active_hours_formatted"] = ", ".join([f"{h % 24:02d}:00" for h in sorted(target_h_sell)])
                     last_h = max(target_h_sell)
                     key_end = f"{last_h % 24:02d}:59" + (" (Tomorrow)" if last_h >= 24 else "")
                     natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_end, b_soc)
@@ -677,6 +712,7 @@ class StrategyEngine:
                 physical_limit_dc = (max_p * num_peaks) / eff
                 
                 available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
+                res["arbitrage_buyback"]["available_kwh"] = round_f(available_sell_dc * eff, 3)
                 
                 # Diagnostics
                 if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
@@ -690,23 +726,39 @@ class StrategyEngine:
                 power_needed = (available_sell_dc * eff / num_peaks) if cur_hour in target_h_sell else 0.0
                 res["recommended_power_kw"] = round_f(power_needed, 3)
                 
-                # v11.3.85: Recursive Morning Deficit Fix
-                if cur_hour in target_h_sell:
-                    # Final simulation with sale commands
+                # Sell Simulation Projections
+                if target_h_sell:
                     sell_cmds = {h: power_needed for h in target_h_sell}
-                    _, final_log, _ = self.run_soc_simulation(b_soc, sim_range, now, {h: -p for h, p in sell_cmds.items()})
-                    key_morning = f"{sunrise_h-1:02d}:59 (Tomorrow)"
-                    soc_morning = self._get_soc_from_log(final_log, key_morning, b_soc)
+                    sell_cmds_sim = {h: -p for h, p in sell_cmds.items()}
                     
-                    deficit = max(0.0, target_morning_soc - soc_morning)
-                    if deficit > 0.1:
-                        # Throttling
-                        available_sell_dc = max(0.0, available_sell_dc - (deficit * b_cap / 100.0))
-                        power_needed = (available_sell_dc * eff / num_peaks)
-                        res["recommended_power_kw"] = round_f(power_needed, 3)
-                        res["arbitrage_decision"] += f" | Коррекция дефицита {deficit:.1f}%"
+                    first_h = min(target_h_sell)
+                    key_start = f"{first_h % 24:02d}:59" + (" (Tomorrow)" if first_h >= 24 else "")
+                    res["sell_simulation"]["projected_soc_at_sale_start_pct"] = self._get_soc_from_log(sim_log_base, key_start, b_soc)
+                    
+                    # Final sim for morning/after sale
+                    final_soc_at_morning, final_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sell_cmds_sim)
+                    res["sell_simulation"]["projected_soc_morning_pct"] = round_f(final_soc_at_morning, 1)
+                    
+                    last_h = max(target_h_sell)
+                    key_end = f"{last_h % 24:02d}:59" + (" (Tomorrow)" if last_h >= 24 else "")
+                    res["sell_simulation"]["projected_soc_after_sale_pct"] = self._get_soc_from_log(final_log, key_end, final_soc_at_morning)
+                    
+                    # v11.3.85: Recursive Morning Deficit Fix
+                    if cur_hour in target_h_sell:
+                        res["state"] = "active"
+                        key_morning = f"{sunrise_h-1:02d}:59 (Tomorrow)"
+                        soc_morning = self._get_soc_from_log(final_log, key_morning, b_soc)
+                        deficit = max(0.0, target_morning_soc - soc_morning)
+                        if deficit > 0.1:
+                            available_sell_dc = max(0.0, available_sell_dc - (deficit * b_cap / 100.0))
+                            power_needed = (available_sell_dc * eff / num_peaks)
+                            res["recommended_power_kw"] = round_f(power_needed, 3)
+                            res["arbitrage_decision"] += f" | Коррекция дефицита {deficit:.1f}%"
 
             res["target_soc"] = round_f(base_target, 1) if mode == "sell" else 100.0
+            res["strategy_candidates"] = []
+            
+            self._strategy_cache[cache_key] = {"time": now, "res": res}
             return res
         finally:
             self._calculating_strategy = old_calc

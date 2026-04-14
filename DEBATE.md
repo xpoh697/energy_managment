@@ -40,6 +40,12 @@
 **Archi**: Confirmed. All methods use 8:00 AM as fallback or calculated sunrise.
 **Skeptic**: Logic looks solid. **MERGE APPROVED.**
 
+### Round 12: Telemetry & UI Fix (v11.3.89)
+**Archi**: The manual restoration broke some UI sensors because many diagnostic keys were missing in the simplified code.
+**Skeptic**: We lost all SOC projections in the Home Assistant interface.
+**Archi**: Restored full `res` structure with `sell_simulation`, `buy_simulation`, and formatted hours. Version updated to v11.3.89.
+**Skeptic**: Telemetry and API compatibility restored. **MERGE APPROVED.**
+
 ### Раунд 5: Компенсация нагрузки дома (v11.3.74)
 **Archi**: Пользователь прав, что злится. Лимит 90% привел к 87% SOC в конце часа. Мы забыли, что дом сам «ест» батарею ПОКА мы продаем излишки.
 **Skeptic**: Формула была «Начало - Лимит». Должна быть «Конец_без_продажи - Лимит».
