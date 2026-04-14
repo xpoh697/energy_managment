@@ -2894,7 +2894,7 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv_bat"
             reason = "Активна стратегия ПРОДАЖИ (AI)"
             
-        elif cur_price is not None and cur_price >= price_sell_only_pv:
+        elif cur_price is not None and cur_price >= price_sell_only_pv and (has_surplus or is_selling_active):
             # SAFE MORNING MODE (User's 4 conditions)
             # 1. Price >= Threshold
             # 2. Before user limit hour
@@ -2935,7 +2935,8 @@ class InverterOperationModeSensor(SensorEntity):
                          reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_hour)} (мало солнца)"
                     elif is_energy_low_for_evening and sell_strategy.get("morning_autopilot_active"):
                          prefix = "Продажа" if mode == "sale_pv_bat" else "Питание дома"
-                         reason = f"{prefix} до {sell_strategy.get('morning_autopilot_floor')}% (защита утра)"
+                         sun_note = " (мало солнца)" if not has_surplus else ""
+                         reason = f"{prefix} до {sell_strategy.get('morning_autopilot_floor')}% (защита утра{sun_note})"
                     elif peak_start_hour is not None and peak_start_hour < 24:
                         reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_hour)}"
                     elif is_low_for_morning:
