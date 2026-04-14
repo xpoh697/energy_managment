@@ -27,7 +27,8 @@ from .const import (
     CONF_FORCE_MARKET_SELL,
     CONF_PRIORITY,
     CONF_SOC_BUFFER,
-    DOMAIN
+    DOMAIN,
+    VERSION
 )
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
 
@@ -916,7 +917,7 @@ class StrategyEngine:
             return cached["res"]
 
         res = {
-            "strategy_version": "v11.4.12",
+            "strategy_version": VERSION,
             "state": "standard",
             "mode": mode,
             "active_hours": [],
