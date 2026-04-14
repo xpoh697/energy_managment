@@ -2642,11 +2642,11 @@ class InverterOperationModeSensor(SensorEntity):
             batt_soc, _, _ = self.manager.get_battery_state(soc_default=100.0)
             
             # Current state calculation
-            mode, context = self._get_mode_at(now, batt_soc)
+            mode, reason, bms_debug, peak_start_abs = self._get_mode_at(now, batt_soc)
             
-            attrs = context.get("attrs", {})
-            attrs["mode_reason"] = context.get("reason", "Unknown")
-            attrs["bms_status"] = context.get("bms_debug", {})
+            attrs = {}
+            attrs["mode_reason"] = reason
+            attrs["bms_status"] = bms_debug
             
             # Forecast 24h
             forecast = {}
@@ -2675,7 +2675,7 @@ class InverterOperationModeSensor(SensorEntity):
                 elif isinstance(f_data, (int, float)):
                     f_soc = float(f_data)
 
-                f_mode, f_context = self._get_mode_at(
+                f_mode, f_reason, f_bms, f_peak = self._get_mode_at(
                     f_dt, f_soc, is_forecast=True, abs_hour=h_abs,
                     avg_gen_override=f_gen, avg_load_override=f_load
                 )
@@ -2697,20 +2697,89 @@ class InverterOperationModeSensor(SensorEntity):
                     pass
                 
                 # Smart Forecast Logic: Hide 'boring' reasons for sale_pv, show everything else
-                f_diag = f_context.get("reason", "")
-                is_boring = any(f_diag.startswith(p) for p in ["Стандартная работа", "Значения по умолчанию"])
+                is_boring = any(f_reason.startswith(p) for p in ["Стандартная работа", "Значения по умолчанию"])
                 
-                if f_mode == "sale_pv" and (is_boring or not f_diag):
+                if f_mode == "sale_pv" and (is_boring or not f_reason):
                     f_display = f"{f_mode}{p_suffix}"
                 else:
                     # Show diagnosis for non-standard modes or strategic fallbacks (v11.4.17)
-                    f_display = f"{f_mode}{p_suffix}: \"{f_diag}\""
+                    f_display = f"{f_mode}{p_suffix}: \"{f_reason}\""
                 
                 # Format the key (simple HH:00)
                 h_full_key = f_dt.strftime("%H:00")
                 forecast[h_full_key] = f_display
                 
             attrs["planned_modes_24h"] = forecast
+            
+            # v11.1.22/58: Synchronize with dynamic strategy results
+            chg_reason = ""
+            # Check for fixed hourly anchors for stable display
+            fixed_buy = self.manager.fixed_strategy_data.get("buy", {})
+            fixed_sell = self.manager.fixed_strategy_data.get("sell", {})
+            hour_str = f"{now.hour}"
+            
+            p_val = 0.0
+            t_soc = 0.0
+            c_amps_fixed = 0.0
+            
+            if mode == "buy":
+                # Priority: use fixed hourly value if available
+                if fixed_buy.get("hour_key", "").startswith(hour_str):
+                    p_val = fixed_buy["power"]
+                    t_soc = fixed_buy["target_soc"]
+                    c_amps_fixed = fixed_buy.get("charge_amps", 0.0)
+                else:
+                    p_val = buy_strategy.get("recommended_power_kw", 0.0)
+                    t_soc = buy_strategy.get("target_soc", 0.0)
+                    c_amps_fixed = None
+            elif mode == "no_pv_sale_no_bat":
+                p_val = 0.0
+                t_soc = float(round_f(batt_soc, 1))
+                chg_reason = "wait_for_negative"
+                c_amps_fixed = 0.0
+            elif mode == "sale_pv_bat":
+                # For sale_pv_bat, we ALSO use the fixed anchor if available
+                if fixed_sell.get("hour_key", "").startswith(hour_str):
+                    p_val = fixed_sell["power"]
+                    t_soc = fixed_sell["target_soc"]
+                    c_amps_fixed = fixed_sell.get("charge_amps", 0.0)
+                else:
+                    p_val = sell_strategy.get("recommended_power_kw", 0.0)
+                    t_soc = sell_strategy.get("target_soc", 0.0)
+                    c_amps_fixed = None
+            else:
+                p_val = 0.0
+                t_soc = 0.0
+                c_amps_fixed = 0.0
+
+            # Extract diagnostic info
+            if not chg_reason:
+                if mode == "buy":
+                    chg_reason = buy_strategy.get("charge_reason", "")
+                elif "sale" in mode and sell_strategy.get("state") == "active":
+                    chg_reason = sell_strategy.get("charge_reason", "")
+
+            attrs["power"] = p_val
+            attrs["target_soc"] = t_soc
+            attrs["charge_reason"] = chg_reason
+            
+            # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
+            if self.manager.battery_voltage_sensor:
+                if c_amps_fixed is not None:
+                    attrs["charge_amps"] = c_amps_fixed
+                else:
+                    v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor)
+                    if v_val and v_val > 0.1 and p_val > 0:
+                        attrs["charge_amps"] = round_f((p_val * 1000.0) / v_val, 2)
+                    else:
+                        attrs["charge_amps"] = 0.0
+            
+            attrs["is_preparing_for_peak"] = (peak_start_abs is not None)
+            attrs["next_peak_start_hour"] = self.manager.strategy_engine._format_h(peak_start_abs)
+            attrs["morning_soc_target"] = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
+            attrs["morning_soc_projected"] = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
+            
+            self.manager.current_inverter_mode = mode
             return attrs
         except Exception as e:
             _LOGGER.error("Error in InverterOperationModeSensor extra_state_attributes: %s", e)
@@ -2803,9 +2872,9 @@ class InverterOperationModeSensor(SensorEntity):
             if batt_soc >= (active_target - 0.5):
                 bms_debug = {"status": "Батарея уже заряжена", "target_soc": active_target, "current_soc": batt_soc}
             else:
-                end_h = peak_start_hour if peak_start_hour is not None else (now_h + 24)
-                sim_range = [h for h in range(now_h, end_h) if h < 48]
-                sim_soc, sim_log, _ = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now)
+                end_h = peak_start_abs if peak_start_abs is not None else (now_h_wall + 24)
+                sim_range = [h for h in range(now_h_wall, end_h) if h < 48]
+                sim_soc, sim_log, _ = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now_wall)
                 
                 ever_fully_charged = any(
                     (val.get("soc", 0.0) if isinstance(val, dict) else val) >= (ai_discharge_limit - 0.5) 
@@ -2818,13 +2887,13 @@ class InverterOperationModeSensor(SensorEntity):
                         total_needed = i + 1
                         break
                 
-                if peak_start_hour is not None:
+                if peak_start_abs is not None:
                     if not ever_fully_charged:
                         is_preparing_for_peak = True
                         bms_debug["status"] = "Внимание: АКБ не успеет зарядиться к Пику!"
                     else:
-                        latest_start = peak_start_hour - total_needed
-                        if now_h < latest_start:
+                        latest_start = peak_start_abs - total_needed
+                        if now_h_wall < latest_start:
                             bms_debug["status"] = f"Зарядка отложена (хватит {total_needed}ч)"
                         else:
                             is_preparing_for_peak = True
@@ -2865,7 +2934,7 @@ class InverterOperationModeSensor(SensorEntity):
         neg_h = buy_strategy.get("first_negative_hour")
         if neg_h and cur_price is not None and cur_price < price_sell_only_pv and avg_gen > 0.01:
             # v11.1.49: Use unified comparison: check_h (absolute index)
-            if not is_forecast or check_h < neg_h:
+            if not is_forecast or check_h_rel < neg_h:
                 is_waiting_for_neg = True
 
         # State Machine Ladder
@@ -2979,84 +3048,7 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv"
             reason = f"Стандартная работа: Цена ({cur_price or 0.0:.2f} sp) - излишки в сеть"
 
-        attrs = {}
-        if not is_forecast:
-            day_type = self.manager.day_type
-            formatted_peak = self.manager.strategy_engine._format_h(peak_start_hour)
-            
-            # v11.1.22/58: Synchronize with dynamic strategy results
-            chg_reason = ""
-            # Check for fixed hourly anchors for stable display
-            fixed_buy = self.manager.fixed_strategy_data.get("buy", {})
-            fixed_sell = self.manager.fixed_strategy_data.get("sell", {})
-            hour_str = f"{now.hour}"
-            
-            p_val = 0.0
-            t_soc = 0.0
-            c_amps_fixed = 0.0
-            
-            if mode == "buy":
-                # Priority: use fixed hourly value if available
-                if fixed_buy.get("hour_key", "").startswith(hour_str):
-                    p_val = fixed_buy["power"]
-                    t_soc = fixed_buy["target_soc"]
-                    c_amps_fixed = fixed_buy.get("charge_amps", 0.0)
-                else:
-                    p_val = buy_strategy.get("recommended_power_kw", 0.0)
-                    t_soc = buy_strategy.get("target_soc", 0.0)
-                    c_amps_fixed = None
-            elif mode == "no_pv_sale_no_bat":
-                p_val = 0.0
-                t_soc = float(round_f(batt_soc, 1))
-                chg_reason = "wait_for_negative"
-                c_amps_fixed = 0.0
-            elif mode == "sale_pv_bat":
-                # For sale_pv_bat, we ALSO use the fixed anchor if available
-                if fixed_sell.get("hour_key", "").startswith(hour_str):
-                    p_val = fixed_sell["power"]
-                    t_soc = fixed_sell["target_soc"]
-                    c_amps_fixed = fixed_sell.get("charge_amps", 0.0)
-                else:
-                    p_val = sell_strategy.get("recommended_power_kw", 0.0)
-                    t_soc = sell_strategy.get("target_soc", 0.0)
-                    c_amps_fixed = None
-            else:
-                p_val = 0.0
-                t_soc = 0.0
-                c_amps_fixed = 0.0
-
-            # Extract diagnostic info
-            if not chg_reason:
-                if mode == "buy":
-                    chg_reason = buy_strategy.get("charge_reason", "")
-                elif "sale" in mode and is_selling_active:
-                    chg_reason = sell_strategy.get("charge_reason", "")
-
-            attrs = {
-                "power": p_val,
-                "target_soc": t_soc,
-                "charge_reason": chg_reason,
-            }
-            
-            # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
-            if self.manager.battery_voltage_sensor:
-                if c_amps_fixed is not None:
-                    attrs["charge_amps"] = c_amps_fixed
-                else:
-                    v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor)
-                    if v_val and v_val > 0.1 and p_val > 0:
-                        attrs["charge_amps"] = round_f((p_val * 1000.0) / v_val, 2)
-                    else:
-                        attrs["charge_amps"] = 0.0
-            
-            attrs["is_preparing_for_peak"] = is_preparing_for_peak
-            attrs["next_peak_start_hour"] = formatted_peak
-            attrs["morning_soc_target"] = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
-            attrs["morning_soc_projected"] = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
-            
-            self.manager.current_inverter_mode = mode
-
-        return mode, {"reason": reason, "bms_debug": bms_debug, "attrs": attrs}
+        return mode, reason, bms_debug, peak_start_abs
 
 class InstantPowerAveragedSensor(SensorEntity):
     """Displays the averaged instantaneous power (W/kW sensors) over the last 10 minutes."""
