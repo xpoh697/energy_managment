@@ -64,7 +64,7 @@ class StrategyEngine:
     @staticmethod
     def _format_h(h_abs):
         if h_abs is None: return "ĐťĐµŃ‚ Đ´Đ°Đ˝Đ˝Ń‹Ń…"
-        d = "Đ—Đ°Đ˛Ń‚Ń€Đ° " if h_abs >= 24 else ""
+        d = "Завтра " if h_abs >= 24 else ""
         return f"{d}{h_abs % 24:02d}:00"
 
     def get_battery_degradation_cost(self):
@@ -141,7 +141,7 @@ class StrategyEngine:
         # Find natural SOC at sunrise
         natural_morning_soc = current_soc
         if baseline_log:
-            key_morning_sim = f"{sunrise_h-1:02d}:59 (Đ—Đ°Đ˛Ń‚Ń€Đ°)"
+            key_morning_sim = f"{sunrise_h-1:02d}:59 (Завтра)"
             natural_morning_soc = self._get_soc_from_log(baseline_log, key_morning_sim, current_soc)
         
         return natural_morning_soc
@@ -491,7 +491,7 @@ class StrategyEngine:
             )
 
             # v7.9.6 - Correct key format for simulation log lookup
-            target_key = f"{sunrise_h:0>2}:59 (Đ—Đ°Đ˛Ń‚Ń€Đ°)" 
+            target_key = f"{sunrise_h:0>2}:59 (Завтра)" 
             projected_morning_soc = self._get_soc_from_log(sim_log, target_key, sim_res_soc)
             
             # If we don't reach morning safely even with BASE load -> No budget for anything.
@@ -655,7 +655,7 @@ class StrategyEngine:
                     permissions_reasons[s_id_s] = f"Đ›Đ¸ĐĽĐ¸Ń‚ Đ¸ŃчĐµŃ€ĐżĐ°Đ˝ ({available_budget:.2f} < 0.1)"
                 else:
                     permissions[s_id_s] = True
-                    permissions_reasons[s_id_s] = f"ĐžĐş ({available_budget:.2f} кВтÂ·ч Đ´ĐľŃŃ‚ŃĐżĐ˝Đľ{price_suffix})"
+                    permissions_reasons[s_id_s] = f"ĐžĐş ({available_budget:.2f} кВт·ч Đ´ĐľŃŃ‚ŃĐżĐ˝Đľ{price_suffix})"
                     
                     # Reservation logic:
                     # - Non-cyclic (boilers/heaters): Reservation is always active.
@@ -1085,7 +1085,7 @@ class StrategyEngine:
             if max_arb_gain >= threshold:
                 s_h, b_h = best_arb_pair
                 if s_h is not None and b_h is not None:
-                    global_arb_note = f"ĐŃ€Đ±Đ¸Ń‚Ń€Đ°Đ¶: ĐźŃ€ĐľĐ´Đ°Đ¶Đ° Đ˛ {self._format_h(s_h)} (ĐżĐľ {all_sell_prices[s_h]:.2f}), Đ˛Ń‹ĐłĐľĐ´Đ° {max_arb_gain:.2f} {currency}/кВтÂ·ч"
+                    global_arb_note = f"ĐŃ€Đ±Đ¸Ń‚Ń€Đ°Đ¶: ĐźŃ€ĐľĐ´Đ°Đ¶Đ° Đ˛ {self._format_h(s_h)} (ĐżĐľ {all_sell_prices[s_h]:.2f}), выгода {max_arb_gain:.2f} {currency}/кВт·ч"
 
 
             if mode == "buy":
@@ -1142,7 +1142,7 @@ class StrategyEngine:
                     if res.get("state") == "preparing_arbitrage":
                         if is_arb_window:
                             s_h, b_h = best_arb_pair
-                            res["arbitrage_decision"] = f"Đ—Đ°Ń€ŃŹĐ´ Đ´Đ»ŃŹ ĐżŃ€ĐľĐ´Đ°Đ¶Đ¸ Đ˛ {self._format_h(s_h)}, Đ˛Ń‹ĐłĐľĐ´Đ° {max_arb_gain:.2f} {currency}/кВтÂ·ч"
+                            res["arbitrage_decision"] = f"Đ—Đ°Ń€ŃŹĐ´ Đ´Đ»ŃŹ ĐżŃ€ĐľĐ´Đ°Đ¶Đ¸ Đ˛ {self._format_h(s_h)}, выгода {max_arb_gain:.2f} {currency}/кВт·ч"
                         else:
                             res["arbitrage_decision"] = "Нет ценового окна"
                     else:
@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.78"
+                    res["strategy_version"] = "v11.3.79"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1369,7 +1369,7 @@ class StrategyEngine:
                     violation_hour = None
                     for h_step in sim_range:
                         is_tom_sim = h_step >= 24
-                        h_label = f"{h_step % 24:0>2}:59" + (" (Đ—Đ°Đ˛Ń‚Ń€Đ°)" if is_tom_sim else "")
+                        h_label = f"{h_step % 24:0>2}:59" + (" (Завтра)" if is_tom_sim else "")
                         soc_at_h = self._get_soc_from_log(log, h_label, 100.0)
                         
                         # IMMINENT SOLAR AWARENESS (v5.3)
@@ -1598,7 +1598,7 @@ class StrategyEngine:
                             first_h_buy = min(t for t in target_hours_sorted if t >= cur_hour)
                             if first_h_buy > cur_hour:
                                 prev_h = first_h_buy - 1
-                                key_start = f"{prev_h % 24:02d}:59" + (" (Đ—Đ°Đ˛Ń‚Ń€Đ°)" if prev_h >= 24 else "")
+                                key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
                                 soc_at_start = self._get_soc_from_log(sim_log, key_start, b_soc)
                             else:
                                 soc_at_start = b_soc
@@ -1617,7 +1617,7 @@ class StrategyEngine:
                                     else:
                                         break
                                 
-                                key_end = f"{last_h_buy_immediate % 24:02d}:59" + (" (Đ—Đ°Đ˛Ń‚Ń€Đ°)" if last_h_buy_immediate >= 24 else "")
+                                key_end = f"{last_h_buy_immediate % 24:02d}:59" + (" (Завтра)" if last_h_buy_immediate >= 24 else "")
                                 soc_at_end = self._get_soc_from_log(sim_log, key_end, b_soc)
                             else:
                                 soc_at_end = b_soc
@@ -1633,7 +1633,7 @@ class StrategyEngine:
                                 sunrise_h_sim = h
                                 break
                                 
-                        key_morning = f"{sunrise_h_sim:02d}:59 (Đ—Đ°Đ˛Ń‚Ń€Đ°)"
+                        key_morning = f"{sunrise_h_sim:02d}:59 (Завтра)"
                         soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_at_end)
                         
                         # v7.2 - CLEANUP: If no buy is currently planned for today, return current SOC
@@ -1881,11 +1881,18 @@ class StrategyEngine:
                     # 2. Morning Surplus (Survival of House until tomorrow sunrise)
                     # 3. User Surplus (Honoring UI settings)
                     
-                    # Correct morning surplus based on simulation end (v11.3.78)
-                                        # v11.3.78: FINAL TRIPLE CONSTRAINT HARMONY (Robust Edition)
-                    # Use natural_morning_soc DIRECTLY (it is the final SOC of the simulation)
-                    # NO extra buffers: we strictly follow User's (Min SOC + Buffer) threshold.
-                    surplus_for_morning = max(0.0, (natural_morning_soc - target_morning_soc) * b_cap / 100.0)
+                    # v11.3.79: REINFORCED HOUSE PROTECTION (M)
+                    # 1. Use base simulation (survival floor)
+                    # 2. Add fallback if database profile is empty to prevent 12kWh lies
+                    morning_soc_sim = natural_morning_soc
+                    if morning_soc_sim > (b_soc - 0.1): # Simulation didn't reduce SOC -> profile empty
+                        avg_house_kw = float(getattr(man, "avg_base_load_kw", 0.5))
+                        # Use hours from simulation end point
+                        hours_to_sr = max(1.0, (sim_range[-1] - cur_hour))
+                        simulated_drain_kwh = (avg_house_kw * hours_to_sr) / eff
+                        morning_soc_sim = max(0.0, b_soc - (simulated_drain_kwh / b_cap * 100.0))
+                    
+                    surplus_for_morning = max(0.0, (morning_soc_sim - target_morning_soc) * b_cap / 100.0)
 
                     # v11.3.72: Surplus is calculated strictly against the IMMUTABLE User Limit
                     surplus_for_user_limit = (max(0.0, natural_soc_after_sale - user_limit_soc) * b_cap / 100.0)
@@ -1920,7 +1927,7 @@ class StrategyEngine:
                     if available_sell_dc < 0.05 and num_peaks_left > 0.1 and cur_hour < 13:
                         mc_status = res.get("multi_cycle", "")
                         if "Đ‘Đ»Đ°ĐłĐľĐżŃ€Đ¸ŃŹŃ‚Đ˝Đľ" in mc_status:
-                            res["multi_cycle"] = mc_status.replace("Đ‘Đ»Đ°ĐłĐľĐżŃ€Đ¸ŃŹŃ‚Đ˝Đľ", "ĐžĐłŃ€Đ°Đ˝Đ¸чĐµĐ˝Đľ (ĐĽĐ°Đ»Đľ ŃĐľĐ»Đ˝Ń†Đ°)")
+                            res["multi_cycle"] = mc_status.replace("Đ‘Đ»Đ°ĐłĐľĐżŃ€Đ¸ŃŹŃ‚Đ˝Đľ", "Ограничено (ĐĽĐ°Đ»Đľ ŃĐľĐ»Đ˝Ń†Đ°)")
                     
                     surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     ai_soc_floor_final = target_morning_soc
@@ -1954,7 +1961,7 @@ class StrategyEngine:
                         # Now only affects current hour power, budget is kept for planning.
                         target_soc = ai_soc_floor_base
                         if is_in_peak and not arbitrage_is_best:
-                            decision_tag = "Đ—Đ°Ń‰Đ¸Ń‚Đ° Đ±Đ°Đ·Ń‹ (Đ—Đ°Đ˛Ń‚Ń€Đ° ĐĽĐ°Đ»Đľ ŃĐľĐ»Đ˝Ń†Đ°)"
+                            decision_tag = "Đ—Đ°Ń‰Đ¸Ń‚Đ° Đ±Đ°Đ·Ń‹ (Завтра ĐĽĐ°Đ»Đľ ŃĐľĐ»Đ˝Ń†Đ°)"
                         else:
                             decision_tag = f"ĐžĐ¶Đ¸Đ´Đ°Đ˝Đ¸Đµ ({sell_diagnosis})"
                     else:
@@ -2020,7 +2027,7 @@ class StrategyEngine:
                     best_buy_p, best_buy_h = get_best_buyback(cur_hour)
                     if best_buy_h is not None:
                         pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
-                        global_arb_note = f"ĐžŃ‚ĐşŃĐż Đ˛ {self._format_h(best_buy_h)} (Đ˛Ń‹ĐłĐľĐ´Đ° {pot_gain_val:.2f})"
+                        global_arb_note = f"ĐžŃ‚ĐşŃĐż Đ˛ {self._format_h(best_buy_h)} (выгода {pot_gain_val:.2f})"
                     else:
                         global_arb_note = "ĐťĐµŃ‚ ĐľĐşĐ˝Đ° ĐľŃ‚ĐşŃĐżĐ°"
 
@@ -2038,7 +2045,7 @@ class StrategyEngine:
                     
                     # If we couldn't place all our surplus in the hours because of max_p limits
                     if rem_kwh_sell > 0.1:
-                        res["arbitrage_sell_status"] = "ĐžĐłŃ€Đ°Đ˝Đ¸чĐµĐ˝Đľ ĐĽĐľŃ‰Đ˝ĐľŃŃ‚ŃŚŃŽ ĐĐšĐ‘"
+                        res["arbitrage_sell_status"] = "Ограничено ĐĽĐľŃ‰Đ˝ĐľŃŃ‚ŃŚŃŽ ĐĐšĐ‘"
 
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
 
@@ -2197,8 +2204,8 @@ class StrategyEngine:
                     for g in groups:
                         h_min = min(g) % 24
                         h_max = max(g) % 24
-                        suffix_min = " (Đ—Đ°Đ˛Ń‚Ń€Đ°)" if min(g) >= 24 else ""
-                        suffix_max = " (Đ—Đ°Đ˛Ń‚Ń€Đ°)" if max(g) >= 24 else ""
+                        suffix_min = " (Завтра)" if min(g) >= 24 else ""
+                        suffix_max = " (Завтра)" if max(g) >= 24 else ""
                         if len(g) == 1:
                             final_periods.append(f"{h_min:02d}:00 - {h_min:02d}:59{suffix_min}")
                         else:
