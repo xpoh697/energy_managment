@@ -2933,7 +2933,8 @@ class InverterOperationModeSensor(SensorEntity):
                     if is_throttled:
                          reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_hour)} (мало солнца)"
                     elif is_energy_low_for_evening and sell_strategy.get("morning_autopilot_active"):
-                         reason = f"Продажа до {sell_strategy.get('morning_autopilot_floor')}% (защита утра)"
+                         prefix = "Продажа" if mode == "sale_pv_bat" else "Питание дома"
+                         reason = f"{prefix} до {sell_strategy.get('morning_autopilot_floor')}% (защита утра)"
                     elif peak_start_hour is not None and peak_start_hour < 24:
                         reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_hour)}"
                     elif is_low_for_morning:
