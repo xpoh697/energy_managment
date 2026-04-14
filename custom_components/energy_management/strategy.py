@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.4.03 (Honest Diagnostics)"
+                    res["strategy_version"] = "v11.4.04 (Simulation Monarchy)"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -2157,6 +2157,19 @@ class StrategyEngine:
                             "projected_soc_morning": res_soc_morning,
                         "log": sim_log
                     }
+
+                    # v11.4.04: Reciprocal Surplus Calculation (Simulation Monarchy)
+                    # We recalculate M, U based on what the simulation JUST confirmed.
+                    true_m_surplus = round(((soc_morning - target_morning_soc) * b_cap / 100.0), 1)
+                    true_u_surplus = round(((soc_after - base_target) * b_cap / 100.0), 1)
+                    
+                    # Update the Diagnostic Reason string to be HONEST
+                    true_sell_diag = res["arbitrage_sell_status"]
+                    if "Защита дома" in true_sell_diag:
+                        true_sell_diag = "Защита дома"
+                    
+                    diag_fixed = f"{true_sell_diag} | TRUE_M:{true_m_surplus:.1f} TRUE_U:{true_u_surplus:.1f} P:{physical_limit_dc:.1f}"
+                    res["arbitrage_sell_limit_reason"] = f"{diag_fixed} | S:{soc_at_start:.1f}% Cur:{b_soc:.1f}% | Cap:{b_cap:.1f} T:{base_target:.0f}%"
 
                     # v7.1: Note: Simulation results are no longer used to override target_soc (v11.1.61).
                     
