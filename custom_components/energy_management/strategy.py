@@ -1821,6 +1821,12 @@ class StrategyEngine:
                     res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
                     res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
+                    # v11.3.37: UI Feedback for Smart Deficit Throttling
+                    if available_sell_dc < 0.05 and num_peaks_left > 0.1 and cur_hour < 13:
+                        mc_status = res.get("multi_cycle", "")
+                        if "Благоприятно" in mc_status:
+                            res["multi_cycle"] = mc_status.replace("Благоприятно", "Ограничено (мало солнца)")
+                    
                     surplus_soc_at_sunrise = (surplus_for_morning / b_cap * 100.0) if b_cap > 0.1 else 0.0
                     ai_soc_floor_final = target_morning_soc
                     
