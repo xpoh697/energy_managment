@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.70"
+                    res["strategy_version"] = "v11.3.71"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1818,6 +1818,12 @@ class StrategyEngine:
                     if target_hours_sorted:
                         future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
                         
+                        # v11.3.71: Calculate survival_floor EARLY for the Double Cycle Optimizer.
+                        target_sunrise_soc = min_soc_val + soc_buffer_val
+                        night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
+                        survival_floor = target_sunrise_soc + night_drain_pct
+                        res["morning_autopilot_floor"] = round_f(survival_floor, 1)
+
                         # --- v11.3.36: Smart Deficit Throttling (Double Cycle Optimizer) ---
                         # If the sun cannot recharge the battery to 100% between Morning and Evening peaks,
                         # it is mathematically optimal to HOLD the deficit energy in the Morning 
@@ -1839,8 +1845,7 @@ class StrategyEngine:
                             end_first = max(epochs_eval[0])
                             start_second = min(epochs_eval[1])
                             
-                            # v11.3.70: Only run if the gap actually has solar potential (Daytime gap)
-                            # Gap is "daytime" if it starts before 15:00 or ends after 08:00
+                            # v11.3.70/71: Only run if the gap actually has solar potential (Daytime gap)
                             gap_h_list = list(range(int(end_first) + 1, int(start_second)))
                             has_daylight = any(6 <= (h % 24) <= 18 for h in gap_h_list)
                             
@@ -1849,35 +1854,15 @@ class StrategyEngine:
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 
                                 # If solar cannot fill it up, raise the discharge floor (base_target) by the deficit
-                                # but NEVER above the survival_floor to prevent 100% lock-ups.
+                                # but NEVER above the survival_floor to prevent lock-ups.
                                 if max_recharge_soc < 99.0:
                                     deficit_pct = 100.0 - max_recharge_soc
-                                    # Use survival_floor as the ABSOLUTE CEILING for this optimization
-                                    limit_ceiling = survival_floor if 'survival_floor' in locals() else 80.0
-                                    base_target = min(limit_ceiling, base_target + deficit_pct)
+                                    # Use the pre-calculated survival_floor as the absolute ceiling
+                                    base_target = min(survival_floor, base_target + deficit_pct)
                                     
-                        if future_active_sell_base:
-                            last_h_base = future_active_sell_base[-1]
-                            for i in range(1, len(future_active_sell_base)):
-                                if future_active_sell_base[i] != future_active_sell_base[i-1] + 1:
-                                    last_h_base = future_active_sell_base[i-1]
-                                    break
-                            key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Tomorrow)" if last_h_base >= 24 else "")
-                            natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_nat_end, soc_at_start)
-                        
-                        # v11.3.69: Morning Survival Floor is now a SAFETY limit for the GATEKEEPER,
-                        # but it should NOT override the user's base_target for surplus calculation
-                        # unless there is an actual deficit.
-                        target_sunrise_soc = min_soc_val + soc_buffer_val
-                        night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
-                        survival_floor = target_sunrise_soc + night_drain_pct
-                        
-                        # We keep survival_floor for diagnostics/gatekeeper but base_target 
-                        # stays at the user's defined limit (e.g. 13%) to allow surplus calculation.
-                        res["morning_autopilot_floor"] = round_f(survival_floor, 1)
                         if survival_floor > base_target:
                             res["morning_autopilot_active"] = True
-                    
+                            
                     # Use natural_soc_after_sale instead of soc_at_start to find the True available surplus
                     surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
                     
