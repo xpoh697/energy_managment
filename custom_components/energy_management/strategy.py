@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.90 (v67 engine restored)"
+                    res["strategy_version"] = "v11.3.91 (v67 engine restored + night_gap_fix)"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1846,13 +1846,18 @@ class StrategyEngine:
                             # Baseline sim_log_base starts at current SOC, which masks the true solar potential.
                             throttle_sim_hours = list(range(int(end_first) + 1, int(start_second)))
                             if throttle_sim_hours:
-                                _, throttle_log, _ = self.run_soc_simulation(base_target, throttle_sim_hours, now, {})
-                                max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
+                                # v11.3.91: Only throttle if there is meaningful solar potential between peaks
+                                avg_gen_prof = dict(man.get_average_profile("generation", man.custom_period, "all"))
+                                total_window_gen = sum(float(x) for x in [avg_gen_prof.get(str(h % 24), 0.0) for h in throttle_sim_hours]) * eff
                                 
-                                # If solar cannot fill it up, raise the discharge floor (base_target) by the deficit
-                                if max_recharge_soc < 99.0:
-                                    deficit_pct = 100.0 - max_recharge_soc
-                                    base_target = min(100.0, base_target + deficit_pct)
+                                if total_window_gen > 0.2:
+                                    _, throttle_log, _ = self.run_soc_simulation(base_target, throttle_sim_hours, now, {})
+                                    max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
+                                    
+                                    # If solar cannot fill it up, raise the discharge floor (base_target) by the deficit
+                                    if max_recharge_soc < 99.0:
+                                        deficit_pct = 100.0 - max_recharge_soc
+                                        base_target = min(100.0, base_target + deficit_pct)
                                     
                         if future_active_sell_base:
                             last_h_base = future_active_sell_base[-1]
