@@ -2696,8 +2696,15 @@ class InverterOperationModeSensor(SensorEntity):
                 except Exception:
                     pass
                 
-                # Format: режим (SP/BP: цена)
-                f_display = f"{f_mode}{p_suffix}"
+                # Smart Forecast Logic: Hide 'boring' reasons for sale_pv, show everything else
+                f_diag = f_context.get("reason", "")
+                is_boring = any(f_diag.startswith(p) for p in ["Стандартная работа", "Значения по умолчанию"])
+                
+                if f_mode == "sale_pv" and (is_boring or not f_diag):
+                    f_display = f"{f_mode}{p_suffix}"
+                else:
+                    # Show diagnosis for non-standard modes or strategic fallbacks (v11.4.17)
+                    f_display = f"{f_mode}{p_suffix}: \"{f_diag}\""
                 
                 # Format the key (simple HH:00)
                 h_full_key = f_dt.strftime("%H:00")
