@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.92"
+                    res["strategy_version"] = "v11.3.97 (Smart Restoration Final)"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1261,6 +1261,7 @@ class StrategyEngine:
                             if curr_p < best_future_p:
                                 best_future_h = next(fp[0] for fp in future_peaks if fp[1] == best_future_p)
                                 cr, reason = _can_recharge_between(curr_h, best_future_h, curr_p, best_future_p)
+                                    if curr_p >= sell_limit: cr = True # v11.3.97: Respect User Limit
                                 if cr:
                                     if is_tech_peak:
                                         safe_peaks.append((curr_h, curr_p))
@@ -1326,7 +1327,7 @@ class StrategyEngine:
                         if cur_p_f >= sell_limit: status = "Продажа (Лимит)"
                         elif cur_gain >= threshold: status = "Продажа (Арбитраж)"
                         
-                        detail = f"Сейчас {cur_p_f:.2f}. {global_arb_note}"
+                        detail = f"Цена {cur_p_f:.2f}" if status == "Продажа (Лимит)" else f"Сейчас {cur_p_f:.2f}. {global_arb_note}"
                         if best_arb_pair[0] is not None and best_arb_pair[0] > cur_hour and all_sell_prices.get(best_arb_pair[0], 0) > cur_p_f + 0.01:
                              detail += f" | Ждем главного пика в {self._format_h(best_arb_pair[0])}"
                         
@@ -1517,7 +1518,7 @@ class StrategyEngine:
                     sim_soc_plan = b_soc
                     
                     charge_commands = {int(h): 0.0 for h in target_hours_sorted if h >= cur_hour}
-                    if target_hours_sorted:
+                    if True: # v11.3.97: Always run simulation for telemetry
                         # 1. Calculate how much kWh we roughly need to add
                         # v11.1.61 - Include projected base consumption during the charging window 
                         # otherwise the battery will discharge if charge power < load.
@@ -1594,7 +1595,7 @@ class StrategyEngine:
                         _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands)
                         
                         # 1. Projected SOC at START of the first buy hour
-                        if target_hours_sorted:
+                        if True: # v11.3.97: Always run simulation for telemetry
                             first_h_buy = min(t for t in target_hours_sorted if t >= cur_hour)
                             if first_h_buy > cur_hour:
                                 prev_h = first_h_buy - 1
@@ -1606,7 +1607,7 @@ class StrategyEngine:
                             soc_at_start = b_soc
 
                         # 2. Projected SOC AFTER the first continuous buy window
-                        if target_hours_sorted:
+                        if True: # v11.3.97: Always run simulation for telemetry
                             future_active_buy = [h for h in target_hours_sorted if h >= cur_hour]
                             if future_active_buy:
                                 # Find the last hour of the first continuous block
@@ -1818,7 +1819,7 @@ class StrategyEngine:
                     # v11.3.26: Calculate User Limit using natural SOC at the END of the sale window.
                     # This guarantees we account for the house background load during the sale.
                     natural_soc_after_sale = soc_at_start
-                    if target_hours_sorted:
+                    if True: # v11.3.97: Always run simulation for telemetry
                         future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
                         
                         # --- v11.3.36: Smart Deficit Throttling (Double Cycle Optimizer) ---
@@ -1894,6 +1895,20 @@ class StrategyEngine:
                     
                     # v11.3.18: Recovery & Hyper-Detailed Diagnostic
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
+                    sell_diagnosis = "Рассчитано (Ок)"
+                    # Using a small delta for float comparison safety
+                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
+                        sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
+                    elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
+                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)"
+                    elif available_sell_dc <= (surplus_for_morning + 0.001):
+                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
+
+                    # v11.3.23: Full transparency diagnostics
+                    # v11.3.23: Full transparency diagnostics
+                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
+                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
+                    res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
                     # v11.3.37: UI Feedback for Smart Deficit Throttling
                     if available_sell_dc < 0.05 and num_peaks_left > 0.1 and cur_hour < 13:
@@ -1926,7 +1941,7 @@ class StrategyEngine:
                             arbitrage_is_best = False
 
                     # Final Permission Check
-                    if b_soc < ai_soc_floor_base and not (arbitrage_is_best and result_is_profitable):
+                    if b_soc < ai_soc_floor_base and not (is_in_peak and cur_p_f >= sell_limit):
                         # Throttled/Idle because base needs for tomorrow are not guaranteed
                         target_soc = ai_soc_floor_base
                         available_sell_ac = 0.0
@@ -2031,7 +2046,7 @@ class StrategyEngine:
                     
                     # 1. Projected SOC at START (Already calculated early)
                     # 2. Daily Surplus (Already calculated early)
-                    if target_hours_sorted:
+                    if True: # v11.3.97: Always run simulation for telemetry
                         future_active_sell = [h for h in target_hours_sorted if h >= cur_hour]
                         if future_active_sell:
                             # v11.3.16: Anchor 'after sale' projection to the end of the WHOLE continuous block
@@ -2110,25 +2125,6 @@ class StrategyEngine:
 
                     # Removed temporary debug diagnostics
 
-
-                    # v11.3.92: Force update status if morning deficit fix was applied
-                    if morning_deficit_fix > 0.1:
-                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
-
-                    sell_diagnosis = "Рассчитано (Ок)"
-                    # Using a small delta for float comparison safety
-                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
-                        sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
-                    elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)"
-                    elif available_sell_dc <= (surplus_for_morning + 0.001):
-                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
-
-                    # v11.3.23: Full transparency diagnostics
-                    # v11.3.23: Full transparency diagnostics
-                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
-                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
-                    res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
