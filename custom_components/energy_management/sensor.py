@@ -2526,6 +2526,10 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
 
         # 1. Run Unified Simulation Engine
         simulated_soc, charge_log, _ = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
+        
+        # v11.3.63: Inject Budget Diagnostics for transparency
+        budget_data = self.manager.strategy_engine.get_budget_and_permissions(skip_strategy_check=True)
+        debug_attrs = {k: v for k, v in budget_data.items() if k.startswith("debug_")}
 
         f_raw = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
@@ -2541,6 +2545,7 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             "efficiency_coefficient": round_f(eff_coeff, 3),
             "simulation_log": charge_log
         }
+        self._attr_extra_state_attributes.update(debug_attrs)
         return round_f(simulated_soc, 1)
 
     @property

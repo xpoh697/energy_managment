@@ -319,6 +319,11 @@ class StrategyEngine:
         now = dt_util.now()
         cur_hour = int(now.hour)
         
+        cache_key = "budget_permissions"
+        cached = self._strategy_cache.get(cache_key)
+        if cached and (now - cached["time"]).total_seconds() < 30:
+            return cached["res"]
+        
         if self._calculating_strategy and not skip_strategy_check:
             skip_strategy_check = True
 
@@ -669,7 +674,7 @@ class StrategyEngine:
             
             batt_surplus = self._calculate_sunrise_surplus(projected_morning_soc, min_soc, soc_buffer, b_cap_f, eff_coeff)
             
-            return {
+            return_res = {
                 "initial_budget": float(initial_budget or 0.0),
                 "battery_capacity_kwh": float(b_cap_f or 0.0),
                 "projected_morning_soc": float(round_f(projected_morning_soc, 1)),
@@ -720,6 +725,8 @@ class StrategyEngine:
                 "battery_flexible_kw": float(batt_p_flexible or 0.0),
                 "battery_discharge_budget_kw": float(batt_discharge_allowed or 0.0)
             }
+            self._strategy_cache["budget_permissions"] = {"time": now, "res": return_res}
+            return return_res
         finally:
             self._calculating_strategy = old_calc
 
@@ -1169,7 +1176,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.62"
+                    res["strategy_version"] = "v11.3.63"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
