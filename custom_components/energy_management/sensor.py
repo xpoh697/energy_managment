@@ -3281,6 +3281,7 @@ class MarketStrategySensor(SensorEntity):
         current_mode = res.get("current_mode_text", "Ожидание")
 
         attrs = {
+            "strategy_version": res.get("strategy_version", "v11.3.36 (legacy)"),
             "analyzed_window": res.get("analyzed_window", "Неизвестно"),
             "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
             "active_hours": res.get("active_hours_formatted", ""),
