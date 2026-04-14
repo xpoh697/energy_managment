@@ -1818,9 +1818,15 @@ class StrategyEngine:
                     # v11.4.27: Determine Effective Buffer EARLY for consistency
                     effective_buffer = soc_buffer_val
                     # Identify if we are in the morning peak with imminent solar
-                    is_morning_solar = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.1)
+                    # v11.4.28: Robust detection - check both future solar and current hour potential
+                    cur_h_gen_prof = float(normalize_float(avg_prof_gen.get(str(cur_hour % 24), 0.0)))
+                    is_morning_solar = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.05 or cur_h_gen_prof > 0.05 or rem_solar_today > 0.05)
+                    
                     if is_morning_solar:
                          effective_buffer = 3.0 # v11.4.25: Liberalized morning buffer
+                    
+                    # Update diagnostic target as well
+                    target_morning_soc = min_soc_val + effective_buffer
                     
                     # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
                     # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
