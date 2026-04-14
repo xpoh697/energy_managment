@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.71"
+                    res["strategy_version"] = "v11.3.72"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1661,8 +1661,9 @@ class StrategyEngine:
                         }
                 else: # sell
                     # Sell mode (v11.1.51)
-                    # Use existing Target SOC Sell as floor for AI selling
-                    base_target = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+                    # v11.3.72: Strictly isolate the User's UI limit from internal safety overrides
+                    user_limit_soc = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+                    base_target = user_limit_soc
                     # Initial defaults for robustness
                     arb_gain = 0.0
                     cheap_h_back = None
@@ -1863,8 +1864,8 @@ class StrategyEngine:
                         if survival_floor > base_target:
                             res["morning_autopilot_active"] = True
                             
-                    # Use natural_soc_after_sale instead of soc_at_start to find the True available surplus
-                    surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
+                    # v11.3.72: Surplus is calculated strictly against the IMMUTABLE User Limit
+                    surplus_for_user_limit = (max(0.0, natural_soc_after_sale - user_limit_soc) * b_cap / 100.0)
                     
                     # v11.3.11: Factor in physical energy capacity of the identified peaks
                     # Using global max_p which already accounts for CONF_BATTERY_MAX_POWER (e.g. 6.2kW)
@@ -1889,7 +1890,7 @@ class StrategyEngine:
                     # v11.3.23: Full transparency diagnostics
                     # v11.3.23: Full transparency diagnostics
                     diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
-                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
+                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} UI:{user_limit_soc:.0f}% T:{base_target:.0f}%"
                     res["arbitrage_sell_status"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
                     
                     # v11.3.37: UI Feedback for Smart Deficit Throttling
