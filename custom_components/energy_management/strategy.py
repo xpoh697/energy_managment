@@ -1163,7 +1163,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.47"
+                    res["strategy_version"] = "v11.3.48"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1239,9 +1239,6 @@ class StrategyEngine:
                             if not future_peaks:
                                 if is_tech_peak:
                                     safe_peaks.append((curr_h, curr_p))
-                                else:
-                                    # High price, but not a technical peak (slope/shoulder)
-                                    skipped_reasons.append(f"{curr_h%24:02d}:00 (Ниже пика)")
                                 continue
                                 
                             best_future_p = max(fp[1] for fp in future_peaks)
