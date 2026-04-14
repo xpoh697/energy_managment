@@ -1163,7 +1163,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.46"
+                    res["strategy_version"] = "v11.3.47"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1252,18 +1252,17 @@ class StrategyEngine:
                                     if is_tech_peak:
                                         safe_peaks.append((curr_h, curr_p))
                                         last_recharge_reason = reason
-                                    else:
-                                        skipped_reasons.append(f"{curr_h%24:02d}:00 (Ниже пика)")
+                                    # v11.3.47: Remove 'skipped' noise for non-peaks
                                 else:
                                     # v11.3.42+44: Report skipped due to recharge deficiency
-                                    short_reason = reason.replace("Неблагоприятно", "Нет усл.").replace("Благоприятно", "Ок")
-                                    skipped_reasons.append(f"{curr_h%24:02d}:00 ({short_reason})")
+                                    if is_tech_peak:
+                                        short_reason = reason.replace("Неблагоприятно", "Нет усл.").replace("Благоприятно", "Ок")
+                                        skipped_reasons.append(f"{curr_h%24:02d}:00 ({short_reason})")
                             else:
                                 # Primary peak (no higher future peak)
                                 if is_tech_peak:
                                     safe_peaks.append((curr_h, curr_p))
-                                else:
-                                    skipped_reasons.append(f"{curr_h%24:02d}:00 (Ниже пика)")
+                                # v11.3.47: No more 'Below peak' reporting to keep status clean
                                     
                         # v11.3.46: Final reporting and diagnostic data
                         def format_skipped(reasons):
