@@ -1163,7 +1163,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.54"
+                    res["strategy_version"] = "v11.3.55"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1215,14 +1215,15 @@ class StrategyEngine:
                             h_int = int(h_str)
                             if h_int < cur_hour: continue
                             norm_p = float(normalize_float(p_val))
+                            ok_arb, _, _, _ = is_profitable(norm_p, h_int)
                             # v11.3.54: Only consider if price meets limit OR it's a profitable arbitrage cycle. 
-                            # Just being a 'local peak' is not enough if it's too cheap and unprofitable.
                             if norm_p >= sell_limit or ok_arb:
                                 peaks_candidates_all.append((h_int, norm_p))
                                 
                         for h_str, p_val in tomorrow_prices.items():
                             h_int = int(h_str) + 24
                             norm_p = float(normalize_float(p_val))
+                            ok_arb, _, _, _ = is_profitable(norm_p, h_int)
                             # v11.3.54
                             if norm_p >= sell_limit or ok_arb:
                                 peaks_candidates_all.append((h_int, norm_p))
