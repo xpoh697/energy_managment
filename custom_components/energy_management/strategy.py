@@ -1163,7 +1163,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.3.44"
+                    res["strategy_version"] = "v11.3.45"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1265,10 +1265,9 @@ class StrategyEngine:
                                 else:
                                     skipped_reasons.append(f"{curr_h%24:02d}:00 (Ниже пика)")
                                     
-                        # v11.3.44: Final filtering of skipped reasons (deduplicate and sort)
+                        # v11.3.45: Final reporting and diagnostic data
                         def format_skipped(reasons):
                             if not reasons: return ""
-                            # Unique and sorted by hour
                             seen = set()
                             res_clean = []
                             for r in reasons:
@@ -1277,16 +1276,19 @@ class StrategyEngine:
                                     seen.add(r)
                             return ", ".join(res_clean)
                         
+                        res["strategy_candidates"] = [f"{h%24:02d}:00" for h, p in peaks_candidates_all]
+                        res["deg_cost"] = float(deg_cost)
+                        res["profit_threshold"] = float(threshold)
+                        
                         if not safe_peaks:
                             res["state"] = "preparing_arbitrage"
-                            res["multi_cycle"] = "Неблагоприятно (Нет условий для дозарядки)"
+                            res["multi_cycle"] = f"Единичный пик (Пропуск: {format_skipped(skipped_reasons)})"
                             target_hours = []
                             target_price = 0.0
                         else:
                             if len(safe_peaks) > 1:
                                 res["multi_cycle"] = last_recharge_reason
                             else:
-                                # v11.3.44: Clear reporting
                                 txt = format_skipped(skipped_reasons)
                                 if txt:
                                     res["multi_cycle"] = f"Единичный пик (Пропуск: {txt})"
@@ -1295,6 +1297,8 @@ class StrategyEngine:
                                 
                             target_hours = sorted(list(set([h for h, p in safe_peaks])))
                             target_price = float(max((p for h, p in safe_peaks), default=0.0))
+                        
+                        _LOGGER.debug(f"[Strategy] v11.3.45: Active: {target_hours}, candidates: {res['strategy_candidates']}")
 
                         # Arbitrage note for the sensor
                         cheap_p_back, cheap_h_back = get_best_buyback(cur_hour)
