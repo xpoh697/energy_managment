@@ -1177,7 +1177,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.4.02 (Mirror Diagnostics)"
+                    res["strategy_version"] = "v11.4.03 (Honest Diagnostics)"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -2125,17 +2125,28 @@ class StrategyEngine:
 
                     # Removed temporary debug diagnostics
 
-                    # v11.4.02: Mirror Diagnostics - Synchronize sensors with the active bottleneck
-                    if available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        # Case: User Limit (e.g. 30%) is the bottleneck
+                    # v11.4.03: Honest Diagnostics - Derive status and power from FINAL simulation
+                    # If projection is below reserve (e.g. 21.6% < 28%), Home Protection ALWAYS wins.
+                    if float(soc_morning) < float(target_morning_soc) - 0.1:
+                        # Safety Block Active
+                        power_needed = 0.0
+                        res["recommended_power_kw"] = 0.0
+                        res["arbitrage_sell_status"] = f"Защита дома (Прогноз {soc_morning:.1f}%)"
+                        res_soc_after = float(round_f(soc_after, 1))
+                        res_soc_morning = float(round_f(soc_morning, 1)) # Be honest about the deficit
+                        res["note"] = f"Блокировка: прогноз на утро ({soc_morning:.1f}%) ниже резерва ({target_morning_soc}%)"
+                    elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
+                        # Controlled by User Limit
+                        res["arbitrage_sell_status"] = f"Лимит пользователя ({int(base_target)}%)"
                         res_soc_after = float(round_f(base_target, 1))
                         res_soc_morning = float(round_f(soc_morning, 1))
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
-                        # Case: Home Protection (e.g. 28%) is the bottleneck
+                        # Controlled by Home Protection (Calculated)
+                        res["arbitrage_sell_status"] = "Защита дома (M)"
                         res_soc_after = float(round_f(soc_after, 1))
                         res_soc_morning = float(round_f(target_morning_soc, 1))
                     else:
-                        # Case: Power limit or others
+                        res["arbitrage_sell_status"] = sell_diagnosis
                         res_soc_after = float(round_f(soc_after, 1))
                         res_soc_morning = float(round_f(soc_morning, 1))
 
