@@ -2897,8 +2897,8 @@ class InverterOperationModeSensor(SensorEntity):
             # v7.9 - Morning Survival Guard
             # We don't just check for "Preparing for Peak Today", we also check 
             # if we have enough energy to reach tomorrow morning (Sunrise).
-            morning_soc_proj = sell_strategy.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0)
-            target_morning = sell_strategy.get("arbitrage_buyback", {}).get("target_morning_soc_pct", 25.0)
+            morning_soc_proj = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
+            target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
             is_low_for_morning = bool(morning_soc_proj < target_morning)
             
             # v11.3.40: Strategic Preparation Detection
@@ -3026,8 +3026,8 @@ class InverterOperationModeSensor(SensorEntity):
             
             attrs["is_preparing_for_peak"] = is_preparing_for_peak
             attrs["next_peak_start_hour"] = formatted_peak
-            attrs["morning_soc_target"] = sell_strategy.get("arbitrage_buyback", {}).get("target_morning_soc_pct", 25.0)
-            attrs["morning_soc_projected"] = sell_strategy.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0)
+            attrs["morning_soc_target"] = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
+            attrs["morning_soc_projected"] = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
             
             self.manager.current_inverter_mode = mode
 
