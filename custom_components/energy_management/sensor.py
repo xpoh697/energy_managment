@@ -2680,30 +2680,24 @@ class InverterOperationModeSensor(SensorEntity):
                     avg_gen_override=f_gen, avg_load_override=f_load
                 )
                 
-                # Add price info if applicable
+                # Add price info if applicable (v11.4.15 UI Polish)
                 p_suffix = ""
                 try:
                     h_idx_s = str(f_dt.hour)
-                    
-                    if "sale" in f_mode:
-                        p_val = (sell_strategy.get("tomorrow_prices", {}) if is_tom else sell_strategy.get("today_prices", {})).get(h_idx_s)
-                        if p_val is not None:
-                            p_suffix = f" (sp: {float(p_val):.2f})"
-                    elif "buy" in f_mode:
+                    if "buy" in f_mode:
                         p_val = (buy_strategy.get("tomorrow_prices", {}) if is_tom else buy_strategy.get("today_prices", {})).get(h_idx_s)
                         if p_val is not None:
-                            p_suffix = f" (bp: {float(p_val):.2f})"
+                            p_suffix = f" (BP: {float(p_val):.2f})"
+                    else:
+                        # For all other modes (sale_pv, sale_pv_bat, etc), show Sell Price
+                        p_val = (sell_strategy.get("tomorrow_prices", {}) if is_tom else sell_strategy.get("today_prices", {})).get(h_idx_s)
+                        if p_val is not None:
+                            p_suffix = f" (SP: {float(p_val):.2f})"
                 except Exception:
                     pass
                 
-                # Format the full display string (with diagnostic reason)
-                f_display = f_mode
-                f_diag = f_context.get("reason", "")
-                if f_diag:
-                    f_display += f": '{f_diag}'"
-                
-                if p_suffix:
-                    f_display += p_suffix
+                # Format: режим (SP/BP: цена)
+                f_display = f"{f_mode}{p_suffix}"
                 
                 # Format the key (simple HH:00)
                 h_full_key = f_dt.strftime("%H:00")
