@@ -2897,14 +2897,23 @@ class InverterOperationModeSensor(SensorEntity):
             # v7.9 - Morning Survival Guard
             # We don't just check for "Preparing for Peak Today", we also check 
             # if we have enough energy to reach tomorrow morning (Sunrise).
-            morning_soc_proj = sell_strategy.get("sell_simulation", {}).get("projected_soc_morning_pct", 100.0)
+            morning_soc_proj = sell_strategy.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0)
             target_morning = sell_strategy.get("arbitrage_buyback", {}).get("target_morning_soc_pct", 25.0)
             is_low_for_morning = bool(morning_soc_proj < target_morning)
             
+            # v11.3.40: Strategic Preparation Detection
+            # If we are holding charge (mode will be sale_pv) despite high prices, we are preparing.
             is_energy_low_for_evening = bool(is_preparing_for_peak or is_low_for_morning)
             
+            # Smart Deficit Throttling Awareness
+            h_idx_val = int(check_h)
+            is_throttled = bool(sell_strategy.get("recommended_power_kw", 0.0) < 0.01 and h_idx_val in sell_strategy.get("active_hours", []))
+            
+            if is_throttled or is_energy_low_for_evening:
+                is_preparing_for_peak = True
+
             # v11.1.91 - Priority check: price must be > 0 at least
-            if is_before_limit_hour and has_surplus and not is_energy_low_for_evening and cur_price > 0:
+            if is_before_limit_hour and has_surplus and not (is_throttled or is_energy_low_for_evening) and cur_price > 0:
                 mode = "sale_pv_no_bat"
                 reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f}), утро, есть излишек и запас энергии"
             elif cur_price < price_stop_sell:
@@ -2914,9 +2923,11 @@ class InverterOperationModeSensor(SensorEntity):
             else:
                 # If conditions for sale_pv_no_bat not met, fallback to standard or charge
                 mode = "sale_pv"
-                if is_energy_low_for_evening:
-                    if is_low_for_morning:
-                        reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (мало на утро: {morning_soc_proj}%)"
+                if is_throttled or is_energy_low_for_evening:
+                    if is_throttled:
+                         reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, подгот. к пику (ограничено солнцем)"
+                    elif is_low_for_morning:
+                        reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (мало на утро: {morning_soc_proj:.1f}%)"
                     else:
                         reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога, но коплю заряд (не успею к пику)"
                 elif not is_before_limit_hour:
