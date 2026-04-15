@@ -1673,6 +1673,7 @@ class StrategyEngine:
                     # Sell mode (v11.1.51)
                     # Use existing Target SOC Sell as floor for AI selling
                     base_target = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+                    user_discharge_limit = base_target  # v11.4.39: Store original user value before any system corrections
                     # Initial defaults for robustness
                     arb_gain = 0.0
                     cheap_h_back = None
@@ -1941,7 +1942,7 @@ class StrategyEngine:
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)"
+                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)" if base_target <= user_discharge_limit + 0.5 else f"Защита дома ({user_discharge_limit:.0f}%→{base_target:.0f}%)"
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
 
@@ -2216,8 +2217,11 @@ class StrategyEngine:
                         res_soc_morning = soc_morning_display
                         res["note"] = f"Блокировка: прогноз на утро ({soc_morning_display:.1f}%) ниже резерва ({target_morning_soc}%)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        # Controlled by User Limit
-                        res["power_decision"] = f"Лимит пользователя ({int(base_target)}%)"
+                        # Controlled by User Limit (or system-raised floor)
+                        if base_target <= user_discharge_limit + 0.5:
+                            res["power_decision"] = f"Лимит пользователя ({int(base_target)}%)"
+                        else:
+                            res["power_decision"] = f"Защита дома ({int(user_discharge_limit)}%→{int(base_target)}%)"
                         res_soc_after = display_soc_after
                         res_soc_morning = soc_morning_display
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
