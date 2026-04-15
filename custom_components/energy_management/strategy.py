@@ -651,6 +651,12 @@ class StrategyEngine:
                 elif gen_bottleneck:
                     permissions[s_id_s] = False
                     permissions_reasons[s_id_s] = "Недостаточно генерации (Только солнце)"
+                elif only_solar and initial_budget < -0.3 and not is_free_price:
+                    # v11.4.42: Solar surplus must go to BATTERY, not to load, when morning SOC is critical.
+                    # only_solar loads bypass the normal budget check, but if the battery itself
+                    # can't make it to sunrise, diverting solar to loads makes things worse.
+                    permissions[s_id_s] = False
+                    permissions_reasons[s_id_s] = f"Заряд АКБ (бюджет {initial_budget:.2f} кВт·ч)"
                 elif available_budget < 0.1 and not only_solar and not is_free_price:
                     permissions[s_id_s] = False
                     permissions_reasons[s_id_s] = f"Лимит исчерпан ({available_budget:.2f} < 0.1)"
@@ -2162,12 +2168,12 @@ class StrategyEngine:
                     if not target_hours_sorted:
                         power_needed = 0.0
                         soc_at_start = b_soc
-                        soc_after = b_soc
-                        # soc_morning remains as natural discharge result
+                    soc_after = b_soc
+                    # soc_morning remains as natural discharge result
 
                     # Removed temporary debug diagnostics
 
-                    # v11.4.41: Unified night sub-simulation for morning SOC display.
+                    # v11.4.42: Unified night sub-simulation for morning SOC display.
                     # natural_morning_soc from sim_log_base is unreliable: the full sim distributes
                     # f_tom (tomorrow's solar) across ALL tomorrow hours. dist_tom['6'] can be >= 0.01
                     # so night clamp (real_h < 8) doesn't fire, giving +47% SOC overnight. Wrong.
