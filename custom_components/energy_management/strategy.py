@@ -2233,20 +2233,13 @@ class StrategyEngine:
                         res_soc_after = display_soc_after
                         res_soc_morning = soc_morning_display
                         res["note"] = f"Блокировка: прогноз на утро ({soc_morning_display:.1f}%) ниже резерва ({target_morning_soc}%)"
-                    elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
-                        # Controlled by User Limit (or system-raised floor)
-                        if base_target <= user_discharge_limit + 0.5:
-                            res["power_decision"] = f"Лимит пользователя ({int(base_target)}%)"
-                        else:
-                            res["power_decision"] = f"Защита дома ({int(user_discharge_limit)}%→{int(base_target)}%)"
-                        res_soc_after = display_soc_after
-                        res_soc_morning = soc_morning_display
-                    elif available_sell_dc <= (surplus_for_morning + 0.001):
-                        # Controlled by Home Protection (Calculated)
-                        res["power_decision"] = "Защита дома (M)"
-                        res_soc_after = display_soc_after
-                        res_soc_morning = float(round_f(target_morning_soc, 1))
                     else:
+                        # v11.4.43: Always use sell_diagnosis for power_decision.
+                        # sell_diagnosis is computed via the correct cascade:
+                        #   physical_limit → user_limit → morning_protection
+                        # The previous elif branches used surplus_for_morning which is inflated
+                        # by buggy natural_morning_soc from sim_log_base, causing the wrong branch
+                        # to fire and overriding the correctly identified constraint (e.g. АКБ limit).
                         res["power_decision"] = sell_diagnosis
                         res_soc_after = display_soc_after
                         res_soc_morning = soc_morning_display
