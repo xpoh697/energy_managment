@@ -1814,9 +1814,14 @@ class StrategyEngine:
                     
                     # --- TWO-STEP SAFETY CHECK (Refined v6.2) ---
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
+                    # v11.4.31: In morning solar window, we make the Gatekeeper "blind" to tomorrow's deficit.
+                    # This allows the simulation (Step 2) to be the primary decision maker.
+                    work_cons_to_sunrise = 0.0 if is_morning_solar_v2 else total_cons_to_sunrise
+                    work_deficit_tomorrow = 0.0 if is_morning_solar_v2 else base_deficit_tomorrow
+                    
                     ai_soc_floor_base = self._calc_immediate_safety_floor(
-                        min_soc_val, active_buffer, total_cons_to_sunrise, 
-                        base_deficit_tomorrow, total_solar_to_sunrise, b_cap, eff
+                        min_soc_val, active_buffer, work_cons_to_sunrise, 
+                        work_deficit_tomorrow, total_solar_to_sunrise, b_cap, eff
                     )
                     
                     # 1. Projected SOC at START of the first peak (v11.3.20: Early detection)
