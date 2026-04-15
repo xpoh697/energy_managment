@@ -2167,45 +2167,56 @@ class StrategyEngine:
 
                     # Removed temporary debug diagnostics
 
-                    # v11.4.38: Airtight Display Algorithm (User-defined physical approach)
-                    # Step 1: soc_at_start — from sim_log_base (already computed above)
-                    # Step 2: natural_soc_after_sale — from sim_log_base at [sale_end:59]
-                    # Step 3: display_soc_after = max(base_target, step2 - planned_sell_pct)
-                    # Step 4: Night sub-sim from display_soc_after → morning key
-                    # Step 5: If morning < target: display_soc_after += deficit
-                    # All three display values are now physically consistent (soc_start >= soc_after >= soc_morning).
+                    # v11.4.40: Two-branch Display Algorithm
+                    # CRITICAL: base_target is a PLANNING floor, NOT a display floor.
+                    # Showing max(base_target, natural_soc) gives soc_after > soc_at_start when
+                    # system raised base_target (e.g. 40%->55%) but no sale is planned.
+                    #
+                    # Branch A (no sale): show pure natural values from sim_log_base.
+                    #   display_soc_after = natural_soc_after_sale
+                    #   soc_morning_display = natural_morning_soc
+                    # Branch B (sale active): show post-sale projection.
+                    #   display_soc_after = natural_soc_after_sale - planned_sell_pct (clamped >= 0)
+                    #   soc_morning_display = night sub-sim from display_soc_after
+                    #   Step 5: if morning < target AND sale active: display_soc_after += deficit
                     planned_sell_kwh = sum(sell_commands.values()) if sell_commands else 0.0
                     planned_sell_pct = (planned_sell_kwh / b_cap * 100.0 / max(0.1, eff)) if b_cap > 0.1 else 0.0
-                    display_soc_after = float(round_f(
-                        max(base_target, natural_soc_after_sale - planned_sell_pct), 1
-                    ))
+                    sale_is_active_disp = planned_sell_kwh > 0.01
 
-                    # Step 4: Night sub-simulation from end of sale to pre-sunrise
-                    # Uses night_now (minute=0) so all hours are full (avoids fraction_left_h1 artifact).
-                    # Night clamp guarantees solar=0 at hours 21-23 and 0-7 → monotone SOC decrease.
-                    night_start_h = (last_h_sell_immediate + 1) if future_active_sell else (cur_hour + 1)
-                    night_sim_range_disp = list(range(night_start_h, 24 + sunrise_h))
-                    try:
-                        night_now = now.replace(minute=0, second=0, microsecond=0)
-                        _, night_log_disp, _ = self.run_soc_simulation(
-                            display_soc_after, night_sim_range_disp, night_now, {}
-                        )
-                        morning_key_disp = f"{sunrise_h - 1:02d}:59 (Завтра)"
-                        soc_morning_display = float(round_f(
-                            self._get_soc_from_log(night_log_disp, morning_key_disp, display_soc_after), 1
+                    if not sale_is_active_disp:
+                        # Branch A: no sale — show pure natural baseline (already from sim_log_base)
+                        display_soc_after = float(round_f(natural_soc_after_sale, 1))
+                        soc_morning_display = float(round_f(natural_morning_soc, 1))
+                    else:
+                        # Branch B: sale planned — compute post-sale projection
+                        display_soc_after = float(round_f(
+                            max(0.0, natural_soc_after_sale - planned_sell_pct), 1
                         ))
-                        # Step 5: If morning < target reserve, adjust display_soc_after up by deficit
-                        if soc_morning_display < float(target_morning_soc) - 0.1:
-                            deficit_disp = float(target_morning_soc) - soc_morning_display
-                            display_soc_after = float(round_f(
-                                min(100.0, display_soc_after + deficit_disp), 1
+                        # Night sub-simulation from display_soc_after to pre-sunrise
+                        # night_now (minute=0): all hours are full, avoids fraction_left_h1 artifact
+                        # Night clamp zeros solar at hours 21-23 and 0-7 → SOC decreases monotonically
+                        night_start_h = (last_h_sell_immediate + 1) if future_active_sell else (cur_hour + 1)
+                        night_sim_range_disp = list(range(night_start_h, 24 + sunrise_h))
+                        try:
+                            night_now = now.replace(minute=0, second=0, microsecond=0)
+                            _, night_log_disp, _ = self.run_soc_simulation(
+                                display_soc_after, night_sim_range_disp, night_now, {}
+                            )
+                            morning_key_disp = f"{sunrise_h - 1:02d}:59 (Завтра)"
+                            soc_morning_display = float(round_f(
+                                self._get_soc_from_log(night_log_disp, morning_key_disp, display_soc_after), 1
                             ))
-                            soc_morning_display = float(target_morning_soc)
-                    except Exception:
-                        # Fallback: deterministic subtraction (v11.4.37 approach)
-                        soc_morning_display = float(round_f(
-                            max(0.0, natural_morning_soc - planned_sell_pct), 1
-                        ))
+                            # Step 5: morning below target → raise display_soc_after to show minimum floor
+                            if soc_morning_display < float(target_morning_soc) - 0.1:
+                                deficit_disp = float(target_morning_soc) - soc_morning_display
+                                display_soc_after = float(round_f(
+                                    min(100.0, display_soc_after + deficit_disp), 1
+                                ))
+                                soc_morning_display = float(target_morning_soc)
+                        except Exception:
+                            soc_morning_display = float(round_f(
+                                max(0.0, natural_morning_soc - planned_sell_pct), 1
+                            ))
 
                     if soc_morning_display < float(target_morning_soc) - 0.1:
                         # Safety Block Active
