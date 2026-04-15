@@ -2183,20 +2183,29 @@ class StrategyEngine:
                         max(base_target, natural_soc_after_sale - planned_sell_pct), 1
                     ))
 
-                    if float(soc_morning) < float(target_morning_soc) - 0.1:
+                    # v11.4.37: soc_morning from sim_log is equally unreliable (same race condition).
+                    # Example: soc_after=43.4% yet soc_morning=64.9% — physically impossible overnight.
+                    # Fix: natural_morning_soc (baseline, NO commands) - planned_sell_pct.
+                    # After the sale window, no commands run: night drain is identical in both
+                    # baseline and sell scenarios, so subtraction is exact.
+                    soc_morning_deterministic = float(round_f(
+                        max(0.0, natural_morning_soc - planned_sell_pct), 1
+                    ))
+
+                    if soc_morning_deterministic < float(target_morning_soc) - 0.1:
                         # Safety Block Active
                         power_needed = 0.0
                         res["recommended_power_kw"] = 0.0
-                        res["power_decision"] = f"Защита дома (Прогноз {soc_morning:.1f}%)"
+                        res["power_decision"] = f"Защита дома (Прогноз {soc_morning_deterministic:.1f}%)"
                         res["planned_power_per_h"] = {} # Clear the plan - nothing to sell!
                         res_soc_after = display_soc_after
-                        res_soc_morning = float(round_f(soc_morning, 1)) # Be honest about the deficit
-                        res["note"] = f"Блокировка: прогноз на утро ({soc_morning:.1f}%) ниже резерва ({target_morning_soc}%)"
+                        res_soc_morning = soc_morning_deterministic
+                        res["note"] = f"Блокировка: прогноз на утро ({soc_morning_deterministic:.1f}%) ниже резерва ({target_morning_soc}%)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
                         # Controlled by User Limit
                         res["power_decision"] = f"Лимит пользователя ({int(base_target)}%)"
                         res_soc_after = display_soc_after
-                        res_soc_morning = float(round_f(soc_morning, 1))
+                        res_soc_morning = soc_morning_deterministic
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         # Controlled by Home Protection (Calculated)
                         res["power_decision"] = "Защита дома (M)"
@@ -2205,7 +2214,7 @@ class StrategyEngine:
                     else:
                         res["power_decision"] = sell_diagnosis
                         res_soc_after = display_soc_after
-                        res_soc_morning = float(round_f(soc_morning, 1))
+                        res_soc_morning = soc_morning_deterministic
 
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
