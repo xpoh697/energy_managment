@@ -2166,46 +2166,60 @@ class StrategyEngine:
 
                     # Removed temporary debug diagnostics
 
-                    # v11.4.03: Honest Diagnostics - Derive status and power from FINAL simulation
-                    # If projection is below reserve (e.g. 21.6% < 28%), Home Protection ALWAYS wins.
-                    # v11.4.36: Deterministic display SOC — avoids cross-simulation inconsistency.
-                    # soc_after from sim_log (final sim) is unreliable because:
-                    #   1. sim_log_base and sim_log are separate runs that can diverge if f_today
-                    #      updates between calls (race condition with HA sensor polling).
-                    #   2. The recursive deficit fix overwrites sim_log, making it potentially
-                    #      reference a different scenario than the display expects.
-                    # Fix: natural_soc_after_sale (baseline "HH:59") minus planned discharge.
-                    # This gives a physically consistent result anchored to the SAME baseline sim
-                    # that produced soc_at_sale_start.
+                    # v11.4.38: Airtight Display Algorithm (User-defined physical approach)
+                    # Step 1: soc_at_start — from sim_log_base (already computed above)
+                    # Step 2: natural_soc_after_sale — from sim_log_base at [sale_end:59]
+                    # Step 3: display_soc_after = max(base_target, step2 - planned_sell_pct)
+                    # Step 4: Night sub-sim from display_soc_after → morning key
+                    # Step 5: If morning < target: display_soc_after += deficit
+                    # All three display values are now physically consistent (soc_start >= soc_after >= soc_morning).
                     planned_sell_kwh = sum(sell_commands.values()) if sell_commands else 0.0
                     planned_sell_pct = (planned_sell_kwh / b_cap * 100.0 / max(0.1, eff)) if b_cap > 0.1 else 0.0
                     display_soc_after = float(round_f(
                         max(base_target, natural_soc_after_sale - planned_sell_pct), 1
                     ))
 
-                    # v11.4.37: soc_morning from sim_log is equally unreliable (same race condition).
-                    # Example: soc_after=43.4% yet soc_morning=64.9% — physically impossible overnight.
-                    # Fix: natural_morning_soc (baseline, NO commands) - planned_sell_pct.
-                    # After the sale window, no commands run: night drain is identical in both
-                    # baseline and sell scenarios, so subtraction is exact.
-                    soc_morning_deterministic = float(round_f(
-                        max(0.0, natural_morning_soc - planned_sell_pct), 1
-                    ))
+                    # Step 4: Night sub-simulation from end of sale to pre-sunrise
+                    # Uses night_now (minute=0) so all hours are full (avoids fraction_left_h1 artifact).
+                    # Night clamp guarantees solar=0 at hours 21-23 and 0-7 → monotone SOC decrease.
+                    night_start_h = (last_h_sell_immediate + 1) if future_active_sell else (cur_hour + 1)
+                    night_sim_range_disp = list(range(night_start_h, 24 + sunrise_h))
+                    try:
+                        night_now = now.replace(minute=0, second=0, microsecond=0)
+                        _, night_log_disp, _ = self.run_soc_simulation(
+                            display_soc_after, night_sim_range_disp, night_now, {}
+                        )
+                        morning_key_disp = f"{sunrise_h - 1:02d}:59 (Завтра)"
+                        soc_morning_display = float(round_f(
+                            self._get_soc_from_log(night_log_disp, morning_key_disp, display_soc_after), 1
+                        ))
+                        # Step 5: If morning < target reserve, adjust display_soc_after up by deficit
+                        if soc_morning_display < float(target_morning_soc) - 0.1:
+                            deficit_disp = float(target_morning_soc) - soc_morning_display
+                            display_soc_after = float(round_f(
+                                min(100.0, display_soc_after + deficit_disp), 1
+                            ))
+                            soc_morning_display = float(target_morning_soc)
+                    except Exception:
+                        # Fallback: deterministic subtraction (v11.4.37 approach)
+                        soc_morning_display = float(round_f(
+                            max(0.0, natural_morning_soc - planned_sell_pct), 1
+                        ))
 
-                    if soc_morning_deterministic < float(target_morning_soc) - 0.1:
+                    if soc_morning_display < float(target_morning_soc) - 0.1:
                         # Safety Block Active
                         power_needed = 0.0
                         res["recommended_power_kw"] = 0.0
-                        res["power_decision"] = f"Защита дома (Прогноз {soc_morning_deterministic:.1f}%)"
+                        res["power_decision"] = f"Защита дома (Прогноз {soc_morning_display:.1f}%)"
                         res["planned_power_per_h"] = {} # Clear the plan - nothing to sell!
                         res_soc_after = display_soc_after
-                        res_soc_morning = soc_morning_deterministic
-                        res["note"] = f"Блокировка: прогноз на утро ({soc_morning_deterministic:.1f}%) ниже резерва ({target_morning_soc}%)"
+                        res_soc_morning = soc_morning_display
+                        res["note"] = f"Блокировка: прогноз на утро ({soc_morning_display:.1f}%) ниже резерва ({target_morning_soc}%)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
                         # Controlled by User Limit
                         res["power_decision"] = f"Лимит пользователя ({int(base_target)}%)"
                         res_soc_after = display_soc_after
-                        res_soc_morning = soc_morning_deterministic
+                        res_soc_morning = soc_morning_display
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         # Controlled by Home Protection (Calculated)
                         res["power_decision"] = "Защита дома (M)"
@@ -2214,7 +2228,7 @@ class StrategyEngine:
                     else:
                         res["power_decision"] = sell_diagnosis
                         res_soc_after = display_soc_after
-                        res_soc_morning = soc_morning_deterministic
+                        res_soc_morning = soc_morning_display
 
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
