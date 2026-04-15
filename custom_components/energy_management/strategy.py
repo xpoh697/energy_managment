@@ -2168,12 +2168,19 @@ class StrategyEngine:
 
                     # v11.4.03: Honest Diagnostics - Derive status and power from FINAL simulation
                     # If projection is below reserve (e.g. 21.6% < 28%), Home Protection ALWAYS wins.
-                    # v11.4.35: Conditional SOC display based on whether sale is actually planned:
-                    # - Sale planned   → soc_after from final simulation (real result with discharge)
-                    # - No sale        → natural_soc_after_sale from baseline sim (no commands)
-                    sale_is_active = any(v > 0.01 for v in sell_commands.values())
+                    # v11.4.36: Deterministic display SOC — avoids cross-simulation inconsistency.
+                    # soc_after from sim_log (final sim) is unreliable because:
+                    #   1. sim_log_base and sim_log are separate runs that can diverge if f_today
+                    #      updates between calls (race condition with HA sensor polling).
+                    #   2. The recursive deficit fix overwrites sim_log, making it potentially
+                    #      reference a different scenario than the display expects.
+                    # Fix: natural_soc_after_sale (baseline "HH:59") minus planned discharge.
+                    # This gives a physically consistent result anchored to the SAME baseline sim
+                    # that produced soc_at_sale_start.
+                    planned_sell_kwh = sum(sell_commands.values()) if sell_commands else 0.0
+                    planned_sell_pct = (planned_sell_kwh / b_cap * 100.0 / max(0.1, eff)) if b_cap > 0.1 else 0.0
                     display_soc_after = float(round_f(
-                        soc_after if sale_is_active else natural_soc_after_sale, 1
+                        max(base_target, natural_soc_after_sale - planned_sell_pct), 1
                     ))
 
                     if float(soc_morning) < float(target_morning_soc) - 0.1:
