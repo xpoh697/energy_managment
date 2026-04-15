@@ -2168,30 +2168,35 @@ class StrategyEngine:
 
                     # v11.4.03: Honest Diagnostics - Derive status and power from FINAL simulation
                     # If projection is below reserve (e.g. 21.6% < 28%), Home Protection ALWAYS wins.
+                    # v11.4.34: Use natural_soc_after_sale (baseline sim, no sell cmds) for display.
+                    # soc_after from final sim includes daytime solar since "now" to sale hour,
+                    # which makes it jump to 90%+ even when only 0.3 kWh is sold — visually misleading.
+                    # natural_soc_after_sale reflects what the battery would be at end of sale window
+                    # independent of the current-hour-to-salehour solar charging.
+                    display_soc_after = float(round_f(natural_soc_after_sale, 1))
+
                     if float(soc_morning) < float(target_morning_soc) - 0.1:
                         # Safety Block Active
                         power_needed = 0.0
                         res["recommended_power_kw"] = 0.0
                         res["power_decision"] = f"Защита дома (Прогноз {soc_morning:.1f}%)"
                         res["planned_power_per_h"] = {} # Clear the plan - nothing to sell!
-                        res_soc_after = float(round_f(soc_after, 1))
+                        res_soc_after = display_soc_after
                         res_soc_morning = float(round_f(soc_morning, 1)) # Be honest about the deficit
                         res["note"] = f"Блокировка: прогноз на утро ({soc_morning:.1f}%) ниже резерва ({target_morning_soc}%)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
                         # Controlled by User Limit
-                        # v11.4.33: Show real simulated soc_after, not base_target.
-                        # power_decision already states the reason ("Лимит пользователя (X%)").
                         res["power_decision"] = f"Лимит пользователя ({int(base_target)}%)"
-                        res_soc_after = float(round_f(soc_after, 1))
+                        res_soc_after = display_soc_after
                         res_soc_morning = float(round_f(soc_morning, 1))
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         # Controlled by Home Protection (Calculated)
                         res["power_decision"] = "Защита дома (M)"
-                        res_soc_after = float(round_f(soc_after, 1))
+                        res_soc_after = display_soc_after
                         res_soc_morning = float(round_f(target_morning_soc, 1))
                     else:
                         res["power_decision"] = sell_diagnosis
-                        res_soc_after = float(round_f(soc_after, 1))
+                        res_soc_after = display_soc_after
                         res_soc_morning = float(round_f(soc_morning, 1))
 
                     res["sell_simulation"] = {
