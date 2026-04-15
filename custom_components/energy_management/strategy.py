@@ -1718,7 +1718,8 @@ class StrategyEngine:
                     total_solar_to_sunrise = rem_solar_today + morning_solar_ac
                     cur_h_gen_prof = float(normalize_float(avg_prof_gen.get(str(cur_hour % 24), 0.0)))
                     
-                    is_morning_solar_v2 = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.05 or cur_h_gen_prof > 0.05 or rem_solar_today > 0.05)
+                    cur_pv = float(man.get_latest_solar() or 0.0)
+                    is_morning_solar_v2 = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.05 or cur_h_gen_prof > 0.05 or rem_solar_today > 0.05 or cur_pv > 0.5)
                     if is_morning_solar_v2:
                          soc_buffer_val = 3.0 # Standard morning relaxation
                     
@@ -1902,8 +1903,16 @@ class StrategyEngine:
                         # We calculate the exact SOC floor needed to guarantee the morning target.
                         # v11.4.30: Unified buffer logic (soc_buffer_val is now early-relaxed to 3.0 during morning window)
                         target_sunrise_soc = min_soc_val + soc_buffer_val
+                        
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
+                        
+                        # v11.4.32: Simulation-Driven Trust
+                        # If the simulation shows we naturally arrive at sunrise with enough charge,
+                        # we don't need to add any "safety buffer" for intermediate drain.
+                        if is_morning_solar_v2 and natural_morning_soc >= target_sunrise_soc:
+                            night_drain_pct = 0.0
+                            
                         survival_floor = target_sunrise_soc + night_drain_pct
                         
                         if survival_floor > base_target:
