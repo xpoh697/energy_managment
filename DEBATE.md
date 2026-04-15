@@ -750,5 +750,45 @@
 3. morning_gap <= user_gap: строгое <= гарантирует что при равных значениях предпочитаем Защита дома (консервативно).
 
 **Итог (v11.4.44)**: sell_diagnosis корректируется после ночной суб-симуляции на основе реальных post-sim значений. Каскад: physical -> floor_raised -> morning_binding -> user_limit. Версия v11.4.44.
-**Одобрение Skeptic (v11.4.44)**: OK
+**Одобрение Skeptic (v11.4.44)**: OK — с оговорками (см. ниже)
 **Одобрение Archi (v11.4.44)**: OK
+
+---
+
+### Раунд 57b: Два скрытых бага в реализации v11.4.44 (v11.4.44-fix)
+
+**Archi**: При ревью кода обнаружены два регрессионных бага в реализации Раунда 57:
+
+**Баг 1 — is_power_limited всегда True.**
+```python
+# НЕВЕРНО (стр. 2236):
+is_power_limited = (available_sell_dc <= physical_limit_dc + 0.05)
+```
+`available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)` — по определению ВСЕГДА ≤ `physical_limit_dc`. Поэтому условие всегда True → блок `if not is_power_limited` **никогда не срабатывает** → коррекция `sell_diagnosis` мертва.
+
+**Правильная логика** — physical binding когда physical_limit является минимумом из трёх:
+```python
+# ВЕРНО:
+is_power_limited = (physical_limit_dc <= min(surplus_for_morning, surplus_for_user_limit) + 0.05)
+```
+
+**Баг 2 — soc_after безусловно сбрасывается в b_soc (стр. 2171).**
+```python
+    if not target_hours_sorted:
+        power_needed = 0.0
+        soc_at_start = b_soc
+    soc_after = b_soc   # ← ВЫРОВНЯЛСЯ ИЗ if-блока → выполняется ВСЕГДА
+```
+Строка `soc_after = b_soc` вышла из блока `if not target_hours_sorted` (потеря отступа). Итог: `soc_after` всегда = текущий SOC, даже при активной продаже. Это делает `user_gap_pct = b_soc - base_target` вместо реального post-sale SOC.
+
+**Skeptic**:
+1. **Баг 1** — критический: делает весь Раунд 57 нефункциональным. Исправление `<=` на `physical_limit_dc <= min(M,U)` — математически корректно и соответствует изначальной логике каскада.
+2. **Баг 2** — критический: из-за потери отступа `user_gap_pct` вычисляется от `b_soc` вместо `display_soc_after`. Нужно вернуть строку `soc_after = b_soc` внутрь `if not target_hours_sorted:` с правильным отступом.
+3. **Оба бага не меняют логику**, только восстанавливают корректность реализации. Регрессий не будет.
+
+**Итог (v11.4.44-fix)**:
+- `is_power_limited` исправлено на `physical_limit_dc <= min(surplus_for_morning, surplus_for_user_limit) + 0.05`
+- `soc_after = b_soc` возвращено внутрь `if not target_hours_sorted:` с правильным отступом
+
+**Одобрение Skeptic (v11.4.44-fix)**: ✅
+**Одобрение Archi (v11.4.44-fix)**: ✅

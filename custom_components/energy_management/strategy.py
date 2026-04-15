@@ -2168,7 +2168,7 @@ class StrategyEngine:
                     if not target_hours_sorted:
                         power_needed = 0.0
                         soc_at_start = b_soc
-                    soc_after = b_soc
+                        soc_after = b_soc  # v11.4.44-fix: only reset when no peaks, else keep sim value
                     # soc_morning remains as natural discharge result
 
                     # Removed temporary debug diagnostics
@@ -2232,8 +2232,10 @@ class StrategyEngine:
                     if sale_is_active_disp:
                         morning_gap_pct = soc_morning_display - float(target_morning_soc)
                         user_gap_pct = display_soc_after - float(base_target)
-                        # Physical limit check: if available_sell ≈ physical_limit → power was binding
-                        is_power_limited = (available_sell_dc <= physical_limit_dc + 0.05)
+                        # v11.4.44-fix: Physical is binding when physical_limit_dc IS the minimum
+                        # of the three surpluses. available_sell_dc is always <= physical_limit_dc
+                        # (it's defined as min of three), so the old check was always True.
+                        is_power_limited = (physical_limit_dc <= min(surplus_for_morning, surplus_for_user_limit) + 0.05)
                         floor_was_raised = (base_target > user_discharge_limit + 0.5)
                         morning_is_binding = (morning_gap_pct <= user_gap_pct)
                         if not is_power_limited:
