@@ -2224,6 +2224,29 @@ class StrategyEngine:
                             max(0.0, display_soc_after - avg_drain_pct_h * overnight_hours), 1
                         ))
 
+                    # v11.4.44: Post-sim sell_diagnosis correction.
+                    # sell_diagnosis was computed BEFORE recursive base_target raise and uses
+                    # inflated surplus_for_morning (from buggy natural_morning_soc).
+                    # Now we have accurate soc_morning_display and display_soc_after from night sub-sim.
+                    # Compare gaps to their respective targets to identify actual binding constraint.
+                    if sale_is_active_disp:
+                        morning_gap_pct = soc_morning_display - float(target_morning_soc)
+                        user_gap_pct = display_soc_after - float(base_target)
+                        # Physical limit check: if available_sell ≈ physical_limit → power was binding
+                        is_power_limited = (available_sell_dc <= physical_limit_dc + 0.05)
+                        floor_was_raised = (base_target > user_discharge_limit + 0.5)
+                        morning_is_binding = (morning_gap_pct <= user_gap_pct)
+                        if not is_power_limited:
+                            if floor_was_raised:
+                                # System raised the floor above user limit → защита дома
+                                sell_diagnosis = f"Защита дома ({int(user_discharge_limit)}%→{int(base_target)}%)"
+                            elif morning_is_binding:
+                                # Morning reserve was the tighter constraint
+                                sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
+                            else:
+                                # User limit was binding, floor not raised
+                                sell_diagnosis = f"Лимит пользователя ({int(base_target)}%)"
+
                     if soc_morning_display < float(target_morning_soc) - 0.1:
                         # Safety Block Active
                         power_needed = 0.0

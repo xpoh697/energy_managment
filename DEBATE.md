@@ -677,3 +677,78 @@
 
 **Одобрение Skeptic (v11.4.42)**: OK
 **Одобрение Archi (v11.4.42)**: OK
+
+---
+
+### Раунд 56: Единый источник истины для power_decision (v11.4.43)
+
+**USER**: Установил мощность АКБ 0.3 кВт. Сработало (продажа 0.3 кВт), но "Power decision" показывает "Лимит пользователя (40%)" вместо "Лимит АКБ".
+
+**Archi**: Баг в цепочке. sell_diagnosis вычисляется корректно на строках 1940-1946 каскадом: (physical_limit -> user_limit -> morning). При P=0.3, surplus_for_morning=11.85 kWh (завышен), surplus_for_user_limit=2.05 kWh:
+- physical_limit=0.3 < min(11.85, 2.05)=2.05 -> True -> sell_diagnosis = "Лимит мощности АКБ" (правильно!)
+
+Но в display-блоке идут отдельные elif:
+- available_sell_dc=0.3 <= surplus_for_user_limit=2.05 -> True
+- surplus_for_user_limit=2.05 < surplus_for_morning=11.85 -> True (из-за inflated natural_morning_soc=97%!)
+-> ветка "Лимит пользователя" ПЕРЕБИВАЕТ корректный sell_diagnosis.
+
+Фикс: убрать все elif ветки в display-блоке для power_decision. Оставить только Safety Block (прогноз < target) как исключение. Иначе -> sell_diagnosis. DRY + правильно.
+
+**Skeptic**:
+1. Корень: surplus_for_morning инфлирован из natural_morning_soc (97% от sim_log_base). Мы исправили ДИСПЛЕЙ (ночная суб-симуляция), но surplus_for_morning в PLANNING-переменных всё ещё берётся из этого же buggy источника. Это продолжает влиять на planning логику (какая ветка считается binding).
+2. Временный fix v11.4.43 корректен - sell_diagnosis не зависит от surplus_for_morning в дисплее.
+3. Долгосрочно: нужно исправить surplus_for_morning в planning на ночную суб-симуляцию тоже. Но это отдельный раунд.
+
+**Итог (v11.4.43)**: power_decision = sell_diagnosis (если не Safety Block). Каскад мощность->пользователь->утро вычисляется один раз правильно в sell_diagnosis. Display-блок больше не имеет собственной логики выбора ветки. Версия v11.4.43.
+
+**Одобрение Skeptic (v11.4.43)**: OK
+**Одобрение Archi (v11.4.43)**: OK
+
+---
+
+### Раунд 56: Единый источник истины для power_decision (v11.4.43)
+
+**USER**: Установил мощность АКБ 0.3 кВт. Сработало (продажа 0.32 кВт), но Power decision показывает Лимит пользователя (40%) вместо Лимит АКБ.
+
+**Archi**: Баг в двух частях. sell_diagnosis вычисляется корректно каскадом (physical -> user -> morning). При P=0.3: physical_limit=0.3 < min(11.85, 2.05)=2.05 -> sell_diagnosis = Лимит мощности АКБ (правильно). Но в display-блоке были отдельные elif которые перебивали sell_diagnosis через собственную логику с inflated surplus_for_morning.
+
+Фикс: убрать все elif ветки в display-блоке для power_decision. Оставить Safety Block как исключение. Иначе: res[power_decision] = sell_diagnosis. DRY и правильно.
+
+**Skeptic**:
+1. sell_diagnosis всё ещё вычисляется ДО рекурсивного фикса (который поднимает base_target). Значит label может содержать старое значение base_target (40% вместо поднятого 55%).
+2. surplus_for_morning инфлирован из natural_morning_soc - этот источник нужно заменить.
+3. Версия v11.4.43 корректна как промежуточный шаг. Следующий раунд исправит root cause.
+
+**Итог (v11.4.43)**: power_decision = sell_diagnosis (если не Safety Block). Версия v11.4.43.
+**Одобрение Skeptic (v11.4.43)**: OK
+**Одобрение Archi (v11.4.43)**: OK
+
+---
+
+### Раунд 57: Пост-симуляционная коррекция sell_diagnosis (v11.4.44)
+
+**USER**: Power decision показывает Лимит пользователя (40%) когда morning SOC = 27.9% = target 28% - явно Защита дома.
+
+**Archi**: Два источника ошибки:
+1. sell_diagnosis вычисляется ДО рекурсивного raise base_target (40% -> 55%). Метка содержит старый 40%.
+2. surplus_for_morning инфлирован -> условие surplus_for_user_limit < surplus_for_morning = True -> ветка Лимит пользователя.
+
+После ночной суб-симуляции у нас есть точные данные:
+  morning_gap = soc_morning_display - target = 27.9 - 28 = -0.1%
+  user_gap    = display_soc_after - base_target = 55.4 - 55 = 0.4%
+  morning_gap < user_gap -> утро binding -> Защита дома (Рассвет 28%)
+
+Фикс: после ночной суб-симуляции пересчитывать sell_diagnosis по post-sim значениям:
+- if floor_was_raised (base_target > user_limit + 0.5): Защита дома (40% -> 55%)
+- elif morning_is_binding (morning_gap <= user_gap): Защита дома (Рассвет 28%)
+- else: Лимит пользователя (X%)
+- Физически ограниченный (available_sell <= physical_limit): не трогаем sell_diagnosis
+
+**Skeptic**:
+1. Порог physical_limit_dc + 0.05 кВтч для is_power_limited - адекватен (5% погрешности).
+2. floor_was_raised check (> 0.5%) надёжно отличает системный raise от шума рекурсивного фикса.
+3. morning_gap <= user_gap: строгое <= гарантирует что при равных значениях предпочитаем Защита дома (консервативно).
+
+**Итог (v11.4.44)**: sell_diagnosis корректируется после ночной суб-симуляции на основе реальных post-sim значений. Каскад: physical -> floor_raised -> morning_binding -> user_limit. Версия v11.4.44.
+**Одобрение Skeptic (v11.4.44)**: OK
+**Одобрение Archi (v11.4.44)**: OK
