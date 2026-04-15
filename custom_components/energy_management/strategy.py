@@ -640,13 +640,22 @@ class StrategyEngine:
                 price_suffix = " (Беспл. цена)" if is_free_price else ""
                 if is_selling_mode and not is_free_price:
                     permissions[s_id_s] = False
-                    # v11.4.45: dict lookup avoids else-trap that labelled ANY unknown mode as "PV+АКБ"
+                    # v11.4.46: dict lookup avoids else-trap that labelled ANY unknown mode as "PV+АКБ"
                     _mode_labels = {
                         "sale_pv_no_bat": "Продажа PV (без АКБ)",
                         "sale_pv_bat": "Продажа PV+АКБ",
                     }
                     mode_label = _mode_labels.get(inverter_mode, inverter_mode)
-                    permissions_reasons[s_id_s] = f"Запрет: Режим '{mode_label}' — приоритет продажи"
+                    # v11.4.46: expose the REAL underlying reason so user sees WHY, not just WHAT
+                    if power_bottleneck:
+                        _extra = f" | Дефицит мощности ({available_power_kw:.2f}кВт)"
+                    elif gen_bottleneck:
+                        _extra = f" | Нет генерации ({available_gen_kw:.2f}кВт)"
+                    elif initial_budget < -0.1:
+                        _extra = f" | Бюджет {initial_budget:.2f}кВт·ч"
+                    else:
+                        _extra = ""
+                    permissions_reasons[s_id_s] = f"Запрет: Режим '{mode_label}'{_extra}"
                 elif req_kwh > 0 and consumed >= req_kwh:
                     permissions[s_id_s] = False
                     permissions_reasons[s_id_s] = f"Норма выполнена ({consumed:.2f}/{req_kwh}{price_suffix})"
