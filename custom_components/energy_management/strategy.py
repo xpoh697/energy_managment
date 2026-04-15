@@ -2168,12 +2168,13 @@ class StrategyEngine:
 
                     # v11.4.03: Honest Diagnostics - Derive status and power from FINAL simulation
                     # If projection is below reserve (e.g. 21.6% < 28%), Home Protection ALWAYS wins.
-                    # v11.4.34: Use natural_soc_after_sale (baseline sim, no sell cmds) for display.
-                    # soc_after from final sim includes daytime solar since "now" to sale hour,
-                    # which makes it jump to 90%+ even when only 0.3 kWh is sold — visually misleading.
-                    # natural_soc_after_sale reflects what the battery would be at end of sale window
-                    # independent of the current-hour-to-salehour solar charging.
-                    display_soc_after = float(round_f(natural_soc_after_sale, 1))
+                    # v11.4.35: Conditional SOC display based on whether sale is actually planned:
+                    # - Sale planned   → soc_after from final simulation (real result with discharge)
+                    # - No sale        → natural_soc_after_sale from baseline sim (no commands)
+                    sale_is_active = any(v > 0.01 for v in sell_commands.values())
+                    display_soc_after = float(round_f(
+                        soc_after if sale_is_active else natural_soc_after_sale, 1
+                    ))
 
                     if float(soc_morning) < float(target_morning_soc) - 0.1:
                         # Safety Block Active
