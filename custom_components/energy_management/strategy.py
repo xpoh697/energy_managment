@@ -2179,8 +2179,10 @@ class StrategyEngine:
                         res["note"] = f"Блокировка: прогноз на утро ({soc_morning:.1f}%) ниже резерва ({target_morning_soc}%)"
                     elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
                         # Controlled by User Limit
+                        # v11.4.33: Show real simulated soc_after, not base_target.
+                        # power_decision already states the reason ("Лимит пользователя (X%)").
                         res["power_decision"] = f"Лимит пользователя ({int(base_target)}%)"
-                        res_soc_after = float(round_f(base_target, 1))
+                        res_soc_after = float(round_f(soc_after, 1))
                         res_soc_morning = float(round_f(soc_morning, 1))
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         # Controlled by Home Protection (Calculated)
