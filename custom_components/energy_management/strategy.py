@@ -1745,6 +1745,10 @@ class StrategyEngine:
                     
                     # House survivability: Target SOC at Sunrise (e.g. 13% un-reducible + 15% buffer = 28%)
                     soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
+                    # v11.4.51: Preserve the FULL user buffer BEFORE any morning relaxation.
+                    # soc_buffer_full is used for home protection (target_morning_soc / target_sunrise_soc).
+                    # soc_buffer_val (may be relaxed to 3.0) is ONLY for the immediate active floor.
+                    soc_buffer_full = soc_buffer_val
                     
                     # v11.4.30: Early Detection for Morning Liberalization
                     # We need solar context to decide if we relax the buffer
@@ -1758,7 +1762,7 @@ class StrategyEngine:
                     cur_pv = float(man.avg_gen_kw or 0.0)
                     is_morning_solar_v2 = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.05 or cur_h_gen_prof > 0.05 or rem_solar_today > 0.05 or cur_pv > 0.5)
                     if is_morning_solar_v2:
-                         soc_buffer_val = 3.0 # Standard morning relaxation
+                         soc_buffer_val = 3.0 # Standard morning relaxation — active floor ONLY
                     
                     # Adaptive buffer (v5.4): 0% if solar covers house needs today.
                     active_buffer = soc_buffer_val
@@ -1777,8 +1781,9 @@ class StrategyEngine:
                             active_buffer = 0.0
 
                     min_soc_val = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
-                    # Hard Target for tomorrow morning (strictly survival: reserve + buffer)
-                    target_morning_soc = min_soc_val + soc_buffer_val
+                    # Hard Target for tomorrow morning (strictly survival: reserve + full buffer)
+                    # v11.4.51: Always use soc_buffer_full (not relaxed) for home protection
+                    target_morning_soc = min_soc_val + soc_buffer_full
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
                     active_floor_soc = min_soc_val + active_buffer
                     
@@ -1938,8 +1943,8 @@ class StrategyEngine:
                         
                         # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
                         # We calculate the exact SOC floor needed to guarantee the morning target.
-                        # v11.4.30: Unified buffer logic (soc_buffer_val is now early-relaxed to 3.0 during morning window)
-                        target_sunrise_soc = min_soc_val + soc_buffer_val
+                        # v11.4.51: Always use full buffer for home-protection sunrise target
+                        target_sunrise_soc = min_soc_val + soc_buffer_full
                         
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)

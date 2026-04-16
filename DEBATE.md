@@ -987,3 +987,46 @@ except-блок перехватывает → _LOGGER.error → return "sale_pv
 
 **Одобрение Skeptic (v11.4.50)**: ✅
 **Одобрение Archi (v11.4.50)**: ✅
+
+---
+
+### Раунд 64: Morning buffer relaxation ломает защиту дома для вечерних продаж (v11.4.51)
+
+**USER**: В стратегии продажи опять отвалилась проверка на защиту дома. power_decision = Лимит мощности АКБ (6.6кВт), arbitrage_gatekeeper_floor = 16, projected_soc_morning = 16. Плановая продажа на 20:00.
+
+**Archi**: Корень в v11.4.30 (Early morning liberalization). Код:
+
+`python
+soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))  # = 15.0
+if is_morning_solar_v2:          # в 08:30 = True
+    soc_buffer_val = 3.0         # релаксируем до 3.0
+# Далее всё использует 3.0:
+target_morning_soc = min_soc_val + soc_buffer_val  # = 13 + 3 = 16%!
+target_sunrise_soc = min_soc_val + soc_buffer_val  # = 16%
+surplus_for_morning = _calculate_sunrise_surplus(..., soc_buffer_val=3, ...)
+`
+
+Релаксация была создана для УТРЕННИХ продаж солнечного излишка (буфер не нужен, солнце перезарядит). Но она ГЛОБАЛЬНО занижает target_morning_soc и target_sunrise_soc, которые используются для Защиты Дома ПРИ ВЕЧЕРНИХ ПРОДАЖАХ. В 08:30 система планирует продажу в 20:00 с is_morning_solar_v2=True → target = 16% вместо 28% → Защита Дома НЕ срабатывает (projected_morning 16% = floor 16% → не триггер).
+
+**Фикс**: Сохранить полный буфер отдельно ПЕРЕД релаксацией:
+
+`python
+soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
+soc_buffer_full = soc_buffer_val  # Всегда полный — для home protection
+if is_morning_solar_v2:
+    soc_buffer_val = 3.0          # Только для active_floor, не для home protection
+# target_morning_soc и target_sunrise_soc используют soc_buffer_full:
+target_morning_soc = min_soc_val + soc_buffer_full  # = 13+15 = 28%
+target_sunrise_soc = min_soc_val + soc_buffer_full  # = 28%
+surplus_for_morning = _calculate_sunrise_surplus(..., soc_buffer_full, ...)
+`
+
+**Skeptic**:
+1. Диагноз верен: в 08:30 с is_morning_solar_v2=True буфер 15% → 3%, target 28% → 16%. Защита дома сравнивает projected_morning (16%) с target (16%) → нет триггера. Баг очевиден.
+2. Разделение soc_buffer_val и soc_buffer_full корректно: active_buffer для текущего флора (релаксированный), home protection всегда полный.
+3. Проверить строку 1950: if is_morning_solar_v2 and natural_morning_soc >= target_sunrise_soc — с target_sunrise_soc=28% эта логика станет более строгой (night_drain_pct зануляется только если база действительно выше 28%).
+
+**Итог (v11.4.51)**: soc_buffer_full захватывается до релаксации, используется в target_morning_soc, target_sunrise_soc, surplus_for_morning. soc_buffer_val=3.0 остается для active_floor в утреннем окне.
+
+**Одобрение Skeptic (v11.4.51)**: ✅
+**Одобрение Archi (v11.4.51)**: ✅
