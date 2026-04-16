@@ -2526,10 +2526,7 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
                 sim_hours = list(range(now.hour, sunrise_hour))
 
         # 1. Run Unified Simulation Engine
-        # v11.4.48: Night simulation uses consumption_base to exclude managed loads (boiler, washer etc.)
-        # which don't run at night but inflate consumption_total profile → caused ~13% forecast error.
-        night_profile = "consumption_base" if not is_day else None
-        simulated_soc, charge_log, _ = self.manager.run_soc_simulation(batt_soc, sim_hours, now, house_profile_override=night_profile)
+        simulated_soc, charge_log, _ = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
         
         # v11.3.63: Inject Budget Diagnostics for transparency
         budget_data = self.manager.strategy_engine.get_budget_and_permissions(skip_strategy_check=True)
@@ -2632,7 +2629,10 @@ class InverterOperationModeSensor(SensorEntity):
     def native_value(self):
         try:
             batt_soc, _, _ = self.manager.get_battery_state(soc_default=100.0)
-            mode, _ = self._get_mode_at(dt_util.now(), batt_soc)
+            # v11.4.50: Fix: _get_mode_at returns (mode, reason, bms_debug, peak_start_abs).
+            # Previously used `mode, _` → ValueError (too many values to unpack) →
+            # silently fell through to except → always returned "sale_pv" default.
+            mode, _, _, _ = self._get_mode_at(dt_util.now(), batt_soc)
             return mode
         except Exception as e:
             _LOGGER.error("Error in InverterOperationModeSensor native_value: %s", e)

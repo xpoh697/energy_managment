@@ -793,6 +793,12 @@ class StrategyEngine:
         # 3. Generation profiles (Historical Baseline)
         prof_gen_today = dict(man.get_average_profile("generation", eff_period, day_idx_today))
         prof_gen_tom = dict(man.get_average_profile("generation", eff_period, day_idx_tom))
+
+        # v11.4.49: Pre-load historical losses profile for idle_p computation inside loop.
+        # Using historical hourly rate (kWh/h) per simulated hour is correct;
+        # the old man.current_losses was an intra-hour accumulator, yielding 0 at hour
+        # boundaries and an average of 50% of the real rate.
+        prof_losses = dict(man.get_average_profile("losses", 7))
         
         blended_coeff = float(getattr(man, "last_blended_coeff", 1.0))
         eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
@@ -858,15 +864,9 @@ class StrategyEngine:
             # 3. Expected consumption (v7.9.4 - Base profile)
             p_cons = prof_cons_tom if is_tom else prof_cons_today
             
-            # v11.4.48: Night-hour protection. During night hours (real_h < 8 or > 20),
-            # managed loads (boiler, washer etc.) don't actually run, but consumption_total
-            # profile includes their historical averages → inflates projected consumption by ~13%.
-            # For night hours, always fall back to base profile (unless caller already uses base).
-            is_night_hour = (real_h < 8 or real_h > 20)
-            if is_night_hour and house_profile_override != "consumption_base":
-                p_cons_base_today = dict(man.get_average_profile("consumption_base", eff_period, day_idx_today))
-                p_cons_base_tom = dict(man.get_average_profile("consumption_base", eff_period, day_idx_tom))
-                p_cons = p_cons_base_tom if is_tom else p_cons_base_today
+            # v11.4.49: Always use consumption_total (as configured) — both total and base
+            # are ≈identical at night anyway (backup confirmed: night profiles differ <0.01 kWh/h).
+            # Over-conservatism is preferred per user: 'better too much than too little at sunrise'.
             
             occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
             occ_coeff = float(occ_coeff)
@@ -888,7 +888,18 @@ class StrategyEngine:
                 if real_gen_kw > 0.01:
                     anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
                     expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
-                
+
+            # v11.4.49: Idle/losses correction — add BEFORE net computation.
+            # BUG fixed: idle_p was previously added to expected_cons_kw AFTER total_net_kw
+            # was already calculated → had ZERO effect on SOC simulation (only polluted log).
+            # Additionally, man.current_losses is an intra-hour kWh accumulator:
+            #   • resets to 0 at every hour boundary → idle_p = 0 exactly at hour start
+            #   • averages ~0.05 kWh mid-hour but historical rate is 0.10 kWh/h at night
+            # Fix: use pre-loaded historical losses profile (kWh/h) for THIS simulated hour.
+            if eff_coeff < 0.999:  # If eff sensor embeds losses already, skip to avoid double-count
+                idle_p = float(prof_losses.get(h_str, 0.05))
+                expected_cons_kw += idle_p
+
             # 4. Inverter Command (AI Buying/Selling)
             cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
 
@@ -899,13 +910,6 @@ class StrategyEngine:
                 total_net_kw = float(p_for_house - expected_cons_kw + cmd_p)
             else:
                 total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
-            
-            # v7.9.9: If we have high-quality efficiency data (>0.6) from the user's sensor, 
-            # we assume it ALREADY includes the idle losses to avoid double-counting.
-            # Otherwise, we add the constant idle_p (usually 0.05kW) to the house load.
-            idle_p = float(man.current_losses) if hasattr(man, 'current_losses') else 0.05
-            if eff_coeff < 0.999: # Only add if not already in efficiency
-                 expected_cons_kw += idle_p
             
             if total_net_kw > 0.001: 
                 # v11.1.62 - bat_emergency recovery: Allow charging from solar 'crumbs' even in emergency

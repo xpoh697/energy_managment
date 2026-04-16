@@ -909,3 +909,81 @@ is_buying_active = buy_strategy.get(\\ctive\\, False)  # False ❌ — ключ
 
 **Одобрение Skeptic (v11.4.48)**: ✅
 **Одобрение Archi (v11.4.48)**: ✅
+
+
+---
+
+### Раунд 62: Двойной баг idle_p в run_soc_simulation (v11.4.49)
+
+**РЕТРОСПЕКТИВА v11.4.48**: Откат. Пользователь подтвердил — consumption_total = consumption_base ночью (разница < 0.01 кВтч/ч по бэкапу). Managed loads ночью не запускались. Гипотеза неверна.
+
+**USER**: Точные данные: 19:00 SOC=55%, прогноз=27%, факт в 6:00=15%. Ошибка = 12%. Бэкап предоставлен (батарея 17.1 кВтч, losses ночью = 0.10 кВтч/ч).
+
+**Archi**: Анализ бэкапа + код выявил ДВА бага в блоке idle_p (strategy.py):
+
+**БАГ 1 — Порядок (нулевой эффект на SOC):**
+idle_p добавлялся к expected_cons_kw ПОСЛЕ вычисления total_net_kw. Discharge = abs(total_net_kw)/eff — на него idle_p не влиял. Полностью мёртвый код для SOC.
+
+**БАГ 2 — Источник данных (50% занижение):**
+man.current_losses — кВтч-аккумулятор, сбрасывается в 0 на границе каждого часа.
+- В 19:00 (старт ночной симуляции): current_losses = 0 → idle_p = 0
+- В 19:30: current_losses ≈ 0.05 кВтч → idle_p = 0.05, при реальной ставке 0.10 кВт/ч
+- Среднее занижение: ~50% от реальных потерь
+
+**Расчёт (батарея 17.1 кВтч, eff=0.979):**
+
+| Параметр | Старый код | Фикс | Реальность |
+|---|---|---|---|
+| Профиль потребления | 0.40 кВт/ч | 0.40 кВт/ч | ~0.45 кВт/ч |
+| idle_p (потери inv.) | 0 (мёртв!) | +0.10 кВт/ч | 0.10 кВт/ч |
+| Итого → батарея | 0.409 кВт/ч | 0.512 кВт/ч | ~0.62 кВт/ч |
+| SOC дрейф/ч | 2.39%/ч | 3.00%/ч | 3.64%/ч |
+| Ошибка за 11ч | 12% | ~7% | — |
+
+**Фикс v11.4.49 (strategy.py):**
+1. prof_losses предзагружается ДО цикла: prof_losses = dict(man.get_average_profile("losses", 7))
+2. idle_p берёт историческую ставку текущего симулируемого часа: idle_p = float(prof_losses.get(h_str, 0.05))
+3. expected_cons_kw += idle_p — добавляется ДО вычисления total_net_kw
+4. Откат v11.4.48: consumption_base override удалён из strategy.py и sensor.py
+
+**Skeptic**:
+1. **БАГ 1 подтверждён**: classic write-after-use. idle_p с момента появления не менял SOC — только загрязнял поле load_kw в simulation_log.
+2. **БАГ 2 подтверждён**: бэкап losses: h0=0.10, h1=0.07, h2=0.10 кВтч/ч. Исторический average корректнее partial-hour accumulator.
+3. **Остаточная ошибка ~7%**: профиль потребления (0.40 vs ~0.46 кВтч/ч) и возможно сниженный КПД инвертора при малой ночной нагрузке. Требует мониторинга после деплоя.
+
+**Итог (v11.4.49)**: idle_p перенесён до total_net_kw, источник — исторический losses profile. Откат v11.4.48. Ожидаемое улучшение: ошибка 12% → ~7%.
+
+**Одобрение Skeptic (v11.4.49)**: ✅
+**Одобрение Archi (v11.4.49)**: ✅
+
+---
+
+### Раунд 63: InverterOperationModeSensor native_value — кортеж из 4 значений (v11.4.50)
+
+**USER**: Инвертор не переключается — Inverter Mode Command = sale_pv, хотя mode_reason пишет sale_pv_no_bat.
+
+**Archi**: Найдена однозначная причина. native_value (строка 2632):
+`python
+mode, _ = self._get_mode_at(dt_util.now(), batt_soc)  # ОШИБКА!
+`
+_get_mode_at возвращает 4 значения: (mode, reason, bms_debug, peak_start_abs).
+Распаковка mode, _ на кортеж из 4 → ValueError: too many values to unpack (expected 2).
+except-блок перехватывает → _LOGGER.error → return "sale_pv" (дефолт).
+
+Поэтому:
+- native_value: ВСЕГДА "sale_pv" (перехвачена ошибка)
+- extra_state_attributes строка 2645: mode, reason, bms_debug, peak_start_abs = ... — корректно → mode_reason верный
+
+**Фикс**: mode, _, _, _ = self._get_mode_at(dt_util.now(), batt_soc)
+
+Когда был введён 4-й аргумент (peak_start_abs) — native_value сломался. Исторически работало, пока return был (mode, reason).
+
+**Skeptic**:
+1. Диагноз верен: разница в поведении native_value vs extra_state_attributes однозначно указывает на except-catchall скрывающий ValueError.
+2. В HA-логах должно быть видно ошибки: "Error in InverterOperationModeSensor native_value: too many values to unpack" — пользователь мог не заметить.
+3. Ревью: проверить все другие вызовы _get_mode_at на корректность распаковки — строка 2678 и ниже.
+
+**Итог (v11.4.50)**: Исправлена распаковка кортежа в native_value. Режим инвертора теперь реально применяется.
+
+**Одобрение Skeptic (v11.4.50)**: ✅
+**Одобрение Archi (v11.4.50)**: ✅
