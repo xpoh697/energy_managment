@@ -2526,7 +2526,10 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
                 sim_hours = list(range(now.hour, sunrise_hour))
 
         # 1. Run Unified Simulation Engine
-        simulated_soc, charge_log, _ = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
+        # v11.4.48: Night simulation uses consumption_base to exclude managed loads (boiler, washer etc.)
+        # which don't run at night but inflate consumption_total profile → caused ~13% forecast error.
+        night_profile = "consumption_base" if not is_day else None
+        simulated_soc, charge_log, _ = self.manager.run_soc_simulation(batt_soc, sim_hours, now, house_profile_override=night_profile)
         
         # v11.3.63: Inject Budget Diagnostics for transparency
         budget_data = self.manager.strategy_engine.get_budget_and_permissions(skip_strategy_check=True)

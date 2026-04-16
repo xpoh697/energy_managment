@@ -857,9 +857,21 @@ class StrategyEngine:
 
             # 3. Expected consumption (v7.9.4 - Base profile)
             p_cons = prof_cons_tom if is_tom else prof_cons_today
+            
+            # v11.4.48: Night-hour protection. During night hours (real_h < 8 or > 20),
+            # managed loads (boiler, washer etc.) don't actually run, but consumption_total
+            # profile includes their historical averages → inflates projected consumption by ~13%.
+            # For night hours, always fall back to base profile (unless caller already uses base).
+            is_night_hour = (real_h < 8 or real_h > 20)
+            if is_night_hour and house_profile_override != "consumption_base":
+                p_cons_base_today = dict(man.get_average_profile("consumption_base", eff_period, day_idx_today))
+                p_cons_base_tom = dict(man.get_average_profile("consumption_base", eff_period, day_idx_tom))
+                p_cons = p_cons_base_tom if is_tom else p_cons_base_today
+            
             occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
             occ_coeff = float(occ_coeff)
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
+
             
             # v11.1.15 - Blended Anchor: Smoothly transition from profile to real-time load
             # to avoid discontinuities at the top of the hour (v7.9.7 fix)
