@@ -1418,7 +1418,8 @@ class StrategyEngine:
                         # IMMINENT SOLAR AWARENESS (v5.3)
                         # If we have a minor violation (< 15% depth) but solar is expected to kick in 
                         # within 3 hours, we don't start grid charging yet.
-                        is_minor = (min_soc - soc_at_h) < 15.0
+                        # v11.4.52: Do NOT allow simulation to drop below 5% absolute SOC to prevent total shutdown
+                        is_minor = soc_at_h >= 5.0 and (min_soc - soc_at_h) < 15.0
                         solar_income_soon = sum(float(normalize_float(active_dist.get(str(hs % 24), 0.0))) for hs in range(h_step, h_step + 3)) > 0.5
                         if soc_at_h < min_soc and violation_hour is None:
                             if is_minor and solar_income_soon and h_step < 12:
@@ -1491,7 +1492,15 @@ class StrategyEngine:
                     # 1. Survival Check (Mandatory)
                     budget_data = self.get_budget_and_permissions(man.custom_period, skip_strategy_check=True)
                     solar_income = float(normalize_float(budget_data.get("forecast_val", 0.0) if budget_data else 0.0))
-                    cons_until_morning = float(normalize_float(budget_data.get("expected_consumption", 2.0) if budget_data else 2.0))
+                    
+                    # v11.4.52: Precise sunrise-based consumption calc identical to sell logic
+                    comp_cons_to_8am = float(normalize_float(budget_data.get("expected_consumption", 2.0) if budget_data else 2.0))
+                    occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient() if man else (1.0, 0,0,0,0,0,0)
+                    tom_idx = (now + timedelta(days=1)).weekday()
+                    prof_cons_for_buy = dict(man.get_average_profile("consumption_base", man.custom_period, "all"))
+                    diff_range = range(min(sunrise_h, 8), max(sunrise_h, 8))
+                    diff_kwh = sum(float(normalize_float(prof_cons_for_buy.get(str(h), 0.0))) for h in diff_range) * occ_coeff
+                    cons_until_morning = comp_cons_to_8am - diff_kwh if sunrise_h < 8 else comp_cons_to_8am + diff_kwh
                     
                     # v11.1.102: Include buffer in survival target to eliminate the "dead zone" (10% buy vs 25% sell limits)
                     soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
@@ -1573,7 +1582,13 @@ class StrategyEngine:
                             h_cons = float(normalize_float(avg_prof_cons.get(str(h % 24), 0.5)))
                             pool_cons += h_cons * h_f
                             
-                        energy_to_buy = theoretical_gap_kwh + pool_cons
+                        # v11.4.52: Fix double-counting. Target SOC for 'survival' already covers 
+                        # all night consumption including charging hours. We only add pool_cons
+                        # for arbitrage where we want to HIT a specific SOC at the end exactly.
+                        if res.get("charge_reason") == "survival":
+                            energy_to_buy = theoretical_gap_kwh
+                        else:
+                            energy_to_buy = theoretical_gap_kwh + pool_cons
 
                         # 2. Sort available hours by price (cheapest first)
                         pool_sorted = sorted(pool, key=lambda h: all_buy_prices[h])
