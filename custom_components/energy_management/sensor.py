@@ -2862,8 +2862,7 @@ class InverterOperationModeSensor(SensorEntity):
         if is_neg_buy:
             active_target = ai_charge_limit
         
-        # Determine if we are in "Buy" strategic mode
-        is_buying_active = buy_strategy.get("active", False)
+        # Determine if we are in "Buy" strategic mode (v11.4.47: removed duplicate assignment that overrode line 2835)
         if is_buying_active:
             active_target = ai_charge_limit
 

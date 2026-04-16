@@ -831,3 +831,43 @@ is_power_limited = (physical_limit_dc <= min(surplus_for_morning, surplus_for_us
 
 **Одобрение Skeptic (v11.4.46)**: ✅
 **Одобрение Archi (v11.4.46)**: ✅
+
+---
+
+### Раунд 60: Двойное присвоение убивает режим BUY (v11.4.47)
+
+**USER**: Стратегия ПОКУПКИ активна (\Market BUY Strategy = active\), а режим инвертора — \sale_pv\. Почему?
+
+**Archi**: Нашёл баг с двойным присвоением \is_buying_active\ в \_get_mode_at\ (sensor.py).
+
+Переменная присваивается **дважды**, причём второе **перезаписывает** первое:
+
+\\\python
+# Строка 2835 — КОРРЕКТНОЕ первое присвоение:
+is_buying_active = buy_strategy.get(\\state\\) == \\ctive\\  # True ✅
+
+# ~30 строк кода (BMS diagnostics)...
+
+# Строка 2866 — ПЕРЕБИВАЕТ первое:
+is_buying_active = buy_strategy.get(\\ctive\\, False)  # False ❌ — ключа нет
+\\\`r
+
+Ключ \ctive\ **не существует** в словаре \get_market_strategy(\\uy\\)\ (там только \state\). Поэтому \.get(\\ctive\\, False)\ всегда возвращает \False\, уничтожая корректное значение.
+
+**Цепочка разрушения:**
+1. 🟢 Стр. 2835: \is_buying_active = True\`r
+2. 🔴 Стр. 2866: \is_buying_active = False\ (fallback)
+3. 🔴 Стр. 2941: \if (is_buying_active and not target_reached)\ → \False\`r
+4. 🔴 Ветка \uy\ не срабатывает → режим падает до \sale_pv\ (дефолт)
+
+**Фикс**: удалить строку 2866. Блок \ctive_target\ использует уже корректный \is_buying_active\ из строки 2835.
+
+**Skeptic**:
+1. **Подтверждение**: \get_market_strategy\ возвращает \{\\state\\: \\ctive\\, ...}\ — без ключа \\ctive\\. Строка 2866 — мёртвый код с деструктивным эффектом.
+2. **Безопасность**: после удаления блок \	arget_reached\ для BUY (стр. 2913) заработает корректно.
+3. **Регрессий нет**: логика \ctive_target\ не изменится — \if is_buying_active\ по-прежнему стоит ниже.
+
+**Итог (v11.4.47)**: Удалена строка \is_buying_active = buy_strategy.get(\\ctive\\, False)\ (строка 2866). Режим \uy\ активируется когда стратегия покупки активна.
+
+**Одобрение Skeptic (v11.4.47)**: ✅
+**Одобрение Archi (v11.4.47)**: ✅
