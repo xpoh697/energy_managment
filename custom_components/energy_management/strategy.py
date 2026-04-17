@@ -1807,7 +1807,11 @@ class StrategyEngine:
                     # When active: user SOC discharge limit (CONF_AI_DISCHARGE_LIMIT) is ignored,
                     # fixed 5% buffer is used instead. target_morning_soc uses soc_buffer_full
                     # (full user buffer) to protect the NEXT morning — do NOT change it.
-                    if is_morning_solar_v2 and cur_hour < 12:
+                    # v11.5.3: Check if there is an actual MORNING sale planned.
+                    # If we are only planning to sell in the evening (e.g. 20:00), we should NOT use the 5% morning buffer!
+                    has_morning_sale = any(h < 13 for h in target_hours_sorted) if target_hours_sorted else False
+                    
+                    if is_morning_solar_v2 and cur_hour < 12 and has_morning_sale:
                         _lib_sim_range = list(range(cur_hour, 21))
                         _lib_start_soc = min_soc_val + 5.0  # Anchor: after selling down to floor
                         try:
@@ -1831,8 +1835,11 @@ class StrategyEngine:
                     
                     # Hard Target for tomorrow morning (strictly survival: reserve + full buffer)
                     # v11.4.51: Always use soc_buffer_full (not relaxed) for home protection
-                    # v11.5.0: target_morning_soc intentionally uses soc_buffer_full (not liberal buffer)
-                    target_morning_soc = min_soc_val + soc_buffer_full
+                    # v11.5.3: USER OVERRIDE: target_morning_soc must also be reduced to 5% during morning liberal mode.
+                    if _is_morning_liberal:
+                        target_morning_soc = min_soc_val + 5.0
+                    else:
+                        target_morning_soc = min_soc_val + soc_buffer_full
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
                     active_floor_soc = min_soc_val + active_buffer
                     
