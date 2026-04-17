@@ -1779,6 +1779,10 @@ class StrategyEngine:
                     if is_morning_solar_v2:
                          soc_buffer_val = 3.0 # Standard morning relaxation — active floor ONLY
                     
+                    # v11.5.0: Morning Liberal Flag (evaluated after min_soc_val is known)
+                    # Set placeholder here; actual override applied after min_soc_val is read.
+                    _is_morning_liberal = False
+                    
                     # Adaptive buffer (v5.4): 0% if solar covers house needs today.
                     active_buffer = soc_buffer_val
                     
@@ -1796,8 +1800,38 @@ class StrategyEngine:
                             active_buffer = 0.0
 
                     min_soc_val = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
+                    
+                    # v11.5.0: Morning Solar Liberalization
+                    # Condition: solar morning window (is_morning_solar_v2) AND hour < 12
+                    # AND simulation confirms solar can recharge battery to >= 90% by evening.
+                    # When active: user SOC discharge limit (CONF_AI_DISCHARGE_LIMIT) is ignored,
+                    # fixed 5% buffer is used instead. target_morning_soc uses soc_buffer_full
+                    # (full user buffer) to protect the NEXT morning — do NOT change it.
+                    if is_morning_solar_v2 and cur_hour < 12:
+                        _lib_sim_range = list(range(cur_hour, 21))
+                        _lib_start_soc = min_soc_val + 5.0  # Anchor: after selling down to floor
+                        try:
+                            _, _lib_log, _ = self.run_soc_simulation(_lib_start_soc, _lib_sim_range, now, {})
+                            _lib_max_soc = max(
+                                [float(st.get("soc", _lib_start_soc)) for st in _lib_log.values()]
+                                + [_lib_start_soc]
+                            )
+                        except Exception:
+                            _lib_max_soc = 0.0
+                        _is_morning_liberal = (_lib_max_soc >= 90.0)
+                        if _is_morning_liberal:
+                            # Override: ignore user discharge limit, use fixed 5% buffer
+                            base_target = min_soc_val + 5.0
+                            soc_buffer_val = 5.0
+                            active_buffer = 5.0
+                            _LOGGER.debug(
+                                f"[Sell v11.5.0] Morning liberal active: base_target={base_target:.1f}%, "
+                                f"sim_max={_lib_max_soc:.1f}% (from {_lib_start_soc:.1f}%)"
+                            )
+                    
                     # Hard Target for tomorrow morning (strictly survival: reserve + full buffer)
                     # v11.4.51: Always use soc_buffer_full (not relaxed) for home protection
+                    # v11.5.0: target_morning_soc intentionally uses soc_buffer_full (not liberal buffer)
                     target_morning_soc = min_soc_val + soc_buffer_full
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
                     active_floor_soc = min_soc_val + active_buffer
@@ -2002,11 +2036,11 @@ class StrategyEngine:
                     elif available_sell_dc <= (surplus_for_morning + 0.001):
                         sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
 
-                    # v11.3.23: Full transparency diagnostics
-                    # v11.3.23: Full transparency diagnostics
-                    diag = f"{sell_diagnosis} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
+                    # v11.3.23 / v11.5.0: Full transparency diagnostics
+                    _lib_tag = " [Утро: буфер=5%]" if _is_morning_liberal else ""
+                    diag = f"{sell_diagnosis}{_lib_tag} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
                     res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
-                    res["power_decision"] = f"Распределение на {num_peaks_left:.1f}ч" if num_peaks_left > 1.1 else sell_diagnosis
+                    res["power_decision"] = (f"Распределение на {num_peaks_left:.1f}ч{_lib_tag}" if num_peaks_left > 1.1 else f"{sell_diagnosis}{_lib_tag}")
                     
                     # v11.3.37: UI Feedback for Smart Deficit Throttling
                     if available_sell_dc < 0.05 and num_peaks_left > 0.1 and cur_hour < 13:
@@ -2315,7 +2349,18 @@ class StrategyEngine:
                         # The previous elif branches used surplus_for_morning which is inflated
                         # by buggy natural_morning_soc from sim_log_base, causing the wrong branch
                         # to fire and overriding the correctly identified constraint (e.g. АКБ limit).
-                        res["power_decision"] = sell_diagnosis
+                        
+                        # v11.5.1: Block sell if current SOC is already at or below projected post-sale floor.
+                        # If b_soc <= display_soc_after, there is literally zero energy to sell without
+                        # violating the floor. This can happen when battery has already drifted down
+                        # to the calculated floor between strategy cycles, or when the morning liberal
+                        # mode set a very low base_target and b_soc is already there.
+                        if b_soc <= display_soc_after and power_needed > 0.01:
+                            power_needed = 0.0
+                            res["power_decision"] = f"АКБ у порога ({b_soc:.1f}% \u2264 {display_soc_after:.1f}%)"
+                            res["planned_power_per_h"] = {}
+                        else:
+                            res["power_decision"] = sell_diagnosis
                         res_soc_after = display_soc_after
                         res_soc_morning = soc_morning_display
 
