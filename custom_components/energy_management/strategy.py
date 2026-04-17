@@ -2273,8 +2273,12 @@ class StrategyEngine:
                         display_soc_after = float(round_f(natural_soc_after_sale, 1))
                     else:
                         # Branch B: sale planned — anchor is post-sale SOC
+                        # v11.5.2: Floor at base_target (not 0.0) — display SOC after sale
+                        # cannot be physically below the discharge floor. Using max(0.0) was
+                        # a regression from Round 52 (v11.4.38) that showed impossible values
+                        # like 4.5% when base_target=28%, and also broke the v11.5.1 SOC check.
                         display_soc_after = float(round_f(
-                            max(0.0, natural_soc_after_sale - planned_sell_pct), 1
+                            max(float(base_target), natural_soc_after_sale - planned_sell_pct), 1
                         ))
 
                     # Night sub-simulation: from sale-end anchor to pre-sunrise (both branches)
@@ -2321,11 +2325,19 @@ class StrategyEngine:
                         # (it's defined as min of three), so the old check was always True.
                         is_power_limited = (physical_limit_dc <= min(surplus_for_morning, surplus_for_user_limit) + 0.05)
                         floor_was_raised = (base_target > user_discharge_limit + 0.5)
+                        # v11.5.2: Morning liberal mode was active (base_target lowered to min_soc+5)
+                        # but the recursive deficit fix raised it back above the liberal floor.
+                        # In this case floor_was_raised=False (base_target==user_discharge_limit),
+                        # but it's still home protection, not the user's intentional limit.
+                        liberal_was_overridden = (
+                            _is_morning_liberal
+                            and (base_target > min_soc_val + 5.0 + 0.5)
+                        )
                         morning_is_binding = (morning_gap_pct <= user_gap_pct)
                         if not is_power_limited:
-                            if floor_was_raised:
-                                # System raised the floor above user limit → защита дома
-                                sell_diagnosis = f"Защита дома ({int(user_discharge_limit)}%→{int(base_target)}%)"
+                            if floor_was_raised or liberal_was_overridden:
+                                # System raised the floor above the intended sell floor → защита дома
+                                sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
                             elif morning_is_binding:
                                 # Morning reserve was the tighter constraint
                                 sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
