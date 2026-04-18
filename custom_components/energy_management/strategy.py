@@ -704,8 +704,11 @@ class StrategyEngine:
                     permissions_reasons[s_id_s] = f"Лимит исчерпан ({available_budget:.2f} < 0.1)"
                 else:
                     permissions[s_id_s] = True
-                    permissions_reasons[s_id_s] = f"Ок ({available_budget:.2f} кВт·ч доступно{price_suffix})"
-                    
+                    # v11.5.6: Display accurate reason for only_solar devices
+                    if only_solar and not is_free_price:
+                        permissions_reasons[s_id_s] = f"Ок (Профицит солнца: {available_gen_kw:.2f} кВт)"
+                    else:
+                        permissions_reasons[s_id_s] = f"Ок ({available_budget:.2f} кВт·ч доступно{price_suffix})"
                     # Reservation logic:
                     # - Non-cyclic (boilers/heaters): Reservation is always active.
                     # - Cyclic (washers/dishwashers): Reserve ONLY if already started (is_pulling).
