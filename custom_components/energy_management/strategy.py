@@ -520,8 +520,17 @@ class StrategyEngine:
             p_gen_s = list(getattr(man, "power_gen_sensors", []))
             
             if p_load_s and p_gen_s:
-                load_kw = float(sum((get_kwh_val(man.hass.states.get(str(s)) or None) or 0.0) for s in p_load_s))
-                gen_kw = float(sum((get_kwh_val(man.hass.states.get(str(s)) or None) or 0.0) for s in p_gen_s))
+                # v11.5.5: Switch from instantaneous to 10-minute averaged sensors to prevent switching chatter
+                avg_l = float(getattr(man, "avg_load_kw", 0.0))
+                avg_g = float(getattr(man, "avg_gen_kw", 0.0))
+                
+                # Check if history is populated (prevent zeroing on fresh reboot)
+                if avg_l > 0.01 or avg_g > 0.01 or getattr(man, "power_history", []):
+                    load_kw = avg_l
+                    gen_kw = avg_g
+                else:
+                    load_kw = float(sum((get_kwh_val(man.hass.states.get(str(s)) or None) or 0.0) for s in p_load_s))
+                    gen_kw = float(sum((get_kwh_val(man.hass.states.get(str(s)) or None) or 0.0) for s in p_gen_s))
                 
                 initial_power_kw = float(gen_kw - load_kw)
 
