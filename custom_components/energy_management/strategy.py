@@ -583,8 +583,14 @@ class StrategyEngine:
             current_managed_load_kw = 0.0
             for s_id in man.deduct_settings:
                 if man._is_currently_pulling_power(str(s_id)):
-                    current_managed_load_kw += float(man.learned_real_power.get(str(s_id), 0.0)) / 1000.0
+                    # v11.5.4: Use actual measured power instead of learned power to avoid math collapse if learned power is corrupted
+                    p_val = float(man.last_known_power.get(str(s_id), 0.0)) / 1000.0
+                    if p_val <= 0.1:
+                        # Fallback
+                        p_val = float(man.learned_real_power.get(str(s_id), 0.0)) / 1000.0
+                    current_managed_load_kw += min(20.0, p_val) # Clamp to sane values
             
+            raw_house_deficit = float(load_kw - gen_kw)
             base_house_load = max(0.0, float(load_kw - current_managed_load_kw))
             available_gen_kw = float(gen_kw - base_house_load) + waste_kw
             gen_surplus_initial = available_gen_kw
@@ -613,6 +619,15 @@ class StrategyEngine:
                 consumed = float(man.daily_deduct_consumption.get(s_id_s, 0.0))
                 
                 is_pulling = bool(man._is_currently_pulling_power(s_id_s))
+                
+                # v11.5.4: Safeguard against e_kw=0 bypassing all bottleneck checks!
+                if e_kw < 0.1 and is_pulling:
+                    cur_w = float(man.last_known_power.get(s_id_s, 0.0))
+                    if cur_w > 100.0:
+                        e_kw = cur_w / 1000.0
+                    else:
+                        e_kw = 2.0  # Safe fallback to trigger threshold limits!
+                        
                 is_free_price = cur_price_buy is not None and float(normalize_float(cur_price_buy)) <= 0.0
 
                 power_bottleneck = False
@@ -629,7 +644,11 @@ class StrategyEngine:
                         if available_power_kw < p_thresh: power_bottleneck = True
                             
                     if only_solar and not is_free_price:
-                        if available_gen_kw < float(e_kw * 0.6): gen_bottleneck = True
+                        # v11.5.4: Strongest assertion: If RAW deficit of the whole house is severe (>500W), AND base_house_load already ate PV, kill only_solar!
+                        if available_gen_kw < float(e_kw * 0.6): 
+                            gen_bottleneck = True
+                        elif is_pulling and (raw_house_deficit > 0.5) and (available_gen_kw < e_kw):
+                            gen_bottleneck = True
                 elif initial_power_kw > 0.5 and available_power_kw < 0:
                     power_bottleneck = True
 
