@@ -2940,13 +2940,10 @@ class InverterOperationModeSensor(SensorEntity):
                 is_waiting_for_neg = True
 
         # State Machine Ladder
-        if (is_buying_active and not target_reached) or is_neg_buy:
-            # v11.1.22/50 - Priority 1: Buying (AI or Negative)
+        if is_buying_active and not target_reached:
+            # v11.5.7 - Priority 1: Buying (Strictly restricted to active AI strategy)
             mode = "buy"
-            if is_neg_buy:
-                reason = f"Отрицательная цена ({buy_p_cur:.2f}): Питание дома от сети"
-            else:
-                reason = "Активна стратегия ПОКУПКИ"
+            reason = "Активна стратегия ПОКУПКИ"
         elif is_buying_active and is_forecast:
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ (Прогноз)"
@@ -3039,11 +3036,6 @@ class InverterOperationModeSensor(SensorEntity):
             # Global price floor for ANY selling
             mode = "stop_sale"
             reason = f"Продажа заблокирована: Цена ({cur_price or 0.0:.2f}) < Порога ({price_stop_sell or 0.0:.2f})"
-            
-        elif cur_price is not None and cur_price >= price_sell_limit:
-            # FIXED PRICE LIMIT: Price is so good we sell from battery even without AI
-            mode = "sale_pv_bat"
-            reason = f"Продажа из АКБ: Цена ({cur_price or 0.0:.2f}) >= Фикс. Лимита ({price_sell_limit or 0.0:.2f})"
             
         else:
             # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
