@@ -2517,6 +2517,12 @@ class StrategyEngine:
                 p_distribution[h_label] = float(round_f(p_val, 2))
                 
             res["planned_power_per_h"] = p_distribution
+            if mode == "sell" and res.get("sell_simulation"):
+                # v11.5.8: The target_soc for the inverter MUST perfectly match the safe floor calculated by the simulation.
+                # Previously it was hardcoded to the user limit, which led to over-discharging if "Home Protection" was active.
+                sim_floor = res["sell_simulation"].get("projected_soc_after_sale_pct", target_soc)
+                target_soc = max(target_soc, sim_floor)
+                
             res["target_soc"] = float(round_f(target_soc, 1))
             
             # Mode Detection Logic (Moved from sensor.py for better centralization)
