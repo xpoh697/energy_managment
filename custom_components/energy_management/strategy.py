@@ -1684,11 +1684,15 @@ class StrategyEngine:
                         
                         # 1. Projected SOC at START of the first buy hour
                         if True: # v11.3.97: Always run simulation for telemetry
-                            first_h_buy = min(t for t in target_hours_sorted if t >= cur_hour)
-                            if first_h_buy > cur_hour:
-                                prev_h = first_h_buy - 1
-                                key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                                soc_at_start = self._get_soc_from_log(sim_log, key_start, b_soc)
+                            valid_buy_hours = [t for t in target_hours_sorted if t >= cur_hour]
+                            if valid_buy_hours:
+                                first_h_buy = min(valid_buy_hours)
+                                if first_h_buy > cur_hour:
+                                    prev_h = first_h_buy - 1
+                                    key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                                    soc_at_start = self._get_soc_from_log(sim_log, key_start, b_soc)
+                                else:
+                                    soc_at_start = b_soc
                             else:
                                 soc_at_start = b_soc
                         else:
