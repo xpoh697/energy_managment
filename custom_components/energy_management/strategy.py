@@ -965,7 +965,7 @@ class StrategyEngine:
                 if b_cap_f > 0.1:
                     simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
             
-            # Store enriched data for the 24h forecast sensors (v11.3.23: Unified EN keys)
+            # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
             history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
                 "soc": round_f(float(simulated_soc), 1),
                 "gen_kw": round_f(float(expected_gen_kw), 3),
@@ -2507,25 +2507,50 @@ class StrategyEngine:
             res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active])
             res["active_periods"] = ", ".join(final_periods) if final_periods else "Нет"
             
-            # v11.1.22: Add planned hourly power distribution for transparency
             p_distribution = {}
-            for h in actual_active:
-                h_label = self._format_h(h)
-                if mode == "buy":
-                    p_val = charge_commands.get(h, 0.0)
-                else: # sell
-                    # v11.1.82: Use the simulation-based power_needed for the breakdown
-                    # instead of the current real-time recommended_power_kw.
-                    p_val = sell_commands.get(h, 0.0)
-                
-                p_distribution[h_label] = float(round_f(p_val, 2))
-                
+            if actual_active and b_cap > 0.1:
+                cur_sim_soc = b_soc
+                eff_safe = max(0.1, eff)
+                for h in actual_active:
+                    h_label = self._format_h(h)
+                    h_idx = int(h)
+                    p_val = sell_commands.get(h_idx, 0.0) if mode == "sell" else charge_commands.get(h_idx, 0.0)
+                    step_f = max(0.1, (60 - now.minute) / 60.0) if h_idx == cur_hour else 1.0
+                    
+                    if mode == "sell":
+                        d_soc = (p_val / eff_safe) * step_f / b_cap * 100.0
+                        cur_sim_soc -= d_soc
+                        if res.get("sell_simulation"):
+                            s_floor = res["sell_simulation"].get("projected_soc_after_sale_pct", base_target)
+                            cur_sim_soc = max(cur_sim_soc, s_floor)
+                    else: # buy
+                        d_soc = (p_val * eff_safe) * step_f / b_cap * 100.0
+                        cur_sim_soc = min(100.0, cur_sim_soc + d_soc)
+                    
+                    # v11.6.3: Combined display in "Planned power" attribute
+                    p_distribution[h_label] = f"{round_f(p_val, 2)} kW (SOC: {round_f(cur_sim_soc, 1)}%)"
+                    
             res["planned_power_per_h"] = p_distribution
-            if mode == "sell" and res.get("sell_simulation"):
-                # v11.5.8: The target_soc for the inverter MUST perfectly match the safe floor calculated by the simulation.
-                # Previously it was hardcoded to the user limit, which led to over-discharging if "Home Protection" was active.
-                sim_floor = res["sell_simulation"].get("projected_soc_after_sale_pct", target_soc)
-                target_soc = max(target_soc, sim_floor)
+            
+            # v11.6.1: Linear Target SOC calculation (User-requested)
+            # Calculate target for the end of the hour based strictly on the current power command.
+            if in_peak and b_cap > 0.1:
+                h_f = max(0.1, (60 - now.minute) / 60.0)
+                eff_safe = max(0.1, eff)
+                if mode == "sell":
+                    # DC discharge = AC power / efficiency
+                    soc_delta = (real_cmd_p / eff_safe) * h_f / b_cap * 100.0
+                    target_soc = b_soc - soc_delta
+                    
+                    # Ensure we never target below the safe floor identified by simulation (Home Protection)
+                    if res.get("sell_simulation"):
+                        sim_floor = res["sell_simulation"].get("projected_soc_after_sale_pct", target_soc)
+                        target_soc = max(target_soc, sim_floor)
+                elif mode == "buy":
+                    # DC charge = AC power * efficiency
+                    soc_delta = (real_cmd_p * eff_safe) * h_f / b_cap * 100.0
+                    target_soc = b_soc + soc_delta
+                    target_soc = min(100.0, target_soc)
                 
             res["target_soc"] = float(round_f(target_soc, 1))
             
