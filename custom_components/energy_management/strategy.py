@@ -984,7 +984,7 @@ class StrategyEngine:
             return cached["res"]
 
         res = {
-            "strategy_version": VERSION,
+            "strategy_version": "v11.6.4",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -1250,7 +1250,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = f"{VERSION}"
+                    res["strategy_version"] = f"v11.6.4"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1966,7 +1966,7 @@ class StrategyEngine:
                         key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
                         soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     
-                    # 2. Daily Surplus Calculation (Sunrise-Aware v6.2)
+                    # 2. Daily Surplus (Sunrise-Aware v6.2)
                     # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
                     # 1. User SOC Limit 2. Morning Survival 3. Physical Battery Power (C-rate/Time)
                     surplus_for_morning = self._calculate_sunrise_surplus(
@@ -2508,49 +2508,42 @@ class StrategyEngine:
             res["active_periods"] = ", ".join(final_periods) if final_periods else "Нет"
             
             p_distribution = {}
-            if actual_active and b_cap > 0.1:
-                cur_sim_soc = b_soc
-                eff_safe = max(0.1, eff)
+            if actual_active:
+                sim_info = res.get("sell_simulation" if mode == "sell" else "buy_simulation")
+                s_log = sim_info.get("log", {}) if sim_info else {}
+                
                 for h in actual_active:
                     h_label = self._format_h(h)
                     h_idx = int(h)
                     p_val = sell_commands.get(h_idx, 0.0) if mode == "sell" else charge_commands.get(h_idx, 0.0)
-                    step_f = max(0.1, (60 - now.minute) / 60.0) if h_idx == cur_hour else 1.0
                     
-                    if mode == "sell":
-                        d_soc = (p_val / eff_safe) * step_f / b_cap * 100.0
-                        cur_sim_soc -= d_soc
-                        if res.get("sell_simulation"):
-                            s_floor = res["sell_simulation"].get("projected_soc_after_sale_pct", base_target)
-                            cur_sim_soc = max(cur_sim_soc, s_floor)
-                    else: # buy
-                        d_soc = (p_val * eff_safe) * step_f / b_cap * 100.0
-                        cur_sim_soc = min(100.0, cur_sim_soc + d_soc)
+                    # Extract calculated SOC directly from the comprehensive simulation log
+                    is_tom = h_idx > 23 or (h_idx < cur_hour)
+                    h_idx_norm = h_idx % 24
+                    key_h = f"{h_idx_norm:02d}:59" + (" (Завтра)" if is_tom else "")
                     
-                    # v11.6.3: Combined display in "Planned power" attribute
-                    p_distribution[h_label] = f"{round_f(p_val, 2)} kW (SOC: {round_f(cur_sim_soc, 1)}%)"
+                    # Fallback if somehow log is missing (should not happen in normal operation)
+                    h_soc = float(self._get_soc_from_log(s_log, key_h, target_soc))
+                    
+                    # v11.6.4: Unified display mapping exact simulation values
+                    p_distribution[h_label] = f"{round_f(p_val, 2)} kW (SOC: {round_f(h_soc, 1)}%)"
                     
             res["planned_power_per_h"] = p_distribution
             
-            # v11.6.1: Linear Target SOC calculation (User-requested)
-            # Calculate target for the end of the hour based strictly on the current power command.
-            if in_peak and b_cap > 0.1:
-                h_f = max(0.1, (60 - now.minute) / 60.0)
-                eff_safe = max(0.1, eff)
+            # v11.6.4: Target SOC from Simulation (Reverts v11.6.1 Linear request for precision)
+            # Fetch the precise hour-end simulation target that intrinsically includes house load.
+            if in_peak:
+                sim_info = res.get("sell_simulation" if mode == "sell" else "buy_simulation")
+                if sim_info:
+                    s_log = sim_info.get("log", {})
+                    key_cur = f"{now.hour:02d}:59"
+                    if key_cur in s_log:
+                        target_soc = float(self._get_soc_from_log(s_log, key_cur, target_soc))
+                
                 if mode == "sell":
-                    # DC discharge = AC power / efficiency
-                    soc_delta = (real_cmd_p / eff_safe) * h_f / b_cap * 100.0
-                    target_soc = b_soc - soc_delta
-                    
-                    # Ensure we never target below the safe floor identified by simulation (Home Protection)
-                    if res.get("sell_simulation"):
-                        sim_floor = res["sell_simulation"].get("projected_soc_after_sale_pct", target_soc)
-                        target_soc = max(target_soc, sim_floor)
-                elif mode == "buy":
-                    # DC charge = AC power * efficiency
-                    soc_delta = (real_cmd_p * eff_safe) * h_f / b_cap * 100.0
-                    target_soc = b_soc + soc_delta
-                    target_soc = min(100.0, target_soc)
+                    # Ensure we never target below the identified safe floor (Home Protection)
+                    sim_floor = res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", target_soc)
+                    target_soc = max(target_soc, sim_floor)
                 
             res["target_soc"] = float(round_f(target_soc, 1))
             
