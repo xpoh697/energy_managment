@@ -2829,10 +2829,10 @@ class InverterOperationModeSensor(SensorEntity):
         sell_strategy = self.manager.get_market_strategy("sell") or {}
         buy_strategy = self.manager.get_market_strategy("buy") or {}
         
-        # When forecasting, we use relative hours to match strategy indices (v11.4.20)
+        # When forecasting, we use absolute hours to match strategy indices (v11.4.20)
         if is_forecast:
-            is_selling_active = check_h_rel in sell_strategy.get("active_hours", [])
-            is_buying_active = check_h_rel in buy_strategy.get("active_hours", [])
+            is_selling_active = check_h_abs in sell_strategy.get("active_hours", []) or (check_h_abs + 24) in sell_strategy.get("active_hours", [])
+            is_buying_active = check_h_abs in buy_strategy.get("active_hours", []) or (check_h_abs + 24) in buy_strategy.get("active_hours", [])
         else:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"
@@ -2843,14 +2843,11 @@ class InverterOperationModeSensor(SensorEntity):
         # Peak preparation logic (only for current time or relative forecast window)
         is_preparing_for_peak = False
         target_hours_sell = sell_strategy.get("active_hours", [])
-        peak_start_h_rel = None
+        peak_start_abs = None
         for h in sorted(target_hours_sell):
-            if h > rel_h:
-                peak_start_h_rel = h
+            if h > check_h_abs:
+                peak_start_abs = h
                 break
-        
-        # Absolute index for _format_h labeling
-        peak_start_abs = (now_h_wall + peak_start_h_rel) if peak_start_h_rel is not None else None
         
         bms_debug = {"status": "Ожидание" if not is_forecast else "Прогноз"}
         
