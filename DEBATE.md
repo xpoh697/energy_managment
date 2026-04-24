@@ -1655,14 +1655,16 @@ display_soc_after = max(base_target, natural_soc_after_sale - planned_sell_pct)
 
 **Место фикса:** В `get_market_strategy()` в `strategy.py`, непосредственно перед запуском baseline-симуляции (`run_soc_simulation` со строки ~1617 для BUY и ~1950 для SELL).
 
-**Логика блокировки:**
-1. Проверяем текущий режим инвертора: `current_mode = getattr(man, 'current_inverter_mode', 'sale_pv')`.
-2. Читаем `sale_pv_no_bat_max_h` из настроек (`CONF_SALE_PV_NO_BAT_MAX_HOUR`, дефолт 13).
-3. Находим первый предстоящий пик продажи (`first_sell_peak_h`) из `target_hours_sorted`.
-4. Рассчитываем верхнюю границу блокировки: `block_until = min(sale_pv_no_bat_max_h, first_sell_peak_h)`. Это имитирует динамическую отмену: перед пиком продажи система переходит в режим подготовки, и батарея начинает заряжаться.
-5. Если `current_mode == 'sale_pv_no_bat'` и `cur_hour < block_until`, передаём `no_battery_charge_until=block_until` в обе симуляции.
+**Логика блокировки (финальная версия — мини-симуляция):**
+1. Проверяем текущий режим: `current_mode = getattr(man, 'current_inverter_mode', 'sale_pv')`.
+2. Читаем `sale_pv_no_bat_max_h` и `ai_discharge_limit` из настроек.
+3. Находим `first_sell_peak_h` из `active_hours` sell-стратегии.
+4. **Мини-симуляция**: запускаем `run_soc_simulation` от `cur_hour` до `min(first_sell_peak, max_h)` БЕЗ блокировки заряда — узнаём `hours_to_full` (сколько часов солнцу нужно достичь `ai_discharge_limit`).
+5. `latest_charge_start = max(cur_hour, first_sell_peak - hours_to_full)` — точный момент когда `sale_pv_no_bat` отменится и батарея начнёт заряжаться.
+6. `block_until = min(sale_pv_no_bat_max_h, latest_charge_start)` — передаём как `no_battery_charge_until`.
+7. Если `block_until <= cur_hour` (солнце не успевает → режим уже был бы отменён) → блокировка не применяется.
 
-**Для BUY-симуляции:** `no_battery_charge_until` объединяется с уже существующей логикой `will_block_pv` (ожидание отрицательных цен): берём максимальный из двух параметров (`max(block_until, first_h_buy)`), чтобы оба случая блокировки учитывались корректно."
+**Для BUY-симуляции:** блокировка объединяется с `will_block_pv` (ожидание отрицательных цен) через `max(...)`, чтобы оба случая учитывались корректно."
 
 **Skeptic** (Senior SRE / Security):
 1. **Динамическая граница**: Использование `min(sale_pv_no_bat_max_h, first_sell_peak_h)` — ключевой инсайт. Без него симуляция неправильно блокировала бы зарядку даже в часы, когда режим уже отменён (подготовка к пику). Теперь граница блокировки в симуляции точно совпадает с физическим поведением инвертора.

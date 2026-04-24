@@ -1627,19 +1627,34 @@ class StrategyEngine:
                         is_neg_strategy = bool(res.get("charge_reason") == "negative")
                         will_block_pv = res["can_wait_for_negative"] and is_neg_strategy
                         
-                        # v11.6.13: Account for sale_pv_no_bat blocking battery charge from PV.
-                        # The mode has dynamic duration: it cancels itself when approaching a sell peak
-                        # (is_preparing_for_peak=True). We model this by capping block_until at the
-                        # first upcoming sell peak hour.
+                        # v11.6.13 (revised): sale_pv_no_bat shrinks from the RIGHT:
+                        # It stays active until "latest_charge_start = first_sell_peak - hours_solar_needs_to_full"
+                        # This mirrors the BMS logic in _get_mode_at (latest_start = peak_abs - total_needed)
                         _current_inverter_mode = getattr(man, "current_inverter_mode", "sale_pv")
                         _sale_pv_no_bat_max_h_v = man.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
                         _sale_pv_no_bat_max_h = int(float(_sale_pv_no_bat_max_h_v) if _sale_pv_no_bat_max_h_v is not None else 13)
                         pv_no_bat_block_until = None
                         if _current_inverter_mode == "sale_pv_no_bat" and cur_hour < _sale_pv_no_bat_max_h:
-                            # Dynamic cancellation boundary: stop blocking at the first sell peak
                             _sell_peaks_ahead = [h for h in (self.manager.get_market_strategy("sell") or {}).get("active_hours", []) if h > cur_hour]
                             _first_sell_peak = min(_sell_peaks_ahead) if _sell_peaks_ahead else _sale_pv_no_bat_max_h
-                            pv_no_bat_block_until = min(_sale_pv_no_bat_max_h, _first_sell_peak)
+                            _ai_target_soc = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 100.0))
+                            # Mini-sim: how long does solar take to charge from b_soc to _ai_target_soc?
+                            _chk_range = list(range(cur_hour, min(_first_sell_peak, _sale_pv_no_bat_max_h) + 1))
+                            _hours_to_full = len(_chk_range)  # pessimistic default
+                            if _chk_range:
+                                try:
+                                    _, _chk_log, _ = self.run_soc_simulation(b_soc, _chk_range, now, {})
+                                    for _ci, _cv in enumerate(_chk_log.values()):
+                                        _cv_soc = _cv.get("soc", 0.0) if isinstance(_cv, dict) else float(_cv)
+                                        if _cv_soc >= (_ai_target_soc - 0.5):
+                                            _hours_to_full = _ci + 1
+                                            break
+                                except Exception:
+                                    pass
+                            # latest_charge_start = peak - hours_needed; sale_pv_no_bat blocks until then
+                            _latest_cs = max(cur_hour, _first_sell_peak - _hours_to_full)
+                            _raw_block = min(_sale_pv_no_bat_max_h, _latest_cs)
+                            pv_no_bat_block_until = _raw_block if _raw_block > cur_hour else None
                         
                         first_h_buy = next((h for h in target_hours_sorted if h >= cur_hour), cur_hour)
                         if first_h_buy > cur_hour:
@@ -1983,7 +1998,23 @@ class StrategyEngine:
                         if _sell_sim_current_mode == "sale_pv_no_bat" and cur_hour < _sell_pv_no_bat_max_h:
                             _sell_peaks_for_sim = [h for h in target_hours_sorted if h > cur_hour]
                             _first_sell_for_sim = min(_sell_peaks_for_sim) if _sell_peaks_for_sim else _sell_pv_no_bat_max_h
-                            _sell_sim_no_charge_until = min(_sell_pv_no_bat_max_h, _first_sell_for_sim)
+                            _ai_target_sell = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 100.0))
+                            # Mini-sim: how many hours does solar need to charge from b_soc to target?
+                            _sell_chk_range = list(range(cur_hour, min(_first_sell_for_sim, _sell_pv_no_bat_max_h) + 1))
+                            _sell_hours_to_full = len(_sell_chk_range)  # pessimistic default
+                            if _sell_chk_range:
+                                try:
+                                    _, _sell_chk_log, _ = self.run_soc_simulation(b_soc, _sell_chk_range, now, {})
+                                    for _si, _sv in enumerate(_sell_chk_log.values()):
+                                        _sv_soc = _sv.get("soc", 0.0) if isinstance(_sv, dict) else float(_sv)
+                                        if _sv_soc >= (_ai_target_sell - 0.5):
+                                            _sell_hours_to_full = _si + 1
+                                            break
+                                except Exception:
+                                    pass
+                            _sell_latest_cs = max(cur_hour, _first_sell_for_sim - _sell_hours_to_full)
+                            _sell_raw_block = min(_sell_pv_no_bat_max_h, _sell_latest_cs)
+                            _sell_sim_no_charge_until = _sell_raw_block if _sell_raw_block > cur_hour else None
                         natural_morning_soc, sim_log_base, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
                             no_battery_charge_until=_sell_sim_no_charge_until
