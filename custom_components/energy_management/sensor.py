@@ -2807,7 +2807,8 @@ class InverterOperationModeSensor(SensorEntity):
         
         # Target check hour (use rel_h for strategy alignment, sim_h for price alignment)
         check_h_rel = rel_h
-        check_h_abs = sim_h
+        # v11.6.10: Use abs_hour if provided (fixes tomorrow's forecast seeing today's peaks)
+        check_h_abs = sim_h if abs_hour is None else abs_hour
 
         try:
             from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_PRICE_SELL_LIMIT, CONF_MIN_SOC_BUY, CONF_AI_DISCHARGE_LIMIT, CONF_AI_CHARGE_LIMIT
@@ -2831,8 +2832,9 @@ class InverterOperationModeSensor(SensorEntity):
         
         # When forecasting, we use absolute hours to match strategy indices (v11.4.20)
         if is_forecast:
-            is_selling_active = check_h_abs in sell_strategy.get("active_hours", []) or (check_h_abs + 24) in sell_strategy.get("active_hours", [])
-            is_buying_active = check_h_abs in buy_strategy.get("active_hours", []) or (check_h_abs + 24) in buy_strategy.get("active_hours", [])
+            # v11.6.10: check_h_abs is now correctly absolute, so no +24 hack is needed
+            is_selling_active = check_h_abs in sell_strategy.get("active_hours", [])
+            is_buying_active = check_h_abs in buy_strategy.get("active_hours", [])
         else:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"
