@@ -2928,10 +2928,22 @@ class InverterOperationModeSensor(SensorEntity):
         buy_p_cur = self.manager.get_price("buy", today_str, sim_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
 
-        # v11.6.7: Removed flawed is_waiting_for_neg logic.
-        # Waiting for a negative price tomorrow should NOT block profitable PV sales today.
-        # We now rely purely on price_stop_sell and the AI strategy to determine export blocks.
+        # v11.6.8: Restored 'Wait for Negative' with Strict User Pre-conditions
+        is_waiting_for_neg = False
         neg_h = buy_strategy.get("first_negative_hour")
+        if neg_h and cur_price is not None and cur_price < price_sell_only_pv and avg_gen > 0.01:
+            if not is_forecast or check_h_rel < neg_h:
+                # 1. Check if there are any planned AI sales between now and the negative price
+                planned_sales = [h for h in sell_strategy.get("active_hours", []) if check_h_abs <= h < neg_h]
+                if not planned_sales:
+                    # 2. Check if we have enough charge to last until the negative price
+                    hours_to_neg = max(1, neg_h - check_h_abs)
+                    base_load = float(self.manager.avg_base_load_kw or 0.5)
+                    energy_needed = hours_to_neg * base_load
+                    soc_needed = min_soc + (energy_needed / max(0.1, batt_cap) * 100.0)
+                    
+                    if batt_soc >= soc_needed:
+                        is_waiting_for_neg = True
 
         # State Machine Ladder
         if is_buying_active and not target_reached:
@@ -2957,6 +2969,14 @@ class InverterOperationModeSensor(SensorEntity):
                 # No sun (insufficient surplus): Recovery wait
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
+
+        elif is_waiting_for_neg:
+            # v11.6.8 - Priority 3: Wait for negative price
+            # no_pv_sale_no_bat sets c_amps_fixed = 0.0 to STOP battery charging,
+            # saving space for the upcoming negative price.
+            mode = "no_pv_sale_no_bat"
+            neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
+            reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
 
         elif is_selling_active and not target_reached:
             # Active AI / Arbitrage strategy
