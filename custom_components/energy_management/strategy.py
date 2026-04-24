@@ -2244,13 +2244,15 @@ class StrategyEngine:
 
                     # v11.3.61: RECURSIVE MORNING DEFICIT CORRECTION
                     # If the simulation result says we are below target, we adjust the floor and RE-CALCULATE everything.
+                    immediate_base_target = base_target # Keep original base target for the immediate block
                     morning_deficit_fix = max(0.0, target_morning_soc - soc_morning)
                     if morning_deficit_fix > 0.1:
-                        # 1. Update the base target floor
+                        # 1. Update the base target floor (applies to future epochs)
                         base_target = min(100.0, base_target + morning_deficit_fix)
                         
                         # 2. Re-calculate available volume
-                        surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
+                        # v11.6.6: Use immediate_base_target so tomorrow's deficit doesn't block today's morning sale
+                        surplus_for_user_limit = (max(0.0, natural_soc_after_sale - immediate_base_target) * b_cap / 100.0)
                         available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                         
