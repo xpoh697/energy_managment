@@ -984,7 +984,7 @@ class StrategyEngine:
             return cached["res"]
 
         res = {
-            "strategy_version": "v11.6.4",
+            "strategy_version": VERSION,
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -1250,7 +1250,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = f"v11.6.4"
+                    res["strategy_version"] = VERSION
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
