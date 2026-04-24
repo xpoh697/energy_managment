@@ -2928,13 +2928,10 @@ class InverterOperationModeSensor(SensorEntity):
         buy_p_cur = self.manager.get_price("buy", today_str, sim_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
 
-        # v11.1.44-57: Priority Logic Refinement
-        is_waiting_for_neg = False
+        # v11.6.7: Removed flawed is_waiting_for_neg logic.
+        # Waiting for a negative price tomorrow should NOT block profitable PV sales today.
+        # We now rely purely on price_stop_sell and the AI strategy to determine export blocks.
         neg_h = buy_strategy.get("first_negative_hour")
-        if neg_h and cur_price is not None and cur_price < price_sell_only_pv and avg_gen > 0.01:
-            # v11.1.49: Use unified comparison: check_h (absolute index)
-            if not is_forecast or check_h_rel < neg_h:
-                is_waiting_for_neg = True
 
         # State Machine Ladder
         if is_buying_active and not target_reached:
@@ -2946,28 +2943,20 @@ class InverterOperationModeSensor(SensorEntity):
             reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
         elif batt_soc <= min_soc:
-            # v11.1.55 - Priority 2: Emergency SOC management (Restored)
+            # v11.6.7 - Priority 2: Emergency SOC management
             if has_surplus:
-                if is_waiting_for_neg:
-                    # Battery low + Waiting for negative: stop_sale allows charge but blocks export
+                if cur_price is not None and cur_price < price_stop_sell:
+                    # Battery low + Cheap price: stop_sale allows charge but blocks unprofitable export
                     mode = "stop_sale"
-                    neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
-                    reason = f"Добор солнца без экспорта (ждет {neg_h_disp}г)"
+                    reason = f"Добор солнца без экспорта (Цена {cur_price or 0.0:.2f} < {price_stop_sell})"
                 else:
-                    # Battery low + Good price: sale_pv allows charge and export
+                    # Battery low + Good price: sale_pv allows charge and exports excess
                     mode = "sale_pv"
                     reason = f"Добор солнца в АКБ (limit: {min_soc}%)"
             else:
-                # No sun (insufficient surplus): Recovery wait / Solar crumbs allowed
+                # No sun (insufficient surplus): Recovery wait
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
-        
-        elif is_waiting_for_neg:
-            # v11.1.55 - Priority 3: Wait for negative price
-            # no_pv_sale_no_bat blocks BOTH export and battery charge.
-            mode = "no_pv_sale_no_bat"
-            neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
-            reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
 
         elif is_selling_active and not target_reached:
             # Active AI / Arbitrage strategy
