@@ -27,6 +27,7 @@ from .const import (
     CONF_FORCE_MARKET_SELL,
     CONF_PRIORITY,
     CONF_SOC_BUFFER,
+    CONF_SALE_PV_NO_BAT_MAX_HOUR,
     DOMAIN,
     VERSION
 )
@@ -1626,12 +1627,32 @@ class StrategyEngine:
                         is_neg_strategy = bool(res.get("charge_reason") == "negative")
                         will_block_pv = res["can_wait_for_negative"] and is_neg_strategy
                         
+                        # v11.6.13: Account for sale_pv_no_bat blocking battery charge from PV.
+                        # The mode has dynamic duration: it cancels itself when approaching a sell peak
+                        # (is_preparing_for_peak=True). We model this by capping block_until at the
+                        # first upcoming sell peak hour.
+                        _current_inverter_mode = getattr(man, "current_inverter_mode", "sale_pv")
+                        _sale_pv_no_bat_max_h_v = man.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
+                        _sale_pv_no_bat_max_h = int(float(_sale_pv_no_bat_max_h_v) if _sale_pv_no_bat_max_h_v is not None else 13)
+                        pv_no_bat_block_until = None
+                        if _current_inverter_mode == "sale_pv_no_bat" and cur_hour < _sale_pv_no_bat_max_h:
+                            # Dynamic cancellation boundary: stop blocking at the first sell peak
+                            _sell_peaks_ahead = [h for h in (self.manager.get_market_strategy("sell") or {}).get("active_hours", []) if h > cur_hour]
+                            _first_sell_peak = min(_sell_peaks_ahead) if _sell_peaks_ahead else _sale_pv_no_bat_max_h
+                            pv_no_bat_block_until = min(_sale_pv_no_bat_max_h, _first_sell_peak)
+                        
                         first_h_buy = next((h for h in target_hours_sorted if h >= cur_hour), cur_hour)
                         if first_h_buy > cur_hour:
                             sim_range_pre = list(range(cur_hour, first_h_buy))
+                            # Combine neg-price block and sale_pv_no_bat block into a single no_charge_until
+                            _combined_block = None
+                            if will_block_pv:
+                                _combined_block = first_h_buy
+                            if pv_no_bat_block_until is not None:
+                                _combined_block = max(_combined_block or 0, pv_no_bat_block_until)
                             soc_at_start_plan, _, _ = self.run_soc_simulation(
-                                b_soc, sim_range_pre, now, 
-                                no_battery_charge=will_block_pv
+                                b_soc, sim_range_pre, now,
+                                no_battery_charge_until=_combined_block
                             )
 
                         # 1. Calculate how much kWh we roughly need to add based on EXPECTED SOC
@@ -1680,9 +1701,15 @@ class StrategyEngine:
                         sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                         sim_range = list(range(cur_hour, sim_end_h))
                         # Apply blocked PV only UP TO the negative prices (so tomorrow afternoon works properly)
+                        # v11.6.13: Also account for sale_pv_no_bat blocking solar charge
+                        _buy_sim_no_charge_until = None
+                        if will_block_pv:
+                            _buy_sim_no_charge_until = first_h_buy
+                        if pv_no_bat_block_until is not None:
+                            _buy_sim_no_charge_until = max(_buy_sim_no_charge_until or 0, pv_no_bat_block_until)
                         _, sim_log, _ = self.run_soc_simulation(
-                            b_soc, sim_range, now, charge_commands, 
-                            no_battery_charge_until=first_h_buy if will_block_pv else None
+                            b_soc, sim_range, now, charge_commands,
+                            no_battery_charge_until=_buy_sim_no_charge_until
                         )
                         
                         # 1. Projected SOC at START of the first buy hour
@@ -1947,7 +1974,20 @@ class StrategyEngine:
                         # 1. Run Baseline Simulation (v11.3.21: Get full log for start_soc detection)
                         sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                         sim_range = list(range(cur_hour, sim_end_h))
-                        natural_morning_soc, sim_log_base, _ = self.run_soc_simulation(b_soc, sim_range, now, {})
+                        # v11.6.13: If currently in sale_pv_no_bat mode, block PV charging in simulation
+                        # until the mode's dynamic boundary (min of max_hour and first sell peak).
+                        _sell_sim_current_mode = getattr(man, "current_inverter_mode", "sale_pv")
+                        _sell_pv_no_bat_max_h_v = man.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
+                        _sell_pv_no_bat_max_h = int(float(_sell_pv_no_bat_max_h_v) if _sell_pv_no_bat_max_h_v is not None else 13)
+                        _sell_sim_no_charge_until = None
+                        if _sell_sim_current_mode == "sale_pv_no_bat" and cur_hour < _sell_pv_no_bat_max_h:
+                            _sell_peaks_for_sim = [h for h in target_hours_sorted if h > cur_hour]
+                            _first_sell_for_sim = min(_sell_peaks_for_sim) if _sell_peaks_for_sim else _sell_pv_no_bat_max_h
+                            _sell_sim_no_charge_until = min(_sell_pv_no_bat_max_h, _first_sell_for_sim)
+                        natural_morning_soc, sim_log_base, _ = self.run_soc_simulation(
+                            b_soc, sim_range, now, {},
+                            no_battery_charge_until=_sell_sim_no_charge_until
+                        )
                     
                     # --- TWO-STEP SAFETY CHECK (Refined v6.2) ---
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
