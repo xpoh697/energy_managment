@@ -935,18 +935,21 @@ class StrategyEngine:
             # 4. Inverter Command (AI Buying/Selling)
             cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
 
-            # v11.6.16: During negative-price buying, inverter curtails PV (DC bus saturated with grid import).
-            # pv_curtail_hours contains only hours where cmd_p > 0 AND price < 0.
+            # v11.6.16: In negative-price buy window (pv_curtail_hours), the inverter:
+            # - Powers the house from the grid (battery does NOT drain from house consumption)
+            # - Curtails PV (gen=0)
+            # - Charges battery only from cmd_p (grid)
+            # Therefore: total_net_kw = cmd_p (ignoring gen and cons — both handled by grid)
             if pv_curtail_hours and h_abs in pv_curtail_hours:
-                expected_gen_kw = 0.0
-
+                total_net_kw = float(cmd_p)
             # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
-            if no_battery_charge or (no_battery_charge_until is not None and h_abs < no_battery_charge_until):
+            elif no_battery_charge or (no_battery_charge_until is not None and h_abs < no_battery_charge_until):
                 # v11.1.39: PV only covers load, no battery charge from surplus
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 total_net_kw = float(p_for_house - expected_cons_kw + cmd_p)
             else:
                 total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
+
             
             if total_net_kw > 0.001: 
                 # v11.1.62 - bat_emergency recovery: Allow charging from solar 'crumbs' even in emergency
@@ -1689,6 +1692,11 @@ class StrategyEngine:
                             pool_cons += h_cons * h_f
                             
                         if res.get("charge_reason") == "survival":
+                            energy_to_buy = theoretical_gap_kwh
+                        elif is_neg_strategy:
+                            # v11.6.16: In negative-price buy window, house is powered from grid.
+                            # Battery does NOT drain from consumption during buy hours.
+                            # We only need to charge the theoretical gap (no pool_cons needed).
                             energy_to_buy = theoretical_gap_kwh
                         else:
                             energy_to_buy = theoretical_gap_kwh + pool_cons
