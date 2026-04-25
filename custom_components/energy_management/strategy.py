@@ -2248,18 +2248,29 @@ class StrategyEngine:
                         decision_tag = f"{decision_tag} | {sell_diagnosis}"
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                         
-                    # --- v11.3.34: Epoched Greedy Allocation ---
-                    # Group hours into epochs (separated by >3h gap) so Evening doesn't cannibalize Morning's current surplus.
+                    # --- v11.6.38: Energy Pooling (Round 108) ---
+                    # Group hours into pools separated by SOLAR GENERATION.
+                    # If two hours are separated only by night, they share the same energy pool
+                    # and must be sorted globally by price!
                     sell_pool = [h for h in target_hours_sorted if h >= cur_hour]
                     
                     epochs = []
                     current_epoch = []
                     for h in sorted(sell_pool):
-                        if not current_epoch or h - current_epoch[-1] <= 3:
+                        if not current_epoch:
                             current_epoch.append(h)
                         else:
-                            epochs.append(current_epoch)
-                            current_epoch = [h]
+                            has_solar = False
+                            for h_mid in range(current_epoch[-1] + 1, h):
+                                if 8 <= (h_mid % 24) <= 18:
+                                    has_solar = True
+                                    break
+                            
+                            if not has_solar:
+                                current_epoch.append(h)
+                            else:
+                                epochs.append(current_epoch)
+                                current_epoch = [h]
                     if current_epoch:
                         epochs.append(current_epoch)
                         
@@ -2269,20 +2280,14 @@ class StrategyEngine:
                     for i, epoch in enumerate(epochs):
                         epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                         
-                        # v11.6.36: Dynamic Multi-Epoch Recharge (Round 106)
-                        # Instead of blindly assuming 100% recharge, we calculate the actual available surplus
-                        # based on the natural SOC at the start of this epoch MINUS what we've sold so far.
+                        # v11.6.38: Solar Recharge Simulation
+                        # Because of Energy Pooling, i > 0 ONLY happens when separated by a day (solar).
+                        # We simulate the solar recharge between the epochs to find the true surplus.
                         if i > 0:
-                            prev_h = min(epoch) - 1
-                            key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                            natural_soc_start = self._get_soc_from_log(sim_log_base, key_start, b_soc)
-                            
-                            sold_kwh_so_far = sum(sell_commands.values())
-                            sold_pct = (sold_kwh_so_far / eff) / max(0.1, b_cap) * 100.0
-                            
-                            actual_soc_start = max(0.0, natural_soc_start - sold_pct)
-                            fresh_surplus = max(0.0, (actual_soc_start - base_target) * b_cap / 100.0) * eff
-                            # We strictly overwrite rem_kwh_sell: if house consumed the surplus at night, it's gone.
+                            sim_hours = list(range(max(epochs[i-1]) + 1, min(epoch)))
+                            _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {})
+                            max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
+                            fresh_surplus = max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff
                             rem_kwh_sell = fresh_surplus
                             
                         for h in epoch_sorted:
@@ -2312,18 +2317,27 @@ class StrategyEngine:
                     else:
                         target_soc = base_target
 
-                    # v11.4.06: Clean Arbitrage reporting (Sell mode)
-                    best_buy_p, best_buy_h = get_best_buyback(cur_hour)
-                    if best_buy_h is not None:
-                        pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
-                        global_arb_note = f"Купим в {self._format_h(best_buy_h)} по {best_buy_p:.2f} | Выгода {pot_gain_val:.2f}"
+                    # v11.6.38: Clean Arbitrage reporting with Partial Sale info
+                    sold_now = sell_commands.get(int(cur_hour), 0.0)
+                    future_sells = {h: p for h, p in sell_commands.items() if h > cur_hour and p > 0.01}
+                    
+                    if sold_now > 0.01 and future_sells:
+                        total_planned = sum(sell_commands.values())
+                        next_h = min(future_sells.keys())
+                        next_p = future_sells[next_h]
+                        res["arbitrage_decision"] = f"Часть {sold_now:.1f} из {total_planned:.1f} кВтч. Остаток в {self._format_h(next_h)} (по {all_sell_prices.get(next_h, 0.0):.2f})"
                     else:
-                        global_arb_note = "Нет окна откупа"
+                        best_buy_p, best_buy_h = get_best_buyback(cur_hour)
+                        if best_buy_h is not None:
+                            pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
+                            global_arb_note = f"Купим в {self._format_h(best_buy_h)} по {best_buy_p:.2f} | Выгода {pot_gain_val:.2f}"
+                        else:
+                            global_arb_note = "Нет окна откупа"
 
-                    if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        res["arbitrage_decision"] = f"Продаем сейчас по {cur_p_f:.2f} | {global_arb_note}"
-                    else:
-                        res["arbitrage_decision"] = "Ручной режим (AI выкл.)"
+                        if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                            res["arbitrage_decision"] = f"Продаем сейчас по {cur_p_f:.2f} | {global_arb_note}"
+                        else:
+                            res["arbitrage_decision"] = "Ручной режим (AI выкл.)"
                         
                     target_soc = float(min(100.0, target_soc))
                     delta_available_dc = available_sell_ac / eff
@@ -2391,13 +2405,10 @@ class StrategyEngine:
                         for i, epoch in enumerate(epochs):
                             epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                             if i > 0:
-                                prev_h = min(epoch) - 1
-                                key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                                natural_soc_start = self._get_soc_from_log(sim_log_base, key_start, b_soc)
-                                sold_kwh_so_far = sum(sell_commands.values())
-                                sold_pct = (sold_kwh_so_far / eff) / max(0.1, b_cap) * 100.0
-                                actual_soc_start = max(0.0, natural_soc_start - sold_pct)
-                                fresh_surplus_fix = max(0.0, (actual_soc_start - base_target) * b_cap / 100.0) * eff
+                                sim_hours = list(range(max(epochs[i-1]) + 1, min(epoch)))
+                                _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {})
+                                max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
+                                fresh_surplus_fix = max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff
                                 rem_kwh_sell_fix = fresh_surplus_fix
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
