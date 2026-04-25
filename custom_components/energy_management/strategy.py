@@ -978,6 +978,7 @@ class StrategyEngine:
     def get_market_strategy(self, mode="buy"):
         now = dt_util.now()
         man: Any = self.manager
+        _LOGGER.warning("[STRATEGY] get_market_strategy called for mode=%s", mode)
         
         cache_key = f"market_strategy_{mode}"
         cached = self._strategy_cache.get(cache_key)
@@ -1669,7 +1670,7 @@ class StrategyEngine:
                                 b_soc, sim_range_pre, now,
                                 no_battery_charge_until=_combined_block
                             )
-                            _LOGGER.debug(
+                            _LOGGER.warning(
                                 "[BUY v11.6.14] SOC block pre-sim: mode=%s b_soc=%.1f block_until=%s "
                                 "pv_no_bat=%s will_block_pv=%s soc_at_start_plan=%.1f",
                                 _current_inverter_mode, b_soc, _combined_block,
@@ -1728,7 +1729,7 @@ class StrategyEngine:
                             _buy_sim_no_charge_until = first_h_buy
                         if pv_no_bat_block_until is not None:
                             _buy_sim_no_charge_until = max(_buy_sim_no_charge_until or 0, pv_no_bat_block_until)
-                        _LOGGER.debug(
+                        _LOGGER.warning(
                             "[BUY v11.6.14] Full sim: mode=%s b_soc=%.1f buy_no_charge_until=%s "
                             "pv_no_bat=%s will_block_pv=%s first_h_buy=%s",
                             _current_inverter_mode, b_soc, _buy_sim_no_charge_until,
