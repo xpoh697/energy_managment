@@ -1669,6 +1669,12 @@ class StrategyEngine:
                                 b_soc, sim_range_pre, now,
                                 no_battery_charge_until=_combined_block
                             )
+                            _LOGGER.debug(
+                                "[BUY v11.6.14] SOC block pre-sim: mode=%s b_soc=%.1f block_until=%s "
+                                "pv_no_bat=%s will_block_pv=%s soc_at_start_plan=%.1f",
+                                _current_inverter_mode, b_soc, _combined_block,
+                                pv_no_bat_block_until, will_block_pv, soc_at_start_plan
+                            )
 
                         # 1. Calculate how much kWh we roughly need to add based on EXPECTED SOC
                         theoretical_gap_kwh = max(0.0, (target_soc - soc_at_start_plan) / 100.0 * b_cap)
@@ -1722,6 +1728,12 @@ class StrategyEngine:
                             _buy_sim_no_charge_until = first_h_buy
                         if pv_no_bat_block_until is not None:
                             _buy_sim_no_charge_until = max(_buy_sim_no_charge_until or 0, pv_no_bat_block_until)
+                        _LOGGER.debug(
+                            "[BUY v11.6.14] Full sim: mode=%s b_soc=%.1f buy_no_charge_until=%s "
+                            "pv_no_bat=%s will_block_pv=%s first_h_buy=%s",
+                            _current_inverter_mode, b_soc, _buy_sim_no_charge_until,
+                            pv_no_bat_block_until, will_block_pv, first_h_buy
+                        )
                         _, sim_log, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, charge_commands,
                             no_battery_charge_until=_buy_sim_no_charge_until
