@@ -978,6 +978,7 @@ class StrategyEngine:
     def get_market_strategy(self, mode="buy"):
         now = dt_util.now()
         man: Any = self.manager
+        _LOGGER.warning("[STRATEGY] get_market_strategy called for mode=%s", mode)
         
         cache_key = f"market_strategy_{mode}"
         cached = self._strategy_cache.get(cache_key)
