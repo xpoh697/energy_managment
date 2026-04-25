@@ -1825,6 +1825,10 @@ class StrategyEngine:
 
                         # v7.1: Note: Simulation results are no longer used to override target_soc 
                         # to ensure the UI shows the intended target (v11.1.61).
+                        
+                        # v11.6.30: Expose charge_commands in res so BatterySocPredictionSensor
+                        # can pass real buy power commands to its own simulation.
+                        res["charge_commands"] = {int(k): float(v) for k, v in charge_commands.items()}
                     except Exception as e:
                         _LOGGER.error("Error in MarketStrategy BUY simulation: %s", e)
                         res["buy_simulation"] = {
