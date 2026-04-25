@@ -2429,7 +2429,24 @@ class StrategyEngine:
                     # Fix: ALWAYS compute morning via a short night sub-sim starting from
                     # natural_soc_after_sale (Branch A) or post-sale SOC (Branch B).
                     # This sim runs only hours 21->sunrise-1, all night-clamped, zero solar.
-                    planned_sell_kwh = sum(sell_commands.values()) if sell_commands else 0.0
+                    # v11.6.34: Extract FIRST continuous sell window from target_hours_sorted.
+                    # sell_commands may span multiple windows (e.g. 20:00 + tomorrow 05:00-06:00).
+                    # display_soc_after must reflect only the nearest (first) window so the UI
+                    # shows the SOC right after the immediate sell event, not the cumulative result.
+                    _future_sell_hrs = sorted([h for h in target_hours_sorted if h >= cur_hour])
+                    _first_window_hrs = []
+                    if _future_sell_hrs:
+                        _first_window_hrs = [_future_sell_hrs[0]]
+                        for _fwi in range(1, len(_future_sell_hrs)):
+                            if _future_sell_hrs[_fwi] == _future_sell_hrs[_fwi - 1] + 1:
+                                _first_window_hrs.append(_future_sell_hrs[_fwi])
+                            else:
+                                break
+                    # Sum sell energy ONLY for the first window hours
+                    if _first_window_hrs:
+                        planned_sell_kwh = sum(sell_commands.get(int(h), 0.0) for h in _first_window_hrs)
+                    else:
+                        planned_sell_kwh = sum(sell_commands.values()) if sell_commands else 0.0
                     planned_sell_pct = (planned_sell_kwh / b_cap * 100.0 / max(0.1, eff)) if b_cap > 0.1 else 0.0
                     sale_is_active_disp = planned_sell_kwh > 0.01
 
