@@ -2269,11 +2269,21 @@ class StrategyEngine:
                     for i, epoch in enumerate(epochs):
                         epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                         
-                        # If this is a future epoch (e.g. evening peak when we are in the morning),
-                        # assume the battery will be recharged by the sun up to ~100% capacity.
+                        # v11.6.36: Dynamic Multi-Epoch Recharge (Round 106)
+                        # Instead of blindly assuming 100% recharge, we calculate the actual available surplus
+                        # based on the natural SOC at the start of this epoch MINUS what we've sold so far.
                         if i > 0:
-                            fresh_surplus = max(0.0, (100.0 - base_target) * b_cap / 100.0) * eff
-                            rem_kwh_sell = max(rem_kwh_sell, fresh_surplus)
+                            prev_h = min(epoch) - 1
+                            key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                            natural_soc_start = self._get_soc_from_log(sim_log_base, key_start, b_soc)
+                            
+                            sold_kwh_so_far = sum(sell_commands.values())
+                            sold_pct = (sold_kwh_so_far / eff) / max(0.1, b_cap) * 100.0
+                            
+                            actual_soc_start = max(0.0, natural_soc_start - sold_pct)
+                            fresh_surplus = max(0.0, (actual_soc_start - base_target) * b_cap / 100.0) * eff
+                            # We strictly overwrite rem_kwh_sell: if house consumed the surplus at night, it's gone.
+                            rem_kwh_sell = fresh_surplus
                             
                         for h in epoch_sorted:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
@@ -2381,8 +2391,14 @@ class StrategyEngine:
                         for i, epoch in enumerate(epochs):
                             epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                             if i > 0:
-                                fresh_surplus_fix = max(0.0, (100.0 - base_target) * b_cap / 100.0) * eff
-                                rem_kwh_sell_fix = max(rem_kwh_sell_fix, fresh_surplus_fix)
+                                prev_h = min(epoch) - 1
+                                key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                                natural_soc_start = self._get_soc_from_log(sim_log_base, key_start, b_soc)
+                                sold_kwh_so_far = sum(sell_commands.values())
+                                sold_pct = (sold_kwh_so_far / eff) / max(0.1, b_cap) * 100.0
+                                actual_soc_start = max(0.0, natural_soc_start - sold_pct)
+                                fresh_surplus_fix = max(0.0, (actual_soc_start - base_target) * b_cap / 100.0) * eff
+                                rem_kwh_sell_fix = fresh_surplus_fix
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
                                 p_alloc_fix = max_p
