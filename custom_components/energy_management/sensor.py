@@ -2647,6 +2647,10 @@ class InverterOperationModeSensor(SensorEntity):
             # Current state calculation
             mode, reason, bms_debug, peak_start_abs = self._get_mode_at(now, batt_soc)
             
+            # v11.6.15: Update manager IMMEDIATELY after mode is computed,
+            # before calling get_market_strategy — prevents strategy.py from reading stale "sale_pv" default.
+            self.manager.current_inverter_mode = mode
+            
             attrs = {}
             attrs["mode_reason"] = reason
             attrs["bms_status"] = bms_debug
