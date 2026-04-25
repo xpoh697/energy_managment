@@ -2587,14 +2587,18 @@ class StrategyEngine:
                 
             # Use current peak power only if we are actually in a peak hour
             # Otherwise show 0 as real command, but attributes will show the potential
-            in_peak = (cur_hour in target_hours_sorted) and (power_needed > 0.01)
-            real_cmd_p = power_needed if (mode == "sell" and in_peak) else 0.0
+            in_peak = (cur_hour in target_hours_sorted)
+            # v11.6.31: Strategy is 'active' if we are in the target window.
+            # For BUY mode, even 0kW is active (we are waiting/blocking PV).
+            # For SELL mode, we still require power > 0.01 to avoid 'active' state on empty battery.
+            if mode == "buy" and in_peak:
+                res["state"] = "active"
+            elif mode == "sell" and in_peak and power_needed > 0.01:
+                res["state"] = "active"
+            
+            real_cmd_p = power_needed if (mode == "sell" and (in_peak and power_needed > 0.01)) else 0.0
             if mode == "buy" and in_peak:
                 real_cmd_p = power_needed
-            
-            # STATE TRANSITION FIX: If we have power and we are in peak, we are ACTIVE
-            if in_peak and power_needed > 0.01:
-                res["state"] = "active"
 
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
             # Only show hours that actually have planned power OR negative price hours (v11.1.22)
