@@ -2877,6 +2877,13 @@ class InverterOperationModeSensor(SensorEntity):
         
         bms_debug = {"status": "Ожидание" if not is_forecast else "Прогноз"}
         
+        # Безопасный отладочный вывод
+        bms_debug["debug_can_wait"] = can_wait
+        bms_debug["debug_neg_h"] = neg_h
+        bms_debug["debug_soc_at_neg"] = buy_strategy.get("debug_soc_at_neg", "N/A")
+        bms_debug["debug_threshold"] = buy_strategy.get("debug_threshold", "N/A")
+        bms_debug["debug_cur_price"] = cur_price
+        
         # v11.1.61: Differentiate target by current strategic mode for diagnostics
         buy_p_cur = self.manager.get_price("buy", today_str, sim_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)

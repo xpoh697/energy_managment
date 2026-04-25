@@ -1628,6 +1628,9 @@ class StrategyEngine:
                             threshold_neg = max(20.0, float(man.get_setting("min_soc_buy", 20.0)))
                             res["can_wait_for_negative"] = bool(soc_at_neg > threshold_neg)
                             res["first_negative_hour"] = first_neg_h
+                            
+                            res["debug_soc_at_neg"] = soc_at_neg
+                            res["debug_threshold"] = threshold_neg
 
                         # v11.6.12: Accurate SOC planning for Buy Window
                         # Pre-simulate the expected SOC at the START of the window
