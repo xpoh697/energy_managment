@@ -978,7 +978,6 @@ class StrategyEngine:
     def get_market_strategy(self, mode="buy"):
         now = dt_util.now()
         man: Any = self.manager
-        _LOGGER.warning("[STRATEGY] get_market_strategy called for mode=%s", mode)
         
         cache_key = f"market_strategy_{mode}"
         cached = self._strategy_cache.get(cache_key)
@@ -1673,10 +1672,6 @@ class StrategyEngine:
                                 b_soc, sim_range_pre, now,
                                 no_battery_charge_until=_combined_block
                             )
-                            _LOGGER.warning(
-                                "[BUY v11.6.14] pre-sim: mode=%s b_soc=%.1f block_until=%s pv_no_bat=%s soc_plan=%.1f",
-                                _current_inverter_mode, b_soc, _combined_block, pv_no_bat_block_until, soc_at_start_plan
-                            )
 
                         # 1. Calculate how much kWh we roughly need to add based on EXPECTED SOC
                         theoretical_gap_kwh = max(0.0, (target_soc - soc_at_start_plan) / 100.0 * b_cap)
@@ -1732,10 +1727,6 @@ class StrategyEngine:
                             # Extend to first_h_buy: post-sale_pv_no_bat hours may be no_pv_sale_no_bat
                             _effective_pv_block = max(pv_no_bat_block_until, first_h_buy)
                             _buy_sim_no_charge_until = max(_buy_sim_no_charge_until or 0, _effective_pv_block)
-                        _LOGGER.warning(
-                            "[BUY v11.6.14] full-sim: mode=%s b_soc=%.1f no_charge_until=%s pv_no_bat=%s first_h_buy=%s",
-                            _current_inverter_mode, b_soc, _buy_sim_no_charge_until, pv_no_bat_block_until, first_h_buy
-                        )
                         _, sim_log, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, charge_commands,
                             no_battery_charge_until=_buy_sim_no_charge_until
