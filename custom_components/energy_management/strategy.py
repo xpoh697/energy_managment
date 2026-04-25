@@ -2062,10 +2062,14 @@ class StrategyEngine:
                                     break
                             if _sell_neg_h is not None and _sell_neg_h > cur_hour:
                                 _sell_sim_no_charge_until = _sell_neg_h
-                        natural_morning_soc, sim_log_base, _ = self.run_soc_simulation(
+                        _, sim_log_base, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
                             no_battery_charge_until=_sell_sim_no_charge_until
                         )
+                        
+                        # v11.6.41: Fix massive bug where natural_morning_soc was taking the end-of-sim SOC (100% due to tomorrow's sun)
+                        key_sunrise = f"{sunrise_h-1:02d}:59" + (" (Завтра)" if sunrise_h-1 < cur_hour else "")
+                        natural_morning_soc = self._get_soc_from_log(sim_log_base, key_sunrise, b_soc)
                     
                     # --- TWO-STEP SAFETY CHECK (Refined v6.2) ---
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
