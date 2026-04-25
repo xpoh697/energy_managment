@@ -2671,7 +2671,15 @@ class StrategyEngine:
                 sim_info = res.get("sell_simulation" if mode == "sell" else "buy_simulation")
                 s_log = sim_info.get("log", {}) if sim_info else {}
                 
-                for h in actual_active:
+                # v11.6.37: Show only nearest (first) continuous window in planned_power
+                _first_window_active = [actual_active[0]]
+                for i in range(1, len(actual_active)):
+                    if actual_active[i] == actual_active[i-1] + 1:
+                        _first_window_active.append(actual_active[i])
+                    else:
+                        break
+                        
+                for h in _first_window_active:
                     h_label = self._format_h(h)
                     h_idx = int(h)
                     p_val = sell_commands.get(h_idx, 0.0) if mode == "sell" else charge_commands.get(h_idx, 0.0)
