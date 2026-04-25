@@ -2980,8 +2980,16 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
+        elif is_waiting_for_neg:
+            # v11.6.19 - Priority 2: Wait for negative price (Elevated over Emergency SOC)
+            # no_pv_sale_no_bat sets c_amps_fixed = 0.0 to STOP battery charging,
+            # saving space for the upcoming negative price.
+            mode = "no_pv_sale_no_bat"
+            neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
+            reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
+
         elif batt_soc <= min_soc:
-            # v11.6.7 - Priority 2: Emergency SOC management
+            # v11.6.7 - Priority 3: Emergency SOC management
             if has_surplus:
                 if cur_price is not None and cur_price < price_stop_sell:
                     # Battery low + Cheap price: stop_sale allows charge but blocks unprofitable export
@@ -2995,14 +3003,6 @@ class InverterOperationModeSensor(SensorEntity):
                 # No sun (insufficient surplus): Recovery wait
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
-
-        elif is_waiting_for_neg:
-            # v11.6.8 - Priority 3: Wait for negative price
-            # no_pv_sale_no_bat sets c_amps_fixed = 0.0 to STOP battery charging,
-            # saving space for the upcoming negative price.
-            mode = "no_pv_sale_no_bat"
-            neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
-            reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
 
         elif is_selling_active and not target_reached:
             # Active AI / Arbitrage strategy
