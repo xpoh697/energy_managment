@@ -2929,18 +2929,6 @@ class InverterOperationModeSensor(SensorEntity):
         fixed_buy = self.manager.fixed_strategy_data["buy"]
         fixed_sell = self.manager.fixed_strategy_data["sell"]
         
-        target_reached = False
-        if is_selling_active and (fixed_sell["id"] != -1 or is_forecast):
-            t_soc = fixed_sell["target_soc"] if not is_forecast else sell_strategy.get("target_soc", 0.0)
-            if batt_soc <= t_soc:
-                target_reached = True
-                reason = f"Достигнут целевой заряд (Продажа: {t_soc}%)"
-        elif is_buying_active and (fixed_buy["id"] != -1 or is_forecast):
-            t_soc = fixed_buy["target_soc"] if not is_forecast else buy_strategy.get("target_soc", 100.0)
-            if batt_soc >= t_soc:
-                target_reached = True
-                reason = f"Достигнут целевой заряд (Закуп: {t_soc}%)"
-
         # Pre-calculate common conditions
         # We use 5-minute averages for the mode selection to be more responsive as requested
         # For forecasts, we use predicted values from the simulation log if provided
@@ -2981,8 +2969,8 @@ class InverterOperationModeSensor(SensorEntity):
                     is_waiting_for_neg = True
 
         # State Machine Ladder
-        if is_buying_active and not target_reached:
-            # v11.5.7 - Priority 1: Buying (Strictly restricted to active AI strategy)
+        if is_buying_active:
+            # v11.6.32 - Priority 1: Buying (Strictly restricted to active AI strategy)
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ"
         elif is_buying_active and is_forecast:
@@ -3027,7 +3015,7 @@ class InverterOperationModeSensor(SensorEntity):
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
 
-        elif is_selling_active and not target_reached:
+        elif is_selling_active:
             # Active AI / Arbitrage strategy
             mode = "sale_pv_bat"
             reason = "Активна стратегия ПРОДАЖИ (AI)"
