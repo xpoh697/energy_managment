@@ -1666,8 +1666,9 @@ class StrategyEngine:
                                 _combined_block = first_h_buy
                             # v11.6.14: Extend block to first_h_buy — hours between sale_pv_no_bat end
                             # and buy window may be no_pv_sale_no_bat (also blocks charging)
-                            _effective_block = max(pv_no_bat_block_until, first_h_buy)
-                            _combined_block = max(_combined_block or 0, _effective_block)
+                            if pv_no_bat_block_until is not None:
+                                _effective_block = max(pv_no_bat_block_until, first_h_buy)
+                                _combined_block = max(_combined_block or 0, _effective_block)
                             soc_at_start_plan, _, _ = self.run_soc_simulation(
                                 b_soc, sim_range_pre, now,
                                 no_battery_charge_until=_combined_block
