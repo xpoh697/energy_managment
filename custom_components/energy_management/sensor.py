@@ -2971,7 +2971,10 @@ class InverterOperationModeSensor(SensorEntity):
         # If we can wait for a negative price, we MUST block charging. 
         # Inside the ladder, we will decide whether to sell PV or just wait.
         if can_wait and neg_h is not None:
-            if not is_forecast or check_h_rel < neg_h:
+            # v11.6.29: Use check_h_abs (absolute hour) to compare with neg_h (absolute hour).
+            # Previously used check_h_rel (relative = offset from now), which caused hours AFTER
+            # the negative price window to still show no_pv_sale_no_bat (e.g., rel=4 < neg_h=12 → True).
+            if not is_forecast or check_h_abs < neg_h:
                 # 1. Check if there are any planned AI sales between now and the negative price
                 planned_sales = [h for h in sell_strategy.get("active_hours", []) if check_h_abs <= h < neg_h]
                 if not planned_sales:
