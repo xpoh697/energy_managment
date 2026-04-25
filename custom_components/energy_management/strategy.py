@@ -2125,24 +2125,23 @@ class StrategyEngine:
                             # Baseline sim_log_base starts at current SOC, which masks the true solar potential.
                             throttle_sim_hours = list(range(int(end_first) + 1, int(start_second)))
                             if throttle_sim_hours:
-                                # v11.3.91: Only throttle if there is meaningful solar potential between peaks
-                                avg_gen_prof = dict(man.get_average_profile("generation", man.custom_period, "all"))
-                                total_window_gen = sum(float(x) for x in [avg_gen_prof.get(str(h % 24), 0.0) for h in throttle_sim_hours]) * eff
+                                # v11.6.35: Night-Aware Deficit Throttling.
+                                # Always run simulation regardless of solar generation.
+                                # Without solar (night), sim returns max_recharge_soc = base_target,
+                                # making deficit = 100% - base_target, raising base_target to 100%
+                                # -> nothing sold in Window1, all energy reserved for higher-priced Window2.
+                                _, throttle_log, _ = self.run_soc_simulation(base_target, throttle_sim_hours, now, {})
+                                max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 
-                                if total_window_gen > 0.2:
-                                    _, throttle_log, _ = self.run_soc_simulation(base_target, throttle_sim_hours, now, {})
-                                    max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
-                                    
-                                    # If solar cannot fill it up, raise the discharge floor (base_target) by the deficit
-                                    # v11.4.25: Price-Aware Deficit Throttling
-                                    # Only hold the energy if the Evening peak price is actually higher than current Morning price.
-                                    prices_all = all_sell_prices
-                                    avg_p1 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[0]) / len(epochs_eval[0])
-                                    avg_p2 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[1]) / len(epochs_eval[1])
-                                    
-                                    if max_recharge_soc < 99.0 and avg_p2 > (avg_p1 + 0.05):
-                                        deficit_pct = 100.0 - max_recharge_soc
-                                        base_target = min(100.0, base_target + deficit_pct)
+                                # v11.4.25: Price-Aware Deficit Throttling
+                                # Only hold the energy if the second epoch price is higher than the first.
+                                prices_all = all_sell_prices
+                                avg_p1 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[0]) / len(epochs_eval[0])
+                                avg_p2 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[1]) / len(epochs_eval[1])
+                                
+                                if max_recharge_soc < 99.0 and avg_p2 > (avg_p1 + 0.05):
+                                    deficit_pct = 100.0 - max_recharge_soc
+                                    base_target = min(100.0, base_target + deficit_pct)
                                     
                         if future_active_sell_base:
                             last_h_base = future_active_sell_base[-1]
