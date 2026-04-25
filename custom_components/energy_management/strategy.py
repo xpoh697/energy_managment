@@ -2015,6 +2015,16 @@ class StrategyEngine:
                             _sell_latest_cs = max(cur_hour, _first_sell_for_sim - _sell_hours_to_full)
                             _sell_raw_block = min(_sell_pv_no_bat_max_h, _sell_latest_cs)
                             _sell_sim_no_charge_until = _sell_raw_block if _sell_raw_block > cur_hour else None
+                        elif _sell_sim_current_mode == "no_pv_sale_no_bat":
+                            # v11.6.14: no_pv_sale_no_bat also blocks PV charging (c_amps_fixed=0.0).
+                            # Block simulation charging until the first negative-price buy hour.
+                            _sell_neg_h = None
+                            for _nh in range(cur_hour, min(48, cur_hour + 24)):
+                                if all_buy_prices.get(_nh, 999.0) < 0.0:
+                                    _sell_neg_h = _nh
+                                    break
+                            if _sell_neg_h is not None and _sell_neg_h > cur_hour:
+                                _sell_sim_no_charge_until = _sell_neg_h
                         natural_morning_soc, sim_log_base, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
                             no_battery_charge_until=_sell_sim_no_charge_until
