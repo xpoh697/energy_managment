@@ -1671,7 +1671,7 @@ class StrategyEngine:
                                 b_soc, sim_range_pre, now,
                                 no_battery_charge_until=_combined_block
                             )
-                            _LOGGER.debug(
+                            _LOGGER.warning(
                                 "[BUY v11.6.14] pre-sim: mode=%s b_soc=%.1f block_until=%s pv_no_bat=%s soc_plan=%.1f",
                                 _current_inverter_mode, b_soc, _combined_block, pv_no_bat_block_until, soc_at_start_plan
                             )
@@ -1730,7 +1730,7 @@ class StrategyEngine:
                             # Extend to first_h_buy: post-sale_pv_no_bat hours may be no_pv_sale_no_bat
                             _effective_pv_block = max(pv_no_bat_block_until, first_h_buy)
                             _buy_sim_no_charge_until = max(_buy_sim_no_charge_until or 0, _effective_pv_block)
-                        _LOGGER.debug(
+                        _LOGGER.warning(
                             "[BUY v11.6.14] full-sim: mode=%s b_soc=%.1f no_charge_until=%s pv_no_bat=%s first_h_buy=%s",
                             _current_inverter_mode, b_soc, _buy_sim_no_charge_until, pv_no_bat_block_until, first_h_buy
                         )
