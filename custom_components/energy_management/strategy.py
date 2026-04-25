@@ -791,7 +791,7 @@ class StrategyEngine:
             return float(val.get("soc", default))
         return float(val if val is not None else default)
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -934,6 +934,11 @@ class StrategyEngine:
 
             # 4. Inverter Command (AI Buying/Selling)
             cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
+
+            # v11.6.16: During negative-price buying, inverter curtails PV (DC bus saturated with grid import).
+            # pv_curtail_hours contains only hours where cmd_p > 0 AND price < 0.
+            if pv_curtail_hours and h_abs in pv_curtail_hours:
+                expected_gen_kw = 0.0
 
             # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
             if no_battery_charge or (no_battery_charge_until is not None and h_abs < no_battery_charge_until):
@@ -1727,9 +1732,14 @@ class StrategyEngine:
                             # Extend to first_h_buy: post-sale_pv_no_bat hours may be no_pv_sale_no_bat
                             _effective_pv_block = max(pv_no_bat_block_until, first_h_buy)
                             _buy_sim_no_charge_until = max(_buy_sim_no_charge_until or 0, _effective_pv_block)
+                        # v11.6.16: PV is curtailed during negative-price buying
+                        _neg_buy_curtail = set()
+                        if is_neg_strategy:
+                            _neg_buy_curtail = {h for h, p in charge_commands.items() if p > 0.0 and all_buy_prices.get(h, 0.0) < 0.0}
                         _, sim_log, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, charge_commands,
-                            no_battery_charge_until=_buy_sim_no_charge_until
+                            no_battery_charge_until=_buy_sim_no_charge_until,
+                            pv_curtail_hours=_neg_buy_curtail or None
                         )
                         
                         # 1. Projected SOC at START of the first buy hour
