@@ -2194,10 +2194,10 @@ class EnergyProfileManager:
         """Analyze current day state and return permissions for heavy loads."""
         return self.strategy_engine.get_budget_and_permissions(days_for_profile, skip_strategy_check)
 
-    def run_soc_simulation(self, start_soc, sim_hours_abs, start_time=None, charge_commands=None):
+    def run_soc_simulation(self, start_soc, sim_hours_abs, start_time=None, commands=None, **kwargs):
         """Universal SOC simulation engine."""
         now = start_time or dt_util.now()
-        return self.strategy_engine.run_soc_simulation(start_soc, sim_hours_abs, now, charge_commands)
+        return self.strategy_engine.run_soc_simulation(start_soc, sim_hours_abs, now, commands, **kwargs)
 
     def _update_bms_learned_profile(self, now):
         """Analyze stable power history to learn BMS charging limits.
