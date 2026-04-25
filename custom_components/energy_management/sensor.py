@@ -2790,6 +2790,15 @@ class InverterOperationModeSensor(SensorEntity):
             attrs["target_soc"] = t_soc
             attrs["charge_reason"] = chg_reason
             
+            # v11.6.21: Временная отладка для выявления причины сброса no_pv_sale_no_bat
+            attrs["debug_neg_h"] = neg_h
+            attrs["debug_can_wait"] = buy_strategy.get("can_wait_for_negative", False)
+            attrs["debug_cur_price"] = cur_price
+            attrs["debug_price_sell_only"] = price_sell_only_pv
+            attrs["debug_has_surplus"] = has_surplus
+            attrs["debug_avg_gen"] = avg_gen
+            attrs["debug_is_energy_low"] = locals().get("is_energy_low_for_evening", "N/A")
+            
             # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
             if self.manager.battery_voltage_sensor:
                 if c_amps_fixed is not None:
