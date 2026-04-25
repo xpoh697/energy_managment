@@ -2317,27 +2317,18 @@ class StrategyEngine:
                     else:
                         target_soc = base_target
 
-                    # v11.6.38: Clean Arbitrage reporting with Partial Sale info
-                    sold_now = sell_commands.get(int(cur_hour), 0.0)
-                    future_sells = {h: p for h, p in sell_commands.items() if h > cur_hour and p > 0.01}
-                    
-                    if sold_now > 0.01 and future_sells:
-                        total_planned = sum(sell_commands.values())
-                        next_h = min(future_sells.keys())
-                        next_p = future_sells[next_h]
-                        res["arbitrage_decision"] = f"Часть {sold_now:.1f} из {total_planned:.1f} кВтч. Остаток в {self._format_h(next_h)} (по {all_sell_prices.get(next_h, 0.0):.2f})"
+                    # v11.4.06: Clean Arbitrage reporting (Sell mode)
+                    best_buy_p, best_buy_h = get_best_buyback(cur_hour)
+                    if best_buy_h is not None:
+                        pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
+                        global_arb_note = f"Купим в {self._format_h(best_buy_h)} по {best_buy_p:.2f} | Выгода {pot_gain_val:.2f}"
                     else:
-                        best_buy_p, best_buy_h = get_best_buyback(cur_hour)
-                        if best_buy_h is not None:
-                            pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
-                            global_arb_note = f"Купим в {self._format_h(best_buy_h)} по {best_buy_p:.2f} | Выгода {pot_gain_val:.2f}"
-                        else:
-                            global_arb_note = "Нет окна откупа"
+                        global_arb_note = "Нет окна откупа"
 
-                        if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                            res["arbitrage_decision"] = f"Продаем сейчас по {cur_p_f:.2f} | {global_arb_note}"
-                        else:
-                            res["arbitrage_decision"] = "Ручной режим (AI выкл.)"
+                    if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
+                        res["arbitrage_decision"] = f"Продаем сейчас по {cur_p_f:.2f} | {global_arb_note}"
+                    else:
+                        res["arbitrage_decision"] = "Ручной режим (AI выкл.)"
                         
                     target_soc = float(min(100.0, target_soc))
                     delta_available_dc = available_sell_ac / eff
@@ -2580,7 +2571,15 @@ class StrategyEngine:
                             res["power_decision"] = f"АКБ у порога ({b_soc:.1f}% \u2264 {display_soc_after:.1f}%)"
                             res["planned_power_per_h"] = {}
                         else:
-                            res["power_decision"] = sell_diagnosis
+                            # v11.6.39: Partial sale status in power_decision
+                            sold_now = sell_commands.get(int(cur_hour), 0.0) if 'sell_commands' in locals() else 0.0
+                            future_sells = {h: p for h, p in sell_commands.items() if h > cur_hour and p > 0.01} if 'sell_commands' in locals() else {}
+                            if sold_now > 0.01 and future_sells:
+                                total_planned = sum(sell_commands.values())
+                                next_h = min(future_sells.keys())
+                                res["power_decision"] = f"{sell_diagnosis} | Часть {sold_now:.1f} из {total_planned:.1f} кВтч (Остаток в {self._format_h(next_h)})"
+                            else:
+                                res["power_decision"] = sell_diagnosis
                         res_soc_after = display_soc_after
                         res_soc_morning = soc_morning_display
 
