@@ -1625,11 +1625,10 @@ class StrategyEngine:
                             sim_range_neg = list(range(cur_hour, first_neg_h))
                             soc_at_neg, _, _ = self.run_soc_simulation(b_soc, sim_range_neg, now, no_battery_charge=True)
                             
-                            # v11.6.27: threshold uses physical min_soc (not min_soc_buy).
+                            # v11.6.28: threshold uses CONF_MIN_SOC_BUY (emergency_soc_limit, default 10%).
                             # At the negative price hour, the system immediately starts buying from grid,
-                            # so we only need to survive above the physical battery floor, not the
-                            # purchase trigger threshold (which is much higher and over-conservative here).
-                            threshold_neg = max(float(man.get_setting("min_soc", 10.0)), 5.0)
+                            # so we only need to survive above the physical battery floor.
+                            threshold_neg = max(float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)), 5.0)
                             res["can_wait_for_negative"] = bool(soc_at_neg > threshold_neg)
                             res["first_negative_hour"] = first_neg_h
                             
