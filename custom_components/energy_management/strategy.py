@@ -2358,13 +2358,11 @@ class StrategyEngine:
                     if True: # v11.3.97: Always run simulation for telemetry
                         future_active_sell = [h for h in target_hours_sorted if h >= cur_hour]
                         if future_active_sell:
-                            # v11.3.16: Anchor 'after sale' projection to the end of the WHOLE continuous block
-                            last_h_sell_immediate = future_active_sell[-1]
-                            # Search for the first break in the sequence to define the immediate block
-                            for i in range(1, len(future_active_sell)):
-                                if future_active_sell[i] != future_active_sell[i-1] + 1:
-                                    last_h_sell_immediate = future_active_sell[i-1]
-                                    break
+                            # v11.6.40: Anchor 'after sale' projection to the end of the FIRST ENERGY POOL.
+                            # Since hours in the same pool share the same energy with no solar recharge,
+                            # the "after sale" SOC must reflect ALL sales within this pool.
+                            last_h_sell_immediate = max(epochs[0]) if 'epochs' in locals() and epochs else future_active_sell[-1]
+                            res["first_pool_hours"] = epochs[0] if 'epochs' in locals() and epochs else future_active_sell
                             
                             key_after = f"{last_h_sell_immediate % 24:02d}:59" + (" (Завтра)" if last_h_sell_immediate >= 24 else "")
                             soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
@@ -2571,13 +2569,19 @@ class StrategyEngine:
                             res["power_decision"] = f"АКБ у порога ({b_soc:.1f}% \u2264 {display_soc_after:.1f}%)"
                             res["planned_power_per_h"] = {}
                         else:
-                            # v11.6.39: Partial sale status in power_decision
-                            sold_now = sell_commands.get(int(cur_hour), 0.0) if 'sell_commands' in locals() else 0.0
-                            future_sells = {h: p for h, p in sell_commands.items() if h > cur_hour and p > 0.01} if 'sell_commands' in locals() else {}
-                            if sold_now > 0.01 and future_sells:
-                                total_planned = sum(sell_commands.values())
-                                next_h = min(future_sells.keys())
-                                res["power_decision"] = f"{sell_diagnosis} | Часть {sold_now:.1f} из {total_planned:.1f} кВтч (Остаток в {self._format_h(next_h)})"
+                            # v11.6.40: Smart Pool Splitting Status
+                            future_sells = {h: p for h, p in sell_commands.items() if h >= cur_hour and p > 0.01} if 'sell_commands' in locals() else {}
+                            if future_sells:
+                                h_list = sorted(future_sells.keys())
+                                has_gap = any(h_list[i] > h_list[i-1] + 1 for i in range(1, len(h_list)))
+                                if has_gap:
+                                    first_h = h_list[0]
+                                    last_h = h_list[-1]
+                                    first_p = future_sells[first_h]
+                                    last_p = future_sells[last_h]
+                                    res["power_decision"] = f"{sell_diagnosis} | Пул разбит: {first_p:.1f}кВтч в {self._format_h(first_h)}, допродажа в {self._format_h(last_h)}"
+                                else:
+                                    res["power_decision"] = sell_diagnosis
                             else:
                                 res["power_decision"] = sell_diagnosis
                         res_soc_after = display_soc_after
@@ -2681,15 +2685,9 @@ class StrategyEngine:
                 sim_info = res.get("sell_simulation" if mode == "sell" else "buy_simulation")
                 s_log = sim_info.get("log", {}) if sim_info else {}
                 
-                # v11.6.37: Show only nearest (first) continuous window in planned_power
-                _first_window_active = [actual_active[0]]
-                for i in range(1, len(actual_active)):
-                    if actual_active[i] == actual_active[i-1] + 1:
-                        _first_window_active.append(actual_active[i])
-                    else:
-                        break
-                        
-                for h in _first_window_active:
+                # v11.6.40: Show ALL hours of the first Energy Pool in planned_power
+                _first_window_active = res.get("first_pool_hours", actual_active)
+                for h in sorted(_first_window_active):
                     h_label = self._format_h(h)
                     h_idx = int(h)
                     p_val = sell_commands.get(h_idx, 0.0) if mode == "sell" else charge_commands.get(h_idx, 0.0)
