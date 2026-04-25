@@ -1812,6 +1812,8 @@ class StrategyEngine:
                             "projected_soc_at_end": float(round_f(min(soc_at_end, target_soc), 1)),
                             "projected_soc_morning_pct": float(round_f(soc_morning, 1)),
                             "projected_soc_morning": float(round_f(soc_morning, 1)),
+                            "no_battery_charge_until": _buy_sim_no_charge_until,
+                            "pv_curtail_hours": _neg_buy_curtail,
                             "log": sim_log
                         }
 

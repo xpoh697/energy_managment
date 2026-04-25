@@ -2525,8 +2525,28 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             else:
                 sim_hours = list(range(now.hour, sunrise_hour))
 
-        # 1. Run Unified Simulation Engine
-        simulated_soc, charge_log, _ = self.manager.run_soc_simulation(batt_soc, sim_hours, now)
+        # 1. Get active strategy constraints to merge into simulation
+        buy_strat = self.manager.strategy_engine.get_market_strategy("buy") or {}
+        sell_strat = self.manager.strategy_engine.get_market_strategy("sell") or {}
+        
+        charge_commands = buy_strat.get("charge_commands", {})
+        planned_sell = sell_strat.get("planned_sell", {})
+        
+        merged_commands = {**charge_commands}
+        for h, v in planned_sell.items():
+            merged_commands[int(h)] = -abs(v) # Ensure sell commands are negative
+            
+        buy_sim = buy_strat.get("buy_simulation", {})
+        no_battery_charge_until = buy_sim.get("no_battery_charge_until")
+        pv_curtail_hours = buy_sim.get("pv_curtail_hours")
+
+        # 2. Run Unified Simulation Engine
+        simulated_soc, charge_log, _ = self.manager.run_soc_simulation(
+            batt_soc, sim_hours, now,
+            commands=merged_commands,
+            no_battery_charge_until=no_battery_charge_until,
+            pv_curtail_hours=pv_curtail_hours
+        )
         
         # v11.3.63: Inject Budget Diagnostics for transparency
         budget_data = self.manager.strategy_engine.get_budget_and_permissions(skip_strategy_check=True)
