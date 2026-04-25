@@ -989,7 +989,7 @@ class StrategyEngine:
         
         cache_key = f"market_strategy_{mode}"
         cached = self._strategy_cache.get(cache_key)
-        if cached and (now - cached["time"]).total_seconds() < 30:
+        if cached and (now - cached["time"]).total_seconds() < 30 and cached["time"].hour == now.hour:
             return cached["res"]
 
         res = {
