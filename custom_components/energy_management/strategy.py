@@ -1732,10 +1732,11 @@ class StrategyEngine:
                             # Extend to first_h_buy: post-sale_pv_no_bat hours may be no_pv_sale_no_bat
                             _effective_pv_block = max(pv_no_bat_block_until, first_h_buy)
                             _buy_sim_no_charge_until = max(_buy_sim_no_charge_until or 0, _effective_pv_block)
-                        # v11.6.16: PV is curtailed during negative-price buying
+                        # v11.6.16: During negative-price buy window, inverter curtails PV regardless of
+                        # actual grid power — inverter is in buy-mode config which suppresses PV.
                         _neg_buy_curtail = set()
                         if is_neg_strategy:
-                            _neg_buy_curtail = {h for h, p in charge_commands.items() if p > 0.0 and all_buy_prices.get(h, 0.0) < 0.0}
+                            _neg_buy_curtail = {h for h in target_hours_sorted if all_buy_prices.get(h, 0.0) < 0.0}
                         _, sim_log, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, charge_commands,
                             no_battery_charge_until=_buy_sim_no_charge_until,
