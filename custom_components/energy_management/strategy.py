@@ -1682,7 +1682,8 @@ class StrategyEngine:
                             )
 
                         # 1. Calculate how much kWh we roughly need to add based on EXPECTED SOC
-                        theoretical_gap_kwh = max(0.0, (target_soc - soc_at_start_plan) / 100.0 * b_cap)
+                        eff_coeff = float(self.get_efficiency_coefficient() or 0.95)
+                        theoretical_gap_kwh = max(0.0, (target_soc - soc_at_start_plan) / 100.0 * b_cap) / max(0.1, eff_coeff)
                         
                         avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
                         pool_cons = 0.0
