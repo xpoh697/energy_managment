@@ -2790,15 +2790,6 @@ class InverterOperationModeSensor(SensorEntity):
             attrs["target_soc"] = t_soc
             attrs["charge_reason"] = chg_reason
             
-            # v11.6.21: Временная отладка для выявления причины сброса no_pv_sale_no_bat
-            attrs["debug_neg_h"] = neg_h
-            attrs["debug_can_wait"] = buy_strategy.get("can_wait_for_negative", False)
-            attrs["debug_cur_price"] = cur_price
-            attrs["debug_price_sell_only"] = price_sell_only_pv
-            attrs["debug_has_surplus"] = has_surplus
-            attrs["debug_avg_gen"] = avg_gen
-            attrs["debug_is_energy_low"] = locals().get("is_energy_low_for_evening", "N/A")
-            
             # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
             if self.manager.battery_voltage_sensor:
                 if c_amps_fixed is not None:
@@ -2963,13 +2954,16 @@ class InverterOperationModeSensor(SensorEntity):
         buy_p_cur = self.manager.get_price("buy", today_str, sim_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
 
-        # v11.6.20: Use strategy engine's precise survival simulation instead of rough heuristics
+        # v11.6.22: Use strategy engine's precise survival simulation instead of rough heuristics
         # Removed avg_gen > 0.01 requirement because curtailment or clouds could falsely drop the mode
         is_waiting_for_neg = False
         neg_h = buy_strategy.get("first_negative_hour")
         can_wait = buy_strategy.get("can_wait_for_negative", False)
         
-        if can_wait and neg_h is not None and cur_price is not None and cur_price < price_sell_only_pv:
+        # We drop the cur_price < price_sell_only_pv condition here.
+        # If we can wait for a negative price, we MUST block charging. 
+        # Inside the ladder, we will decide whether to sell PV or just wait.
+        if can_wait and neg_h is not None:
             if not is_forecast or check_h_rel < neg_h:
                 # 1. Check if there are any planned AI sales between now and the negative price
                 planned_sales = [h for h in sell_strategy.get("active_hours", []) if check_h_abs <= h < neg_h]
@@ -2986,12 +2980,26 @@ class InverterOperationModeSensor(SensorEntity):
             reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
         elif is_waiting_for_neg:
-            # v11.6.19 - Priority 2: Wait for negative price (Elevated over Emergency SOC)
-            # no_pv_sale_no_bat sets c_amps_fixed = 0.0 to STOP battery charging,
-            # saving space for the upcoming negative price.
-            mode = "no_pv_sale_no_bat"
-            neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
-            reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
+            # v11.6.22 - Priority 2: Wait for negative price (Elevated over Emergency SOC)
+            # Evaluate if we can sell PV profitably instead of just waiting
+            can_sell_pv = False
+            if cur_price is not None and cur_price >= price_sell_only_pv and has_surplus:
+                morning_soc_proj = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
+                target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
+                is_low_for_morning = bool(morning_soc_proj < target_morning)
+                is_throttled = bool(sell_strategy.get("recommended_power_kw", 0.0) < 0.01 and rel_h in sell_strategy.get("active_hours", []))
+                is_energy_low_for_evening = bool(is_preparing_for_peak or is_low_for_morning)
+                
+                if is_before_limit_hour and not (is_throttled or is_energy_low_for_evening) and cur_price > 0:
+                    can_sell_pv = True
+            
+            if can_sell_pv:
+                mode = "sale_pv_no_bat"
+                reason = f"Продажа только солнца: Цена ({cur_price:.2f}) >= Порога ({price_sell_only_pv:.2f}) (Ожидаем отриц. цену)"
+            else:
+                mode = "no_pv_sale_no_bat"
+                neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
+                reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
 
         elif batt_soc <= min_soc:
             # v11.6.7 - Priority 3: Emergency SOC management
