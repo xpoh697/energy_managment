@@ -2311,6 +2311,27 @@ class StrategyEngine:
                                 sell_commands[int(h)] = round_f(actual_power, 3)
                                 rem_kwh_sell -= (actual_power * h_f)
                     
+                    # v11.6.48: Round 117 — Morning Floor Liberation
+                    # Evening hours → limited by Gatekeeper base_target (e.g. 33%).
+                    # Morning hours (next day, before sunrise) → only limited by target_morning_soc (e.g. 15%).
+                    # Second pass: top up morning hours with the extra budget freed by the lower floor.
+                    _morning_extra_total = max(0.0, (base_target - target_morning_soc) * b_cap / 100.0 * eff)
+                    if _morning_extra_total > 0.01 and epochs:
+                        _morning_hrs_p0 = sorted(
+                            [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
+                            key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True
+                        )
+                        _rem_extra = _morning_extra_total
+                        for h_m in _morning_hrs_p0:
+                            if _rem_extra <= 0.05:
+                                break
+                            _curr_alloc = sell_commands.get(int(h_m), 0.0)
+                            _can_add = max(0.0, max_p - _curr_alloc)
+                            _add_power = min(_can_add, _rem_extra)
+                            if _add_power > 0.01:
+                                sell_commands[int(h_m)] = round_f(_curr_alloc + _add_power, 3)
+                                _rem_extra -= _add_power
+
                     power_needed = sell_commands.get(int(cur_hour), 0.0)
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
@@ -2418,6 +2439,24 @@ class StrategyEngine:
                                 else:
                                     sell_commands[int(h)] = 0.0
                         
+                        # v11.6.48: Round 117 — Morning Floor Liberation (recursive correction pass)
+                        _morning_extra_fix = max(0.0, (base_target - target_morning_soc) * b_cap / 100.0 * eff)
+                        if _morning_extra_fix > 0.01 and epochs:
+                            _morning_hrs_fix = sorted(
+                                [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
+                                key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True
+                            )
+                            _rem_extra_fix = _morning_extra_fix
+                            for h_mf in _morning_hrs_fix:
+                                if _rem_extra_fix <= 0.05:
+                                    break
+                                _curr_fix = sell_commands.get(int(h_mf), 0.0)
+                                _can_add_fix = max(0.0, max_p - _curr_fix)
+                                _add_fix = min(_can_add_fix, _rem_extra_fix)
+                                if _add_fix > 0.01:
+                                    sell_commands[int(h_mf)] = round_f(_curr_fix + _add_fix, 3)
+                                    _rem_extra_fix -= _add_fix
+
                         # 4. Re-run final simulation
                         sim_commands_fix = {int(h): -cmd for h, cmd in sell_commands.items()}
                         if best_buy_h is not None and best_buy_h < sim_end_h:
