@@ -2315,9 +2315,14 @@ class StrategyEngine:
                     # Evening hours → limited by Gatekeeper base_target (e.g. 33%).
                     # Morning hours (next day, before sunrise) → limited by min_soc_val + 2% ONLY.
                     # Second pass: top up morning hours with the extra budget freed by the lower floor.
-                    # Round 117 fix: floor = min_soc_val + 2.0 (emergency reserve + 2%), NOT target_morning_soc.
+                    # v11.6.50: Round 117 fix — subtract house consumption during morning hours
                     _morning_sell_floor = min_soc_val + 2.0
-                    _morning_extra_total = max(0.0, (base_target - _morning_sell_floor) * b_cap / 100.0 * eff)
+                    _morning_hrs_p0_calc = [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h] if epochs else []
+                    _morning_house_kwh = sum(
+                        float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) * occ_coeff
+                        for h in _morning_hrs_p0_calc
+                    )
+                    _morning_extra_total = max(0.0, (base_target - _morning_sell_floor) * b_cap / 100.0 * eff - _morning_house_kwh)
                     if _morning_extra_total > 0.01 and epochs:
                         _morning_hrs_p0 = sorted(
                             [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
@@ -2442,9 +2447,14 @@ class StrategyEngine:
                                     sell_commands[int(h)] = 0.0
                         
                         # v11.6.48: Round 117 — Morning Floor Liberation (recursive correction pass)
-                        # floor = min_soc_val + 2.0, same as main pass
+                        # floor = min_soc_val + 2.0, same as main pass, minus house consumption
                         _morning_sell_floor_fix = min_soc_val + 2.0
-                        _morning_extra_fix = max(0.0, (base_target - _morning_sell_floor_fix) * b_cap / 100.0 * eff)
+                        _morning_hrs_fix_calc = [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h] if epochs else []
+                        _morning_house_fix = sum(
+                            float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) * occ_coeff
+                            for h in _morning_hrs_fix_calc
+                        )
+                        _morning_extra_fix = max(0.0, (base_target - _morning_sell_floor_fix) * b_cap / 100.0 * eff - _morning_house_fix)
                         if _morning_extra_fix > 0.01 and epochs:
                             _morning_hrs_fix = sorted(
                                 [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
