@@ -2313,9 +2313,11 @@ class StrategyEngine:
                     
                     # v11.6.48: Round 117 — Morning Floor Liberation
                     # Evening hours → limited by Gatekeeper base_target (e.g. 33%).
-                    # Morning hours (next day, before sunrise) → only limited by target_morning_soc (e.g. 15%).
+                    # Morning hours (next day, before sunrise) → limited by min_soc_val + 2% ONLY.
                     # Second pass: top up morning hours with the extra budget freed by the lower floor.
-                    _morning_extra_total = max(0.0, (base_target - target_morning_soc) * b_cap / 100.0 * eff)
+                    # Round 117 fix: floor = min_soc_val + 2.0 (emergency reserve + 2%), NOT target_morning_soc.
+                    _morning_sell_floor = min_soc_val + 2.0
+                    _morning_extra_total = max(0.0, (base_target - _morning_sell_floor) * b_cap / 100.0 * eff)
                     if _morning_extra_total > 0.01 and epochs:
                         _morning_hrs_p0 = sorted(
                             [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
@@ -2440,7 +2442,9 @@ class StrategyEngine:
                                     sell_commands[int(h)] = 0.0
                         
                         # v11.6.48: Round 117 — Morning Floor Liberation (recursive correction pass)
-                        _morning_extra_fix = max(0.0, (base_target - target_morning_soc) * b_cap / 100.0 * eff)
+                        # floor = min_soc_val + 2.0, same as main pass
+                        _morning_sell_floor_fix = min_soc_val + 2.0
+                        _morning_extra_fix = max(0.0, (base_target - _morning_sell_floor_fix) * b_cap / 100.0 * eff)
                         if _morning_extra_fix > 0.01 and epochs:
                             _morning_hrs_fix = sorted(
                                 [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
