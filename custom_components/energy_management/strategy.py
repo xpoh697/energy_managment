@@ -2568,7 +2568,23 @@ class StrategyEngine:
                                     last_h = h_list[-1]
                                     first_p = future_sells[first_h]
                                     last_p = future_sells[last_h]
-                                    res["power_decision"] = f"{sell_diagnosis} | Пул разбит: {first_p:.1f}кВтч в {self._format_h(first_h)}, допродажа в {self._format_h(last_h)}"
+                                    # v11.6.47: Round 116 — Distinguish intra-pool gap (ночь) vs inter-pool gap (через солнце)
+                                    # Use already-computed epochs to check if first_h and last_h are in same epoch.
+                                    _epochs_ref = epochs if 'epochs' in locals() and epochs else []
+                                    _first_epoch_idx = next((ei for ei, ep in enumerate(_epochs_ref) if first_h in ep), 0)
+                                    _last_epoch_idx = next((ei for ei, ep in enumerate(_epochs_ref) if last_h in ep), 0)
+                                    if _first_epoch_idx != _last_epoch_idx:
+                                        # Different epochs — separated by solar day
+                                        res["power_decision"] = (
+                                            f"{sell_diagnosis} | {first_p:.1f}кВтч в {self._format_h(first_h)}, "
+                                            f"+ Пул {_last_epoch_idx + 1} (↑ солнце): {self._format_h(last_h)}"
+                                        )
+                                    else:
+                                        # Same epoch — just a nightly gap (same energy pool, split hours)
+                                        res["power_decision"] = (
+                                            f"{sell_diagnosis} | Пул разбит: {first_p:.1f}кВтч в {self._format_h(first_h)}, "
+                                            f"допродажа в {self._format_h(last_h)}"
+                                        )
                                 else:
                                     res["power_decision"] = sell_diagnosis
                             else:
