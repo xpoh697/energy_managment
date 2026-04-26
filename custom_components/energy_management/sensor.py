@@ -2641,6 +2641,7 @@ class InverterOperationModeSensor(SensorEntity):
             "target_soc": 0.0,
             "charge_amps": 0.0,
         }
+        self._last_logged_hour = None
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
             name=manager.entry.data.get("name", "Energy Management"),
@@ -2822,12 +2823,13 @@ class InverterOperationModeSensor(SensorEntity):
                 "charge_amps": round_f(attrs.get("charge_amps", 0.0), 1),
             }
             
-            # Check for significant changes
+            # Check for significant changes OR new hour (Round 113)
             has_changed = (
                 curr_params["mode"] != self._last_logged_params.get("mode") or
                 abs(curr_params["power"] - self._last_logged_params.get("power", 0.0)) >= 0.1 or
                 abs(curr_params["target_soc"] - self._last_logged_params.get("target_soc", 0.0)) >= 0.1 or
-                abs(curr_params["charge_amps"] - self._last_logged_params.get("charge_amps", 0.0)) >= 0.5
+                abs(curr_params["charge_amps"] - self._last_logged_params.get("charge_amps", 0.0)) >= 0.5 or
+                now.hour != self._last_logged_hour
             )
             
             if has_changed:
@@ -2837,6 +2839,7 @@ class InverterOperationModeSensor(SensorEntity):
                     old_mode, mode, p_val, t_soc, attrs.get("charge_amps", 0.0), reason
                 )
                 self._last_logged_params = curr_params
+                self._last_logged_hour = now.hour
 
             return attrs
         except Exception as e:
