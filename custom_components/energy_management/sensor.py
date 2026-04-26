@@ -2833,10 +2833,11 @@ class InverterOperationModeSensor(SensorEntity):
             )
             
             if has_changed:
+                log_tag = "[Inverter Status]" if now.hour != self._last_logged_hour and curr_params["mode"] == self._last_logged_params.get("mode") else "[Inverter Change]"
                 old_mode = self._last_logged_params.get("mode", "initial")
-                _LOGGER.info(
-                    "[Inverter Change] %s -> %s | Power: %.1f kW | Target SOC: %.1f%% | Amps: %.1f A | Reason: %s",
-                    old_mode, mode, p_val, t_soc, attrs.get("charge_amps", 0.0), reason
+                _LOGGER.warning(
+                    "%s %s -> %s | Power: %.1f kW | Target SOC: %.1f%% | Amps: %.1f A | Reason: %s",
+                    log_tag, old_mode, mode, p_val, t_soc, attrs.get("charge_amps", 0.0), reason
                 )
                 self._last_logged_params = curr_params
                 self._last_logged_hour = now.hour
