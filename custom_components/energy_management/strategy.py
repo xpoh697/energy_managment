@@ -2311,35 +2311,34 @@ class StrategyEngine:
                                 sell_commands[int(h)] = round_f(actual_power, 3)
                                 rem_kwh_sell -= (actual_power * h_f)
                     
-                    # v11.6.48: Round 117 — Morning Floor Liberation
-                    # Evening hours → limited by Gatekeeper base_target (e.g. 33%).
-                    # Morning hours (next day, before sunrise) → limited by min_soc_val + 2% ONLY.
-                    # Second pass: top up morning hours with the extra budget freed by the lower floor.
-                    # v11.6.50: Round 117 fix — subtract house consumption during morning hours
+                    # v11.6.51: Round 117 — Morning Floor Liberation (correct approach)
+                    # Use natural_morning_soc (sim_log_base, no sells) to derive exact SOC
+                    # at start of morning hours, then cap sell power to keep floor = min_soc + 2%.
                     _morning_sell_floor = min_soc_val + 2.0
-                    _morning_hrs_p0_calc = [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h] if epochs else []
-                    _morning_house_kwh = sum(
-                        float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) * occ_coeff
-                        for h in _morning_hrs_p0_calc
-                    )
-                    _morning_extra_total = max(0.0, (base_target - _morning_sell_floor) * b_cap / 100.0 * eff - _morning_house_kwh)
-                    if _morning_extra_total > 0.01 and epochs:
+                    if epochs:
                         _morning_hrs_p0 = sorted(
                             [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
                             key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True
                         )
-                        _rem_extra = _morning_extra_total
-                        for h_m in _morning_hrs_p0:
-                            if _rem_extra <= 0.05:
-                                break
-                            _curr_alloc = sell_commands.get(int(h_m), 0.0)
-                            _can_add = max(0.0, max_p - _curr_alloc)
-                            _add_power = min(_can_add, _rem_extra)
-                            if _add_power > 0.01:
-                                sell_commands[int(h_m)] = round_f(_curr_alloc + _add_power, 3)
-                                _rem_extra -= _add_power
+                        if _morning_hrs_p0:
+                            # SOC at 05:59 WITHOUT any sells = natural_morning_soc (from sim_log_base)
+                            # Subtract evening sells (h < 24 in epoch 0) to get adjusted SOC
+                            _eve_sell_kwh = sum(sell_commands.get(int(h), 0.0) for h in epochs[0] if h < 24)
+                            _soc_before_morn = natural_morning_soc - (_eve_sell_kwh * 100.0 / (b_cap * eff)) if b_cap > 0.1 else _morning_sell_floor
+                            for h_m in _morning_hrs_p0:
+                                _house_h = float(normalize_float(avg_prof_cons.get(str(h_m % 24), 0.0))) * occ_coeff
+                                # Max sell AC = (SOC above floor) * cap * eff - house consumption
+                                _max_sell_h = max(0.0, (_soc_before_morn - _morning_sell_floor) * b_cap / 100.0 * eff - _house_h)
+                                _curr_alloc = sell_commands.get(int(h_m), 0.0)
+                                _new_alloc = min(max_p, _max_sell_h)
+                                if _new_alloc > _curr_alloc + 0.01:
+                                    sell_commands[int(h_m)] = round_f(_new_alloc, 3)
+                                # Update rolling SOC for the next morning hour
+                                _used = sell_commands.get(int(h_m), 0.0)
+                                _soc_before_morn -= (_used + _house_h) / eff * 100.0 / b_cap if b_cap > 0.1 else 0.0
 
                     power_needed = sell_commands.get(int(cur_hour), 0.0)
+
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         if target_soc < base_target:
@@ -2446,30 +2445,25 @@ class StrategyEngine:
                                 else:
                                     sell_commands[int(h)] = 0.0
                         
-                        # v11.6.48: Round 117 — Morning Floor Liberation (recursive correction pass)
-                        # floor = min_soc_val + 2.0, same as main pass, minus house consumption
+                        # v11.6.51: Round 117 — Morning Floor Liberation (recursive correction pass)
                         _morning_sell_floor_fix = min_soc_val + 2.0
-                        _morning_hrs_fix_calc = [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h] if epochs else []
-                        _morning_house_fix = sum(
-                            float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) * occ_coeff
-                            for h in _morning_hrs_fix_calc
-                        )
-                        _morning_extra_fix = max(0.0, (base_target - _morning_sell_floor_fix) * b_cap / 100.0 * eff - _morning_house_fix)
-                        if _morning_extra_fix > 0.01 and epochs:
+                        if epochs:
                             _morning_hrs_fix = sorted(
                                 [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
                                 key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True
                             )
-                            _rem_extra_fix = _morning_extra_fix
-                            for h_mf in _morning_hrs_fix:
-                                if _rem_extra_fix <= 0.05:
-                                    break
-                                _curr_fix = sell_commands.get(int(h_mf), 0.0)
-                                _can_add_fix = max(0.0, max_p - _curr_fix)
-                                _add_fix = min(_can_add_fix, _rem_extra_fix)
-                                if _add_fix > 0.01:
-                                    sell_commands[int(h_mf)] = round_f(_curr_fix + _add_fix, 3)
-                                    _rem_extra_fix -= _add_fix
+                            if _morning_hrs_fix:
+                                _eve_sell_kwh_fix = sum(sell_commands.get(int(h), 0.0) for h in epochs[0] if h < 24)
+                                _soc_before_morn_fix = natural_morning_soc - (_eve_sell_kwh_fix * 100.0 / (b_cap * eff)) if b_cap > 0.1 else _morning_sell_floor_fix
+                                for h_mf in _morning_hrs_fix:
+                                    _house_h_fix = float(normalize_float(avg_prof_cons.get(str(h_mf % 24), 0.0))) * occ_coeff
+                                    _max_sell_h_fix = max(0.0, (_soc_before_morn_fix - _morning_sell_floor_fix) * b_cap / 100.0 * eff - _house_h_fix)
+                                    _curr_fix = sell_commands.get(int(h_mf), 0.0)
+                                    _new_alloc_fix = min(max_p, _max_sell_h_fix)
+                                    if _new_alloc_fix > _curr_fix + 0.01:
+                                        sell_commands[int(h_mf)] = round_f(_new_alloc_fix, 3)
+                                    _used_fix = sell_commands.get(int(h_mf), 0.0)
+                                    _soc_before_morn_fix -= (_used_fix + _house_h_fix) / eff * 100.0 / b_cap if b_cap > 0.1 else 0.0
 
                         # 4. Re-run final simulation
                         sim_commands_fix = {int(h): -cmd for h, cmd in sell_commands.items()}
