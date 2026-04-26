@@ -2635,6 +2635,12 @@ class InverterOperationModeSensor(SensorEntity):
         self._attr_unique_id = f"{manager.entry.entry_id}_inverter_mode"
         self._attr_icon = "mdi:state-machine"
         self._state = "sale_pv"
+        self._last_logged_params = {
+            "mode": None,
+            "power": 0.0,
+            "target_soc": 0.0,
+            "charge_amps": 0.0,
+        }
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
             name=manager.entry.data.get("name", "Energy Management"),
@@ -2807,6 +2813,31 @@ class InverterOperationModeSensor(SensorEntity):
             attrs["morning_soc_projected"] = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
             
             self.manager.current_inverter_mode = mode
+
+            # Round 112: Inverter Change Logging
+            curr_params = {
+                "mode": mode,
+                "power": round_f(p_val, 1),
+                "target_soc": round_f(t_soc, 1),
+                "charge_amps": round_f(attrs.get("charge_amps", 0.0), 1),
+            }
+            
+            # Check for significant changes
+            has_changed = (
+                curr_params["mode"] != self._last_logged_params.get("mode") or
+                abs(curr_params["power"] - self._last_logged_params.get("power", 0.0)) >= 0.1 or
+                abs(curr_params["target_soc"] - self._last_logged_params.get("target_soc", 0.0)) >= 0.1 or
+                abs(curr_params["charge_amps"] - self._last_logged_params.get("charge_amps", 0.0)) >= 0.5
+            )
+            
+            if has_changed:
+                old_mode = self._last_logged_params.get("mode", "initial")
+                _LOGGER.info(
+                    "[Inverter Change] %s -> %s | Power: %.1f kW | Target SOC: %.1f%% | Amps: %.1f A | Reason: %s",
+                    old_mode, mode, p_val, t_soc, attrs.get("charge_amps", 0.0), reason
+                )
+                self._last_logged_params = curr_params
+
             return attrs
         except Exception as e:
             _LOGGER.error("Error in InverterOperationModeSensor extra_state_attributes: %s", e)
