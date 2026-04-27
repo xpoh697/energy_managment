@@ -3139,15 +3139,20 @@ class InverterOperationModeSensor(SensorEntity):
                 else:
                     reason = "Цена выше порога, но условия продажи PV+АКБ не соблюдены"
             
-        elif cur_price is not None and cur_price < price_stop_sell:
+        elif cur_price is None:
+            # v11.6.65: Handle missing future prices gracefully
+            mode = "sale_pv"
+            reason = "Нет данных о цене (завтра?)"
+            
+        elif cur_price < price_stop_sell:
             # Global price floor for ANY selling
             mode = "stop_sale"
-            reason = f"Продажа заблокирована: Цена ({cur_price or 0.0:.2f}) < Порога ({price_stop_sell or 0.0:.2f})"
+            reason = f"Продажа заблокирована: Цена ({cur_price:.2f}) < Порога ({price_stop_sell:.2f})"
             
         else:
             # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
             mode = "sale_pv"
-            reason = f"Цена ({cur_price or 0.0:.2f} sp) >= Порога ({price_stop_sell or 0.0:.2f})"
+            reason = f"Стандартная работа: Цена ({cur_price:.2f}) выше порога остановки ({price_stop_sell:.2f})"
 
         return mode, reason, bms_debug, peak_start_abs
 
