@@ -977,13 +977,9 @@ class StrategyEngine:
                 if b_cap_f > 0.1:
                     simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
             
-            # v11.6.91: Dynamic Floor Clamping in simulation
-            _cur_floor = b_min_soc
-            if dynamic_floors and h_abs in dynamic_floors:
-                _cur_floor = dynamic_floors[h_abs]
-            
-            if simulated_soc < _cur_floor:
-                simulated_soc = _cur_floor
+            # v11.6.94: Removed hard floor clamp. 
+            # The simulation should show NATURAL discharge below the safety floor 
+            # due to house load, not artificially 'stick' to it.
             
             # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
             history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
