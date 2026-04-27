@@ -1921,11 +1921,14 @@ class StrategyEngine:
                     # v11.5.0: Morning Solar Liberalization
                     # Condition: solar morning window (is_morning_solar_v2) AND hour < 12
                     # AND there is an actual MORNING sale planned.
-                    # v11.5.3: Check if there is an actual MORNING sale planned.
-                    # If we are only planning to sell in the evening (e.g. 20:00), we should NOT use the 2% morning buffer!
                     has_morning_sale = any(h < 13 for h in target_hours_sorted) if target_hours_sorted else False
                     
                     if is_morning_solar_v2 and cur_hour < 12 and has_morning_sale:
+                        # v11.6.55: User Request: Compare current price with evening peak (13:00-23:00)
+                        evening_hours = [h for h in all_sell_prices.keys() if 13 <= h <= 23]
+                        evening_max_p = max([all_sell_prices[h] for h in evening_hours] + [0.0])
+                        cur_p_s = all_sell_prices.get(cur_hour, 0.0)
+                        
                         _lib_sim_range = list(range(cur_hour, 21))
                         _lib_start_soc = min_soc_val + 2.0  # Anchor: after selling down to floor
                         try:
@@ -1936,24 +1939,37 @@ class StrategyEngine:
                             )
                         except Exception:
                             _lib_max_soc = 0.0
-                        # v11.6.54: Morning liberalization triggers unconditionally in morning solar window.
-                        # The 90% recharge requirement was too strict (would fail on cloudy days).
-                        # User requirement: morning protection = min_soc + 2%.
-                        # Solar recharge during the day handles the rest.
+                            
+                        # v11.6.54: Unconditional flag in morning solar window
                         _is_morning_liberal = True
+                        
                         if _is_morning_liberal:
-                            # Override: ignore user discharge limit, use fixed 2% buffer
-                            base_target = min_soc_val + 2.0
-                            soc_buffer_val = 2.0
-                            active_buffer = 2.0
-                            _LOGGER.debug(
-                                f"[Sell v11.6.54] Morning liberal active: base_target={base_target:.1f}%, "
-                                f"sim_max={_lib_max_soc:.1f}% (from {_lib_start_soc:.1f}%)"
-                            )
+                            # v11.6.55: Refined Price-Aware Strategy
+                            # 1. If morning price < evening price -> Ensure 100% recharge by evening peak.
+                            # 2. If morning price >= evening price -> Only ensure 15% survival for next morning.
+                            
+                            if cur_p_s < evening_max_p - 0.05:
+                                # Deficit to reach full charge (100%) by evening
+                                recharge_deficit_soc = max(0.0, 100.0 - _lib_max_soc)
+                                base_target = min_soc_val + 2.0 + recharge_deficit_soc
+                                soc_buffer_val = 2.0 + recharge_deficit_soc
+                                active_buffer = 2.0 + recharge_deficit_soc
+                                _LOGGER.debug(
+                                    f"[Sell v11.6.55] Morning < Evening ({cur_p_s:.2f} < {evening_max_p:.2f}): "
+                                    f"Raising base_target to {base_target:.1f}% to ensure evening charge (sim_max={_lib_max_soc:.1f}%)"
+                                )
+                            else:
+                                # Morning is better or equal -> Sell down to 15% survival floor
+                                base_target = min_soc_val + 2.0
+                                soc_buffer_val = 2.0
+                                active_buffer = 2.0
+                                _LOGGER.debug(
+                                    f"[Sell v11.6.55] Morning >= Evening ({cur_p_s:.2f} >= {evening_max_p:.2f}): "
+                                    f"Survival mode active, base_target={base_target:.1f}%"
+                                )
                     
                     # Hard Target for tomorrow morning (strictly survival: reserve + full buffer)
                     # v11.6.54: In morning solar window, use min_soc+2% as the morning protection target.
-                    # This allows selling in the morning; solar recharges the battery during the day.
                     if _is_morning_liberal:
                         target_morning_soc = min_soc_val + 2.0
                     else:
