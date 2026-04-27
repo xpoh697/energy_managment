@@ -792,7 +792,7 @@ class StrategyEngine:
             return float(val.get("soc", default))
         return float(val if val is not None else default)
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -975,6 +975,14 @@ class StrategyEngine:
                 actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
                 if b_cap_f > 0.1:
                     simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
+            
+            # v11.6.91: Dynamic Floor Clamping in simulation
+            _cur_floor = b_min_soc
+            if dynamic_floors and h_abs in dynamic_floors:
+                _cur_floor = dynamic_floors[h_abs]
+            
+            if simulated_soc < _cur_floor:
+                simulated_soc = _cur_floor
             
             # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
             history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
@@ -1495,7 +1503,7 @@ class StrategyEngine:
                 # Continue to simulation to show natural discharge
                 
             target_hours_sorted = sorted(target_hours)
-            found_periods = [] # Legacy reference, actual logic moved to end of function (v6.18)
+found_periods = [] # Legacy reference, actual logic moved to end of function (v6.18)
                 
             # Target & Power Calculation
             power_needed = 0.0
@@ -2408,11 +2416,21 @@ class StrategyEngine:
                         if pot_gain_val >= diff_threshold:
                             sim_commands[int(best_buy_h)] = float(max_p)
 
-                    # v11.6.73: Ensure ALL simulations use the same charge constraints (especially negative price waiting)
+                    # v11.6.91: Ensure ALL simulations use the same dynamic floor constraints
+                    _strat_floors = {}
+                    _strat_sunrise = sunrise_h if 'sunrise_h' in locals() else 6
+                    for h_sim in sim_range:
+                        h_sim_norm = h_sim % 24
+                        if _strat_sunrise <= h_sim_norm <= 12:
+                            _strat_floors[h_sim] = min_soc_val + 2.0
+                        else:
+                            _strat_floors[h_sim] = base_target
+
                     _, sim_log, _ = self.run_soc_simulation(
                         b_soc, sim_range, now, sim_commands, 
                         no_battery_charge_until=_sell_sim_no_charge_until,
-                        ignore_blended=True
+                        ignore_blended=True,
+                        dynamic_floors=_strat_floors
                     )
 
                     
@@ -2566,12 +2584,14 @@ class StrategyEngine:
                         display_soc_after = float(round_f(natural_soc_after_sale, 1))
                     else:
                         # Branch B: sale planned — anchor is post-sale SOC
-                        # v11.5.2: Floor at base_target (not 0.0) — display SOC after sale
-                        # cannot be physically below the discharge floor. Using max(0.0) was
-                        # a regression from Round 52 (v11.4.38) that showed impossible values
-                        # like 4.5% when base_target=28%, and also broke the v11.5.1 SOC check.
+                        # v11.6.91: Morning-Aware UI Floor.
+                        # If the window ends in the morning, use 15%. Else use base_target (18%).
+                        _ui_floor = base_target
+                        if sunrise_h <= (first_block_end % 24) <= 12:
+                            _ui_floor = min_soc_val + 2.0
+                            
                         display_soc_after = float(round_f(
-                            max(float(base_target), natural_soc_after_sale - planned_sell_pct), 1
+                            max(float(_ui_floor), natural_soc_after_sale - planned_sell_pct), 1
                         ))
 
                     # v11.6.42: Unified Display Logic. No more separate dummy night sub-sims.
@@ -2596,8 +2616,10 @@ class StrategyEngine:
                     # Now we have accurate soc_morning_display and display_soc_after from night sub-sim.
                     # Compare gaps to their respective targets to identify actual binding constraint.
                     if sale_is_active_disp:
+                        # v11.6.91: Correct gaps for binding diagnostic
+                        _morning_floor = min_soc_val + 2.0
                         morning_gap_pct = soc_morning_display - float(target_morning_soc)
-                        user_gap_pct = display_soc_after - float(base_target)
+                        user_gap_pct = display_soc_after - float(_ui_floor)
                         # v11.6.79: Updated binding check (removed surplus_for_morning)
                         is_power_limited = (physical_limit_dc <= surplus_for_user_limit + 0.05)
                         floor_was_raised = (base_target > user_discharge_limit + 0.5)
