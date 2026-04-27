@@ -3137,7 +3137,7 @@ class InverterOperationModeSensor(SensorEntity):
                 elif not has_surplus:
                     reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f}), но нет излишка солнца"
                 else:
-                    reason = "Стандартная работа: цена высокая, но условия sale_pv_no_bat не соблюдены"
+                    reason = "Цена выше порога, но условия продажи PV+АКБ не соблюдены"
             
         elif cur_price is not None and cur_price < price_stop_sell:
             # Global price floor for ANY selling
@@ -3147,7 +3147,7 @@ class InverterOperationModeSensor(SensorEntity):
         else:
             # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
             mode = "sale_pv"
-            reason = f"Стандартная работа: Цена ({cur_price or 0.0:.2f} sp) - излишки в сеть"
+            reason = f"Цена ({cur_price or 0.0:.2f} sp) >= Порога ({price_stop_sell or 0.0:.2f})"
 
         return mode, reason, bms_debug, peak_start_abs
 
