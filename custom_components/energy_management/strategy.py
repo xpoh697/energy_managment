@@ -2308,15 +2308,15 @@ class StrategyEngine:
                     for i, epoch in enumerate(epochs):
                         epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                         
-                        # v11.6.38: Solar Recharge Simulation
-                        # Because of Energy Pooling, i > 0 ONLY happens when separated by a day (solar).
-                        # We simulate the solar recharge between the epochs to find the true surplus.
                         if i > 0:
                             sim_hours = list(range(max(epochs[i-1]) + 1, min(epoch)))
                             _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {}, ignore_blended=True)
                             max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
-                            fresh_surplus = max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff
-                            rem_kwh_sell = fresh_surplus
+                            rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
+                            rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
+                        else:
+                            rem_base_ac = float(max(0.0, (b_soc - base_target) * b_cap / 100.0 * eff))
+                            rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
                             
                         for h in epoch_sorted:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
@@ -2342,10 +2342,23 @@ class StrategyEngine:
                                      surplus_h_dc = max(0.0, (h_soc_s - h_floor) * b_cap / 100.0)
                                      p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
-                            if rem_kwh_sell > 0.05:
-                                actual_power = min(p_alloc, rem_kwh_sell / h_f)
-                                sell_commands[int(h)] = round_f(actual_power, 3)
-                                rem_kwh_sell -= (actual_power * h_f)
+                            if (rem_base_ac + rem_bonus_ac) > 0.05:
+                                # v11.6.85: Segregate budgets - evening hours cannot steal morning bonus
+                                is_morning = 4 <= (h % 24) <= 12
+                                
+                                # 1. Try to take from base budget first
+                                power_from_base = min(p_alloc, rem_base_ac / h_f)
+                                rem_base_ac -= (power_from_base * h_f)
+                                
+                                # 2. If it's morning and base is empty, take from bonus
+                                power_from_bonus = 0.0
+                                if is_morning and (p_alloc - power_from_base) > 0.01:
+                                    power_from_bonus = min(p_alloc - power_from_base, rem_bonus_ac / h_f)
+                                    rem_bonus_ac -= (power_from_bonus * h_f)
+                                
+                                actual_power = power_from_base + power_from_bonus
+                                if actual_power > 0.01:
+                                    sell_commands[int(h)] = round_f(actual_power, 3)
                     
                     # v11.6.83: Morning Floor Liberation is now integrated into the core distribution loop
                     # via dynamic h_floor and expanded budget.
@@ -2436,20 +2449,20 @@ class StrategyEngine:
                         # 2. Re-calculate available volume
                         # v11.6.6: Use immediate_base_target so tomorrow's deficit doesn't block today's morning sale
                         # v11.6.84: Recursive budget also includes morning expansion
-                        surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
-                        available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
-                        available_sell_ac = float(max(0.0, available_sell_dc * eff))
+                        # v11.6.85: Recursive budget also segregated
+                        rem_base_ac_fix = float(max(0.0, (b_soc - base_target) * b_cap / 100.0 * eff))
+                        rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
                         
                         # 3. Re-distribute sell_commands
-                        rem_kwh_sell_fix = available_sell_ac
                         for i, epoch in enumerate(epochs):
                             epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                             if i > 0:
                                 sim_hours = list(range(max(epochs[i-1]) + 1, min(epoch)))
                                 _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {})
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
-                                fresh_surplus_fix = max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff
-                                rem_kwh_sell_fix = fresh_surplus_fix
+                                rem_base_ac_fix = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
+                                rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
+                            
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
                                 h_floor_fix = base_target
@@ -2467,10 +2480,25 @@ class StrategyEngine:
                                     if h_soc_sf := self._get_soc_from_log(sim_log_base, f"{h%24:02d}:00", b_soc):
                                          surplus_hf_dc = max(0.0, (h_soc_sf - h_floor_fix) * b_cap / 100.0)
                                          p_alloc_fix = min(max_p, (surplus_hf_dc * eff) / h_f)
-                                if rem_kwh_sell_fix > 0.05:
-                                    actual_p_fix = min(p_alloc_fix, rem_kwh_sell_fix / h_f)
-                                    sell_commands[int(h)] = round_f(actual_p_fix, 3)
-                                    rem_kwh_sell_fix -= (actual_p_fix * h_f)
+                                
+                                if (rem_base_ac_fix + rem_bonus_ac_fix) > 0.05:
+                                    is_morning_fix = 4 <= (h % 24) <= 12
+                                    
+                                    # 1. Base
+                                    p_base_fix = min(p_alloc_fix, rem_base_ac_fix / h_f)
+                                    rem_base_ac_fix -= (p_base_fix * h_f)
+                                    
+                                    # 2. Bonus
+                                    p_bonus_fix = 0.0
+                                    if is_morning_fix and (p_alloc_fix - p_base_fix) > 0.01:
+                                        p_bonus_fix = min(p_alloc_fix - p_base_fix, rem_bonus_ac_fix / h_f)
+                                        rem_bonus_ac_fix -= (p_bonus_fix * h_f)
+                                        
+                                    actual_p_fix = p_base_fix + p_bonus_fix
+                                    if actual_p_fix > 0.01:
+                                        sell_commands[int(h)] = round_f(actual_p_fix, 3)
+                                    else:
+                                        sell_commands[int(h)] = 0.0
                                 else:
                                     sell_commands[int(h)] = 0.0
                         
