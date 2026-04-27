@@ -2412,9 +2412,13 @@ class StrategyEngine:
                         if pot_gain_val >= diff_threshold:
                             sim_commands[int(best_buy_h)] = float(max_p)
 
-                    # v11.6.61: ignore_blended=True so morning SOC projection uses full solar forecast,
-                    # preventing the recursive correction from falsely raising base_target due to pessimistic blended_coeff
-                    _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_commands, ignore_blended=True)
+                    # v11.6.73: Ensure ALL simulations use the same charge constraints (especially negative price waiting)
+                    _, sim_log, _ = self.run_soc_simulation(
+                        b_soc, sim_range, now, sim_commands, 
+                        no_battery_charge_until=_sell_sim_no_charge_until,
+                        ignore_blended=True
+                    )
+
                     
                     # 1. Projected SOC at START (Already calculated early)
                     # 2. Daily Surplus (Already calculated early)
@@ -2508,8 +2512,13 @@ class StrategyEngine:
                         if best_buy_h is not None and best_buy_h < sim_end_h:
                             sim_commands_fix[int(best_buy_h)] = float(max_p)
                         
-                        # v11.6.61: ignore_blended=True — same reason as the primary simulation above
-                        _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_commands_fix, ignore_blended=True)
+                        # v11.6.73: Synchronize charge constraints
+                        _, sim_log, _ = self.run_soc_simulation(
+                            b_soc, sim_range, now, sim_commands_fix, 
+                            no_battery_charge_until=_sell_sim_no_charge_until,
+                            ignore_blended=True
+                        )
+
                         
                         # 5. Re-extract markers
                         if future_active_sell:
