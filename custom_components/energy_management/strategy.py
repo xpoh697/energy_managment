@@ -1972,8 +1972,10 @@ class StrategyEngine:
                                 )
                     
                     # Hard Target for tomorrow morning (strictly survival: reserve + full buffer)
-                    # v11.6.54: In morning solar window, use min_soc+2% as the morning protection target.
-                    if _is_morning_liberal:
+                    # v11.6.80: If there is a morning sale planned (tomorrow), use the liberal 2% buffer 
+                    # as the target for sunrise. This allows the evening plan to correctly aim for 15%.
+                    has_tomorrow_morning_sale = any(24 <= h < 37 for h in target_hours_sorted) if target_hours_sorted else False
+                    if _is_morning_liberal or has_tomorrow_morning_sale:
                         target_morning_soc = min_soc_val + 2.0
                     else:
                         target_morning_soc = min_soc_val + soc_buffer_full
