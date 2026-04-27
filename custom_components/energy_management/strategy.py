@@ -1976,13 +1976,11 @@ class StrategyEngine:
                                     f"Survival mode active, base_target={base_target:.1f}%"
                                 )
                     
-                    # Hard Target for tomorrow morning (strictly survival: reserve + full buffer)
-                    # v11.6.83: Look ahead for morning sales regardless of current time
-                    has_tomorrow_morning_sale = any(24 <= h < 37 for h in target_hours_sorted) if target_hours_sorted else False
-                    if _is_morning_liberal or has_tomorrow_morning_sale:
-                        target_morning_soc = min_soc_val + 2.0
-                    else:
-                        target_morning_soc = min_soc_val + soc_buffer_full
+                    # Hard Target for tomorrow morning (strictly sunrise goal: reserve + full buffer)
+                    # v11.6.95: The sunrise goal is ALWAYS 18%. 
+                    # The 15% morning floor is a 'bonus' allowed DURING the morning,
+                    # but we must arrive at sunrise with 18% to protect the base.
+                    target_morning_soc = min_soc_val + soc_buffer_full
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
                     active_floor_soc = min_soc_val + active_buffer
                     
