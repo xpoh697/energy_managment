@@ -2322,9 +2322,9 @@ class StrategyEngine:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
                             p_alloc = max_p
                             
-                            # v11.6.84: Absolute Floor for morning hours (4-12 AM)
+                            # v11.6.90: Morning Floor starts EXACTLY at sunrise
                             h_floor = base_target
-                            if 4 <= (h % 24) <= 12:
+                            if sunrise_h <= (h % 24) <= 12:
                                 h_floor = min_soc_val + 2.0
                                 
                             # Selective Throttling strictly for the current hour
@@ -2343,8 +2343,8 @@ class StrategyEngine:
                                      p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
                             if (rem_base_ac + rem_bonus_ac) > 0.05:
-                                # v11.6.89: Segregate budgets - evening hours cannot steal morning bonus
-                                is_morning = 4 <= (h % 24) <= 12
+                                # v11.6.90: Segregate budgets starting from sunrise_h
+                                is_morning = sunrise_h <= (h % 24) <= 12
                                 
                                 # 1. Try to take from base budget first (Limit 18%)
                                 power_from_base = min(p_alloc, rem_base_ac / h_f)
@@ -2466,7 +2466,7 @@ class StrategyEngine:
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
                                 h_floor_fix = base_target
-                                if 4 <= (h % 24) <= 12:
+                                if sunrise_h <= (h % 24) <= 12:
                                     h_floor_fix = min_soc_val + 2.0
                                     
                                 p_alloc_fix = max_p
@@ -2482,7 +2482,7 @@ class StrategyEngine:
                                          p_alloc_fix = min(max_p, (surplus_hf_dc * eff) / h_f)
                                 
                                 if (rem_base_ac_fix + rem_bonus_ac_fix) > 0.05:
-                                    is_morning_fix = 4 <= (h % 24) <= 12
+                                    is_morning_fix = sunrise_h <= (h % 24) <= 12
                                     
                                     # 1. Base
                                     p_base_fix = min(p_alloc_fix, rem_base_ac_fix / h_f)
