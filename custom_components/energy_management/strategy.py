@@ -2153,7 +2153,8 @@ class StrategyEngine:
                                 # Without solar (night), sim returns max_recharge_soc = base_target,
                                 # making deficit = 100% - base_target, raising base_target to 100%
                                 # -> nothing sold in Window1, all energy reserved for higher-priced Window2.
-                                _, throttle_log, _ = self.run_soc_simulation(base_target, throttle_sim_hours, now, {})
+                                # v11.6.58: Use ignore_blended=True to avoid pessimistic morning scaling (which causes mythical deficits)
+                                _, throttle_log, _ = self.run_soc_simulation(base_target, throttle_sim_hours, now, ignore_blended=True)
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 
                                 # v11.4.25: Price-Aware Deficit Throttling
