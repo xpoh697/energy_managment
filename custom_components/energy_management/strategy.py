@@ -490,6 +490,7 @@ class StrategyEngine:
                 start_soc=b_soc_f,
                 sim_range=sim_range,
                 now=now,
+                b_min_soc=0.0, # Budget calc needs natural discharge
                 house_profile_override="consumption_base"
             )
 
@@ -792,7 +793,7 @@ class StrategyEngine:
             return float(val.get("soc", default))
         return float(val if val is not None else default)
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -2070,7 +2071,7 @@ class StrategyEngine:
                             _sell_hours_to_full = len(_sell_chk_range)  # pessimistic default
                             if _sell_chk_range:
                                 try:
-                                    _, _sell_chk_log, _ = self.run_soc_simulation(b_soc, _sell_chk_range, now, {})
+                                    _, _sell_chk_log, _ = self.run_soc_simulation(b_soc, _sell_chk_range, now, {}, b_min_soc=0.0)
                                     for _si, _sv in enumerate(_sell_chk_log.values()):
                                         _sv_soc = _sv.get("soc", 0.0) if isinstance(_sv, dict) else float(_sv)
                                         if _sv_soc >= (_ai_target_sell - 0.5):
@@ -2095,6 +2096,7 @@ class StrategyEngine:
                         # without double-counting the safety margin of tomorrow's solar block.
                         _, sim_log_base, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
+                            b_min_soc=0.0,
                             ignore_blended=True
                         )
 
@@ -2428,6 +2430,7 @@ class StrategyEngine:
 
                     _, sim_log, _ = self.run_soc_simulation(
                         b_soc, sim_range, now, sim_commands, 
+                        b_min_soc=base_target,
                         no_battery_charge_until=_sell_sim_no_charge_until,
                         ignore_blended=True,
                         dynamic_floors=_strat_floors
