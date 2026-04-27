@@ -153,7 +153,8 @@ class StrategyEngine:
         # v11.1.77: Respect the highest floor (Morning safety vs User defined min SOC)
         target_mark = float(max(min_soc + buffer_soc, user_soc_limit))
         extra_soc_pct = max(0.0, natural_morning_soc - target_mark)
-        return float((extra_soc_pct * batt_cap / 100.0) * eff)
+        return float(extra_soc_pct * batt_cap / 100.0)
+
 
     def _calc_immediate_safety_floor(self, min_soc, active_buffer, total_cons_to_sunrise, base_deficit_tomorrow, total_solar_to_sunrise, batt_cap, eff):
         """The 'Gatekeeper' floor for current hour selling."""
