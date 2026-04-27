@@ -2082,13 +2082,13 @@ class StrategyEngine:
                                     break
                             if _sell_neg_h is not None and _sell_neg_h > cur_hour:
                                 _sell_sim_no_charge_until = _sell_neg_h
-                        # v11.6.59: ignore_blended=True avoids pessimistic morning forecast when projecting base survival,
-                        # especially important when no_battery_charge_until skips the morning sun.
+                        # v11.6.75: Remove NoChgUntil from baseline. User wants Budget to match Gatekeeper floor
+                        # without double-counting the safety margin of tomorrow's solar block.
                         _, sim_log_base, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
-                            no_battery_charge_until=_sell_sim_no_charge_until,
                             ignore_blended=True
                         )
+
                         
                         # v11.6.41: Fix massive bug where natural_morning_soc was taking the end-of-sim SOC (100% due to tomorrow's sun)
                         key_sunrise = f"{sunrise_h-1:02d}:59" + (" (Завтра)" if sunrise_h-1 < cur_hour else "")
