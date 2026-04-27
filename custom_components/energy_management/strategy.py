@@ -2215,7 +2215,7 @@ class StrategyEngine:
                     
                     # v11.6.76: Anchor Budget directly to Gatekeeper floor. 
                     # This eliminates the "Simulation Schizophrenia" once and for all.
-                    surplus_for_user_limit = max(0.0, (b_soc - gatekeeper_floor) * b_cap / 100.0)
+                    surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0)
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
 
                     sell_diagnosis = "Рассчитано (Ок)"
@@ -2457,7 +2457,7 @@ class StrategyEngine:
                         # 2. Re-calculate available volume
                         # v11.6.6: Use immediate_base_target so tomorrow's deficit doesn't block today's morning sale
                         # v11.6.76: Anchor Budget directly to Gatekeeper floor
-                        surplus_for_user_limit = (max(0.0, b_soc - gatekeeper_floor) * b_cap / 100.0)
+                        surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0)
                         available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                         
