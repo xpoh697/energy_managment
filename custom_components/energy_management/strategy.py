@@ -1503,7 +1503,7 @@ class StrategyEngine:
                 # Continue to simulation to show natural discharge
                 
             target_hours_sorted = sorted(target_hours)
-found_periods = [] # Legacy reference, actual logic moved to end of function (v6.18)
+            found_periods = [] # Legacy reference, actual logic moved to end of function (v6.18)
                 
             # Target & Power Calculation
             power_needed = 0.0
