@@ -2214,10 +2214,9 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
-                    # v11.6.83: Expand budget to accommodate deeper morning discharge (15% vs 18%)
-                    surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0)
-                    if has_tomorrow_morning_sale:
-                        surplus_for_user_limit += (soc_buffer_val - 2.0) * b_cap / 100.0
+                    # v11.6.84: Expand budget to accommodate deeper morning discharge (15% vs 18%)
+                    _morning_lib_surplus_dc = (soc_buffer_val - 2.0) * b_cap / 100.0 if has_tomorrow_morning_sale else 0.0
+                    surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
                     available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
 
                     sell_diagnosis = "Рассчитано (Ок)"
@@ -2323,7 +2322,7 @@ class StrategyEngine:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
                             p_alloc = max_p
                             
-                            # v11.6.83: Dynamic Floor for morning hours
+                            # v11.6.84: Absolute Floor for morning hours (4-12 AM)
                             h_floor = base_target
                             if 4 <= (h % 24) <= 12:
                                 h_floor = min_soc_val + 2.0
@@ -2336,12 +2335,11 @@ class StrategyEngine:
                                 max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
                                 p_alloc = min(max_p, max_allowed_sell_ac / h_f)
                             else:
-                                # For future hours in this pool, we also cap by the local floor
-                                # to ensure evening hours don't 'steal' the morning buffer.
-                                # v11.6.83: Simple safety cap
+                                # For future hours, also respect the local hour-specific floor.
+                                # v11.6.84: Use a more generous simulation-aware cap for morning hours.
                                 p_alloc = max_p
-                                if h_soc_at_start := self._get_soc_from_log(sim_log_base, f"{h%24:02d}:00", b_soc):
-                                     surplus_h_dc = max(0.0, (h_soc_at_start - h_floor) * b_cap / 100.0)
+                                if h_soc_s := self._get_soc_from_log(sim_log_base, f"{h%24:02d}:00", b_soc):
+                                     surplus_h_dc = max(0.0, (h_soc_s - h_floor) * b_cap / 100.0)
                                      p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
                             if rem_kwh_sell > 0.05:
@@ -2437,8 +2435,8 @@ class StrategyEngine:
                         
                         # 2. Re-calculate available volume
                         # v11.6.6: Use immediate_base_target so tomorrow's deficit doesn't block today's morning sale
-                        # v11.6.79: Anchor Budget directly to Gatekeeper floor (Remove redundant M_dc)
-                        surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0)
+                        # v11.6.84: Recursive budget also includes morning expansion
+                        surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
                         available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                         
@@ -2454,12 +2452,21 @@ class StrategyEngine:
                                 rem_kwh_sell_fix = fresh_surplus_fix
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
+                                h_floor_fix = base_target
+                                if 4 <= (h % 24) <= 12:
+                                    h_floor_fix = min_soc_val + 2.0
+                                    
                                 p_alloc_fix = max_p
                                 if h == cur_hour:
                                     house_cons_fix = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
                                     house_rem_dc_fix = (house_cons_fix * h_f) / eff
-                                    current_surplus_dc_fix = max(0.0, (b_soc - base_target) * b_cap / 100.0 - house_rem_dc_fix)
+                                    current_surplus_dc_fix = max(0.0, (b_soc - h_floor_fix) * b_cap / 100.0 - house_rem_dc_fix)
                                     p_alloc_fix = min(max_p, (current_surplus_dc_fix * eff) / h_f)
+                                else:
+                                    # v11.6.84: Capped by local floor in Step 2 as well
+                                    if h_soc_sf := self._get_soc_from_log(sim_log_base, f"{h%24:02d}:00", b_soc):
+                                         surplus_hf_dc = max(0.0, (h_soc_sf - h_floor_fix) * b_cap / 100.0)
+                                         p_alloc_fix = min(max_p, (surplus_hf_dc * eff) / h_f)
                                 if rem_kwh_sell_fix > 0.05:
                                     actual_p_fix = min(p_alloc_fix, rem_kwh_sell_fix / h_f)
                                     sell_commands[int(h)] = round_f(actual_p_fix, 3)
@@ -2467,31 +2474,7 @@ class StrategyEngine:
                                 else:
                                     sell_commands[int(h)] = 0.0
                         
-                        # v11.6.52: Round 117 — Morning Floor Liberation (recursive correction pass)
-                        _morning_sell_floor_fix = min_soc_val + 2.0
-                        if epochs:
-                            _morning_hrs_fix = sorted(
-                                [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
-                                key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True
-                            )
-                            if _morning_hrs_fix:
-                                _temp_cmds_fix = {int(h): -cmd for h, cmd in sell_commands.items()}
-                                _sim_range_fix = list(range(cur_hour, max(_morning_hrs_fix) + 2))
-                                for h_mf in _morning_hrs_fix:
-                                    _, _temp_log_f, _ = self.run_soc_simulation(b_soc, _sim_range_fix, now, _temp_cmds_fix)
-                                    _key_hmf = f"{h_mf % 24:02d}:59" + (" (Завтра)" if h_mf >= 24 else "")
-                                    _soc_end_hmf = self._get_soc_from_log(_temp_log_f, _key_hmf, b_soc)
-                                    
-                                    _surplus_pct_f = max(0.0, _soc_end_hmf - _morning_sell_floor_fix)
-                                    _surplus_kwh_f = _surplus_pct_f * b_cap / 100.0 * eff
-                                    
-                                    _curr_alloc_f = sell_commands.get(int(h_mf), 0.0)
-                                    _can_add_f = max(0.0, max_p - _curr_alloc_f)
-                                    _add_power_f = min(_can_add_f, _surplus_kwh_f)
-                                    
-                                    if _add_power_f > 0.01:
-                                        sell_commands[int(h_mf)] = round_f(_curr_alloc_f + _add_power_f, 3)
-                                        _temp_cmds_fix[int(h_mf)] = -sell_commands[int(h_mf)]
+                        # v11.6.84: All 'liberation' is now unified in the main distribution cycles above.
 
                         # 4. Re-run final simulation
                         sim_commands_fix = {int(h): -cmd for h, cmd in sell_commands.items()}
