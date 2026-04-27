@@ -1264,7 +1264,8 @@ class EnergyProfileManager:
         b_soc, _, _ = self.get_battery_state()
         
         # v11.1.65 - Enhanced Curtailment Detection: include wait-for-pit mode
-        is_curtailed = bool((is_stop_sale and b_soc > 95) or (p_buy is not None and p_buy <= 0) or is_no_pv_sale)
+        # v11.6.60 - Lowered threshold to 90% based on user request
+        is_curtailed = bool((is_stop_sale and b_soc > 90) or (p_buy is not None and p_buy <= 0) or is_no_pv_sale)
         
         # v11.1.21 - Solar "Healing" logic: if curtailed, record forecast instead of actual zero/low gen
         gen_to_record = self.current_generation

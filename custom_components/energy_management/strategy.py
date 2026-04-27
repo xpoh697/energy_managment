@@ -418,7 +418,7 @@ class StrategyEngine:
             if is_stop_sale and today_coeff < 1.0:
                 # Check if battery is full enough to cause curtailment
                 b_soc_cur, _, _ = man.get_battery_state()
-                if b_soc_cur > 95:
+                if b_soc_cur > 90:
                     # We suspect curtailment because export is forbidden AND battery is full.
                     # In this case, frozen high-water performance (or at least 1.0/history) is used.
                     old_today = today_coeff
