@@ -2204,9 +2204,6 @@ class StrategyEngine:
                         # target_morning_soc remains as calculated at line 1978 (buffer-aware)
                         pass
                     
-                    # Use natural_soc_after_sale instead of soc_at_start to find the True available surplus
-                    surplus_for_user_limit = (max(0.0, natural_soc_after_sale - base_target) * b_cap / 100.0)
-                    
                     # v11.3.11: Factor in physical energy capacity of the identified peaks
                     # Using global max_p which already accounts for CONF_BATTERY_MAX_POWER (e.g. 6.2kW)
                     # Auto-convert Watts to kW if user entered 6200 instead of 6.2
@@ -2216,8 +2213,11 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
-                    # v11.3.18: Recovery & Hyper-Detailed Diagnostic
+                    # v11.6.76: Anchor Budget directly to Gatekeeper floor. 
+                    # This eliminates the "Simulation Schizophrenia" once and for all.
+                    surplus_for_user_limit = max(0.0, (b_soc - gatekeeper_floor) * b_cap / 100.0)
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
+
                     sell_diagnosis = "Рассчитано (Ок)"
                     # Using a small delta for float comparison safety
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
@@ -2314,7 +2314,7 @@ class StrategyEngine:
                         # We simulate the solar recharge between the epochs to find the true surplus.
                         if i > 0:
                             sim_hours = list(range(max(epochs[i-1]) + 1, min(epoch)))
-                            _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {})
+                            _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {}, ignore_blended=True)
                             max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                             fresh_surplus = max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff
                             rem_kwh_sell = fresh_surplus
@@ -2336,7 +2336,7 @@ class StrategyEngine:
                                 sell_commands[int(h)] = round_f(actual_power, 3)
                                 rem_kwh_sell -= (actual_power * h_f)
                     
-                    # v11.6.52: Round 117 — Morning Floor Liberation (Simulation-Driven)
+                    # v11.6.76: Morning Floor Liberation (Simulation-Driven)
                     # Instead of flat math, use step-by-step simulation to accurately account
                     # for solar generation and house consumption during morning hours.
                     # v11.6.69: Morning Sell-off MUST respect the user's SOC limit.
@@ -2352,7 +2352,11 @@ class StrategyEngine:
                             _temp_cmds = {int(h): -cmd for h, cmd in sell_commands.items()}
                             _sim_range_temp = list(range(cur_hour, max(_morning_hrs_p0) + 2))
                             for h_m in _morning_hrs_p0:
-                                _, _temp_log, _ = self.run_soc_simulation(b_soc, _sim_range_temp, now, _temp_cmds)
+                                # v11.6.76: Use ignore_blended=True for consistency with Step 1
+                                _, _temp_log, _ = self.run_soc_simulation(
+                                    b_soc, _sim_range_temp, now, _temp_cmds, 
+                                    ignore_blended=True
+                                )
                                 _key_hm = f"{h_m % 24:02d}:59" + (" (Завтра)" if h_m >= 24 else "")
                                 _soc_end_hm = self._get_soc_from_log(_temp_log, _key_hm, b_soc)
                                 
@@ -2452,7 +2456,8 @@ class StrategyEngine:
                         
                         # 2. Re-calculate available volume
                         # v11.6.6: Use immediate_base_target so tomorrow's deficit doesn't block today's morning sale
-                        surplus_for_user_limit = (max(0.0, natural_soc_after_sale - immediate_base_target) * b_cap / 100.0)
+                        # v11.6.76: Anchor Budget directly to Gatekeeper floor
+                        surplus_for_user_limit = (max(0.0, b_soc - gatekeeper_floor) * b_cap / 100.0)
                         available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                         
