@@ -791,7 +791,7 @@ class StrategyEngine:
             return float(val.get("soc", default))
         return float(val if val is not None else default)
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -832,7 +832,8 @@ class StrategyEngine:
         # boundaries and an average of 50% of the real rate.
         prof_losses = dict(man.get_average_profile("losses", 7))
         
-        blended_coeff = float(getattr(man, "last_blended_coeff", 1.0))
+        # v11.6.57: ignore_blended allows skipping the last_blended_coeff (which can be <0.2 in the morning)
+        blended_coeff = 1.0 if ignore_blended else float(getattr(man, "last_blended_coeff", 1.0))
         eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
         fraction_left_h1 = float(1.0 - (now.minute / 60.0))
         max_batt_p_v = man.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
@@ -1932,7 +1933,8 @@ class StrategyEngine:
                         _lib_sim_range = list(range(cur_hour, 21))
                         _lib_start_soc = min_soc_val + 2.0  # Anchor: after selling down to floor
                         try:
-                            _, _lib_log, _ = self.run_soc_simulation(_lib_start_soc, _lib_sim_range, now, {})
+                            # v11.6.57: Use ignore_blended=True to avoid pessimistic morning scaling (46kWh means 46kWh)
+                            _, _lib_log, _ = self.run_soc_simulation(_lib_start_soc, _lib_sim_range, now, ignore_blended=True)
                             _lib_max_soc = max(
                                 [float(st.get("soc", _lib_start_soc)) for st in _lib_log.values()]
                                 + [_lib_start_soc]
