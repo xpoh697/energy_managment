@@ -2338,7 +2338,10 @@ class StrategyEngine:
                     # v11.6.52: Round 117 — Morning Floor Liberation (Simulation-Driven)
                     # Instead of flat math, use step-by-step simulation to accurately account
                     # for solar generation and house consumption during morning hours.
-                    _morning_sell_floor = min_soc_val + 2.0
+                    # v11.6.69: Morning Sell-off MUST respect the user's SOC limit.
+                    # It was previously bypassing user_discharge_limit, causing inconsistent discharge.
+                    _morning_sell_floor = max(min_soc_val + 2.0, user_discharge_limit)
+
                     if epochs:
                         _morning_hrs_p0 = sorted(
                             [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
