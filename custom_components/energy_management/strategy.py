@@ -2181,8 +2181,11 @@ class StrategyEngine:
                         
                         # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
                         # We calculate the exact SOC floor needed to guarantee the morning target.
-                        # v11.4.51: Always use full buffer for home-protection sunrise target
-                        target_sunrise_soc = min_soc_val + soc_buffer_full
+                        # v11.6.61: Use min_soc + 2% as the strict morning emergency floor.
+                        # soc_buffer_full (user's evening buffer) is NOT appropriate here:
+                        # it's designed to preserve energy for peak hours, not for survival.
+                        # Morning floor = emergency battery reserve (min_soc) + tiny safety margin (2%).
+                        target_sunrise_soc = min_soc_val + 2.0
                         
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
