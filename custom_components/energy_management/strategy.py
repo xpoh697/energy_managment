@@ -1976,6 +1976,9 @@ class StrategyEngine:
                                     f"Survival mode active, base_target={base_target:.1f}%"
                                 )
                     
+                    # v11.6.96: Check if any sales are planned for tomorrow morning (for budget expansion)
+                    has_tomorrow_morning_sale = any(24 <= h < 37 for h in target_hours_sorted) if target_hours_sorted else False
+                    
                     # Hard Target for tomorrow morning (strictly sunrise goal: reserve + full buffer)
                     # v11.6.95: The sunrise goal is ALWAYS 18%. 
                     # The 15% morning floor is a 'bonus' allowed DURING the morning,
