@@ -2957,16 +2957,25 @@ class InverterOperationModeSensor(SensorEntity):
                         break
                 
                 if peak_start_abs is not None:
-                    if not ever_fully_charged:
-                        is_preparing_for_peak = True
-                        bms_debug["status"] = "Внимание: АКБ не успеет зарядиться к Пику!"
-                    else:
-                        latest_start = peak_start_abs - total_needed
-                        if now_h_wall < latest_start:
-                            bms_debug["status"] = f"Зарядка отложена (хватит {total_needed}ч)"
-                        else:
+                    # v11.6.56: Only prepare for peak if peak price is higher than current price
+                    # to avoid blocking profitable sales now for less profitable peaks later.
+                    peak_price = self.manager.get_price("sell", today_str, peak_start_abs % 24)
+                    cur_p = cur_price if cur_price is not None else 0.0
+                    
+                    if peak_price is not None and peak_price > (cur_p + 0.1): # 0.1 margin
+                        if not ever_fully_charged:
                             is_preparing_for_peak = True
-                            bms_debug["status"] = "Штатный заряд к пику"
+                            bms_debug["status"] = "Внимание: АКБ не успеет зарядиться к Пику!"
+                        else:
+                            latest_start = peak_start_abs - total_needed
+                            if now_h_wall < latest_start:
+                                bms_debug["status"] = f"Зарядка отложена (хватит {total_needed}ч)"
+                            else:
+                                is_preparing_for_peak = True
+                                bms_debug["status"] = "Штатный заряд к пику"
+                    else:
+                        p_p_disp = f"{peak_price:.2f}" if peak_price is not None else "N/A"
+                        bms_debug["status"] = f"Продажа выгоднее ({cur_p:.2f} >= {p_p_disp})"
 
         # State Machine
         reason = "Значения по умолчанию"
