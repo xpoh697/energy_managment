@@ -2213,19 +2213,18 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
-                    # v11.6.76: Anchor Budget directly to Gatekeeper floor. 
-                    # This eliminates the "Simulation Schizophrenia" once and for all.
+                    # v11.6.79: Remove redundant surplus_for_morning (M) from budget.
+                    # base_target (U) already includes the survival floor + morning solar credit.
+                    # M was a pessimistic (no-solar) version of the same safety check.
                     surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0)
-                    available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
+                    available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
 
                     sell_diagnosis = "Рассчитано (Ок)"
                     # Using a small delta for float comparison safety
-                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < min(surplus_for_morning, surplus_for_user_limit):
+                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < surplus_for_user_limit:
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
-                    elif available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < surplus_for_morning:
+                    else:
                         sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)" if base_target <= user_discharge_limit + 0.5 else f"Защита дома ({user_discharge_limit:.0f}%→{base_target:.0f}%)"
-                    elif available_sell_dc <= (surplus_for_morning + 0.001):
-                        sell_diagnosis = f"Защита дома (Рассвет {target_morning_soc:.0f}%)"
 
                     # v11.3.23 / v11.5.0: Full transparency diagnostics
                     _lib_tag = " [Утро: буфер=5%]" if _is_morning_liberal else ""
@@ -2456,9 +2455,9 @@ class StrategyEngine:
                         
                         # 2. Re-calculate available volume
                         # v11.6.6: Use immediate_base_target so tomorrow's deficit doesn't block today's morning sale
-                        # v11.6.76: Anchor Budget directly to Gatekeeper floor
+                        # v11.6.79: Anchor Budget directly to Gatekeeper floor (Remove redundant M_dc)
                         surplus_for_user_limit = (max(0.0, b_soc - base_target) * b_cap / 100.0)
-                        available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
+                        available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                         
                         # 3. Re-distribute sell_commands
@@ -2606,10 +2605,8 @@ class StrategyEngine:
                     if sale_is_active_disp:
                         morning_gap_pct = soc_morning_display - float(target_morning_soc)
                         user_gap_pct = display_soc_after - float(base_target)
-                        # v11.4.44-fix: Physical is binding when physical_limit_dc IS the minimum
-                        # of the three surpluses. available_sell_dc is always <= physical_limit_dc
-                        # (it's defined as min of three), so the old check was always True.
-                        is_power_limited = (physical_limit_dc <= min(surplus_for_morning, surplus_for_user_limit) + 0.05)
+                        # v11.6.79: Updated binding check (removed surplus_for_morning)
+                        is_power_limited = (physical_limit_dc <= surplus_for_user_limit + 0.05)
                         floor_was_raised = (base_target > user_discharge_limit + 0.5)
                         # v11.5.2: Morning liberal mode was active (base_target lowered to min_soc+5)
                         # but the recursive deficit fix raised it back above the liberal floor.
