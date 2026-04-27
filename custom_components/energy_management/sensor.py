@@ -2892,8 +2892,17 @@ class InverterOperationModeSensor(SensorEntity):
         # When forecasting, we use absolute hours to match strategy indices (v11.4.20)
         if is_forecast:
             # v11.6.10: check_h_abs is now correctly absolute, so no +24 hack is needed
-            is_selling_active = check_h_abs in sell_strategy.get("active_hours", [])
-            is_buying_active = check_h_abs in buy_strategy.get("active_hours", [])
+            # v11.6.54: For the CURRENT wall-clock hour in the forecast, use real-time state
+            # (respects Safety Block). For future hours, use active_hours as before.
+            # This prevents planned_modes_24h from showing sale_pv_bat at the current hour
+            # while the actual mode stays sale_pv due to Safety Block firing.
+            _now_h_for_forecast = now_wall.hour
+            if check_h_abs == _now_h_for_forecast:
+                is_selling_active = sell_strategy.get("state") == "active"
+                is_buying_active = buy_strategy.get("state") == "active"
+            else:
+                is_selling_active = check_h_abs in sell_strategy.get("active_hours", [])
+                is_buying_active = check_h_abs in buy_strategy.get("active_hours", [])
         else:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"

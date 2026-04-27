@@ -1920,17 +1920,14 @@ class StrategyEngine:
                     
                     # v11.5.0: Morning Solar Liberalization
                     # Condition: solar morning window (is_morning_solar_v2) AND hour < 12
-                    # AND simulation confirms solar can recharge battery to >= 90% by evening.
-                    # When active: user SOC discharge limit (CONF_AI_DISCHARGE_LIMIT) is ignored,
-                    # fixed 5% buffer is used instead. target_morning_soc uses soc_buffer_full
-                    # (full user buffer) to protect the NEXT morning — do NOT change it.
+                    # AND there is an actual MORNING sale planned.
                     # v11.5.3: Check if there is an actual MORNING sale planned.
-                    # If we are only planning to sell in the evening (e.g. 20:00), we should NOT use the 5% morning buffer!
+                    # If we are only planning to sell in the evening (e.g. 20:00), we should NOT use the 2% morning buffer!
                     has_morning_sale = any(h < 13 for h in target_hours_sorted) if target_hours_sorted else False
                     
                     if is_morning_solar_v2 and cur_hour < 12 and has_morning_sale:
                         _lib_sim_range = list(range(cur_hour, 21))
-                        _lib_start_soc = min_soc_val + 5.0  # Anchor: after selling down to floor
+                        _lib_start_soc = min_soc_val + 2.0  # Anchor: after selling down to floor
                         try:
                             _, _lib_log, _ = self.run_soc_simulation(_lib_start_soc, _lib_sim_range, now, {})
                             _lib_max_soc = max(
@@ -1939,22 +1936,26 @@ class StrategyEngine:
                             )
                         except Exception:
                             _lib_max_soc = 0.0
-                        _is_morning_liberal = (_lib_max_soc >= 90.0)
+                        # v11.6.54: Morning liberalization triggers unconditionally in morning solar window.
+                        # The 90% recharge requirement was too strict (would fail on cloudy days).
+                        # User requirement: morning protection = min_soc + 2%.
+                        # Solar recharge during the day handles the rest.
+                        _is_morning_liberal = True
                         if _is_morning_liberal:
-                            # Override: ignore user discharge limit, use fixed 5% buffer
-                            base_target = min_soc_val + 5.0
-                            soc_buffer_val = 5.0
-                            active_buffer = 5.0
+                            # Override: ignore user discharge limit, use fixed 2% buffer
+                            base_target = min_soc_val + 2.0
+                            soc_buffer_val = 2.0
+                            active_buffer = 2.0
                             _LOGGER.debug(
-                                f"[Sell v11.5.0] Morning liberal active: base_target={base_target:.1f}%, "
+                                f"[Sell v11.6.54] Morning liberal active: base_target={base_target:.1f}%, "
                                 f"sim_max={_lib_max_soc:.1f}% (from {_lib_start_soc:.1f}%)"
                             )
                     
                     # Hard Target for tomorrow morning (strictly survival: reserve + full buffer)
-                    # v11.4.51: Always use soc_buffer_full (not relaxed) for home protection
-                    # v11.5.3: USER OVERRIDE: target_morning_soc must also be reduced to 5% during morning liberal mode.
+                    # v11.6.54: In morning solar window, use min_soc+2% as the morning protection target.
+                    # This allows selling in the morning; solar recharges the battery during the day.
                     if _is_morning_liberal:
-                        target_morning_soc = min_soc_val + 5.0
+                        target_morning_soc = min_soc_val + 2.0
                     else:
                         target_morning_soc = min_soc_val + soc_buffer_full
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
