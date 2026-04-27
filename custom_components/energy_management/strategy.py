@@ -2582,6 +2582,14 @@ class StrategyEngine:
                     planned_sell_pct = (planned_sell_kwh / b_cap * 100.0 / max(0.1, eff)) if b_cap > 0.1 else 0.0
                     sale_is_active_disp = planned_sell_kwh > 0.01
 
+                    # v11.6.93: Move first_block_end up to avoid UnboundLocalError in UI calc
+                    first_block_end = future_active_sell[0] if future_active_sell else cur_hour
+                    for i in range(1, len(future_active_sell)):
+                        if future_active_sell[i] == future_active_sell[i-1] + 1:
+                            first_block_end = future_active_sell[i]
+                        else:
+                            break
+
                     if not sale_is_active_disp:
                         # Branch A: no sale — anchor is the natural end-of-sale-window SOC
                         display_soc_after = float(round_f(natural_soc_after_sale, 1))
@@ -2602,14 +2610,6 @@ class StrategyEngine:
                     morning_key_disp = f"{sunrise_h - 1:02d}:59 (Завтра)"
                     soc_morning_display = float(round_f(self._get_soc_from_log(sim_log, morning_key_disp, b_soc), 1))
                     
-                    # display_soc_after should show the SOC after the FIRST continuous block of sales
-                    # for better visual feedback on immediate action.
-                    first_block_end = future_active_sell[0] if future_active_sell else cur_hour
-                    for i in range(1, len(future_active_sell)):
-                        if future_active_sell[i] == future_active_sell[i-1] + 1:
-                            first_block_end = future_active_sell[i]
-                        else:
-                            break
                     key_after_disp = f"{first_block_end % 24:02d}:59" + (" (Завтра)" if first_block_end >= 24 else "")
                     display_soc_after = float(round_f(self._get_soc_from_log(sim_log, key_after_disp, b_soc), 1))
 
