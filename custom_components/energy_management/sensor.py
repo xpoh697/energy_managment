@@ -2714,11 +2714,6 @@ class InverterOperationModeSensor(SensorEntity):
                     f_dt, f_soc, is_forecast=True, abs_hour=h_abs,
                     avg_gen_override=f_gen, avg_load_override=f_load
                 )
-                # v11.6.62: debug - log after _get_mode_at returns
-                if h_abs in (19, 20):
-                    _active = (self.manager.get_market_strategy("sell") or {}).get("active_hours", [])
-                    _LOGGER.warning("[ForecastLoop] h_abs=%s f_mode=%s f_soc=%.1f active_hours=%s type=%s",
-                                    h_abs, f_mode, f_soc, _active, type(_active).__name__)
                 
                 # Add price info if applicable (v11.4.15 UI Polish)
                 p_suffix = ""
@@ -2856,7 +2851,12 @@ class InverterOperationModeSensor(SensorEntity):
     def _get_mode_at(self, dt_now, batt_soc, is_forecast=False, abs_hour=None, avg_gen_override=None, avg_load_override=None):
         """Calculates the inverter mode for a given timestamp and SOC."""
         mode = "sale_pv" # default
-        now_wall = dt_now
+        # v11.6.63: now_wall MUST be the real wall clock time, NOT the forecast time.
+        # Using dt_now here caused _now_h_for_forecast = forecast_hour (e.g. 19),
+        # making check_h_abs == _now_h_for_forecast always True for the target hour,
+        # which then used sell_strategy.get("state") == "active" (False at 11:00) 
+        # instead of the correct active_hours lookup → is_selling_active always False → sale_pv.
+        now_wall = dt_util.now()
         now_h_wall = now_wall.hour
         
         # v11.4.21: Fix date and hour alignment for forecast
