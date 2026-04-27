@@ -2343,14 +2343,14 @@ class StrategyEngine:
                                      p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
                             if (rem_base_ac + rem_bonus_ac) > 0.05:
-                                # v11.6.85: Segregate budgets - evening hours cannot steal morning bonus
+                                # v11.6.89: Segregate budgets - evening hours cannot steal morning bonus
                                 is_morning = 4 <= (h % 24) <= 12
                                 
-                                # 1. Try to take from base budget first
+                                # 1. Try to take from base budget first (Limit 18%)
                                 power_from_base = min(p_alloc, rem_base_ac / h_f)
                                 rem_base_ac -= (power_from_base * h_f)
                                 
-                                # 2. If it's morning and base is empty, take from bonus
+                                # 2. If it's morning and base is empty, take from bonus (Limit 15%)
                                 power_from_bonus = 0.0
                                 if is_morning and (p_alloc - power_from_base) > 0.01:
                                     power_from_bonus = min(p_alloc - power_from_base, rem_bonus_ac / h_f)
