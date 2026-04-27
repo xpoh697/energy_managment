@@ -2902,8 +2902,13 @@ class InverterOperationModeSensor(SensorEntity):
                 is_selling_active = sell_strategy.get("state") == "active"
                 is_buying_active = buy_strategy.get("state") == "active"
             else:
-                is_selling_active = check_h_abs in sell_strategy.get("active_hours", [])
+                _active_h_raw = sell_strategy.get("active_hours", [])
+                is_selling_active = check_h_abs in _active_h_raw
                 is_buying_active = check_h_abs in buy_strategy.get("active_hours", [])
+                # v11.6.62: debug
+                if check_h_abs in [19, 20]:
+                    _LOGGER.warning("[Mode Forecast] h=%s active_hours=%s type=%s is_selling=%s",
+                                    check_h_abs, _active_h_raw, type(_active_h_raw).__name__, is_selling_active)
         else:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"
