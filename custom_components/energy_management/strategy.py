@@ -2708,8 +2708,10 @@ class StrategyEngine:
                     res["arbitrage_sell_limit_reason"] = (
                         f"{diag_fixed} | S:{soc_at_start:.1f}% Cur:{b_soc:.1f}% | "
                         f"Cap:{b_cap:.1f} T:{base_target:.0f}% Eff:{eff:.3f} "
-                        f"M_dc:{surplus_for_morning:.2f} U_dc:{surplus_for_user_limit:.2f} AC:{available_sell_ac:.2f}"
+                        f"M_dc:{surplus_for_morning:.2f} U_dc:{surplus_for_user_limit:.2f} AC:{available_sell_ac:.2f} "
+                        f"NoChg:{_sell_sim_no_charge_until}"
                     )
+
 
 
                     # v7.1: Note: Simulation results are no longer used to override target_soc (v11.1.61).
