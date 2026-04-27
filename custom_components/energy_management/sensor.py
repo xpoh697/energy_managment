@@ -2714,6 +2714,11 @@ class InverterOperationModeSensor(SensorEntity):
                     f_dt, f_soc, is_forecast=True, abs_hour=h_abs,
                     avg_gen_override=f_gen, avg_load_override=f_load
                 )
+                # v11.6.62: debug - log after _get_mode_at returns
+                if h_abs in (19, 20):
+                    _active = (self.manager.get_market_strategy("sell") or {}).get("active_hours", [])
+                    _LOGGER.warning("[ForecastLoop] h_abs=%s f_mode=%s f_soc=%.1f active_hours=%s type=%s",
+                                    h_abs, f_mode, f_soc, _active, type(_active).__name__)
                 
                 # Add price info if applicable (v11.4.15 UI Polish)
                 p_suffix = ""
