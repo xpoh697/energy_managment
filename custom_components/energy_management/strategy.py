@@ -1972,8 +1972,9 @@ class StrategyEngine:
                                 )
                     
                     # Hard Target for tomorrow morning (strictly survival: reserve + full buffer)
-                    # v11.6.54: In morning solar window, use min_soc+2% as the morning protection target.
-                    if _is_morning_liberal:
+                    # v11.6.83: Look ahead for morning sales regardless of current time
+                    has_tomorrow_morning_sale = any(24 <= h < 37 for h in target_hours_sorted) if target_hours_sorted else False
+                    if _is_morning_liberal or has_tomorrow_morning_sale:
                         target_morning_soc = min_soc_val + 2.0
                     else:
                         target_morning_soc = min_soc_val + soc_buffer_full
@@ -2213,10 +2214,10 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
-                    # v11.6.79: Remove redundant surplus_for_morning (M) from budget.
-                    # base_target (U) already includes the survival floor + morning solar credit.
-                    # M was a pessimistic (no-solar) version of the same safety check.
+                    # v11.6.83: Expand budget to accommodate deeper morning discharge (15% vs 18%)
                     surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0)
+                    if has_tomorrow_morning_sale:
+                        surplus_for_user_limit += (soc_buffer_val - 2.0) * b_cap / 100.0
                     available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
 
                     sell_diagnosis = "Рассчитано (Ок)"
@@ -2322,53 +2323,34 @@ class StrategyEngine:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
                             p_alloc = max_p
                             
+                            # v11.6.83: Dynamic Floor for morning hours
+                            h_floor = base_target
+                            if 4 <= (h % 24) <= 12:
+                                h_floor = min_soc_val + 2.0
+                                
                             # Selective Throttling strictly for the current hour
                             if h == cur_hour:
                                 house_cons_hourly = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
                                 house_rem_dc = (house_cons_hourly * h_f) / eff
-                                current_surplus_dc = max(0.0, (b_soc - base_target) * b_cap / 100.0 - house_rem_dc)
+                                current_surplus_dc = max(0.0, (b_soc - h_floor) * b_cap / 100.0 - house_rem_dc)
                                 max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
                                 p_alloc = min(max_p, max_allowed_sell_ac / h_f)
+                            else:
+                                # For future hours in this pool, we also cap by the local floor
+                                # to ensure evening hours don't 'steal' the morning buffer.
+                                # v11.6.83: Simple safety cap
+                                p_alloc = max_p
+                                if h_soc_at_start := self._get_soc_from_log(sim_log_base, f"{h%24:02d}:00", b_soc):
+                                     surplus_h_dc = max(0.0, (h_soc_at_start - h_floor) * b_cap / 100.0)
+                                     p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
                             if rem_kwh_sell > 0.05:
                                 actual_power = min(p_alloc, rem_kwh_sell / h_f)
                                 sell_commands[int(h)] = round_f(actual_power, 3)
                                 rem_kwh_sell -= (actual_power * h_f)
                     
-                    # v11.6.76: Morning Floor Liberation (Simulation-Driven)
-                    # Instead of flat math, use step-by-step simulation to accurately account
-                    # for solar generation and house consumption during morning hours.
-                    # v11.6.69: Morning Sell-off MUST respect the user's SOC limit.
-                    # It was previously bypassing user_discharge_limit, causing inconsistent discharge.
-                    _morning_sell_floor = max(min_soc_val + 2.0, user_discharge_limit)
-
-                    if epochs:
-                        _morning_hrs_p0 = sorted(
-                            [h for h in epochs[0] if h >= 24 and (h % 24) <= sunrise_h],
-                            key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True
-                        )
-                        if _morning_hrs_p0:
-                            _temp_cmds = {int(h): -cmd for h, cmd in sell_commands.items()}
-                            _sim_range_temp = list(range(cur_hour, max(_morning_hrs_p0) + 2))
-                            for h_m in _morning_hrs_p0:
-                                # v11.6.76: Use ignore_blended=True for consistency with Step 1
-                                _, _temp_log, _ = self.run_soc_simulation(
-                                    b_soc, _sim_range_temp, now, _temp_cmds, 
-                                    ignore_blended=True
-                                )
-                                _key_hm = f"{h_m % 24:02d}:59" + (" (Завтра)" if h_m >= 24 else "")
-                                _soc_end_hm = self._get_soc_from_log(_temp_log, _key_hm, b_soc)
-                                
-                                _surplus_pct = max(0.0, _soc_end_hm - _morning_sell_floor)
-                                _surplus_kwh = _surplus_pct * b_cap / 100.0 * eff
-                                
-                                _curr_alloc = sell_commands.get(int(h_m), 0.0)
-                                _can_add = max(0.0, max_p - _curr_alloc)
-                                _add_power = min(_can_add, _surplus_kwh)
-                                
-                                if _add_power > 0.01:
-                                    sell_commands[int(h_m)] = round_f(_curr_alloc + _add_power, 3)
-                                    _temp_cmds[int(h_m)] = -sell_commands[int(h_m)]
+                    # v11.6.83: Morning Floor Liberation is now integrated into the core distribution loop
+                    # via dynamic h_floor and expanded budget.
 
                     power_needed = sell_commands.get(int(cur_hour), 0.0)
 
