@@ -2942,20 +2942,23 @@ class StrategyEngine:
                     house_rem_dc = (house_cons * h_f) / eff
                     discharge_dc = (power_needed * h_f) / eff
                     pure_discharge_pct = (discharge_dc + house_rem_dc) / b_cap * 100.0 if b_cap > 0.1 else 0.0
-                    target_soc = max(0.0, target_soc - pure_discharge_pct)
                     
-                    # Ensure we never target below the identified safe floor
-                    sim_floor = res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", target_soc)
+                    # v11.6.119: Align target_soc with end of CURRENT HOUR (Solar-Blind)
+                    # We target the SOC reached by discharging battery + house load, ignoring solar gain.
+                    target_soc = max(0.0, b_soc - pure_discharge_pct)
+                    
+                    # Ensure we never target below the identified safe floor for this hour
                     _target_limit = min_soc_val + 2.0 if (sunrise_h <= (cur_hour % 24) <= 12) else base_target
                     target_soc = max(target_soc, _target_limit)
                 else:
-                    # For buying, it's fine to use the simulation log
+                    # For buying, it's fine to use the simulation log (HH:59)
                     sim_info = res.get("buy_simulation")
                     if sim_info:
                         s_log = sim_info.get("log", {})
                         key_cur = f"{now.hour:02d}:59"
                         if key_cur in s_log:
                             target_soc = float(self._get_soc_from_log(s_log, key_cur, target_soc))
+
                 
             res["target_soc"] = float(round_f(target_soc, 1))
 
