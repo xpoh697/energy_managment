@@ -2222,7 +2222,7 @@ class StrategyEngine:
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
                     # v11.6.84: Expand budget to accommodate deeper morning discharge (15% vs 18%)
-                    # v11.6.101: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
+                    # v11.6.103: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
                     # even if the autopilot raised base_target to 18%.
 
 
@@ -2844,8 +2844,8 @@ class StrategyEngine:
                     # Fallback if somehow log is missing (should not happen in normal operation)
                     h_soc = float(self._get_soc_from_log(s_log, key_h, target_soc))
                     
-                    # v11.6.4: Unified display mapping exact simulation values
-                    p_distribution[h_label] = f"{round_f(p_val, 2)} kW (SOC: {round_f(h_soc, 1)}%)"
+                    # v11.6.103: Clarify that this is the projected simulation SOC, NOT the inverter target
+                    p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc, 1)}%)"
                     
             res["planned_power_per_h"] = p_distribution
             
