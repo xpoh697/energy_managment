@@ -16,8 +16,7 @@ from .const import (
     CONF_ONLY_SOLAR,
     CONF_PRICE_BUY_LIMIT,
     CONF_PRICE_SELL_LIMIT,
-    CONF_PRICE_TOLERANCE,
-    CONF_PRICE_SELL_TOLERANCE,
+    CONF_PRICE_SELL_ONLY_PV,
     CONF_BATTERY_MAX_POWER,
     CONF_AI_CHARGE_LIMIT,
     CONF_AI_DISCHARGE_LIMIT,
@@ -1081,8 +1080,6 @@ class StrategyEngine:
 
             buy_limit = float(man.get_setting(CONF_PRICE_BUY_LIMIT, 2.0))
             sell_limit = float(man.get_setting(CONF_PRICE_SELL_LIMIT, 5.0))
-            buy_tolerance = float(man.get_setting(CONF_PRICE_TOLERANCE, 0.0))
-            sell_tolerance = float(man.get_setting(CONF_PRICE_SELL_TOLERANCE, 0.0))
             eff = float(eff_coeff)
             active_window = (cur_hour, 47) if tomorrow_prices else (cur_hour, 23)
             # End the window at :59 for clarity
@@ -1091,18 +1088,40 @@ class StrategyEngine:
             target_hours = []
             target_price = 0.0
 
-            def get_peaks(window, is_sell, limit, tol):
+            def get_peaks(window, is_sell, limit):
                 if not window: return []
                 w_vals = [float(v) for v in window.values()]
-                if is_sell:
-                    best_p = float(max(w_vals))
-                    if best_p >= float(limit):
-                        return [(int(h), float(p)) for h, p in window.items() if float(p) >= float(limit) and float(p) >= (best_p - float(tol))]
-                else:
-                    best_p = float(min(w_vals))
-                    if best_p <= float(limit):
-                        return [(int(h), float(p)) for h, p in window.items() if float(p) <= float(limit) and float(p) <= (best_p + float(tol))]
-                return []
+                if not w_vals: return []
+                
+                limit = float(limit)
+                target = max(w_vals) if is_sell else min(w_vals)
+                
+                if (is_sell and target < limit) or (not is_sell and target > limit):
+                    return []
+                    
+                peak_hours = [int(h) for h, p in window.items() if float(p) == target]
+                peaks = set()
+                
+                for peak_h in peak_hours:
+                    # expand left
+                    h = peak_h
+                    while str(h) in window:
+                        p = float(window[str(h)])
+                        if (is_sell and p >= limit) or (not is_sell and p <= limit):
+                            peaks.add((h, p))
+                            h -= 1
+                        else:
+                            break
+                    # expand right
+                    h = peak_h + 1
+                    while str(h) in window:
+                        p = float(window[str(h)])
+                        if (is_sell and p >= limit) or (not is_sell and p <= limit):
+                            peaks.add((h, p))
+                            h += 1
+                        else:
+                            break
+                return sorted(list(peaks), key=lambda x: x[0])
 
             # Shared arbitrage data
             s_p_today = dict(man.data.get("prices_sell", {}).get(today_str, {}))
@@ -1200,8 +1219,8 @@ class StrategyEngine:
                         combined = [(int(h), float(p)) for h, p in today_prices.items() if float(normalize_float(p)) <= buy_limit]
                         combined += [(int(h) + 24, float(p)) for h, p in tomorrow_prices.items() if float(normalize_float(p)) <= buy_limit]
                     else:
-                        peaks_today = get_peaks(wt_filtered, False, 999.0, buy_tolerance)
-                        peaks_tom = get_peaks(wom_filtered, False, 999.0, buy_tolerance)
+                        peaks_today = get_peaks(wt_filtered, False, buy_limit)
+                        peaks_tom = get_peaks(wom_filtered, False, buy_limit)
                         combined = peaks_today + peaks_tom
                     
                     is_arb_window = False
@@ -1259,8 +1278,8 @@ class StrategyEngine:
                 tom_morn = {h: p for h, p in tomorrow_prices.items() if int(h) < 13}
                 tom_eve = {h: p for h, p in tomorrow_prices.items() if int(h) >= 13}
 
-                raw_peaks_today = get_peaks(today_morn, True, 0.0, sell_tolerance) + get_peaks(today_eve, True, 0.0, sell_tolerance)
-                raw_peaks_tom = get_peaks(tom_morn, True, 0.0, sell_tolerance) + get_peaks(tom_eve, True, 0.0, sell_tolerance)
+                raw_peaks_today = get_peaks(today_morn, True, sell_limit) + get_peaks(today_eve, True, sell_limit)
+                raw_peaks_tom = get_peaks(tom_morn, True, sell_limit) + get_peaks(tom_eve, True, sell_limit)
                 
                 if not raw_peaks_today and not raw_peaks_tom:
                     res["state"] = "price_limit_not_met"
@@ -1310,8 +1329,8 @@ class StrategyEngine:
                         all_h_possible = sorted(list(set(list(today_prices.keys()) + list(tomorrow_prices.keys()))), key=lambda x: int(x))
                         
                         # Get technical peaks for comparison
-                        tech_peaks_today = [int(h) for h, p in get_peaks(today_morn, True, 0.0, sell_tolerance) + get_peaks(today_eve, True, 0.0, sell_tolerance)]
-                        tech_peaks_tom = [int(h) + 24 for h, p in get_peaks(tom_morn, True, 0.0, sell_tolerance) + get_peaks(tom_eve, True, 0.0, sell_tolerance)]
+                        tech_peaks_today = [int(h) for h, p in get_peaks(today_morn, True, sell_limit) + get_peaks(today_eve, True, sell_limit)]
+                        tech_peaks_tom = [int(h) + 24 for h, p in get_peaks(tom_morn, True, sell_limit) + get_peaks(tom_eve, True, sell_limit)]
                         tech_peaks_all = set(tech_peaks_today + tech_peaks_tom)
 
                         for h_str, p_val in today_prices.items():
