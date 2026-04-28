@@ -2323,7 +2323,11 @@ class StrategyEngine:
                             rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
                         else:
                             rem_base_ac = float(max(0.0, (b_soc - base_target) * b_cap / 100.0 * eff))
-                            rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
+                            # v11.6.98: Cap the bonus budget to the actual physical SOC available!
+                            # If b_soc is already below base_target, we can't sell the full 3% bonus.
+                            capped_bonus_soc = max(0.0, min(b_soc, base_target) - (min_soc_val + 2.0))
+                            _actual_bonus_dc = (capped_bonus_soc * b_cap / 100.0) if has_morning_sale else 0.0
+                            rem_bonus_ac = float(min(_morning_lib_surplus_dc, _actual_bonus_dc) * eff)
                             
                         for h in epoch_sorted:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
@@ -2660,14 +2664,17 @@ class StrategyEngine:
                         # by buggy natural_morning_soc from sim_log_base, causing the wrong branch
                         # to fire and overriding the correctly identified constraint (e.g. АКБ limit).
                         
-                        # v11.5.1: Block sell if current SOC is already at or below projected post-sale floor.
-                        # If b_soc <= display_soc_after, there is literally zero energy to sell without
-                        # violating the floor. This can happen when battery has already drifted down
-                        # to the calculated floor between strategy cycles, or when the morning liberal
-                        # mode set a very low base_target and b_soc is already there.
-                        if b_soc <= display_soc_after and power_needed > 0.01:
+                        # v11.6.98: Fixed "АКБ у порога" false positive.
+                        # The old check (b_soc <= display_soc_after) falsely triggered during morning
+                        # solar charging because display_soc_after would rise above b_soc.
+                        # Now we strictly check if we are at or below the applicable UI floor.
+                        if b_soc <= float(_ui_floor) + 0.1 and power_needed > 0.01:
                             power_needed = 0.0
-                            res["power_decision"] = f"АКБ у порога ({b_soc:.1f}% \u2264 {display_soc_after:.1f}%)"
+                            res["power_decision"] = f"АКБ у порога ({b_soc:.1f}% \u2264 {_ui_floor:.1f}%)"
+                            res["planned_power_per_h"] = {}
+                        elif display_soc_after < float(_ui_floor) - 0.1 and power_needed > 0.01:
+                            power_needed = 0.0
+                            res["power_decision"] = f"Блокировка (Прогноз {display_soc_after:.1f}% < {_ui_floor:.1f}%)"
                             res["planned_power_per_h"] = {}
                         else:
                             # v11.6.53: Smart Pool Splitting Status (Round 118)
