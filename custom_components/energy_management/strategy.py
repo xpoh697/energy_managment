@@ -1976,8 +1976,8 @@ class StrategyEngine:
                                     f"Survival mode active, base_target={base_target:.1f}%"
                                 )
                     
-                    # v11.6.96: Check if any sales are planned for tomorrow morning (for budget expansion)
-                    has_tomorrow_morning_sale = any(24 <= h < 37 for h in target_hours_sorted) if target_hours_sorted else False
+                    # v11.6.97: Check if any sales are planned for the morning (either today or tomorrow)
+                    has_morning_sale = any((sunrise_h <= (h % 24) <= 12) for h in target_hours_sorted) if target_hours_sorted else False
                     
                     # Hard Target for tomorrow morning (strictly sunrise goal: reserve + full buffer)
                     # v11.6.95: The sunrise goal is ALWAYS 18%. 
@@ -2222,7 +2222,7 @@ class StrategyEngine:
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
                     # v11.6.84: Expand budget to accommodate deeper morning discharge (15% vs 18%)
-                    _morning_lib_surplus_dc = (soc_buffer_val - 2.0) * b_cap / 100.0 if has_tomorrow_morning_sale else 0.0
+                    _morning_lib_surplus_dc = (soc_buffer_val - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
                     surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
                     available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
 
