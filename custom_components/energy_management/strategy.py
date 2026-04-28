@@ -2196,12 +2196,10 @@ class StrategyEngine:
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         
-                        # v11.4.32: Simulation-Driven Trust
-                        # If the simulation shows we naturally arrive at sunrise with enough charge,
-                        # we don't need to add any "safety buffer" for intermediate drain.
-                        if is_morning_solar_v2 and natural_morning_soc >= target_sunrise_soc:
-                            night_drain_pct = 0.0
-                            
+                        # v11.6.108: Always apply the night_drain_pct to the survival floor!
+                        # Previous logic zeroed it out if natural_morning_soc >= target_sunrise_soc,
+                        # which caused the system to mistakenly assume no floor protection was needed 
+                        # against the overnight drain caused by the sale itself.
                         survival_floor = target_sunrise_soc + night_drain_pct
                         
                         if survival_floor > base_target:
@@ -2227,7 +2225,11 @@ class StrategyEngine:
 
 
                     _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
-                    surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
+                    # v11.6.108: Use soc_at_start instead of b_soc.
+                    # When evaluating future evening peaks, b_soc represents the current (low) SOC, 
+                    # while soc_at_start represents the fully charged 100% state. Using b_soc artificially 
+                    # restricted the planned arbitrage budget and caused massive forecasting mismatches.
+                    surplus_for_user_limit = max(0.0, (soc_at_start - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
                     available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
 
                     sell_diagnosis = "Рассчитано (Ок)"
