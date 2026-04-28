@@ -2222,7 +2222,9 @@ class StrategyEngine:
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
                     # v11.6.84: Expand budget to accommodate deeper morning discharge (15% vs 18%)
-                    _morning_lib_surplus_dc = (soc_buffer_val - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
+                    # v11.6.99: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
+                    # even if the autopilot raised base_target to 18%.
+                    _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
                     surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
                     available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
 
