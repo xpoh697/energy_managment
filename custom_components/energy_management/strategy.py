@@ -2481,10 +2481,9 @@ class StrategyEngine:
                         base_target = min(100.0, base_target + morning_deficit_fix)
                         
                         # 2. Re-calculate available volume
-                        # v11.6.6: Use immediate_base_target so tomorrow's deficit doesn't block today's morning sale
-                        # v11.6.84: Recursive budget also includes morning expansion
-                        # v11.6.85: Recursive budget also segregated
-                        rem_base_ac_fix = float(max(0.0, (b_soc - base_target) * b_cap / 100.0 * eff))
+                        # v11.6.112: Step 2 also needs to use soc_at_start for future windows.
+                        _rem_start_soc = soc_at_start if 'soc_at_start' in locals() else b_soc
+                        rem_base_ac_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0 * eff))
                         rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
                         
                         # 3. Re-distribute sell_commands
@@ -2496,6 +2495,12 @@ class StrategyEngine:
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 rem_base_ac_fix = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                                 rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
+                            else:
+                                # v11.6.112: Same for the first epoch inside the fix loop
+                                rem_base_ac_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0 * eff))
+                                # Bonus in Step 2 for first epoch
+                                _actual_bonus_dc_fix = (max(0.0, min(_rem_start_soc, base_target) - (min_soc_val + 2.0)) * b_cap / 100.0) if has_morning_sale else 0.0
+                                rem_bonus_ac_fix = float(min(_morning_lib_surplus_dc, _actual_bonus_dc_fix) * eff)
                             
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
@@ -2735,7 +2740,7 @@ class StrategyEngine:
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": res_soc_after,
                         "projected_soc_morning_pct": res_soc_morning,
-                            "projected_soc_morning": res_soc_morning,
+                        "projected_soc_morning": res_soc_morning,
                         "log": sim_log
                     }
 
