@@ -2874,7 +2874,6 @@ class StrategyEngine:
                             final_periods.append(f"{h_min:02d}:00{suffix_min} - {h_max:02d}:59{suffix_max}")
 
             res["active_hours"] = actual_active
-            res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active])
             res["active_periods"] = ", ".join(final_periods) if final_periods else "Нет"
             
             p_distribution = {}
