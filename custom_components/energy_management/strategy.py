@@ -2108,17 +2108,26 @@ class StrategyEngine:
                                     break
                             if _sell_neg_h is not None and _sell_neg_h > cur_hour:
                                 _sell_sim_no_charge_until = _sell_neg_h
-                        # v11.6.75: Remove NoChgUntil from baseline. User wants Budget to match Gatekeeper floor
-                        # without double-counting the safety margin of tomorrow's solar block.
+                        # v11.6.124: Run two baselines.
+                        # Base 1: Full simulation (with solar) for survival and long-term targets.
                         _, sim_log_base, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
                             b_min_soc=0.0,
                             ignore_blended=True
                         )
-
                         
-                        # v11.6.41: Fix massive bug where natural_morning_soc was taking the end-of-sim SOC (100% due to tomorrow's sun)
-                        key_sunrise = f"{sunrise_h-1:02d}:59" + (" (Завтра)" if sunrise_h-1 < cur_hour else "")
+                        # Base 2: Battery-Only (no solar) for discharge budget and p_alloc limits.
+                        # This ensures we don't 'spread' the battery energy by overestimating 
+                        # the budget with upcoming solar. Solar goes to grid 'on top'.
+                        _, sim_log_no_sun, _ = self.run_soc_simulation(
+                            b_soc, sim_range, now, {},
+                            b_min_soc=0.0,
+                            no_battery_charge=True,
+                            ignore_blended=True
+                        )
+
+                        # natural_morning_soc still uses base (with solar) to protect the base.
+                        key_sunrise = f"{sunrise_h-1:02d}:59" + (" (Завтра)" if sunrise_h-1 < (now.hour) else "")
                         natural_morning_soc = self._get_soc_from_log(sim_log_base, key_sunrise, b_soc)
                     
                     # --- TWO-STEP SAFETY CHECK (Refined v6.2) ---
@@ -2205,7 +2214,9 @@ class StrategyEngine:
                                     last_h_base = future_active_sell_base[i-1]
                                     break
                             key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Завтра)" if last_h_base >= 24 else "")
-                            natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_nat_end, soc_at_start)
+                            # v11.6.124: natural_soc_after_sale now uses the NO_SUN log.
+                            # This restricts the budget to 'mobile' battery energy only.
+                            natural_soc_after_sale = self._get_soc_from_log(sim_log_no_sun, key_nat_end, soc_at_start)
                         
                         # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
                         # We calculate the exact SOC floor needed to guarantee the morning target.
@@ -2364,13 +2375,12 @@ class StrategyEngine:
                             if sunrise_h <= (h % 24) <= 12:
                                 h_floor = min_soc_val + 2.0
                                 
-                            # v11.6.123: Power Allocation Throttling (p_alloc)
-                            # Uses SOC at the END of the hour in the base simulation.
-                            # This accounts for solar gain occurring DURING the hour,
-                            # allowing more power to be allocated to the most expensive (first) hours.
+                            # v11.6.124: Power Allocation Throttling (p_alloc)
+                            # Now uses the NO_SUN log to determine battery-only surplus.
+                            # This allows concentrating the WHOLE battery surplus in the best hour.
                             _h_key = f"{(h)%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
-                            if h_soc_end := self._get_soc_from_log(sim_log_base, _h_key, b_soc):
-                                surplus_h_dc = max(0.0, (h_soc_end - h_floor) * b_cap / 100.0)
+                            if h_soc_end_no_sun := self._get_soc_from_log(sim_log_no_sun, _h_key, b_soc):
+                                surplus_h_dc = max(0.0, (h_soc_end_no_sun - h_floor) * b_cap / 100.0)
                                 p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                             else:
                                 p_alloc = max_p
