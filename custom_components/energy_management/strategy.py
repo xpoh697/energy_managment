@@ -2857,7 +2857,7 @@ class StrategyEngine:
             if in_peak:
                 if mode == "sell":
                     h_f = max(0.1, (60 - now.minute) / 60.0)
-                    house_cons = float(normalize_float(self.manager.get_average_profile("consumption_total", self.manager.custom_period, now.weekday()).get(str(cur_hour), 0.5))) * self.manager.occupancy_coefficient
+                    house_cons = float(normalize_float(self.manager.get_average_profile("consumption_total", self.manager.custom_period, now.weekday()).get(str(cur_hour), 0.5))) * occ_coeff
                     house_rem_dc = (house_cons * h_f) / eff
                     discharge_dc = (power_needed * h_f) / eff
                     pure_discharge_pct = (discharge_dc + house_rem_dc) / b_cap * 100.0 if b_cap > 0.1 else 0.0
