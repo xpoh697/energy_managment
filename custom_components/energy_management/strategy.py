@@ -2370,31 +2370,18 @@ class StrategyEngine:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
                             p_alloc = max_p
                             
-                            # v11.6.90: Morning Floor starts EXACTLY at sunrise
-                            h_floor = base_target
-                            if sunrise_h <= (h % 24) <= 12:
-                                h_floor = min_soc_val + 2.0
+                            # v11.6.126: Unified Sell Budget (Greedy)
+                            # Combine base and bonus into one pool and let the best hour take it all.
+                            total_pool_ac = rem_base_ac + rem_bonus_ac
+                            if total_pool_ac > 0.05:
+                                actual_power = min(p_alloc, total_pool_ac / h_f)
                                 
-                            # v11.6.125: Greed is good. 
-                            # We want to push the WHOLE battery budget into the best hour.
-                            # So we set p_alloc to max_p, effectively removing energy throttling.
-                            p_alloc = max_p
+                                # Update budgets for next hours in the loop
+                                power_taken_ac = actual_power * h_f
+                                taken_from_base = min(rem_base_ac, power_taken_ac)
+                                rem_base_ac -= taken_from_base
+                                rem_bonus_ac -= (power_taken_ac - taken_from_base)
                                 
-                            if (rem_base_ac + rem_bonus_ac) > 0.05:
-                                # v11.6.90: Segregate budgets starting from sunrise_h
-                                is_morning = sunrise_h <= (h % 24) <= 12
-                                
-                                # 1. Try to take from base budget first (Limit 18%)
-                                power_from_base = min(p_alloc, rem_base_ac / h_f)
-                                rem_base_ac -= (power_from_base * h_f)
-                                
-                                # 2. If it's morning and base is empty, take from bonus (Limit 15%)
-                                power_from_bonus = 0.0
-                                if is_morning and (p_alloc - power_from_base) > 0.01:
-                                    power_from_bonus = min(p_alloc - power_from_base, rem_bonus_ac / h_f)
-                                    rem_bonus_ac -= (power_from_bonus * h_f)
-                                
-                                actual_power = power_from_base + power_from_bonus
                                 if actual_power > 0.01:
                                     sell_commands[int(h)] = round_f(actual_power, 3)
                     
