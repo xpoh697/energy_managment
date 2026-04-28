@@ -2135,23 +2135,25 @@ class EnergyProfileManager:
         stored = self.fixed_strategy_data.get(mode, {"hour_key": ""})
         
         if is_active:
-            if stored.get("hour_key") != hour_key:
-                # Capture fresh values for the remainder of this hour
-                p_val = float(res.get("recommended_power_kw", 0.0))
-                t_soc = float(res.get("target_soc", 0.0))
+            p_val_new = float(res.get("recommended_power_kw", 0.0))
+            t_soc_new = float(res.get("target_soc", 0.0))
+            stored_p = float(stored.get("power", 0.0))
+            
+            # v11.6.105: High-Water Mark Anchor. 
+            # Update the anchor if it's a new hour OR if the strategy allows MORE power than previously locked.
+            # This prevents power from dropping (reducing jitter), but allows it to increase if the budget grows.
+            if stored.get("hour_key") != hour_key or p_val_new > (stored_p + 0.05):
                 c_amps = 0.0
-                
-                # Calculate charge_amps once at capture time
                 if self.battery_voltage_sensor:
                     v_val = self.get_sensor_float(self.battery_voltage_sensor)
-                    if v_val and v_val > 0.1 and p_val > 0.01:
-                        c_amps = round_f((p_val * 1000.0) / v_val, 2)
+                    if v_val and v_val > 0.1 and p_val_new > 0.01:
+                        c_amps = round_f((p_val_new * 1000.0) / v_val, 2)
                 
                 self.fixed_strategy_data[mode] = {
                     "id": 1,
                     "hour_key": hour_key,
-                    "power": p_val,
-                    "target_soc": t_soc,
+                    "power": p_val_new,
+                    "target_soc": t_soc_new,
                     "charge_amps": c_amps
                 }
         else:
