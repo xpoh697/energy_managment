@@ -2222,8 +2222,9 @@ class StrategyEngine:
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
                     # v11.6.84: Expand budget to accommodate deeper morning discharge (15% vs 18%)
-                    # v11.6.100: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
+                    # v11.6.101: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
                     # even if the autopilot raised base_target to 18%.
+
 
                     _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
                     surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
@@ -2848,22 +2849,35 @@ class StrategyEngine:
                     
             res["planned_power_per_h"] = p_distribution
             
-            # v11.6.4: Target SOC from Simulation (Reverts v11.6.1 Linear request for precision)
-            # Fetch the precise hour-end simulation target that intrinsically includes house load.
+            # v11.6.101: Solar-Blind Target SOC for Selling
+            # If we use the simulation log (which includes solar charging), the target_soc 
+            # will be artificially raised (e.g., 17.2% instead of 15.0%). 
+            # This causes the inverter to stop discharging too early, preventing solar energy 
+            # from being exported to the grid. The inverter must receive the PURE discharge target.
             if in_peak:
-                sim_info = res.get("sell_simulation" if mode == "sell" else "buy_simulation")
-                if sim_info:
-                    s_log = sim_info.get("log", {})
-                    key_cur = f"{now.hour:02d}:59"
-                    if key_cur in s_log:
-                        target_soc = float(self._get_soc_from_log(s_log, key_cur, target_soc))
-                
                 if mode == "sell":
-                    # Ensure we never target below the identified safe floor (Home Protection)
+                    h_f = max(0.1, (60 - now.minute) / 60.0)
+                    house_cons = float(normalize_float(self.manager.get_average_profile("consumption_total", self.manager.custom_period, now.weekday()).get(str(cur_hour), 0.5))) * self.manager.occupancy_coefficient
+                    house_rem_dc = (house_cons * h_f) / eff
+                    discharge_dc = (power_needed * h_f) / eff
+                    pure_discharge_pct = (discharge_dc + house_rem_dc) / b_cap * 100.0 if b_cap > 0.1 else 0.0
+                    target_soc = max(0.0, target_soc - pure_discharge_pct)
+                    
+                    # Ensure we never target below the identified safe floor
                     sim_floor = res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", target_soc)
-                    target_soc = max(target_soc, sim_floor)
+                    _target_limit = min_soc_val + 2.0 if (sunrise_h <= (cur_hour % 24) <= 12) else base_target
+                    target_soc = max(target_soc, _target_limit)
+                else:
+                    # For buying, it's fine to use the simulation log
+                    sim_info = res.get("buy_simulation")
+                    if sim_info:
+                        s_log = sim_info.get("log", {})
+                        key_cur = f"{now.hour:02d}:59"
+                        if key_cur in s_log:
+                            target_soc = float(self._get_soc_from_log(s_log, key_cur, target_soc))
                 
             res["target_soc"] = float(round_f(target_soc, 1))
+
             
             # Mode Detection Logic (Moved from sensor.py for better centralization)
             cur_mode_text = "Ожидание"
