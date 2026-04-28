@@ -2375,15 +2375,10 @@ class StrategyEngine:
                             if sunrise_h <= (h % 24) <= 12:
                                 h_floor = min_soc_val + 2.0
                                 
-                            # v11.6.124: Power Allocation Throttling (p_alloc)
-                            # Now uses the NO_SUN log to determine battery-only surplus.
-                            # This allows concentrating the WHOLE battery surplus in the best hour.
-                            _h_key = f"{(h)%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
-                            if h_soc_end_no_sun := self._get_soc_from_log(sim_log_no_sun, _h_key, b_soc):
-                                surplus_h_dc = max(0.0, (h_soc_end_no_sun - h_floor) * b_cap / 100.0)
-                                p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
-                            else:
-                                p_alloc = max_p
+                            # v11.6.125: Greed is good. 
+                            # We want to push the WHOLE battery budget into the best hour.
+                            # So we set p_alloc to max_p, effectively removing energy throttling.
+                            p_alloc = max_p
                                 
                             if (rem_base_ac + rem_bonus_ac) > 0.05:
                                 # v11.6.90: Segregate budgets starting from sunrise_h
@@ -2442,6 +2437,11 @@ class StrategyEngine:
                         res["power_decision"] = "Ограничено мощностью АКБ"
 
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
+                    # v11.6.125: Block simulation charging until the end of the sale window.
+                    # This ensures the 'Прогноз' in UI shows battery hitting the floor,
+                    # which matches the 'Sell First' behavior where solar goes straight to grid.
+                    if last_h_sell is not None:
+                        _sell_sim_no_charge_until = last_h_sell + 1
 
                     # --- FINAL SIMULATION ---
                     sim_commands = {int(h): -cmd for h, cmd in sell_commands.items()}
