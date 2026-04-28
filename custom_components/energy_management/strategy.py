@@ -2828,25 +2828,25 @@ class StrategyEngine:
                         res["arbitrage_buyback"]["power_kw"] = max_p
                         res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
                 
+            # v11.6.116: Filter out hours with 0.0 kW power from planning completely.
+            # Strategy is only active if planned power > 0.01 or (BUY mode and negative price).
+            _filtered_targets = []
+            for h in target_hours_sorted:
+                p_val = sell_commands.get(h, 0.0) if mode == "sell" else charge_commands.get(h, 0.0)
+                is_neg_buy = (mode == "buy" and negative_hours and h in negative_hours)
+                if p_val > 0.01 or is_neg_buy:
+                    _filtered_targets.append(h)
+            target_hours_sorted = _filtered_targets
+
             # Use current peak power only if we are actually in a peak hour
-            # Otherwise show 0 as real command, but attributes will show the potential
             in_peak = (cur_hour in target_hours_sorted)
-            # v11.6.31: Strategy is 'active' if we are in the target window.
-            # For BUY mode, even 0kW is active (we are waiting/blocking PV).
-            # For SELL mode, we still require power > 0.01 to avoid 'active' state on empty battery.
-            if mode == "buy" and in_peak:
-                res["state"] = "active"
-            elif mode == "sell" and in_peak and power_needed > 0.01:
+            if in_peak:
                 res["state"] = "active"
             
-            real_cmd_p = power_needed if (mode == "sell" and (in_peak and power_needed > 0.01)) else 0.0
-            if mode == "buy" and in_peak:
-                real_cmd_p = power_needed
+            real_cmd_p = power_needed if in_peak else 0.0
 
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
-            # Only show hours that actually have planned power OR negative price hours (v11.1.22)
-            # v11.3.3: Always show future target hours if they are identified (consistent for buy/sell)
-            # This allows the user to see cheap/expensive windows even if current power command is 0.
+            
             actual_active = [h for h in target_hours_sorted if h >= cur_hour]
 
             # Regenerate active_periods based on final filtered hours (v6.18)
@@ -2884,6 +2884,9 @@ class StrategyEngine:
                 
                 # v11.6.40: Show ALL hours of the first Energy Pool in planned_power
                 _first_window_active = res.get("first_pool_hours", actual_active)
+                
+                # v11.6.116: Filter UI display to match the 0.0kW cleanup
+                _first_window_active = [h for h in _first_window_active if h in target_hours_sorted]
                 
                 for h_idx in sorted(_first_window_active):
                     h_label = self._format_h(h_idx)
