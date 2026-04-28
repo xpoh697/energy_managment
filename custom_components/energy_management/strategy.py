@@ -2715,17 +2715,34 @@ class StrategyEngine:
                                         continue
                                     
                                     h_list = sorted(ep_sells.keys())
-                                    has_gap = any(h_list[i] > h_list[i-1] + 1 for i in range(1, len(h_list)))
-                                    first_h = h_list[0]
-                                    last_h = h_list[-1]
+                                    
+                                    # v11.6.114: Group contiguous hours for accurate summary
+                                    groups = []
+                                    current_group = [h_list[0]]
+                                    for i in range(1, len(h_list)):
+                                        if h_list[i] == h_list[i-1] + 1:
+                                            current_group.append(h_list[i])
+                                        else:
+                                            groups.append(current_group)
+                                            current_group = [h_list[i]]
+                                    groups.append(current_group)
                                     
                                     if ei == 0:
-                                        if has_gap:
-                                            pool_strs.append(f"{ep_sells[first_h]:.1f}кВтч в {self._format_h(first_h)}, допродажа в {self._format_h(last_h)}")
-                                        else:
-                                            pool_strs.append(f"{ep_sells[first_h]:.1f}кВтч в {self._format_h(first_h)}")
+                                        group_strs = []
+                                        for g in groups:
+                                            g_sum = sum(ep_sells[h] for h in g)
+                                            first_g = g[0]
+                                            last_g = g[-1]
+                                            is_morning = (first_g % 24) >= 4 and (first_g % 24) <= 12
+                                            prefix = "допродажа " if is_morning and g != groups[0] else ""
+                                            if len(g) > 1:
+                                                group_strs.append(f"{prefix}{g_sum:.1f}кВтч в {self._format_h(first_g)}-{self._format_h(last_g)}")
+                                            else:
+                                                group_strs.append(f"{prefix}{g_sum:.1f}кВтч в {self._format_h(first_g)}")
+                                        
+                                        pool_strs.append(", ".join(group_strs))
                                     else:
-                                        pool_strs.append(f"+ Пул {ei+1} (↑ солнце): {self._format_h(first_h)}")
+                                        pool_strs.append(f"+ Пул {ei+1} (↑ солнце): {self._format_h(h_list[0])}")
                                 
                                 if len(pool_strs) > 0:
                                     res["power_decision"] = f"{sell_diagnosis} | " + ", ".join(pool_strs)
