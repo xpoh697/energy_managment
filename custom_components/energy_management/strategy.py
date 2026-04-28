@@ -2244,11 +2244,10 @@ class StrategyEngine:
 
 
                     _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
-                    # v11.6.108: Use soc_at_start instead of b_soc.
-                    # When evaluating future evening peaks, b_soc represents the current (low) SOC, 
-                    # while soc_at_start represents the fully charged 100% state. Using b_soc artificially 
-                    # restricted the planned arbitrage budget and caused massive forecasting mismatches.
-                    surplus_for_user_limit = max(0.0, (soc_at_start - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
+                    # v11.6.118: Use natural_soc_after_sale instead of soc_at_start.
+                    # This accounts for house consumption, inverter losses and solar income 
+                    # during the sale window, ensuring we hit the target SOC precisely.
+                    surplus_for_user_limit = max(0.0, (natural_soc_after_sale - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
                     available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
 
                     sell_diagnosis = "Рассчитано (Ок)"
@@ -2260,7 +2259,8 @@ class StrategyEngine:
 
                     # v11.3.23 / v11.5.0: Full transparency diagnostics
                     _lib_tag = " [Утро: буфер=5%]" if _is_morning_liberal else ""
-                    diag = f"{sell_diagnosis}{_lib_tag} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% Cur:{b_soc:.1f}%"
+                    # v11.6.118: Show Natural End SOC (S_nat) in diagnostics
+                    diag = f"{sell_diagnosis}{_lib_tag} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Nat:{natural_soc_after_sale:.1f}%)"
                     res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
                     res["power_decision"] = (f"Распределение на {num_peaks_left:.1f}ч{_lib_tag}" if num_peaks_left > 1.1 else f"{sell_diagnosis}{_lib_tag}")
                     
