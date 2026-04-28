@@ -2222,7 +2222,7 @@ class StrategyEngine:
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
                     # v11.6.84: Expand budget to accommodate deeper morning discharge (15% vs 18%)
-                    # v11.6.103: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
+                    # v11.6.104: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
                     # even if the autopilot raised base_target to 18%.
 
 
@@ -2831,21 +2831,33 @@ class StrategyEngine:
                 
                 # v11.6.40: Show ALL hours of the first Energy Pool in planned_power
                 _first_window_active = res.get("first_pool_hours", actual_active)
+                _running_target_soc = float(b_soc)
                 for h in sorted(_first_window_active):
                     h_label = self._format_h(h)
                     h_idx = int(h)
                     p_val = sell_commands.get(h_idx, 0.0) if mode == "sell" else charge_commands.get(h_idx, 0.0)
                     
-                    # Extract calculated SOC directly from the comprehensive simulation log
                     is_tom = h_idx > 23 or (h_idx < cur_hour)
                     h_idx_norm = h_idx % 24
                     key_h = f"{h_idx_norm:02d}:59" + (" (Завтра)" if is_tom else "")
                     
-                    # Fallback if somehow log is missing (should not happen in normal operation)
-                    h_soc = float(self._get_soc_from_log(s_log, key_h, target_soc))
+                    # Fallback if somehow log is missing
+                    h_soc_sim = float(self._get_soc_from_log(s_log, key_h, target_soc))
                     
-                    # v11.6.103: Clarify that this is the projected simulation SOC, NOT the inverter target
-                    p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc, 1)}%)"
+                    if mode == "sell":
+                        h_f_local = max(0.1, (60 - now.minute) / 60.0) if h_idx == cur_hour else 1.0
+                        house_cons_local = float(normalize_float(self.manager.get_average_profile("consumption_total", self.manager.custom_period, now.weekday()).get(str(h_idx_norm), 0.5))) * occ_coeff
+                        house_rem_dc_local = (house_cons_local * h_f_local) / eff
+                        discharge_dc_local = (p_val * h_f_local) / eff
+                        pure_discharge_pct_local = (discharge_dc_local + house_rem_dc_local) / b_cap * 100.0 if b_cap > 0.1 else 0.0
+                        
+                        _target_limit_local = min_soc_val + 2.0 if (sunrise_h <= h_idx_norm <= 12) else base_target
+                        h_target = max(_target_limit_local, _running_target_soc - pure_discharge_pct_local)
+                        _running_target_soc = h_target
+                        
+                        p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
+                    else:
+                        p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc_sim, 1)}%)"
                     
             res["planned_power_per_h"] = p_distribution
             
