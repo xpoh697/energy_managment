@@ -2222,8 +2222,9 @@ class StrategyEngine:
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
                     # v11.6.84: Expand budget to accommodate deeper morning discharge (15% vs 18%)
-                    # v11.6.99: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
+                    # v11.6.100: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
                     # even if the autopilot raised base_target to 18%.
+
                     _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
                     surplus_for_user_limit = max(0.0, (b_soc - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
                     available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
@@ -2641,13 +2642,19 @@ class StrategyEngine:
                         if not is_power_limited:
                             if floor_was_raised or liberal_was_overridden:
                                 # System raised the floor above the intended sell floor → защита дома
-                                sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
+                                if _ui_floor < target_morning_soc:
+                                    sell_diagnosis = f"Утренний лимит ({int(_ui_floor)}%)"
+                                else:
+                                    sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
                             elif morning_is_binding:
                                 # Morning reserve was the tighter constraint
-                                sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
+                                if _ui_floor < target_morning_soc:
+                                    sell_diagnosis = f"Утренний лимит ({int(_ui_floor)}%)"
+                                else:
+                                    sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
                             else:
                                 # User limit was binding, floor not raised
-                                sell_diagnosis = f"Лимит пользователя ({int(base_target)}%)"
+                                sell_diagnosis = f"Лимит пользователя ({int(_ui_floor)}%)"
 
                     if soc_morning_display < float(target_morning_soc) - 0.1:
                         # Safety Block Active
