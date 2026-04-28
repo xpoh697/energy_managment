@@ -2832,7 +2832,20 @@ class StrategyEngine:
                 
                 # v11.6.40: Show ALL hours of the first Energy Pool in planned_power
                 _first_window_active = res.get("first_pool_hours", actual_active)
+                
+                # v11.6.107: Initialize _running_target_soc with the correct starting point.
+                # If the window is in the future, we MUST start from the projected SOC at the 
+                # end of the hour just before the window starts! Otherwise we start from b_soc (e.g. 37%), 
+                # causing absurdly low targets for evening windows when the battery will be 100% by then.
                 _running_target_soc = float(b_soc)
+                if _first_window_active:
+                    _first_h = sorted(_first_window_active)[0]
+                    if _first_h > cur_hour:
+                        _prev_h = _first_h - 1
+                        _is_tom_prev = _prev_h > 23 or (_prev_h < cur_hour and _first_h > cur_hour)
+                        _prev_key = f"{_prev_h % 24:02d}:59" + (" (Завтра)" if _is_tom_prev else "")
+                        _running_target_soc = float(self._get_soc_from_log(s_log, _prev_key, b_soc))
+
                 for h in sorted(_first_window_active):
                     h_label = self._format_h(h)
                     h_idx = int(h)
@@ -2856,7 +2869,10 @@ class StrategyEngine:
                         h_target = max(_target_limit_local, _running_target_soc - pure_discharge_pct_local)
                         _running_target_soc = h_target
                         
-                        p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
+                        if p_val > 0.01:
+                            p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
+                        else:
+                            p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc_sim, 1)}%)"
                     else:
                         p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc_sim, 1)}%)"
                     
