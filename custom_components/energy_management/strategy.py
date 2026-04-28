@@ -2597,6 +2597,7 @@ class StrategyEngine:
 
                     if not sale_is_active_disp:
                         # Branch A: no sale — anchor is the natural end-of-sale-window SOC
+                        _ui_floor = base_target
                         display_soc_after = float(round_f(natural_soc_after_sale, 1))
                     else:
                         # Branch B: sale planned — anchor is post-sale SOC

@@ -3074,3 +3074,15 @@ else:
 **Итог (v11.6.105)**:
 - В `sensor.py` (`get_market_strategy`) добавлено условие: `if stored.get("hour_key") != hour_key or p_val_new > (stored_p + 0.05):`. Якорь обновляется, если расчетная мощность превышает зафиксированную.
 - Версия v11.6.105.
+
+---
+
+### Раунд 159: Исправление UnboundLocalError _ui_floor (v11.6.106)
+
+**Archi**: Пользователь сообщил об ошибке в логах: `UnboundLocalError: cannot access local variable '_ui_floor' where it is not associated with a value` на строке 2681. Это произошло потому, что переменная `_ui_floor` не определялась в ветке `if not sale_is_active_disp:` (Ветка А: нет запланированной продажи). Я просто добавил `_ui_floor = base_target` обратно в эту ветку.
+
+**Skeptic**: Банальная опечатка/потеря строки при рефакторинге предыдущих версий. Исправление тривиальное и абсолютно необходимое для стабильности сенсора.
+
+**Итог (v11.6.106)**:
+- Добавлено `_ui_floor = base_target` в ветку `Branch A: no sale` внутри `strategy.py`.
+- Версия v11.6.106.
