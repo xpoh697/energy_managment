@@ -2356,7 +2356,12 @@ class StrategyEngine:
                                 # For future hours, also respect the local hour-specific floor.
                                 # v11.6.84: Use a more generous simulation-aware cap for morning hours.
                                 p_alloc = max_p
-                                if h_soc_s := self._get_soc_from_log(sim_log_base, f"{h%24:02d}:00", b_soc):
+                                # v11.6.110: Fix key format: log stores "HH:59", not "HH:00".
+                                # Use end-of-previous-hour SOC to represent the SOC entering this hour.
+                                # v11.6.111: Key in history_log uses ' (Завтра)' for h >= 24.
+                                _prev_h = h - 1
+                                _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
+                                if h_soc_s := self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc):
                                      surplus_h_dc = max(0.0, (h_soc_s - h_floor) * b_cap / 100.0)
                                      p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
@@ -2505,8 +2510,11 @@ class StrategyEngine:
                                     current_surplus_dc_fix = max(0.0, (b_soc - h_floor_fix) * b_cap / 100.0 - house_rem_dc_fix)
                                     p_alloc_fix = min(max_p, (current_surplus_dc_fix * eff) / h_f)
                                 else:
-                                    # v11.6.84: Capped by local floor in Step 2 as well
-                                    if h_soc_sf := self._get_soc_from_log(sim_log_base, f"{h%24:02d}:00", b_soc):
+                                    # v11.6.110: Same fix in Step 2 (Recursive Fix)
+                                    # v11.6.111: Same fix for suffix in Step 2
+                                    _prev_h_f = h - 1
+                                    _prev_h_key_f = f"{(_prev_h_f)%24:02d}:59" + (" (Завтра)" if _prev_h_f >= 24 else "")
+                                    if h_soc_sf := self._get_soc_from_log(sim_log_base, _prev_h_key_f, b_soc):
                                          surplus_hf_dc = max(0.0, (h_soc_sf - h_floor_fix) * b_cap / 100.0)
                                          p_alloc_fix = min(max_p, (surplus_hf_dc * eff) / h_f)
                                 
