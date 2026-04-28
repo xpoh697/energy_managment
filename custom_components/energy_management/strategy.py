@@ -2347,10 +2347,10 @@ class StrategyEngine:
                             rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                             rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
                         else:
-                            # v11.6.109: Use soc_at_start instead of b_soc to allocate energy for future peaks
-                            # The overall budget was expanded in v11.6.108, but the epoch allocator still used b_soc, 
-                            # resulting in a tiny allocation for the first evening epoch.
-                            rem_base_ac = float(max(0.0, (soc_at_start - base_target) * b_cap / 100.0 * eff))
+                            # v11.6.119: Use natural_soc_after_sale instead of soc_at_start.
+                            # This ensures the actual power commands (Planned power) respect 
+                            # the same house-aware budget as the diagnostics.
+                            rem_base_ac = float(max(0.0, (natural_soc_after_sale - base_target) * b_cap / 100.0 * eff))
                             capped_bonus_soc = max(0.0, min(soc_at_start, base_target) - (min_soc_val + 2.0))
                             _actual_bonus_dc = (capped_bonus_soc * b_cap / 100.0) if has_morning_sale else 0.0
                             rem_bonus_ac = float(min(_morning_lib_surplus_dc, _actual_bonus_dc) * eff)
