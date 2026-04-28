@@ -2235,22 +2235,30 @@ class EnergyProfileManager:
             soc, _, _ = self.get_battery_state()
             soc_int = int(round_f(float(soc or 0.0), 0))
             
+            # v11.6.117: Improved Learning Logic
+            # 1. Export Proof: If we are exporting > 0.5kW, the battery is REFUSING power.
+            #    This is a hard proof of the BMS limit. Full learning (up/down).
+            avg_export = sum(float(x.get("grid_kw", 0.0)) for x in relevant_history) / len(relevant_history)
+            has_export_proof = bool(avg_export > 0.5)
+            
             max_batt_p = float(self.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
-            old_val = self.bms_learned_profile.get(soc_int, max_batt_p)
+            old_val = self.bms_learned_profile.get(soc_int)
             
             do_update = False
-            new_val = old_val
+            new_val = 0.0
 
-            if mode == "sale_pv":
-                # Need export proof that battery is refusing power
-                avg_export = sum(float(x.get("grid_kw", 0.0)) for x in relevant_history) / len(relevant_history)
-                if avg_export < 0.5:
-                    return
-
-            # High Water Mark: only update UPWARD
-            if charge_power_limit > old_val + 0.05:
-                new_val = charge_power_limit
-                do_update = True
+            if has_export_proof:
+                # Golden proof: update if different from old or if first time
+                if old_val is None or abs(charge_power_limit - old_val) > 0.05:
+                    new_val = charge_power_limit
+                    do_update = True
+            elif mode == "buy":
+                # Buy mode: Grid is unlimited, but we don't know if inverter is limiting.
+                # Only trust UPWARD updates (High Water Mark).
+                check_val = old_val if old_val is not None else max_batt_p
+                if charge_power_limit > check_val + 0.05:
+                    new_val = charge_power_limit
+                    do_update = True
                 
             if do_update:
                 self.bms_learned_profile[soc_int] = round_f(new_val, 3)
