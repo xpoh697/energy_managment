@@ -2364,25 +2364,16 @@ class StrategyEngine:
                             if sunrise_h <= (h % 24) <= 12:
                                 h_floor = min_soc_val + 2.0
                                 
-                            # Selective Throttling strictly for the current hour
-                            if h == cur_hour:
-                                house_cons_hourly = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
-                                house_rem_dc = (house_cons_hourly * h_f) / eff
-                                current_surplus_dc = max(0.0, (b_soc - h_floor) * b_cap / 100.0 - house_rem_dc)
-                                max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
-                                p_alloc = min(max_p, max_allowed_sell_ac / h_f)
+                            # v11.6.123: Power Allocation Throttling (p_alloc)
+                            # Uses SOC at the END of the hour in the base simulation.
+                            # This accounts for solar gain occurring DURING the hour,
+                            # allowing more power to be allocated to the most expensive (first) hours.
+                            _h_key = f"{(h)%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
+                            if h_soc_end := self._get_soc_from_log(sim_log_base, _h_key, b_soc):
+                                surplus_h_dc = max(0.0, (h_soc_end - h_floor) * b_cap / 100.0)
+                                p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                             else:
-                                # For future hours, also respect the local hour-specific floor.
-                                # v11.6.84: Use a more generous simulation-aware cap for morning hours.
                                 p_alloc = max_p
-                                # v11.6.110: Fix key format: log stores "HH:59", not "HH:00".
-                                # Use end-of-previous-hour SOC to represent the SOC entering this hour.
-                                # v11.6.111: Key in history_log uses ' (Завтра)' for h >= 24.
-                                _prev_h = h - 1
-                                _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
-                                if h_soc_s := self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc):
-                                     surplus_h_dc = max(0.0, (h_soc_s - h_floor) * b_cap / 100.0)
-                                     p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
                             if (rem_base_ac + rem_bonus_ac) > 0.05:
                                 # v11.6.90: Segregate budgets starting from sunrise_h
