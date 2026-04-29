@@ -1764,7 +1764,8 @@ class StrategyEngine:
                         
                     # --- BUY SIMULATION ---
                     try:
-                        sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
+                        # v11.6.214: Expand simulation horizon to 48 hours for 48h-aware logic
+                        sim_end_h = cur_hour + 48
                         sim_range = list(range(cur_hour, sim_end_h))
                         # Apply blocked PV only UP TO the negative prices (so tomorrow afternoon works properly)
                         # v11.6.13: Also account for sale_pv_no_bat blocking solar charge
@@ -2070,7 +2071,8 @@ class StrategyEngine:
                     
                     if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         # 1. Run Baseline Simulation (v11.3.21: Get full log for start_soc detection)
-                        sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
+                        # v11.6.214: Expand simulation horizon to 48 hours for 48h-aware logic
+                        sim_end_h = cur_hour + 48
                         sim_range = list(range(cur_hour, sim_end_h))
                         # v11.6.13: If currently in sale_pv_no_bat mode, block PV charging in simulation
                         # until the mode's dynamic boundary (min of max_hour and first sell peak).
@@ -2252,35 +2254,45 @@ class StrategyEngine:
                     # even if the autopilot raised base_target to 18%.
 
 
-                    # v11.6.173: Formalized min(M, U, P) budget allocation
-                    _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
+                    # v11.6.214: Strictly align with TS Section 6.1 (Sunrise Guard)
+                    # M (Morning Survival): Calculated for sunrise point (e.g. 6:00 AM)
+                    # U (User Limit): Calculated for the end of current simulated hour
                     
-                    # M: Morning Survival (Includes night drain protection)
-                    surplus_for_morning = max(0.0, (natural_soc_after_sale - survival_floor) * b_cap / 100.0) + _morning_lib_surplus_dc
+                    # 1. Calculate M (Morning Survival) DC Budget
+                    # TS 6.1: In the morning window (planned for sunrise), the limit is User_Limit + 2%
+                    _m_floor = min_soc_val + 2.0
                     
-                    # U: User Limit (Raw floor at end of sale window, NO night drain)
-                    _user_budget_floor = min_soc_val
-                    surplus_for_user_limit = max(0.0, (natural_soc_after_sale - _user_budget_floor) * b_cap / 100.0)
+                    key_sunrise = f"{sunrise_h % 24:02d}:00" + (" (Завтра)" if sunrise_h >= 24 else "")
+                    natural_soc_at_sunrise = self._get_soc_from_log(sim_log_base, key_sunrise, b_soc)
+                    surplus_for_morning = max(0.0, (natural_soc_at_sunrise - _m_floor) * b_cap / 100.0)
+                    
+                    # 2. Calculate U (User Limit) DC Budget
+                    # Current hour floor is the raw User Limit (min_soc_val)
+                    _u_floor = min_soc_val
+                    _k_end_hour = f"{cur_hour % 24:02d}:59"
+                    _natural_soc_now = self._get_soc_from_log(sim_log_base, _k_end_hour, b_soc)
+                    surplus_for_user_limit = max(0.0, (_natural_soc_now - _u_floor) * b_cap / 100.0)
                     
                     # Choose most restrictive budget
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
+                    available_sell_dc = max(0.0, available_sell_dc)
 
-                    # v11.6.161: Ensure base_target reflects the chosen constraint
+                    # Update base_target for diagnostics
                     if available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < (surplus_for_morning - 0.1):
-                         base_target = _user_budget_floor
+                         base_target = _u_floor
                     else:
-                         base_target = survival_floor
+                         base_target = _m_floor
 
                     sell_diagnosis = "Рассчитано (Ок)"
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < (min(surplus_for_morning, surplus_for_user_limit) - 0.1):
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     else:
-                        sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома (Цель {min_soc_bat_val + soc_buffer_full:.0f}% к утру)"
+                        sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома (Цель {base_target:.0f}% к утру)"
 
                     # v11.6.167 / v11.6.169: Clean human-readable status construction
                     res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis}"
                     # Detailed debug is moved to internal attributes
-                    res["_debug_limit_info"] = f"M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Nat:{natural_soc_after_sale:.1f}%)"
+                    res["_debug_limit_info"] = f"M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Sunrise:{natural_soc_at_sunrise:.1f}%)"
                     res["_debug_passes"] = _pass_log if '_pass_log' in locals() else ""
                     # res["power_decision"] = (f"Распределение на {num_peaks_left:.1f}ч{_lib_tag}" if num_peaks_left > 1.1 else f"{sell_diagnosis}{_lib_tag}") # v11.6.161: Moved to end
                     
@@ -2461,7 +2473,8 @@ class StrategyEngine:
                     delta_available_dc = available_sell_ac / eff
 
                     # --- SELL SIMULATION ---
-                    sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
+                    # v11.6.214: Expand simulation horizon to 48 hours for 48h-aware logic
+                    sim_end_h = cur_hour + 48
                     sim_range = list(range(cur_hour, sim_end_h))
                     
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
