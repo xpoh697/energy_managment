@@ -1903,6 +1903,9 @@ class StrategyEngine:
                     
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
                     
+                    # v11.6.196: Emergency Reserve (min_soc_bat)
+                    min_soc_bat_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+                    
                     # v11.6.162: Min SOC is a HARD floor, not a sunrise target. 
                     min_soc_val = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 15.0))
                     
@@ -1992,8 +1995,8 @@ class StrategyEngine:
                     
                     # v11.6.169: Priority Correction (min(M, U, P))
                     has_morning_sale = any((sunrise_h <= (h % 24) <= 12) for h in target_hours_sorted) if target_hours_sorted else False
-                    # 1. Home Protection Floor (M_floor): 10% Emergency + 15% Buffer = 25%
-                    _m_floor = 10.0 + (2.0 if has_morning_sale else soc_buffer_full)
+                    # 1. Home Protection Floor (M_floor): Reserve + Buffer
+                    _m_floor = min_soc_bat_val + (2.0 if has_morning_sale else soc_buffer_full)
                     
                     # 2. Final Sunrise Target: max(User Limit, Home Protection)
                     # If User=70 and Home=25, Target=70.
@@ -2209,9 +2212,6 @@ class StrategyEngine:
                         # We calculate the exact SOC floor needed to guarantee the morning target.
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
-                        
-                        # v11.6.192: Use actual min_soc_bat (Emergency Reserve) instead of hardcoded 10.0
-                        min_soc_bat_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
                         
                         # v11.6.192: Emergency Base for Survival Floor (M)
                         # We only need to ensure the house stays above (Reserve + Buffer) BY MORNING.
@@ -2514,7 +2514,7 @@ class StrategyEngine:
                     # v11.6.175: Recursive Survival targeting
                     # The recursion should only "save" the house from dropping below the absolute minimum (25%),
                     # it should NOT try to maintain the user's high arbitrage limit (70%) until sunrise.
-                    _m_recursive_target = 10.0 + soc_buffer_full
+                    _m_recursive_target = min_soc_bat_val + soc_buffer_full
                     
                     _pass_log = "Pass0"
                     for pass_idx in range(3):
