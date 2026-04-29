@@ -2503,10 +2503,17 @@ class StrategyEngine:
                         # If we have a deficit (morning_gap > 0), we RAISE it.
                         base_target = min(100.0, max(min_soc_val + 2.0, base_target + morning_gap))
                         
-                        # Now run the distribution again...
-                        # v11.6.112: Step 2 also needs to use soc_at_start for future windows.
+                        # v11.6.158: Re-calculate available volume WITH house load awareness
+                        # We must subtract what the house will eat DURING the sale period,
+                        # otherwise we over-allocate and fall below target at sunrise.
                         _rem_start_soc = soc_at_start if 'soc_at_start' in locals() else b_soc
-                        rem_base_ac_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0 * eff))
+                        rem_base_dc_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0))
+                        
+                        # Subtract house load for the first pool (evening sale)
+                        _house_during_fix = house_load_during_sale_dc if 'house_load_during_sale_dc' in locals() else 0.0
+                        rem_base_dc_fix = max(0.0, rem_base_dc_fix - _house_during_fix)
+                        
+                        rem_base_ac_fix = float(rem_base_dc_fix * eff)
                         
                         # Bonus in Step 2 for first epoch
                         _actual_bonus_dc_fix = (max(0.0, min(_rem_start_soc, base_target) - (min_soc_val + 2.0)) * b_cap / 100.0) if has_morning_sale else 0.0
