@@ -2785,14 +2785,18 @@ class StrategyEngine:
                     res_soc_after = float(res["projected_soc_after_sale"])
                     res_soc_morning = float(res["projected_soc_morning"])
 
-                    # v11.6.211: Simple stable UI projections
+                    # v11.6.212: Restore v207-style stable start projection.
+                    # Use BASELINE simulation (no sales) for the start point.
                     _active_planned = [int(h) for h, p in sell_commands.items() if p > 0.01]
                     if _active_planned:
                         _h_start = min(_active_planned)
                         _h_end = max(_active_planned)
                         _k_start = f"{(_h_start-1)%24:02d}:59" + (" (Завтра)" if (_h_start-1) >= 24 else "")
                         _k_end = f"{_h_end%24:02d}:59" + (" (Завтра)" if _h_end >= 24 else "")
-                        soc_at_start = self._get_soc_from_log(sim_log, _k_start, b_soc)
+                        
+                        # START point from BASELINE log
+                        soc_at_start = self._get_soc_from_log(sim_log_base, _k_start, b_soc)
+                        # AFTER point from REAL log (with sales)
                         soc_after = self._get_soc_from_log(sim_log, _k_end, soc_at_start)
                     else:
                         soc_at_start = b_soc
