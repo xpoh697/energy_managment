@@ -1942,7 +1942,7 @@ class StrategyEngine:
                         if not is_evening_sale and has_solar_coming:
                             active_buffer = 0.0
 
-                    min_soc_val = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
+                    min_soc_val = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 15.0))
                     
                     # v11.5.0: Morning Solar Liberalization
                     # Condition: solar morning window (is_morning_solar_v2) AND hour < 12
@@ -2253,19 +2253,21 @@ class StrategyEngine:
                     surplus_for_user_limit = max(0.0, (natural_soc_after_sale - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
                     available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
 
+                    # v11.6.161: Ensure base_target never falls below the corrected user limit
+                    base_target = max(base_target, min_soc_val + active_buffer)
+
                     sell_diagnosis = "Рассчитано (Ок)"
-                    # Using a small delta for float comparison safety
-                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < surplus_for_user_limit:
+                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < (surplus_for_user_limit - 0.1):
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     else:
-                        sell_diagnosis = f"Лимит пользователя ({base_target:.0f}%)" if base_target <= user_discharge_limit + 0.5 else f"Защита дома ({user_discharge_limit:.0f}%→{base_target:.0f}%)"
+                        sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома ({min_soc_val:.0f}%→{base_target:.0f}%)"
 
                     # v11.3.23 / v11.5.0: Full transparency diagnostics
                     _lib_tag = " [Утро: буфер=5%]" if _is_morning_liberal else ""
                     # v11.6.118: Show Natural End SOC (S_nat) in diagnostics
                     diag = f"{sell_diagnosis}{_lib_tag} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Nat:{natural_soc_after_sale:.1f}%)"
                     res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
-                    res["power_decision"] = (f"Распределение на {num_peaks_left:.1f}ч{_lib_tag}" if num_peaks_left > 1.1 else f"{sell_diagnosis}{_lib_tag}")
+                    # res["power_decision"] = (f"Распределение на {num_peaks_left:.1f}ч{_lib_tag}" if num_peaks_left > 1.1 else f"{sell_diagnosis}{_lib_tag}") # v11.6.161: Moved to end
                     
                     # v11.3.37: UI Feedback for Smart Deficit Throttling
                     if available_sell_dc < 0.05 and num_peaks_left > 0.1 and cur_hour < 13:
@@ -2439,9 +2441,14 @@ class StrategyEngine:
                     sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     
-                    # If we couldn't place all our surplus in the hours because of max_p limits
-                    if rem_kwh_sell > 0.1:
-                        res["power_decision"] = "Ограничено мощностью АКБ"
+                    # v11.6.161: Explicit Throttling Diagnostic
+                    total_planned_ac = sum(cmd * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h, cmd in sell_commands.items())
+                    is_throttled = total_planned_ac < (available_sell_ac - 0.5)
+                    
+                    if is_throttled:
+                        res["power_decision"] = f"Ограничено мощностью АКБ ({total_planned_ac:.1f}/{available_sell_ac:.1f}кВтч)"
+                    else:
+                        res["power_decision"] = f"Цель на утро {target_morning_soc:.0f}% | {total_planned_ac:.1f}кВтч"
 
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
 
