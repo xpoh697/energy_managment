@@ -2502,6 +2502,10 @@ class StrategyEngine:
                          # We are selling as much as the SOC limit allows
                          res["power_decision"] = f"{limit_label} | {total_planned_ac:.1f}кВтч"
 
+                    # v11.6.165: Define key_after for the recursive loop
+                    last_h_sell_pool1 = max(epochs[0]) if 'epochs' in locals() and epochs else (future_active_sell[-1] if future_active_sell else cur_hour)
+                    key_after = f"{last_h_sell_pool1 % 24:02d}:59" + (" (Завтра)" if last_h_sell_pool1 >= 24 else "")
+
                     # v11.6.159: Iterative EXACT morning SOC targeting (max 3 passes)
                     res["arbitrage_limit_reason"] = "Pass0"
                     for pass_idx in range(3):
