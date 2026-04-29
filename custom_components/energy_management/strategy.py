@@ -2653,14 +2653,12 @@ class StrategyEngine:
                     morning_key_disp = f"{sunrise_h - 1:02d}:59 (Завтра)"
                     soc_morning_display = float(round_f(self._get_soc_from_log(sim_log, morning_key_disp, b_soc), 1))
                     
-                    _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
-                    if _all_sell_hrs:
-                        _soc_vals = []
-                        for _h in _all_sell_hrs:
-                            _k = f"{_h % 24:02d}:59" + (" (Завтра)" if _h >= 24 else "")
-                            if _v := self._get_soc_from_log(sim_log, _k, b_soc):
-                                _soc_vals.append(float(_v))
-                        display_soc_after = min(_soc_vals) if _soc_vals else b_soc
+                    # v11.6.182: UI Synchronization - 'After Sale' SOC now refers to the end of the FIRST pool
+                    _pool1_hrs = res.get("first_pool_hours", [])
+                    if _pool1_hrs:
+                        _last_h = max(_pool1_hrs)
+                        _key_end = f"{_last_h % 24:02d}:59" + (" (Завтра)" if _last_h >= 24 else "")
+                        display_soc_after = float(self._get_soc_from_log(sim_log, _key_end, b_soc))
                     else:
                         display_soc_after = b_soc
                         
