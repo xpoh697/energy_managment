@@ -908,22 +908,31 @@ class StrategyEngine:
             occ_coeff = float(occ_coeff)
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
 
+            # v11.6.212: Night-time Sensor Safety.
+            # Avoid phantom charging/discharging from noisy sensors during night hours in simulation.
+            is_night = (real_h < sunrise_h) or (real_h > 20)
             
-            # v11.1.15 - Blended Anchor: Smoothly transition from profile to real-time load
-            # to avoid discontinuities at the top of the hour (v7.9.7 fix)
+            real_gen = float(getattr(man, "avg_gen_kw", expected_gen_kw))
+            if is_night:
+                real_gen = 0.0 # Force zero solar at night
+                
+            real_load = float(getattr(man, "avg_base_load_kw" if house_profile_override == "consumption_base" else "avg_load_kw", expected_cons_kw))
+            if is_night:
+                # Cap real load at night to avoid anchoring to temporary peaks (kettle, etc.)
+                real_load = min(real_load, expected_cons_kw * 1.5)
+            
+            # v11.3.17: Use anchor values ONLY for the first hour of the simulation.
             if i == 0:
                 anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
-                # Only anchor if we have a reasonable load reading
-                real_load = float(getattr(man, "avg_base_load_kw" if house_profile_override == "consumption_base" else "avg_load_kw", expected_cons_kw))
-                expected_cons_kw = (real_load * anchor_weight) + (expected_cons_kw * (1.0 - anchor_weight))
-            
-            # First hour solar correction: 
-            if i == 0:
-                # v11.1.15 - Blended Solar Anchor: Same logic as load to prevent sawtooth
-                real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
-                if real_gen_kw > 0.01:
-                    anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
-                    expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
+                actual_gen_kw = expected_gen_kw * (1.0 - anchor_weight) + real_gen * anchor_weight
+                actual_load_kw = expected_cons_kw * (1.0 - anchor_weight) + real_load * anchor_weight
+            else:
+                actual_gen_kw = expected_gen_kw
+                actual_load_kw = expected_cons_kw
+
+            # Re-assign to variables used in logic
+            expected_gen_kw = actual_gen_kw
+            expected_cons_kw = actual_load_kw
 
             # v11.4.49: Idle/losses correction — add BEFORE net computation.
             # BUG fixed: idle_p was previously added to expected_cons_kw AFTER total_net_kw
