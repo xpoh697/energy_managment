@@ -1914,6 +1914,13 @@ class StrategyEngine:
                     soc_buffer_full = 3.0 if min_soc_val > 25.0 else soc_buffer_val
                     soc_buffer_val = 3.0 if min_soc_val > 25.0 else soc_buffer_val
                     
+                    # v11.6.204: Preliminary peak detection for budget accuracy.
+                    # We need to know WHEN the sale starts to account for overnight house drain.
+                    # budget_data_sell doesn't provide target_hours, so we find them here.
+                    _prelim_peaks = [int(h) for h, p in today_prices.items() if int(h) >= cur_hour and float(normalize_float(p)) >= sell_limit]
+                    _prelim_peaks += [int(h) + 24 for h, p in tomorrow_prices.items() if float(normalize_float(p)) >= sell_limit]
+                    target_hours_sorted = sorted(list(set(_prelim_peaks)))
+                    
                     # v11.4.30: Early Detection for Morning Liberalization
                     # We need solar context to decide if we relax the buffer
                     rem_solar_today = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
