@@ -2210,14 +2210,17 @@ class StrategyEngine:
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         
-                        # v11.6.174: Emergency Base for Survival Floor (M)
-                        # We only need to ensure the house stays above 25% (10+15) BY MORNING.
-                        # So the survival floor for TONIGHT is 25% + whatever the house eats until sunrise.
-                        _m_emergency_base = 10.0 + soc_buffer_full
-                        survival_floor = _m_emergency_base + night_drain_pct
-                        
-                        # Final base target is the HIGHEST of User Limit or Survival Floor
-                        base_target = max(min_soc_val, survival_floor)
+                    # v11.6.192: Use actual min_soc_buy (Emergency Reserve) instead of hardcoded 10.0
+                    min_soc_buy_val = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
+                    
+                    # v11.6.192: Emergency Base for Survival Floor (M)
+                    # We only need to ensure the house stays above (Reserve + Buffer) BY MORNING.
+                    # As per TS Round 231: Limits NEVER SUM with house consumption in labels/floors.
+                    _m_emergency_base = min_soc_buy_val + soc_buffer_full
+                    
+                    # Final base target is the HIGHEST of User Limit (Min SOC) or Survival Floor (Reserve+Buffer)
+                    base_target = max(min_soc_val, _m_emergency_base)
+                    survival_floor = _m_emergency_base # For label logic
                         
                         if survival_floor > min_soc_val + 0.5:
                              res["morning_autopilot_active"] = True
