@@ -2687,10 +2687,12 @@ class StrategyEngine:
                     # v11.6.185: Restore missing variable for energy calculation
                     _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
                     
-                    # Core Diagnostic
+                    # Core Diagnostic (v11.6.189: Use correct bottleneck flag)
                     total_planned_ac = sum(sell_commands.get(int(h), 0.0) * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h in _all_sell_hrs)
-                    if total_planned_ac < (available_sell_ac - 0.3) and total_planned_ac < (work_max_p * 0.9):
-                         sell_diagnosis = f"Ограничено мощностью АКБ ({total_planned_ac:.1f}/{available_sell_ac:.1f}кВтч)"
+                    if _is_p_limited:
+                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
+                    elif _is_u_limited:
+                         sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)"
                     else:
                          sell_diagnosis = limit_label
 
