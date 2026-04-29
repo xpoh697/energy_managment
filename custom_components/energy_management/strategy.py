@@ -2697,22 +2697,38 @@ class StrategyEngine:
                     res["projected_soc_morning"] = round_f(soc_morning_display, 1)
 
                     # v11.6.162: Status Label Construction
+                    # Step 2: Optimized Distribution (v11.6.208: Prioritize PRICE over Time)
+                    # We sort by price descending to fill the most profitable hours first.
+                    _all_sell_hrs_sorted = sorted(_all_sell_hrs, key=lambda h: all_prices.get(h, 0.0), reverse=True)
+                    
+                    rem_budget_dc = available_sell_dc
+                    for h in _all_sell_hrs_sorted:
+                        h_eff_p = work_max_p * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0)
+                        can_take_dc = min(rem_budget_dc, h_eff_p * eff)
+                        if can_take_dc > 0.01:
+                            sell_commands[h] = float(can_take_dc / eff)
+                            rem_budget_dc -= can_take_dc
+                        else:
+                            sell_commands[h] = 0.0
+
+                    # v11.6.208: Account for house load DURING the sale to stay at the target floor.
+                    total_planned_ac = sum(sell_commands.values())
+                    total_planned_ac = max(0.0, total_planned_ac - (house_load_during_sale_dc / eff))
+
+                    # Update Status Flags
+                    _is_p_limited = bool(round(total_planned_ac, 2) >= round(work_max_p * len(_all_sell_hrs) * eff, 2))
+                    _is_u_limited = (available_sell_dc <= (surplus_for_user_limit + 0.01) and surplus_for_user_limit < (surplus_for_morning - 0.1))
+                    
                     limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
                     if base_target > min_soc_val + 0.5:
                         _disp_goal = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
-                        limit_label = f"Защита дома (Лимит {_disp_goal:.0f}% УТРО)" if 4 <= (cur_hour % 24) <= 12 else f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
+                        limit_label = f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
                     
-                    # v11.6.185: Restore missing variable for energy calculation
-                    _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
-                    
-                    # Core Diagnostic (v11.6.189: Use correct bottleneck flag)
-                    total_planned_ac = sum(sell_commands.get(int(h), 0.0) * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h in _all_sell_hrs)
+                    sell_diagnosis = limit_label
                     if _is_p_limited:
                          sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     elif _is_u_limited:
                          sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)"
-                    else:
-                         sell_diagnosis = limit_label
 
                     # v11.6.53: Smart Pool Splitting Status
                     future_sells = {h: p for h, p in sell_commands.items() if h >= cur_hour and p > 0.01}
@@ -2764,13 +2780,32 @@ class StrategyEngine:
                         _h_key = f"{(_real_first_h-1)%24:02d}:59" + (" (Завтра)" if (_real_first_h-1) >= 24 else "")
                         soc_at_start = self._get_soc_from_log(sim_log, _h_key, soc_at_start)
                     
+                    # v11.6.208: Total cleanup of UI projections.
+                    # 1. SOC AT START: Exactly at the beginning of the FIRST sell hour.
+                    _active_planned = [int(h) for h, p in sell_commands.items() if p > 0.01]
+                    _real_first_h = min(_active_planned) if _active_planned else None
+                    
+                    if _real_first_h is not None:
+                        # Take SOC from the PREVIOUS hour's log
+                        _h_key_start = f"{(_real_first_h-1)%24:02d}:59" + (" (Завтра)" if (_real_first_h-1) >= 24 else "")
+                        soc_at_start = self._get_soc_from_log(sim_log, _h_key_start, b_soc)
+                        
+                        # 2. SOC AFTER SALE: Exactly at the end of the LAST sell hour.
+                        _real_last_h = max(_active_planned)
+                        _h_key_after = f"{_real_last_h%24:02d}:59" + (" (Завтра)" if _real_last_h >= 24 else "")
+                        soc_after = self._get_soc_from_log(sim_log, _h_key_after, soc_at_start)
+                    else:
+                        soc_at_start = b_soc
+                        soc_after = b_soc
+
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
-                        "projected_soc_after_sale_pct": res_soc_after,
+                        "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
                         "projected_soc_morning_pct": res_soc_morning,
                         "projected_soc_morning": res_soc_morning,
                         "log": sim_log
                     }
+                    res["projected_soc_after_sale"] = round_f(soc_after, 1)
 
                     # v11.4.04: Reciprocal Surplus Calculation (Simulation Monarchy)
                     # We recalculate M, U based on what the simulation JUST confirmed.
