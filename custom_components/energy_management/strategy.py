@@ -2112,8 +2112,7 @@ class StrategyEngine:
                         # without double-counting the safety margin of tomorrow's solar block.
                         _, sim_log_base, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
-                            b_min_soc=0.0,
-                            ignore_blended=True
+                            b_min_soc=0.0
                         )
 
                         
