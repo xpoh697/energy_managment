@@ -2494,20 +2494,24 @@ class StrategyEngine:
                     key_morning = f"{sunrise_h-1:02d}:59 (Завтра)"
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
 
-                    # v11.3.61: RECURSIVE MORNING DEFICIT CORRECTION
-                    # If the simulation result says we are below target, we adjust the floor and RE-CALCULATE everything.
-                    immediate_base_target = base_target # Keep original base target for the immediate block
-                    morning_deficit_fix = max(0.0, target_morning_soc - soc_morning)
-                    if morning_deficit_fix > 0.1:
+                    # v11.6.157: Target EXACT morning SOC. 
+                    # Run fix if we are either below OR significantly above target (to sell more).
+                    morning_gap = target_morning_soc - soc_morning
+                    if abs(morning_gap) > 0.1:
                         # 1. Update the base target floor (applies to future epochs)
-                        base_target = min(100.0, base_target + morning_deficit_fix)
+                        # If we have a surplus (morning_gap < 0), we LOWER the floor to sell more.
+                        # If we have a deficit (morning_gap > 0), we RAISE it.
+                        base_target = min(100.0, max(min_soc_val + 2.0, base_target + morning_gap))
                         
-                        # 2. Re-calculate available volume
+                        # Now run the distribution again...
                         # v11.6.112: Step 2 also needs to use soc_at_start for future windows.
                         _rem_start_soc = soc_at_start if 'soc_at_start' in locals() else b_soc
                         rem_base_ac_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0 * eff))
-                        rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
                         
+                        # Bonus in Step 2 for first epoch
+                        _actual_bonus_dc_fix = (max(0.0, min(_rem_start_soc, base_target) - (min_soc_val + 2.0)) * b_cap / 100.0) if has_morning_sale else 0.0
+                        rem_bonus_ac_fix = float(min(_morning_lib_surplus_dc, _actual_bonus_dc_fix) * eff)
+                            
                         # 3. Re-distribute sell_commands
                         for i, epoch in enumerate(epochs):
                             epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
@@ -2517,12 +2521,6 @@ class StrategyEngine:
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 rem_base_ac_fix = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                                 rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
-                            else:
-                                # v11.6.112: Same for the first epoch inside the fix loop
-                                rem_base_ac_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0 * eff))
-                                # Bonus in Step 2 for first epoch
-                                _actual_bonus_dc_fix = (max(0.0, min(_rem_start_soc, base_target) - (min_soc_val + 2.0)) * b_cap / 100.0) if has_morning_sale else 0.0
-                                rem_bonus_ac_fix = float(min(_morning_lib_surplus_dc, _actual_bonus_dc_fix) * eff)
                             
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
@@ -2568,8 +2566,15 @@ class StrategyEngine:
                         
                         # v11.6.84: All 'liberation' is now unified in the main distribution cycles above.
 
-                        # 4. Re-run final simulation
-                        sim_commands_fix = {int(h): -cmd for h, cmd in sell_commands.items()}
+                        # 4. Re-run final simulation to verify the fix
+                        sim_commands_fix = {int(h): cmd for h, cmd in sell_commands.items()}
+                        _, sim_log, _ = self.run_soc_simulation(
+                            b_soc, sim_range, now, sim_commands_fix, 
+                            b_min_soc=base_target,
+                            no_battery_charge_until=_sell_sim_no_charge_until,
+                            ignore_blended=True,
+                            dynamic_floors=_strat_floors
+                        )
                         if best_buy_h is not None and best_buy_h < sim_end_h:
                             sim_commands_fix[int(best_buy_h)] = float(max_p)
                         
