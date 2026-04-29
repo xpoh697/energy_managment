@@ -2151,6 +2151,11 @@ class StrategyEngine:
                         soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     
                     # 2. Daily Surplus (Sunrise-Aware v6.2)
+                    # v11.6.130: Calculate BASELINE deficit to break circular dependency
+                    _key_morning_base = f"{sunrise_h-1:02d}:59 (Завтра)"
+                    _soc_morning_base = self._get_soc_from_log(sim_log_base, _key_morning_base, b_soc)
+                    morning_deficit_base = max(0.0, target_morning_soc - _soc_morning_base)
+
                     # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
                     # 1. User SOC Limit 2. Morning Survival 3. Physical Battery Power (C-rate/Time)
                     surplus_for_morning = self._calculate_sunrise_surplus(
@@ -2240,10 +2245,9 @@ class StrategyEngine:
                         # target_morning_soc remains as calculated at line 1978 (buffer-aware)
                         pass
                     
-                    # v11.6.129: Corrected Morning Liberation Math.
-                    # The bonus must be the difference between current floor (base_target)
-                    # and the liberal floor (min_soc_val + 2.0%), ensuring we NEVER go below min_soc.
-                    _has_deficit_for_bonus = bool(morning_deficit_fix > 0.1 or (is_preparing_for_peak and base_target > user_discharge_limit + 1.0))
+                    # v11.6.130: Corrected Morning Liberation Math.
+                    # Use morning_deficit_base (from baseline sim) to avoid UnboundLocalError.
+                    _has_deficit_for_bonus = bool(morning_deficit_base > 0.1 or (is_preparing_for_peak and base_target > user_discharge_limit + 1.0))
                     _liberal_floor = min_soc_val + 2.0
                     _morning_lib_surplus_dc = (base_target - _liberal_floor) * b_cap / 100.0 if (has_morning_sale and not _has_deficit_for_bonus and base_target > _liberal_floor) else 0.0
 
