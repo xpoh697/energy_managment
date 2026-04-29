@@ -1020,6 +1020,7 @@ class StrategyEngine:
         }
         charge_commands = {}
         can_recharge = False
+        house_load_during_sale_dc = 0.0
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
@@ -2160,7 +2161,6 @@ class StrategyEngine:
                     # This guarantees we account for the house background load during the sale.
                     natural_soc_after_sale = soc_at_start
                     if True: # v11.3.97: Always run simulation for telemetry
-                        house_load_during_sale_dc = 0.0
                         future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
                         
                         # --- v11.3.36: Smart Deficit Throttling (Double Cycle Optimizer) ---
