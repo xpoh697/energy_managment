@@ -2813,6 +2813,9 @@ class StrategyEngine:
                         true_sell_diag = "Защита дома"
                     
                     # v11.6.72: Hyper-Detailed Diagnostics for Budget Debugging
+                    # v11.6.141: Define variables for diagnostics
+                    f_today_v = float(normalize_float(budget_data_sell.get("forecast_val", 0.0)))
+                    blended_coeff_v = float(getattr(man, "last_blended_coeff", 1.0))
                     diag_fixed = f"{true_sell_diag} | TRUE_M:{true_m_surplus:.1f} TRUE_U:{true_u_surplus:.1f} P:{physical_limit_dc:.1f}"
                     res["arbitrage_sell_limit_reason"] = (
                         f"{diag_fixed} | S:{soc_at_start:.1f}% Cur:{b_soc:.1f}% | "
