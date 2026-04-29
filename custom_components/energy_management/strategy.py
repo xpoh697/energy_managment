@@ -2342,21 +2342,9 @@ class StrategyEngine:
                     if current_epoch:
                         epochs.append(current_epoch)
 
-                    # v11.6.187: UI-only Pool Splitting (Strictly continuous hours)
-                    _ui_groups = []
-                    if sell_pool:
-                        _sorted_sell = sorted(sell_pool)
-                        _cur_g = [_sorted_sell[0]]
-                        for _i in range(1, len(_sorted_sell)):
-                            if _sorted_sell[_i] == _sorted_sell[_i-1] + 1:
-                                _cur_g.append(_sorted_sell[_i])
-                            else:
-                                _ui_groups.append(_cur_g)
-                                _cur_g = [_sorted_sell[_i]]
-                        _ui_groups.append(_cur_g)
-                    
-                    if _ui_groups:
-                        res["first_pool_hours"] = _ui_groups[0]
+                    # v11.6.180: Define the first pool for UI display filtering
+                    if epochs:
+                        res["first_pool_hours"] = epochs[0]
                         
                     sell_commands = {int(h): 0.0 for h in sell_pool}
                     rem_kwh_sell = available_sell_ac
@@ -2665,12 +2653,14 @@ class StrategyEngine:
                     morning_key_disp = f"{sunrise_h - 1:02d}:59 (Завтра)"
                     soc_morning_display = float(round_f(self._get_soc_from_log(sim_log, morning_key_disp, b_soc), 1))
                     
-                    # v11.6.182: UI Synchronization - 'After Sale' SOC now refers to the end of the FIRST pool
-                    _pool1_hrs = res.get("first_pool_hours", [])
-                    if _pool1_hrs:
-                        _last_h = max(_pool1_hrs)
-                        _key_end = f"{_last_h % 24:02d}:59" + (" (Завтра)" if _last_h >= 24 else "")
-                        display_soc_after = float(self._get_soc_from_log(sim_log, _key_end, b_soc))
+                    _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
+                    if _all_sell_hrs:
+                        _soc_vals = []
+                        for _h in _all_sell_hrs:
+                            _k = f"{_h % 24:02d}:59" + (" (Завтра)" if _h >= 24 else "")
+                            if _v := self._get_soc_from_log(sim_log, _k, b_soc):
+                                _soc_vals.append(float(_v))
+                        display_soc_after = min(_soc_vals) if _soc_vals else b_soc
                     else:
                         display_soc_after = b_soc
                         
