@@ -2756,6 +2756,14 @@ class StrategyEngine:
                     res_soc_after = float(res["projected_soc_after_sale"])
                     res_soc_morning = float(res["projected_soc_morning"])
 
+                    # v11.6.207: Final UI Synchronization. 
+                    # Ensure 'soc_at_start' in UI reflects the REAL start of the planned sale (from sell_commands),
+                    # not just the first theoretical peak candidate.
+                    _real_first_h = min([int(h) for h, p in sell_commands.items() if p > 0.01], default=None)
+                    if _real_first_h is not None and _real_first_h > cur_hour:
+                        _h_key = f"{(_real_first_h-1)%24:02d}:59" + (" (Завтра)" if (_real_first_h-1) >= 24 else "")
+                        soc_at_start = self._get_soc_from_log(sim_log, _h_key, soc_at_start)
+                    
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": res_soc_after,
