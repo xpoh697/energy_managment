@@ -895,8 +895,8 @@ class StrategyEngine:
                     # v7.6.1 - Correct units: Power (kW) = Weight / Sum_Weights * Total_Energy * Calibration * Hourly_Bias
                     expected_gen_kw = float(cur_h_weight / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
                 else:
-                    cur_h_hist = float(prof_gen_today.get(h_str, 0.0))
-                    rem_hist = (cur_h_hist * step_duration) + sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
+                    cur_h_hist = float(normalize_float(prof_gen_today.get(real_h, prof_gen_today.get(h_str, 0.0))))
+                    rem_hist = (cur_h_hist * step_duration) + sum(float(normalize_float(prof_gen_today.get(hr, prof_gen_today.get(str(hr), 0.0)))) for hr in range(now.hour + 1, 24))
                     
                     h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
                     expected_gen_kw = float(cur_h_hist / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
