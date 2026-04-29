@@ -2514,15 +2514,21 @@ class StrategyEngine:
                     last_h_sell_pool1 = max(epochs[0]) if 'epochs' in locals() and epochs else (future_active_sell[-1] if future_active_sell else cur_hour)
                     key_after = f"{last_h_sell_pool1 % 24:02d}:59" + (" (Завтра)" if last_h_sell_pool1 >= 24 else "")
 
-                    # v11.6.159: Iterative EXACT morning SOC targeting (max 3 passes)
+                    # v11.6.175: Recursive Survival targeting
+                    # The recursion should only "save" the house from dropping below the absolute minimum (25%),
+                    # it should NOT try to maintain the user's high arbitrage limit (70%) until sunrise.
+                    _m_recursive_target = 10.0 + soc_buffer_full
+                    
                     _pass_log = "Pass0"
                     for pass_idx in range(3):
-                        morning_gap = target_morning_soc - soc_morning
-                        if abs(morning_gap) <= 0.1:
+                        morning_gap = _m_recursive_target - soc_morning
+                        # Only raise the floor if we are actually dropping below the EMERGENCY level.
+                        # If we are just dropping below the user's 70% (but stay at 60%), we don't care.
+                        if morning_gap <= 0.1:
                             break
                             
                         # 1. Update the base target floor
-                        base_target = min(100.0, max(min_soc_val + 2.0, base_target + morning_gap))
+                        base_target = min(100.0, max(min_soc_val, base_target + morning_gap))
                         
                         # 2. Re-calculate available volume WITH house load awareness
                         _rem_start_soc = soc_at_start if 'soc_at_start' in locals() else b_soc
