@@ -2495,20 +2495,6 @@ class StrategyEngine:
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
                     res["projected_soc_morning"] = round_f(soc_morning, 1)
 
-                    # v11.6.162: Explicit Status Construction
-                    limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
-                    if base_target > min_soc_val + 0.5:
-                        limit_label = f"Защита дома ({base_target:.1f}%)"
-                    
-                    # Check if we are throttled by Inverter Power (max_p) OR if we reached the limit
-                    total_planned_ac = sum(cmd * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h, cmd in sell_commands.items())
-                    
-                    if total_planned_ac < (available_sell_ac - 0.3):
-                         # Significant gap between what we want to sell and what we can sell (Battery Power Limit)
-                         res["power_decision"] = f"Ограничено мощностью АКБ ({total_planned_ac:.1f}/{available_sell_ac:.1f}кВтч)"
-                    else:
-                         # We are selling as much as the SOC limit allows
-                         res["power_decision"] = f"{limit_label} | {total_planned_ac:.1f}кВтч"
 
                     # v11.6.165: Define key_after for the recursive loop
                     last_h_sell_pool1 = max(epochs[0]) if 'epochs' in locals() and epochs else (future_active_sell[-1] if future_active_sell else cur_hour)
@@ -2611,9 +2597,23 @@ class StrategyEngine:
                         soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
                         _pass_log += f" | P{pass_idx+1}:{soc_morning:.1f}%"
                         
+                        # v11.6.178: Final Status Update (Post-Simulation)
+                        limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
+                        if base_target > min_soc_val + 0.5:
+                            limit_label = f"Защита дома ({base_target:.1f}%)"
+                        
+                        total_planned_ac = sum(cmd * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h, cmd in sell_commands.items())
+                        # Recalculate available_sell_ac based on current base_target
+                        _final_available_ac = max(0.0, (soc_at_start - base_target) * b_cap / 100.0) * eff
+                        
+                        if total_planned_ac < (_final_available_ac - 0.3):
+                             res["power_decision"] = f"Лимит мощности АКБ ({total_planned_ac:.1f}/{_final_available_ac:.1f}кВтч)"
+                        else:
+                             res["power_decision"] = f"{limit_label} | {total_planned_ac:.1f}кВтч"
+
                         # Update user status if floor changed significantly
-                        if abs(base_target - min_soc_val) > 0.5:
-                             res["arbitrage_sell_limit_reason"] = f"Защита дома ({min_soc_val:.0f}%→{base_target:.0f}%)"
+                        if base_target > min_soc_val + 0.5:
+                             res["arbitrage_sell_limit_reason"] = f"Защита дома ({base_target:.1f}%)"
                         else:
                              res["arbitrage_sell_limit_reason"] = f"Лимит пользователя ({min_soc_val:.0f}%)"
 
