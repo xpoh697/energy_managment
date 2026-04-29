@@ -2385,7 +2385,7 @@ class StrategyEngine:
                             _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {}, ignore_blended=True)
                             max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                             rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
-                            rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
+                            rem_bonus_ac = float(max(0.0, surplus_for_morning * eff))
                         else:
                             # v11.6.119: Use natural_soc_after_sale instead of soc_at_start.
                             # This ensures the actual power commands (Planned power) respect 
@@ -2393,7 +2393,7 @@ class StrategyEngine:
                             rem_base_ac = float(max(0.0, (natural_soc_after_sale - base_target) * b_cap / 100.0 * eff))
                             capped_bonus_soc = max(0.0, min(soc_at_start, base_target) - (min_soc_val + 2.0))
                             _actual_bonus_dc = (capped_bonus_soc * b_cap / 100.0) if has_morning_sale else 0.0
-                            rem_bonus_ac = float(min(_morning_lib_surplus_dc, _actual_bonus_dc) * eff)
+                            rem_bonus_ac = float(min(surplus_for_morning, _actual_bonus_dc) * eff)
                             
                         for h in epoch_sorted:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
