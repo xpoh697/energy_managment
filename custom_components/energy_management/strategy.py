@@ -2252,11 +2252,11 @@ class StrategyEngine:
                     _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
                     
                     # M: Morning Survival (Includes night drain protection)
-                    surplus_for_morning = max(0.0, (natural_soc_after_sale - survival_floor) * b_cap / 100.0)
+                    surplus_for_morning = max(0.0, (natural_soc_after_sale - survival_floor) * b_cap / 100.0) + _morning_lib_surplus_dc
                     
                     # U: User Limit (Raw floor at end of sale window, NO night drain)
                     _user_budget_floor = min_soc_val
-                    surplus_for_user_limit = max(0.0, (natural_soc_after_sale - _user_budget_floor) * b_cap / 100.0) + _morning_lib_surplus_dc
+                    surplus_for_user_limit = max(0.0, (natural_soc_after_sale - _user_budget_floor) * b_cap / 100.0)
                     
                     # Choose most restrictive budget
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
@@ -2519,7 +2519,8 @@ class StrategyEngine:
                     # v11.6.175: Recursive Survival targeting
                     # The recursion should only "save" the house from dropping below the absolute minimum (25%),
                     # it should NOT try to maintain the user's high arbitrage limit (70%) until sunrise.
-                    _m_recursive_target = min_soc_bat_val + soc_buffer_full
+                    # v11.6.203: Synchronize recursive target with dynamic morning limits
+                    _m_recursive_target = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
                     
                     _pass_log = "Pass0"
                     for pass_idx in range(3):
