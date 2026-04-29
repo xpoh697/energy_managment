@@ -2110,9 +2110,9 @@ class StrategyEngine:
                                 _sell_sim_no_charge_until = _sell_neg_h
                         # v11.6.75: Remove NoChgUntil from baseline. User wants Budget to match Gatekeeper floor
                         # without double-counting the safety margin of tomorrow's solar block.
-                        # v11.6.152: Trust forecast 100% in the morning (until 12:00) to allow sales,
-                        # but use realistic confidence in the afternoon for accurate planning.
-                        _ignore_blended = bool(cur_hour < 12)
+                        # v11.6.152: Trust forecast 100% in the morning (until 10:00) to allow sales,
+                        # but use realistic confidence thereafter for accurate planning.
+                        _ignore_blended = bool(cur_hour < 10)
                         _, sim_log_base, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
                             b_min_soc=0.0,
