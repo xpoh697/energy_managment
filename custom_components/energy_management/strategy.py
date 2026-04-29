@@ -2341,10 +2341,22 @@ class StrategyEngine:
                                 current_epoch = [h]
                     if current_epoch:
                         epochs.append(current_epoch)
+
+                    # v11.6.187: UI-only Pool Splitting (Strictly continuous hours)
+                    _ui_groups = []
+                    if sell_pool:
+                        _sorted_sell = sorted(sell_pool)
+                        _cur_g = [_sorted_sell[0]]
+                        for _i in range(1, len(_sorted_sell)):
+                            if _sorted_sell[_i] == _sorted_sell[_i-1] + 1:
+                                _cur_g.append(_sorted_sell[_i])
+                            else:
+                                _ui_groups.append(_cur_g)
+                                _cur_g = [_sorted_sell[_i]]
+                        _ui_groups.append(_cur_g)
                     
-                    # v11.6.180: Define the first pool for UI display filtering
-                    if epochs:
-                        res["first_pool_hours"] = epochs[0]
+                    if _ui_groups:
+                        res["first_pool_hours"] = _ui_groups[0]
                         
                     sell_commands = {int(h): 0.0 for h in sell_pool}
                     rem_kwh_sell = available_sell_ac
