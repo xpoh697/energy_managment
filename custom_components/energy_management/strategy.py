@@ -2245,9 +2245,10 @@ class StrategyEngine:
                         # target_morning_soc remains as calculated at line 1978 (buffer-aware)
                         pass
                     
-                    # v11.6.130: Corrected Morning Liberation Math.
-                    # Use morning_deficit_base (from baseline sim) to avoid UnboundLocalError.
-                    _has_deficit_for_bonus = bool(morning_deficit_base > 0.1 or (is_preparing_for_peak and base_target > user_discharge_limit + 1.0))
+                    # v11.6.132: Corrected Morning Liberation Math.
+                    # Removed undefined 'is_preparing_for_peak'. 
+                    # If base_target is raised above user limit, it means we are in protection mode.
+                    _has_deficit_for_bonus = bool(morning_deficit_base > 0.1 or base_target > user_discharge_limit + 1.0)
                     _liberal_floor = min_soc_val + 2.0
                     _morning_lib_surplus_dc = (base_target - _liberal_floor) * b_cap / 100.0 if (has_morning_sale and not _has_deficit_for_bonus and base_target > _liberal_floor) else 0.0
 
