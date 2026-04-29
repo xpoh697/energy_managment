@@ -2446,7 +2446,7 @@ class StrategyEngine:
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
 
                     # --- FINAL SIMULATION ---
-                    sim_commands = {int(h): -cmd for h, cmd in sell_commands.items()}
+                    sim_commands = {int(h): cmd for h, cmd in sell_commands.items()}
                     if best_buy_h is not None and best_buy_h < sim_end_h:
                         pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
                         diff_threshold = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.1))
