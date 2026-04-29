@@ -1994,10 +1994,12 @@ class StrategyEngine:
                     has_morning_sale = any((sunrise_h <= (h % 24) <= 12) for h in target_hours_sorted) if target_hours_sorted else False
                     
                     # Hard Target for tomorrow morning (strictly sunrise goal: reserve + full buffer)
-                    # v11.6.95: The sunrise goal is ALWAYS 18%. 
-                    # The 15% morning floor is a 'bonus' allowed DURING the morning,
-                    # but we must arrive at sunrise with 18% to protect the base.
-                    target_morning_soc = min_soc_val + soc_buffer_full
+                    # v11.6.166: If a morning sale is planned, we don't need to 'arrive' with a full 15% buffer.
+                    # We can arrive with a minimal 2% buffer because we are going to discharge anyway.
+                    if has_morning_sale:
+                        target_morning_soc = min_soc_val + 2.0
+                    else:
+                        target_morning_soc = min_soc_val + soc_buffer_full
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
                     active_floor_soc = min_soc_val + active_buffer
                     
