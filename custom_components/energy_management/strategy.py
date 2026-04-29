@@ -792,7 +792,7 @@ class StrategyEngine:
             return float(val.get("soc", default))
         return float(val if val is not None else default)
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_battery_charge_hours=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -942,10 +942,15 @@ class StrategyEngine:
             # - Curtails PV (gen=0)
             # - Charges battery only from cmd_p (grid)
             # Therefore: total_net_kw = cmd_p (ignoring gen and cons — both handled by grid)
+            # v11.6.136: Support granular no-charge hours
+            is_no_charge_h = False
+            if no_battery_charge: is_no_charge_h = True
+            elif no_battery_charge_until is not None and h_abs < no_battery_charge_until: is_no_charge_h = True
+            elif no_battery_charge_hours is not None and int(h_abs) in no_battery_charge_hours: is_no_charge_h = True
+            
             if pv_curtail_hours and h_abs in pv_curtail_hours:
                 total_net_kw = float(cmd_p)
-            # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
-            elif no_battery_charge or (no_battery_charge_until is not None and h_abs < no_battery_charge_until):
+            elif is_no_charge_h:
                 # v11.1.39: PV only covers load, no battery charge from surplus
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 total_net_kw = float(p_for_house - expected_cons_kw + cmd_p)
@@ -2442,12 +2447,10 @@ class StrategyEngine:
                     if rem_kwh_sell > 0.1:
                         res["power_decision"] = "Ограничено мощностью АКБ"
 
-                    last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
-                    # v11.6.134: Block simulation charging ONLY if we are actually selling.
-                    # If we are in 'Protection' mode (available_sell_ac ~ 0), we must allow 
-                    # solar charge in simulation to show realistic SOC recovery.
-                    if last_h_sell is not None and available_sell_ac > 0.1:
-                        _sell_sim_no_charge_until = last_h_sell + 1
+                    # v11.6.136: Block simulation charging ONLY during active sell hours.
+                    # This allows solar to recharge the battery during idle daytime hours 
+                    # between peaks, providing an accurate morning SOC projection.
+                    _sell_sim_no_charge_hrs = {int(h) for h, p in sell_commands.items() if p > 0.01}
 
                     # --- FINAL SIMULATION ---
                     sim_commands = {int(h): -cmd for h, cmd in sell_commands.items()}
@@ -2470,7 +2473,7 @@ class StrategyEngine:
                     _, sim_log, _ = self.run_soc_simulation(
                         b_soc, sim_range, now, sim_commands, 
                         b_min_soc=base_target,
-                        no_battery_charge_until=_sell_sim_no_charge_until,
+                        no_battery_charge_hours=_sell_sim_no_charge_hrs,
                         ignore_blended=True,
                         dynamic_floors=_strat_floors
                     )
