@@ -785,12 +785,14 @@ class StrategyEngine:
         finally:
             self._calculating_strategy = old_calc
 
-    def _get_soc_from_log(self, log: dict, key: str, default: float) -> float:
+    def _get_soc_from_log(self, log: dict, key: str, default: Optional[float]) -> Optional[float]:
         """Safely extract SOC float from simulation log (handles both float and dict formats)."""
         val = log.get(key)
         if isinstance(val, dict):
-            return float(val.get("soc", default))
-        return float(val if val is not None else default)
+            res = val.get("soc", default)
+        else:
+            res = val if val is not None else default
+        return float(res) if res is not None else None
 
     def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None):
         """Universal SOC simulation engine."""
@@ -2472,7 +2474,7 @@ class StrategyEngine:
                         soc_values_during_sales = []
                         for h_sell in future_active_sell:
                             h_key = f"{h_sell % 24:02d}:59" + (" (Завтра)" if h_sell >= 24 else "")
-                            if val := self._get_soc_from_log(sim_log, h_key, None):
+                            if val := self._get_soc_from_log(sim_log, h_key, b_soc):
                                 soc_values_during_sales.append(float(val))
                         soc_after = min(soc_values_during_sales) if soc_values_during_sales else b_soc
                     else:
@@ -2623,7 +2625,7 @@ class StrategyEngine:
                         _soc_vals = []
                         for _h in _all_sell_hrs:
                             _k = f"{_h % 24:02d}:59" + (" (Завтра)" if _h >= 24 else "")
-                            if _v := self._get_soc_from_log(sim_log, _k, None):
+                            if _v := self._get_soc_from_log(sim_log, _k, b_soc):
                                 _soc_vals.append(float(_v))
                         display_soc_after = min(_soc_vals) if _soc_vals else b_soc
                     else:
