@@ -3421,6 +3421,7 @@ class MarketStrategySensor(SensorEntity):
             "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
             "analyzed_window": res.get("analyzed_window", "Неизвестно"),
             "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
+            "active_hours": res.get("active_hours_formatted", ""),
             "active_periods": res.get("active_periods", ""),
             "target_price": round_f(float(res.get("target_price", 0.0) or 0.0), 3),
             "limit_used": round_f(float(res.get("limit_used", 0.0) or 0.0), 3),
