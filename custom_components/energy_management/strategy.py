@@ -1990,16 +1990,14 @@ class StrategyEngine:
                                     f"Survival mode active, base_target={base_target:.1f}%"
                                 )
                     
-                    # v11.6.97: Check if any sales are planned for the morning (either today or tomorrow)
+                    # v11.6.169: Priority Correction (min(M, U, P))
                     has_morning_sale = any((sunrise_h <= (h % 24) <= 12) for h in target_hours_sorted) if target_hours_sorted else False
+                    # 1. Home Protection Floor (M_floor): 10% Emergency + 15% Buffer = 25%
+                    _m_floor = 10.0 + (2.0 if has_morning_sale else soc_buffer_full)
                     
-                    # Hard Target for tomorrow morning (strictly sunrise goal: reserve + full buffer)
-                    # v11.6.166: If a morning sale is planned, we don't need to 'arrive' with a full 15% buffer.
-                    # We can arrive with a minimal 2% buffer because we are going to discharge anyway.
-                    if has_morning_sale:
-                        target_morning_soc = min_soc_val + 2.0
-                    else:
-                        target_morning_soc = min_soc_val + soc_buffer_full
+                    # 2. Final Sunrise Target: max(User Limit, Home Protection)
+                    # If User=70 and Home=25, Target=70.
+                    target_morning_soc = max(min_soc_val, _m_floor)
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
                     active_floor_soc = min_soc_val + active_buffer
                     
@@ -2259,13 +2257,10 @@ class StrategyEngine:
                     else:
                         sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома ({min_soc_val:.0f}%→{base_target:.0f}%)"
 
-                    # v11.3.23 / v11.5.0: Full transparency diagnostics
-                    _lib_tag = " [Утро: буфер=5%]" if _is_morning_liberal else ""
-                    # v11.6.118: Show Natural End SOC (S_nat) in diagnostics
-                    diag = f"{sell_diagnosis}{_lib_tag} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Nat:{natural_soc_after_sale:.1f}%)"
-                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.1f}%"
-                    
-                    # v11.6.167: Move detailed junk to a special tag for the user to see IF he wants
+                    # v11.6.167 / v11.6.169: Clean human-readable status construction
+                    res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis} (Цель: {base_target:.0f}%)"
+                    # Detailed debug is moved to internal attributes
+                    res["_debug_limit_info"] = f"M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Nat:{natural_soc_after_sale:.1f}%)"
                     res["_debug_passes"] = _pass_log if '_pass_log' in locals() else ""
                     # res["power_decision"] = (f"Распределение на {num_peaks_left:.1f}ч{_lib_tag}" if num_peaks_left > 1.1 else f"{sell_diagnosis}{_lib_tag}") # v11.6.161: Moved to end
                     
@@ -2600,7 +2595,15 @@ class StrategyEngine:
                             dynamic_floors=_strat_floors
                         )
                         soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
-                        res["arbitrage_limit_reason"] = f"{sell_diagnosis}{_lib_tag} | P{pass_idx+1}:{soc_morning:.1f}% | S:{soc_at_start:.1f}% T:{base_target:.1f}%"
+                        _pass_log += f" | P{pass_idx+1}:{soc_morning:.1f}%"
+                        
+                        # Update user status if floor changed significantly
+                        if abs(base_target - min_soc_val) > 0.5:
+                             res["arbitrage_sell_limit_reason"] = f"Защита дома ({min_soc_val:.0f}%→{base_target:.0f}%)"
+                        else:
+                             res["arbitrage_sell_limit_reason"] = f"Лимит пользователя ({min_soc_val:.0f}%)"
+
+                        res["_debug_passes"] = _pass_log
 
                         
                         # 5. Re-extract markers
