@@ -2149,6 +2149,11 @@ class StrategyEngine:
                         natural_morning_soc, min_soc_val, soc_buffer_val, b_cap, 1.0, 0.0 
                     )
                     
+                    # v11.6.200: Initialize simulation state with baseline data
+                    sim_log = sim_log_base
+                    soc_morning = natural_morning_soc
+                    soc_after = soc_at_start
+                    
                     # v11.3.26: Calculate User Limit using natural SOC at the END of the sale window.
                     # This guarantees we account for the house background load during the sale.
                     natural_soc_after_sale = soc_at_start
@@ -2758,24 +2763,26 @@ class StrategyEngine:
                     true_m_surplus = round(((soc_morning - target_morning_soc) * b_cap / 100.0), 1)
                     true_u_surplus = round(((soc_after - base_target) * b_cap / 100.0), 1)
                     
-                    # Update the Diagnostic Reason string to be HONEST
-                    true_sell_diag = res["power_decision"]
-                    if "Защита дома" in true_sell_diag:
-                        # v11.6.198: Keep the target SOC in the diagnostic string
-                        if "(" in true_sell_diag and ")" in true_sell_diag:
-                             _diag_parts = true_sell_diag.split(")")
-                             true_sell_diag = _diag_parts[0] + ")"
-                        else:
-                             true_sell_diag = "Защита дома"
-                    
-                    # v11.6.72: Hyper-Detailed Diagnostics for Budget Debugging
-                    diag_fixed = f"{true_sell_diag} | TRUE_M:{true_m_surplus:.1f} TRUE_U:{true_u_surplus:.1f} P:{physical_limit_dc:.1f}"
-                    res["arbitrage_sell_limit_reason"] = (
-                        f"{diag_fixed} | S:{soc_at_start:.1f}% Cur:{b_soc:.1f}% | "
-                        f"Cap:{b_cap:.1f} T:{base_target:.0f}% Eff:{eff:.3f} "
-                        f"M_dc:{surplus_for_morning:.2f} U_dc:{surplus_for_user_limit:.2f} AC:{available_sell_ac:.2f} "
-                        f"NoChg:{_sell_sim_no_charge_until}"
-                    )
+                    # v11.6.200: Update the Diagnostic Reason string only if power_decision exists
+                    true_sell_diag = res.get("power_decision")
+                    if true_sell_diag:
+                        if "Защита дома" in true_sell_diag:
+                            # v11.6.198: Keep the target SOC in the diagnostic string
+                            if "(" in true_sell_diag and ")" in true_sell_diag:
+                                 _diag_parts = true_sell_diag.split(")")
+                                 true_sell_diag = _diag_parts[0] + ")"
+                            else:
+                                 true_sell_diag = "Защита дома"
+                        
+                        # v11.6.72: Hyper-Detailed Diagnostics for Budget Debugging
+                        diag_fixed = f"{true_sell_diag} | TRUE_M:{true_m_surplus:.1f} TRUE_U:{true_u_surplus:.1f} P:{physical_limit_dc:.1f}"
+                        res["arbitrage_sell_limit_reason"] = (
+                            f"{diag_fixed} | S:{soc_at_start:.1f}% Cur:{b_soc:.1f}% | "
+                            f"Cap:{b_cap:.1f} T:{base_target:.0f}% Eff:{eff:.3f} "
+                            f"M_dc:{surplus_for_morning:.2f} U_dc:{surplus_for_user_limit:.2f} AC:{available_sell_ac:.2f} "
+                            f"NoChg:{_sell_sim_no_charge_until}"
+                        )
+
 
 
 
