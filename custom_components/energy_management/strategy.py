@@ -908,31 +908,21 @@ class StrategyEngine:
             occ_coeff = float(occ_coeff)
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
 
-            # v11.6.212: Night-time Sensor Safety.
-            # Avoid phantom charging/discharging from noisy sensors during night hours in simulation.
-            is_night = (real_h < sunrise_h) or (real_h > 20)
-            
-            real_gen = float(getattr(man, "avg_gen_kw", expected_gen_kw))
-            if is_night:
-                real_gen = 0.0 # Force zero solar at night
-                
-            real_load = float(getattr(man, "avg_base_load_kw" if house_profile_override == "consumption_base" else "avg_load_kw", expected_cons_kw))
-            if is_night:
-                # Cap real load at night to avoid anchoring to temporary peaks (kettle, etc.)
-                real_load = min(real_load, expected_cons_kw * 1.5)
-            
-            # v11.3.17: Use anchor values ONLY for the first hour of the simulation.
+            # v11.1.15 - Blended Anchor: Smoothly transition from profile to real-time load
+            # to avoid discontinuities at the top of the hour (v7.9.7 fix)
             if i == 0:
                 anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
-                actual_gen_kw = expected_gen_kw * (1.0 - anchor_weight) + real_gen * anchor_weight
-                actual_load_kw = expected_cons_kw * (1.0 - anchor_weight) + real_load * anchor_weight
-            else:
-                actual_gen_kw = expected_gen_kw
-                actual_load_kw = expected_cons_kw
-
-            # Re-assign to variables used in logic
-            expected_gen_kw = actual_gen_kw
-            expected_cons_kw = actual_load_kw
+                # Only anchor if we have a reasonable load reading
+                real_load = float(getattr(man, "avg_base_load_kw" if house_profile_override == "consumption_base" else "avg_load_kw", expected_cons_kw))
+                expected_cons_kw = (real_load * anchor_weight) + (expected_cons_kw * (1.0 - anchor_weight))
+            
+            # First hour solar correction: 
+            if i == 0:
+                # v11.1.15 - Blended Solar Anchor: Same logic as load to prevent sawtooth
+                real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
+                if real_gen_kw > 0.01:
+                    anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
+                    expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
 
             # v11.4.49: Idle/losses correction — add BEFORE net computation.
             # BUG fixed: idle_p was previously added to expected_cons_kw AFTER total_net_kw
@@ -2216,14 +2206,13 @@ class StrategyEngine:
                                     deficit_pct = 100.0 - max_recharge_soc
                                     base_target = min(100.0, base_target + deficit_pct)
                                     
-                        if future_active_sell_base:
-                            # v11.6.211: Only consider MORNING peaks (until 12:00) for house-drain budget.
-                            # Evening peaks shouldn't collapse the morning sale budget.
-                            _morning_peaks = [h for h in future_active_sell_base if (h % 24) < 12]
-                            last_h_base = _morning_peaks[-1] if _morning_peaks else future_active_sell_base[0]
-                            
-                            key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Завтра)" if last_h_base >= 24 else "")
-                            natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_nat_end, soc_at_start)
+                        if True:
+                            # v11.6.213: Anchor budget to the actual MINIMUM SOC in the 48h simulation.
+                            # If tomorrow is sunny, the battery will refill, and the minimum SOC 
+                            # will be reached exactly at the end of the night (sunrise).
+                            _socs = [float(s.get("soc", b_soc)) for s in sim_log_base.values()]
+                            natural_min_soc = min(_socs) if _socs else b_soc
+                            natural_soc_after_sale = natural_min_soc
                         
                         # v11.6.208: Calculate expected house load during the sale window (in kWh)
                         house_load_during_sale_dc = max(0.0, (soc_at_start - natural_soc_after_sale) * b_cap / 100.0)
