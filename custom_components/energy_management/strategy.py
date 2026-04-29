@@ -2562,7 +2562,7 @@ class StrategyEngine:
                         
                         # Bonus in Step 2 for first epoch
                         _actual_bonus_dc_fix = (max(0.0, min(_rem_start_soc, base_target) - (min_soc_val + 2.0)) * b_cap / 100.0) if has_morning_sale else 0.0
-                        rem_bonus_ac_fix = float(min(_morning_lib_surplus_dc, _actual_bonus_dc_fix) * eff)
+                        rem_bonus_ac_fix = float(min(surplus_for_morning, _actual_bonus_dc_fix) * eff)
                             
                         # 3. Re-distribute sell_commands
                         for i, epoch in enumerate(epochs):
@@ -2572,7 +2572,7 @@ class StrategyEngine:
                                 _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {})
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 rem_base_ac_fix = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
-                                rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
+                                rem_bonus_ac_fix = float(max(0.0, surplus_for_morning * eff))
                             
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
