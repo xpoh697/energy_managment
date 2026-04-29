@@ -801,7 +801,11 @@ class StrategyEngine:
         _, batt_cap, _ = man.get_battery_state()
         b_cap_f = float(batt_cap)
         if b_cap_f <= 0.1:
-            return float(start_soc), {}, 0.0
+            return float(start_soc), {}, 0.0, 0.0, 0.0
+        
+        # v11.6.143: Track total energy flows for diagnostics
+        total_gen_sim = 0.0
+        total_cons_sim = 0.0
 
         # v5.2 - Dynamic Period Adaptability (Fast Learning in Transition Seasons) 
         eff_period = man.custom_period
@@ -936,12 +940,10 @@ class StrategyEngine:
                     expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
 
             # v11.4.49: Idle/losses correction — add BEFORE net computation.
-            # BUG fixed: idle_p was previously added to expected_cons_kw AFTER total_net_kw
-            # was already calculated → had ZERO effect on SOC simulation (only polluted log).
-            # Additionally, man.current_losses is an intra-hour kWh accumulator:
-            #   • resets to 0 at every hour boundary → idle_p = 0 exactly at hour start
-            #   • averages ~0.05 kWh mid-hour but historical rate is 0.10 kWh/h at night
-            # Fix: use pre-loaded historical losses profile (kWh/h) for THIS simulated hour.
+            # v11.6.143: Accumulate flows
+            total_gen_sim += expected_gen_kw * step_duration
+            total_cons_sim += expected_cons_kw * step_duration
+
             if eff_coeff < 0.999:  # If eff sensor embeds losses already, skip to avoid double-count
                 idle_p = float(prof_losses.get(h_str, 0.05))
                 expected_cons_kw += idle_p
@@ -1004,7 +1006,7 @@ class StrategyEngine:
                 "load_kw": round_f(float(expected_cons_kw), 3)
             }
 
-        return float(simulated_soc), history_log, float(overflow_kwh)
+        return float(simulated_soc), history_log, float(overflow_kwh), float(total_gen_sim), float(total_cons_sim)
 
     def get_market_strategy(self, mode="buy"):
         now = dt_util.now()
@@ -1325,7 +1327,7 @@ class StrategyEngine:
                             if not sim_r: return False, "Слишком короткий период"
                             
                             sim_s = now if start_h == cur_hour else now.replace(minute=0, second=0, microsecond=0)
-                            _, log_d, _ = self.run_soc_simulation(start_soc, sim_r, sim_s, commands=None)
+                            _, log_d, *_ = self.run_soc_simulation(start_soc, sim_r, sim_s, commands=None)
                             
                             max_r = start_soc
                             for st in log_d.values():
@@ -1490,7 +1492,7 @@ class StrategyEngine:
                     _win_end = int(best_arb_pair[0]) if best_arb_pair[0] is not None and int(best_arb_pair[0]) > cur_hour else int(max(all_buy_prices.keys()) if all_buy_prices else 23)
                     sim_range = list(range(cur_hour, _win_end + 1))
                     commands = {h_cmd: max_p for h_cmd in survival_hours}
-                    _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, commands)
+                    _, log, *_ = self.run_soc_simulation(b_soc, sim_range, now, commands)
                     
                     violation_hour = None
                     for h_step in sim_range:
@@ -1599,7 +1601,7 @@ class StrategyEngine:
                     for h_b in pool:
                         # 1. Prediction of SOC at the START of this hour (solar only)
                         sim_to_b = list(range(cur_hour, int(h_b)))
-                        soc_at_b, _, _ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None)
+                        soc_at_b, _, *_ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None)
                         
                         # Fix (v6.16): For future hours, use Minute 0 to get FULL solar hour in simulation.
                         # This prevents "losing" solar minutes due to now.minute offset.
@@ -1607,7 +1609,7 @@ class StrategyEngine:
                         
                         # 2. Prediction of MAX SOC achieved by Sun alone TODAY starting from this hour
                         sim_eod = list(range(int(h_b), 24))
-                        soc_final_dry, dry_log, _ = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
+                        soc_final_dry, dry_log, *_ = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
                         max_dry_soc = max([float(st["soc"]) for st in dry_log.values()] + [float(soc_at_b)])
                         
                         # v11.1.30: Always include negative price hours regardless of future solar potential
@@ -1622,7 +1624,7 @@ class StrategyEngine:
                     elif is_strict_arb:
                         res["charge_reason"] = "arbitrage"
                         # Adaptive Target: 100% minus what the sun gives eventually
-                        expected_soc_at_peak, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, int(peak_h))), now, commands=None)
+                        expected_soc_at_peak, _, *_ = self.run_soc_simulation(b_soc, list(range(cur_hour, int(peak_h))), now, commands=None)
                         sun_gain_pct = max(0.0, expected_soc_at_peak - b_soc)
                         target_soc = float(min(100.0, 100.0 - sun_gain_pct))
                     elif available_today_kwh < survival_target_kwh:
@@ -1666,7 +1668,7 @@ class StrategyEngine:
                         if first_neg_h is not None and first_neg_h > cur_hour:
                             # Simulation: Can we survive until first_neg_h without extra charging from PV?
                             sim_range_neg = list(range(cur_hour, first_neg_h))
-                            soc_at_neg, _, _ = self.run_soc_simulation(b_soc, sim_range_neg, now, no_battery_charge=True)
+                            soc_at_neg, _, *_ = self.run_soc_simulation(b_soc, sim_range_neg, now, no_battery_charge=True)
                             
                             # v11.6.28: threshold uses CONF_MIN_SOC_BUY (emergency_soc_limit, default 10%).
                             # At the negative price hour, the system immediately starts buying from grid,
@@ -1700,7 +1702,7 @@ class StrategyEngine:
                             _hours_to_full = len(_chk_range)  # pessimistic default
                             if _chk_range:
                                 try:
-                                    _, _chk_log, _ = self.run_soc_simulation(b_soc, _chk_range, now, {})
+                                    _, _chk_log, *_ = self.run_soc_simulation(b_soc, _chk_range, now, {})
                                     for _ci, _cv in enumerate(_chk_log.values()):
                                         _cv_soc = _cv.get("soc", 0.0) if isinstance(_cv, dict) else float(_cv)
                                         if _cv_soc >= (_ai_target_soc - 0.5):
@@ -1725,7 +1727,7 @@ class StrategyEngine:
                             if pv_no_bat_block_until is not None:
                                 _effective_block = max(pv_no_bat_block_until, first_h_buy)
                                 _combined_block = max(_combined_block or 0, _effective_block)
-                            soc_at_start_plan, _, _ = self.run_soc_simulation(
+                            soc_at_start_plan, _, *_ = self.run_soc_simulation(
                                 b_soc, sim_range_pre, now,
                                 no_battery_charge_until=_combined_block
                             )
@@ -1795,7 +1797,7 @@ class StrategyEngine:
                         _neg_buy_curtail = set()
                         if is_neg_strategy:
                             _neg_buy_curtail = {h for h in target_hours_sorted if all_buy_prices.get(h, 0.0) < 0.0}
-                        _, sim_log, _ = self.run_soc_simulation(
+                        _, sim_log, *_ = self.run_soc_simulation(
                             b_soc, sim_range, now, charge_commands,
                             no_battery_charge_until=_buy_sim_no_charge_until,
                             pv_curtail_hours=_neg_buy_curtail or None
@@ -1976,7 +1978,7 @@ class StrategyEngine:
                         _lib_start_soc = min_soc_val + 2.0  # Anchor: after selling down to floor
                         try:
                             # v11.6.57: Use ignore_blended=True to avoid pessimistic morning scaling (46kWh means 46kWh)
-                            _, _lib_log, _ = self.run_soc_simulation(_lib_start_soc, _lib_sim_range, now, ignore_blended=True)
+                            _, _lib_log, *_ = self.run_soc_simulation(_lib_start_soc, _lib_sim_range, now, ignore_blended=True)
                             _lib_max_soc = max(
                                 [float(st.get("soc", _lib_start_soc)) for st in _lib_log.values()]
                                 + [_lib_start_soc]
@@ -2104,7 +2106,7 @@ class StrategyEngine:
                             _sell_hours_to_full = len(_sell_chk_range)  # pessimistic default
                             if _sell_chk_range:
                                 try:
-                                    _, _sell_chk_log, _ = self.run_soc_simulation(b_soc, _sell_chk_range, now, {}, b_min_soc=0.0)
+                                    _, _sell_chk_log, *_ = self.run_soc_simulation(b_soc, _sell_chk_range, now, {}, b_min_soc=0.0)
                                     for _si, _sv in enumerate(_sell_chk_log.values()):
                                         _sv_soc = _sv.get("soc", 0.0) if isinstance(_sv, dict) else float(_sv)
                                         if _sv_soc >= (_ai_target_sell - 0.5):
@@ -2127,7 +2129,7 @@ class StrategyEngine:
                                 _sell_sim_no_charge_until = _sell_neg_h
                         # v11.6.124: Run two baselines.
                         # Base 1: Full simulation (with solar) for survival and long-term targets.
-                        _, sim_log_base, _ = self.run_soc_simulation(
+                        _, sim_log_base, *_ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
                             b_min_soc=0.0,
                             ignore_blended=True
@@ -2136,7 +2138,7 @@ class StrategyEngine:
                         # Base 2: Battery-Only (no solar) for discharge budget and p_alloc limits.
                         # This ensures we don't 'spread' the battery energy by overestimating 
                         # the budget with upcoming solar. Solar goes to grid 'on top'.
-                        _, sim_log_no_sun, _ = self.run_soc_simulation(
+                        _, sim_log_no_sun, *_ = self.run_soc_simulation(
                             b_soc, sim_range, now, {},
                             b_min_soc=0.0,
                             no_battery_charge=True,
@@ -2216,7 +2218,7 @@ class StrategyEngine:
                                 # making deficit = 100% - base_target, raising base_target to 100%
                                 # -> nothing sold in Window1, all energy reserved for higher-priced Window2.
                                 # v11.6.58: Use ignore_blended=True to avoid pessimistic morning scaling (which causes mythical deficits)
-                                _, throttle_log, _ = self.run_soc_simulation(base_target, throttle_sim_hours, now, ignore_blended=True)
+                                _, throttle_log, *_ = self.run_soc_simulation(base_target, throttle_sim_hours, now, ignore_blended=True)
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 
                                 # v11.4.25: Price-Aware Deficit Throttling
@@ -2376,7 +2378,7 @@ class StrategyEngine:
                         
                         if i > 0:
                             sim_hours = list(range(max(epochs[i-1]) + 1, min(epoch)))
-                            _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {}, ignore_blended=True)
+                            _, throttle_log, *_ = self.run_soc_simulation(base_target, sim_hours, now, {}, ignore_blended=True)
                             max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                             rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                             rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
@@ -2482,7 +2484,7 @@ class StrategyEngine:
                         else:
                             _strat_floors[h_sim] = base_target
 
-                    _, sim_log, _ = self.run_soc_simulation(
+                    _, sim_log, _, g_sum_v, c_sum_v = self.run_soc_simulation(
                         b_soc, sim_range, now, sim_commands, 
                         b_min_soc=base_target,
                         no_battery_charge_hours=_sell_sim_no_charge_hrs,
@@ -2532,7 +2534,7 @@ class StrategyEngine:
                             epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                             if i > 0:
                                 sim_hours = list(range(max(epochs[i-1]) + 1, min(epoch)))
-                                _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {})
+                                _, throttle_log, *_ = self.run_soc_simulation(base_target, sim_hours, now, {})
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 rem_base_ac_fix = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                                 rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
@@ -2593,7 +2595,7 @@ class StrategyEngine:
                             sim_commands_fix[int(best_buy_h)] = float(max_p)
                         
                         # v11.6.73: Synchronize charge constraints
-                        _, sim_log, _ = self.run_soc_simulation(
+                        _, sim_log, *_ = self.run_soc_simulation(
                             b_soc, sim_range, now, sim_commands_fix, 
                             no_battery_charge_until=_sell_sim_no_charge_until,
                             ignore_blended=True
@@ -2821,7 +2823,7 @@ class StrategyEngine:
                         f"{diag_fixed} | S:{soc_at_start:.1f}% Cur:{b_soc:.1f}% | "
                         f"Cap:{b_cap:.1f} T:{base_target:.0f}% Eff:{eff:.3f} "
                         f"M_dc:{surplus_for_morning:.2f} U_dc:{surplus_for_user_limit:.2f} AC:{available_sell_ac:.2f} "
-                        f"NoChg:{_sell_sim_no_charge_until} Sun:{f_today_v:.1f} Conf:{blended_coeff_v:.2f}"
+                        f"NoChg:{_sell_sim_no_charge_until} Sun:{f_today_v:.1f} Conf:{blended_coeff_v:.2f} G:{g_sum_v:.1f} C:{c_sum_v:.1f}"
                     )
 
 
