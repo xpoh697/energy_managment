@@ -2663,9 +2663,11 @@ class StrategyEngine:
                          if abs(display_soc_after - min_soc_val) < 1.0:
                               display_soc_after = min_soc_val
                     else:
-                         # Home Protection is active
-                         if abs(soc_morning_display - base_target) < 1.0:
-                              soc_morning_display = base_target
+                         # Protection Mode: Snap evening to Protection Floor, morning to Survival Target
+                         if abs(display_soc_after - base_target) < 1.0:
+                              display_soc_after = base_target
+                         if abs(soc_morning_display - target_morning_soc) < 1.0:
+                              soc_morning_display = target_morning_soc
                     
                     res["projected_soc_after_sale"] = round_f(display_soc_after, 1)
                     res["projected_soc_morning"] = round_f(soc_morning_display, 1)
