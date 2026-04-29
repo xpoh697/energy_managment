@@ -2643,6 +2643,16 @@ class StrategyEngine:
                     else:
                         display_soc_after = b_soc
                         
+                    # v11.6.172: Snap Projections to active limits for UI consistency
+                    _limit_is_user = (base_target <= min_soc_val + 0.5)
+                    if _limit_is_user:
+                         if abs(display_soc_after - min_soc_val) < 1.0:
+                              display_soc_after = min_soc_val
+                    else:
+                         # Home Protection is active
+                         if abs(soc_morning_display - base_target) < 1.0:
+                              soc_morning_display = base_target
+                    
                     res["projected_soc_after_sale"] = round_f(display_soc_after, 1)
                     res["projected_soc_morning"] = round_f(soc_morning_display, 1)
 
