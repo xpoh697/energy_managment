@@ -847,6 +847,17 @@ class StrategyEngine:
         dist_today = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
         dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, (now + timedelta(days=1)).strftime("%Y-%m-%d"))
 
+        # v11.6.138: Fallback distribution if Solcast/Forecast distribution is missing.
+        # Use normalized historical profile to distribute the daily forecast.
+        if not dist_today and f_today > 0.1:
+             total_prof = sum(prof_gen_today.values())
+             if total_prof > 0.1:
+                  dist_today = {h: p / total_prof for h, p in prof_gen_today.items()}
+        if not dist_tom and f_tom > 0.1:
+             total_prof = sum(prof_gen_tom.values())
+             if total_prof > 0.1:
+                  dist_tom = {h: p / total_prof for h, p in prof_gen_tom.items()}
+
 
         simulated_soc = float(start_soc)
         history_log = {}
