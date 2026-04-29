@@ -2443,10 +2443,10 @@ class StrategyEngine:
                         res["power_decision"] = "Ограничено мощностью АКБ"
 
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
-                    # v11.6.125: Block simulation charging until the end of the sale window.
-                    # This ensures the 'Прогноз' in UI shows battery hitting the floor,
-                    # which matches the 'Sell First' behavior where solar goes straight to grid.
-                    if last_h_sell is not None:
+                    # v11.6.134: Block simulation charging ONLY if we are actually selling.
+                    # If we are in 'Protection' mode (available_sell_ac ~ 0), we must allow 
+                    # solar charge in simulation to show realistic SOC recovery.
+                    if last_h_sell is not None and available_sell_ac > 0.1:
                         _sell_sim_no_charge_until = last_h_sell + 1
 
                     # --- FINAL SIMULATION ---
