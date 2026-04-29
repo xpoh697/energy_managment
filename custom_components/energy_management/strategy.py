@@ -2682,6 +2682,9 @@ class StrategyEngine:
                     if base_target > min_soc_val + 0.5:
                         limit_label = f"Защита дома ({base_target:.1f}%)"
                     
+                    # v11.6.185: Restore missing variable for energy calculation
+                    _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
+                    
                     # Core Diagnostic
                     total_planned_ac = sum(sell_commands.get(int(h), 0.0) * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h in _all_sell_hrs)
                     if total_planned_ac < (available_sell_ac - 0.3) and total_planned_ac < (work_max_p * 0.9):
