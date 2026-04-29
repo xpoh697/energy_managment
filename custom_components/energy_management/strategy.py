@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 from .const import (
     CONF_BATTERY_COST, 
     CONF_BATTERY_RATED_CYCLES,
-    CONF_MIN_SOC_BUY,
+    CONF_MIN_SOC_BAT,
     CONF_ACTIVE_SENSOR,
     CONF_IS_CYCLIC,
     CONF_ONLY_SOLAR,
@@ -446,7 +446,7 @@ class StrategyEngine:
             b_cap_f = float(batt_cap)
             b_energy_f = float(batt_energy_val)
             
-            min_soc_val = man.get_setting(CONF_MIN_SOC_BUY, 10.0)
+            min_soc_val = man.get_setting(CONF_MIN_SOC_BAT, 10.0)
             min_soc = float(min_soc_val) if min_soc_val is not None else 10.0
             eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
                         
@@ -1462,7 +1462,7 @@ class StrategyEngine:
                 # Adaptive active_window for buy mode: current hour until next sell peak for the arbitrage window
                 active_window = (best_buy_pair[1], best_arb_pair[0]) if best_arb_pair[0] is not None else (best_buy_pair[1], int(best_buy_pair[1] or 0) + 1)
                 
-                min_soc = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
+                min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
                 natural_hours_names = set(target_hours)
                 survival_hours = set(target_hours)
                 
@@ -1653,10 +1653,10 @@ class StrategyEngine:
                             sim_range_neg = list(range(cur_hour, first_neg_h))
                             soc_at_neg, _, _ = self.run_soc_simulation(b_soc, sim_range_neg, now, no_battery_charge=True)
                             
-                            # v11.6.28: threshold uses CONF_MIN_SOC_BUY (emergency_soc_limit, default 10%).
+                            # v11.6.28: threshold uses CONF_MIN_SOC_BAT (emergency_soc_limit, default 10%).
                             # At the negative price hour, the system immediately starts buying from grid,
                             # so we only need to survive above the physical battery floor.
-                            threshold_neg = max(float(man.get_setting(CONF_MIN_SOC_BUY, 10.0)), 5.0)
+                            threshold_neg = max(float(man.get_setting(CONF_MIN_SOC_BAT, 10.0)), 5.0)
                             res["can_wait_for_negative"] = bool(soc_at_neg > threshold_neg)
                             res["first_negative_hour"] = first_neg_h
                             
@@ -2211,12 +2211,12 @@ class StrategyEngine:
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         
                     # v11.6.192: Use actual min_soc_buy (Emergency Reserve) instead of hardcoded 10.0
-                    min_soc_buy_val = float(man.get_setting(CONF_MIN_SOC_BUY, 10.0))
+                    min_soc_bat_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
                     
                     # v11.6.192: Emergency Base for Survival Floor (M)
                     # We only need to ensure the house stays above (Reserve + Buffer) BY MORNING.
                     # As per TS Round 231: Limits NEVER SUM with house consumption in labels/floors.
-                    _m_emergency_base = min_soc_buy_val + soc_buffer_full
+                    _m_emergency_base = min_soc_bat_val + soc_buffer_full
                     
                     # Final base target is the HIGHEST of User Limit (Min SOC) or Survival Floor (Reserve+Buffer)
                     base_target = max(min_soc_val, _m_emergency_base)

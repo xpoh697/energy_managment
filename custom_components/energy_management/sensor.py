@@ -34,7 +34,7 @@ from .const import (
     CONF_CUSTOM_PERIOD,
     CONF_PRICE_BUY,
     CONF_PRICE_SELL,
-    CONF_MIN_SOC_BUY,
+    CONF_MIN_SOC_BAT,
     CONF_AI_CHARGE_LIMIT,
     CONF_AI_DISCHARGE_LIMIT,
     CONF_BATTERY_MAX_POWER,
@@ -2886,7 +2886,7 @@ class InverterOperationModeSensor(SensorEntity):
         check_h_abs = sim_h if abs_hour is None else abs_hour
 
         try:
-            from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_PRICE_SELL_LIMIT, CONF_MIN_SOC_BUY, CONF_AI_DISCHARGE_LIMIT, CONF_AI_CHARGE_LIMIT
+            from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_PRICE_SELL_LIMIT, CONF_MIN_SOC_BAT, CONF_AI_DISCHARGE_LIMIT, CONF_AI_CHARGE_LIMIT
             price_stop_sell = self.manager.get_setting(CONF_PRICE_STOP_SELL, 0.0)
             price_sell_only_pv = self.manager.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0)
             sale_pv_no_bat_max_hour = self.manager.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0)
@@ -2897,7 +2897,7 @@ class InverterOperationModeSensor(SensorEntity):
             sale_pv_no_bat_max_hour = 13.0
             price_sell_limit = 5.0
 
-        min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
+        min_soc = self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0)
         # Use absolute hour of simulated date for price
         cur_price = self.manager.get_price("sell", today_str, sim_h)
 
@@ -3987,7 +3987,7 @@ class BatteryAutonomySensor(SensorEntity):
         total_hours = (energy_dc * eff) / load_kw if load_kw > 0.005 else 99.0
 
         # 2. Survival Autonomy (to min_soc_buy)
-        min_soc = self.manager.get_setting(CONF_MIN_SOC_BUY, 10.0)
+        min_soc = self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0)
         reserve_energy_dc = (min_soc / 100.0) * cap
         usable_energy_dc = max(0.0, energy_dc - reserve_energy_dc)
         survival_hours = (usable_energy_dc * eff) / load_kw if load_kw > 0.005 else 99.0

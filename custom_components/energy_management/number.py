@@ -30,7 +30,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EnergyProfileNumber(manager, CONF_BATTERY_MAX_POWER, "Макс. мощность АКБ (кВт)", UnitOfPower.KILO_WATT, 0.0, 100.0, 0.1, "mdi:flash", 5.0),
         EnergyProfileNumber(manager, CONF_AI_CHARGE_LIMIT, "Лимит заряда (Max SOC)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-up", 100.0),
         EnergyProfileNumber(manager, CONF_AI_DISCHARGE_LIMIT, "Лимит разряда (Min SOC)", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:battery-arrow-down", 20.0),
-        EnergyProfileNumber(manager, CONF_MIN_SOC_BUY, "Минимальный уровень SOC", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
+        EnergyProfileNumber(manager, CONF_MIN_SOC_BAT, "Аварийный резерв АКБ", PERCENTAGE, 0.0, 100.0, 1.0, "mdi:shield-cross", 10.0),
         EnergyProfileNumber(manager, CONF_SOC_BUFFER, "Буфер SOC на утро (%)", PERCENTAGE, 0.0, 50.0, 1.0, "mdi:battery-plus", 15.0),
         EnergyProfileNumber(manager, CONF_SALE_PV_NO_BAT_MAX_HOUR, "Макс. час для продажи только PV", "h", 0.0, 23.0, 1.0, "mdi:clock-end", 13.0),
     ]
