@@ -2208,11 +2208,11 @@ class StrategyEngine:
                                     base_target = min(100.0, base_target + deficit_pct)
                                     
                         if future_active_sell_base:
-                            last_h_base = future_active_sell_base[-1]
-                            for i in range(1, len(future_active_sell_base)):
-                                if future_active_sell_base[i] != future_active_sell_base[i-1] + 1:
-                                    last_h_base = future_active_sell_base[i-1]
-                                    break
+                            # v11.6.211: Only consider MORNING peaks (until 12:00) for house-drain budget.
+                            # Evening peaks shouldn't collapse the morning sale budget.
+                            _morning_peaks = [h for h in future_active_sell_base if (h % 24) < 12]
+                            last_h_base = _morning_peaks[-1] if _morning_peaks else future_active_sell_base[0]
+                            
                             key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Завтра)" if last_h_base >= 24 else "")
                             natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_nat_end, soc_at_start)
                         
@@ -2776,28 +2776,15 @@ class StrategyEngine:
                     res_soc_after = float(res["projected_soc_after_sale"])
                     res_soc_morning = float(res["projected_soc_morning"])
 
-                    # v11.6.207: Final UI Synchronization. 
-                    # Ensure 'soc_at_start' in UI reflects the REAL start of the planned sale (from sell_commands),
-                    # not just the first theoretical peak candidate.
-                    _real_first_h = min([int(h) for h, p in sell_commands.items() if p > 0.01], default=None)
-                    if _real_first_h is not None and _real_first_h > cur_hour:
-                        _h_key = f"{(_real_first_h-1)%24:02d}:59" + (" (Завтра)" if (_real_first_h-1) >= 24 else "")
-                        soc_at_start = self._get_soc_from_log(sim_log, _h_key, soc_at_start)
-                    
-                    # v11.6.208: Total cleanup of UI projections.
-                    # 1. SOC AT START: Exactly at the beginning of the FIRST sell hour.
+                    # v11.6.211: Simple stable UI projections
                     _active_planned = [int(h) for h, p in sell_commands.items() if p > 0.01]
-                    _real_first_h = min(_active_planned) if _active_planned else None
-                    
-                    if _real_first_h is not None:
-                        # Take SOC from the PREVIOUS hour's log
-                        _h_key_start = f"{(_real_first_h-1)%24:02d}:59" + (" (Завтра)" if (_real_first_h-1) >= 24 else "")
-                        soc_at_start = self._get_soc_from_log(sim_log, _h_key_start, b_soc)
-                        
-                        # 2. SOC AFTER SALE: Exactly at the end of the LAST sell hour.
-                        _real_last_h = max(_active_planned)
-                        _h_key_after = f"{_real_last_h%24:02d}:59" + (" (Завтра)" if _real_last_h >= 24 else "")
-                        soc_after = self._get_soc_from_log(sim_log, _h_key_after, soc_at_start)
+                    if _active_planned:
+                        _h_start = min(_active_planned)
+                        _h_end = max(_active_planned)
+                        _k_start = f"{(_h_start-1)%24:02d}:59" + (" (Завтра)" if (_h_start-1) >= 24 else "")
+                        _k_end = f"{_h_end%24:02d}:59" + (" (Завтра)" if _h_end >= 24 else "")
+                        soc_at_start = self._get_soc_from_log(sim_log, _k_start, b_soc)
+                        soc_after = self._get_soc_from_log(sim_log, _k_end, soc_at_start)
                     else:
                         soc_at_start = b_soc
                         soc_after = b_soc
@@ -2805,11 +2792,12 @@ class StrategyEngine:
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
-                        "projected_soc_morning_pct": res_soc_morning,
-                        "projected_soc_morning": res_soc_morning,
+                        "projected_soc_morning_pct": float(res_soc_morning),
+                        "projected_soc_morning": float(res_soc_morning),
                         "log": sim_log
                     }
                     res["projected_soc_after_sale"] = round_f(soc_after, 1)
+                    res["projected_soc_morning"] = round_f(soc_morning_display, 1)
 
                     # v11.4.04: Reciprocal Surplus Calculation (Simulation Monarchy)
                     # We recalculate M, U based on what the simulation JUST confirmed.
