@@ -2240,11 +2240,12 @@ class StrategyEngine:
                         # target_morning_soc remains as calculated at line 1978 (buffer-aware)
                         pass
                     
-                    # v11.6.128: Conditional Morning Liberation.
-                    # Only allow deeper discharge (to 12%) if we HAVE enough energy for tomorrow
-                    # AND we are not preparing for a higher-priced evening peak (deficit throttling).
+                    # v11.6.129: Corrected Morning Liberation Math.
+                    # The bonus must be the difference between current floor (base_target)
+                    # and the liberal floor (min_soc_val + 2.0%), ensuring we NEVER go below min_soc.
                     _has_deficit_for_bonus = bool(morning_deficit_fix > 0.1 or (is_preparing_for_peak and base_target > user_discharge_limit + 1.0))
-                    _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale and not _has_deficit_for_bonus else 0.0
+                    _liberal_floor = min_soc_val + 2.0
+                    _morning_lib_surplus_dc = (base_target - _liberal_floor) * b_cap / 100.0 if (has_morning_sale and not _has_deficit_for_bonus and base_target > _liberal_floor) else 0.0
 
                     # v11.3.11: Factor in physical energy capacity of the identified peaks
                     # Using global max_p which already accounts for CONF_BATTERY_MAX_POWER (e.g. 6.2kW)
