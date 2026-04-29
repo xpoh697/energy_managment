@@ -2207,22 +2207,21 @@ class StrategyEngine:
                         
                         # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
                         # We calculate the exact SOC floor needed to guarantee the morning target.
-                        # v11.6.61: Use the pre-calculated target_morning_soc (28% or 15%) as the emergency floor.
-                        target_sunrise_soc = target_morning_soc
-                        
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         
-                        # v11.6.108: Always apply the night_drain_pct to the survival floor!
-                        # Previous logic zeroed it out if natural_morning_soc >= target_sunrise_soc,
-                        # which caused the system to mistakenly assume no floor protection was needed 
-                        # against the overnight drain caused by the sale itself.
-                        survival_floor = target_sunrise_soc + night_drain_pct
+                        # v11.6.174: Emergency Base for Survival Floor (M)
+                        # We only need to ensure the house stays above 25% (10+15) BY MORNING.
+                        # So the survival floor for TONIGHT is 25% + whatever the house eats until sunrise.
+                        _m_emergency_base = 10.0 + soc_buffer_full
+                        survival_floor = _m_emergency_base + night_drain_pct
                         
-                        if survival_floor > base_target:
+                        # Final base target is the HIGHEST of User Limit or Survival Floor
+                        base_target = max(min_soc_val, survival_floor)
+                        
+                        if survival_floor > min_soc_val + 0.5:
                              res["morning_autopilot_active"] = True
                              res["morning_autopilot_floor"] = round_f(survival_floor, 1)
-                             base_target = survival_floor
                          
                         # target_morning_soc remains as calculated at line 1978 (buffer-aware)
                         pass
