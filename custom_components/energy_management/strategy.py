@@ -2160,6 +2160,7 @@ class StrategyEngine:
                     # This guarantees we account for the house background load during the sale.
                     natural_soc_after_sale = soc_at_start
                     if True: # v11.3.97: Always run simulation for telemetry
+                        house_load_during_sale_dc = 0.0
                         future_active_sell_base = [h for h in target_hours_sorted if h >= cur_hour]
                         
                         # --- v11.3.36: Smart Deficit Throttling (Double Cycle Optimizer) ---
@@ -2214,6 +2215,9 @@ class StrategyEngine:
                                     break
                             key_nat_end = f"{last_h_base % 24:02d}:59" + (" (Завтра)" if last_h_base >= 24 else "")
                             natural_soc_after_sale = self._get_soc_from_log(sim_log_base, key_nat_end, soc_at_start)
+                        
+                        # v11.6.208: Calculate expected house load during the sale window (in kWh)
+                        house_load_during_sale_dc = max(0.0, (soc_at_start - natural_soc_after_sale) * b_cap / 100.0)
                         
                         # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
                         # We calculate the exact SOC floor needed to guarantee the morning target.
