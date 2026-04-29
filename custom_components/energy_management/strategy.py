@@ -2241,21 +2241,30 @@ class StrategyEngine:
                     # even if the autopilot raised base_target to 18%.
 
 
+                    # v11.6.173: Formalized min(M, U, P) budget allocation
                     _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
-                    # v11.6.118: Use natural_soc_after_sale instead of soc_at_start.
-                    # This accounts for house consumption, inverter losses and solar income 
-                    # during the sale window, ensuring we hit the target SOC precisely.
-                    surplus_for_user_limit = max(0.0, (natural_soc_after_sale - base_target) * b_cap / 100.0) + _morning_lib_surplus_dc
-                    available_sell_dc = min(surplus_for_user_limit, physical_limit_dc)
+                    
+                    # M: Morning Survival (Includes night drain protection)
+                    surplus_for_morning = max(0.0, (natural_soc_after_sale - survival_floor) * b_cap / 100.0)
+                    
+                    # U: User Limit (Raw floor at end of sale window, NO night drain)
+                    _user_budget_floor = min_soc_val
+                    surplus_for_user_limit = max(0.0, (natural_soc_after_sale - _user_budget_floor) * b_cap / 100.0) + _morning_lib_surplus_dc
+                    
+                    # Choose most restrictive budget
+                    available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
 
-                    # v11.6.161: Ensure base_target never falls below the corrected user limit
-                    base_target = max(base_target, min_soc_val + active_buffer)
+                    # v11.6.161: Ensure base_target reflects the chosen constraint
+                    if available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < (surplus_for_morning - 0.1):
+                         base_target = _user_budget_floor
+                    else:
+                         base_target = survival_floor
 
                     sell_diagnosis = "Рассчитано (Ок)"
-                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < (surplus_for_user_limit - 0.1):
+                    if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < (min(surplus_for_morning, surplus_for_user_limit) - 0.1):
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     else:
-                        sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома ({min_soc_val:.0f}%→{base_target:.0f}%)"
+                        sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома ({base_target:.1f}%)"
 
                     # v11.6.167 / v11.6.169: Clean human-readable status construction
                     res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis} (Цель: {base_target:.0f}%)"
