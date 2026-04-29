@@ -2341,6 +2341,10 @@ class StrategyEngine:
                                 current_epoch = [h]
                     if current_epoch:
                         epochs.append(current_epoch)
+                    
+                    # v11.6.180: Define the first pool for UI display filtering
+                    if epochs:
+                        res["first_pool_hours"] = epochs[0]
                         
                     sell_commands = {int(h): 0.0 for h in sell_pool}
                     rem_kwh_sell = available_sell_ac
