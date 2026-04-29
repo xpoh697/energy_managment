@@ -1901,12 +1901,13 @@ class StrategyEngine:
                     
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
                     
-                    # House survivability: Target SOC at Sunrise (e.g. 13% un-reducible + 15% buffer = 28%)
+                    # v11.6.162: Min SOC is a HARD floor, not a sunrise target. 
+                    min_soc_val = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 15.0))
+                    
+                    # Adaptive buffer: If Min SOC is high (e.g. 70%), we don't need a huge additional buffer.
                     soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
-                    # v11.4.51: Preserve the FULL user buffer BEFORE any morning relaxation.
-                    # soc_buffer_full is used for home protection (target_morning_soc / target_sunrise_soc).
-                    # soc_buffer_val (may be relaxed to 3.0) is ONLY for the immediate active floor.
-                    soc_buffer_full = soc_buffer_val
+                    soc_buffer_full = 3.0 if min_soc_val > 25.0 else soc_buffer_val
+                    soc_buffer_val = 3.0 if min_soc_val > 25.0 else soc_buffer_val
                     
                     # v11.4.30: Early Detection for Morning Liberalization
                     # We need solar context to decide if we relax the buffer
@@ -1920,13 +1921,9 @@ class StrategyEngine:
                     cur_pv = float(man.avg_gen_kw or 0.0)
                     is_morning_solar_v2 = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.05 or cur_h_gen_prof > 0.05 or rem_solar_today > 0.05 or cur_pv > 0.5)
                     if is_morning_solar_v2:
-                         soc_buffer_val = 3.0 # Standard morning relaxation — active floor ONLY
+                         soc_buffer_val = 3.0 # Standard morning relaxation
                     
-                    # v11.5.0: Morning Liberal Flag (evaluated after min_soc_val is known)
-                    # Set placeholder here; actual override applied after min_soc_val is read.
                     _is_morning_liberal = False
-                    
-                    # Adaptive buffer (v5.4): 0% if solar covers house needs today.
                     active_buffer = soc_buffer_val
                     
                     has_solar_coming = man.get_expected_remaining("generation") > 0.5
@@ -1941,12 +1938,8 @@ class StrategyEngine:
                         is_evening_sale = any(h > 13 for h in target_hours_sorted) if target_hours_sorted else True
                         if not is_evening_sale and has_solar_coming:
                             active_buffer = 0.0
-
-                    min_soc_val = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 15.0))
                     
                     # v11.5.0: Morning Solar Liberalization
-                    # Condition: solar morning window (is_morning_solar_v2) AND hour < 12
-                    # AND there is an actual MORNING sale planned.
                     has_morning_sale = any(h < 13 for h in target_hours_sorted) if target_hours_sorted else False
                     
                     if is_morning_solar_v2 and cur_hour < 12 and has_morning_sale:
@@ -2441,15 +2434,6 @@ class StrategyEngine:
                     sim_end_h = max(cur_hour + 24, 24 + sunrise_h + 1)
                     sim_range = list(range(cur_hour, sim_end_h))
                     
-                    # v11.6.161: Explicit Throttling Diagnostic
-                    total_planned_ac = sum(cmd * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h, cmd in sell_commands.items())
-                    is_throttled = total_planned_ac < (available_sell_ac - 0.5)
-                    
-                    if is_throttled:
-                        res["power_decision"] = f"Ограничено мощностью АКБ ({total_planned_ac:.1f}/{available_sell_ac:.1f}кВтч)"
-                    else:
-                        res["power_decision"] = f"Цель на утро {target_morning_soc:.0f}% | {total_planned_ac:.1f}кВтч"
-
                     last_h_sell = max(target_hours_sorted) if target_hours_sorted else None
 
                     # --- FINAL SIMULATION ---
@@ -2481,25 +2465,40 @@ class StrategyEngine:
                     
                     # 1. Projected SOC at START (Already calculated early)
                     # 2. Daily Surplus (Already calculated early)
-                    if True: # v11.3.97: Always run simulation for telemetry
-                        future_active_sell = [h for h in target_hours_sorted if h >= cur_hour]
-                        if future_active_sell:
-                            # v11.6.40: Anchor 'after sale' projection to the end of the FIRST ENERGY POOL.
-                            # Since hours in the same pool share the same energy with no solar recharge,
-                            # the "after sale" SOC must reflect ALL sales within this pool.
-                            last_h_sell_immediate = max(epochs[0]) if 'epochs' in locals() and epochs else future_active_sell[-1]
-                            res["first_pool_hours"] = epochs[0] if 'epochs' in locals() and epochs else future_active_sell
-                            
-                            key_after = f"{last_h_sell_immediate % 24:02d}:59" + (" (Завтра)" if last_h_sell_immediate >= 24 else "")
-                            soc_after = self._get_soc_from_log(sim_log, key_after, b_soc)
-                        else:
-                            soc_after = b_soc
+                    # v11.6.162: Projected SOC after sale should be the MINIMUM reached during sales
+                    future_active_sell = [h for h in target_hours_sorted if h >= cur_hour]
+                    if future_active_sell:
+                        # Find minimum SOC in the simulation log across all sell hours
+                        soc_values_during_sales = []
+                        for h_sell in future_active_sell:
+                            h_key = f"{h_sell % 24:02d}:59" + (" (Завтра)" if h_sell >= 24 else "")
+                            if val := self._get_soc_from_log(sim_log, h_key, None):
+                                soc_values_during_sales.append(float(val))
+                        soc_after = min(soc_values_during_sales) if soc_values_during_sales else b_soc
                     else:
                         soc_after = b_soc
                     
-                    # 3. Projected SOC TOMORROW MORNING (at Dynamic Sunrise)
+                    res["projected_soc_after_sale"] = round_f(soc_after, 1)
+
+                    # v11.3.9: Projected SOC TOMORROW MORNING (at Dynamic Sunrise)
                     key_morning = f"{sunrise_h-1:02d}:59 (Завтра)"
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
+                    res["projected_soc_morning"] = round_f(soc_morning, 1)
+
+                    # v11.6.162: Explicit Status Construction
+                    limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
+                    if base_target > min_soc_val + 0.5:
+                        limit_label = f"Защита дома ({base_target:.1f}%)"
+                    
+                    # Check if we are throttled by Inverter Power (max_p) OR if we reached the limit
+                    total_planned_ac = sum(cmd * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h, cmd in sell_commands.items())
+                    
+                    if total_planned_ac < (available_sell_ac - 0.3):
+                         # Significant gap between what we want to sell and what we can sell (Battery Power Limit)
+                         res["power_decision"] = f"Ограничено мощностью АКБ ({total_planned_ac:.1f}/{available_sell_ac:.1f}кВтч)"
+                    else:
+                         # We are selling as much as the SOC limit allows
+                         res["power_decision"] = f"{limit_label} | {total_planned_ac:.1f}кВтч"
 
                     # v11.6.159: Iterative EXACT morning SOC targeting (max 3 passes)
                     res["arbitrage_limit_reason"] = "Pass0"
@@ -2615,177 +2614,77 @@ class StrategyEngine:
                     # so night clamp (real_h < 8) doesn't fire, giving +47% SOC overnight. Wrong.
                     # Fix: ALWAYS compute morning via a short night sub-sim starting from
                     # natural_soc_after_sale (Branch A) or post-sale SOC (Branch B).
-                    # This sim runs only hours 21->sunrise-1, all night-clamped, zero solar.
-                    # v11.6.34: Extract FIRST continuous sell window from target_hours_sorted.
-                    # sell_commands may span multiple windows (e.g. 20:00 + tomorrow 05:00-06:00).
-                    # display_soc_after must reflect only the nearest (first) window so the UI
-                    # shows the SOC right after the immediate sell event, not the cumulative result.
-                    _future_sell_hrs = sorted([h for h in target_hours_sorted if h >= cur_hour])
-                    _first_window_hrs = []
-                    if _future_sell_hrs:
-                        _first_window_hrs = [_future_sell_hrs[0]]
-                        for _fwi in range(1, len(_future_sell_hrs)):
-                            if _future_sell_hrs[_fwi] == _future_sell_hrs[_fwi - 1] + 1:
-                                _first_window_hrs.append(_future_sell_hrs[_fwi])
-                            else:
-                                break
-                    # Sum sell energy ONLY for the first window hours
-                    if _first_window_hrs:
-                        planned_sell_kwh = sum(sell_commands.get(int(h), 0.0) for h in _first_window_hrs)
-                    else:
-                        planned_sell_kwh = sum(sell_commands.values()) if sell_commands else 0.0
-                    planned_sell_pct = (planned_sell_kwh / b_cap * 100.0 / max(0.1, eff)) if b_cap > 0.1 else 0.0
-                    sale_is_active_disp = planned_sell_kwh > 0.01
-
-                    # v11.6.93: Move first_block_end up to avoid UnboundLocalError in UI calc
-                    first_block_end = future_active_sell[0] if future_active_sell else cur_hour
-                    for i in range(1, len(future_active_sell)):
-                        if future_active_sell[i] == future_active_sell[i-1] + 1:
-                            first_block_end = future_active_sell[i]
-                        else:
-                            break
-
-                    if not sale_is_active_disp:
-                        # Branch A: no sale — anchor is the natural end-of-sale-window SOC
-                        _ui_floor = base_target
-                        display_soc_after = float(round_f(natural_soc_after_sale, 1))
-                    else:
-                        # Branch B: sale planned — anchor is post-sale SOC
-                        # v11.6.91: Morning-Aware UI Floor.
-                        # If the window ends in the morning, use 15%. Else use base_target (18%).
-                        _ui_floor = base_target
-                        if sunrise_h <= (first_block_end % 24) <= 12:
-                            _ui_floor = min_soc_val + 2.0
-                            
-                        display_soc_after = float(round_f(
-                            max(float(_ui_floor), natural_soc_after_sale - planned_sell_pct), 1
-                        ))
-
-                    # v11.6.42: Unified Display Logic. No more separate dummy night sub-sims.
-                    # We extract the UI indicators directly from the main sim_log for 100% consistency.
+                    # v11.6.162: Final Status and Projection Construction
                     morning_key_disp = f"{sunrise_h - 1:02d}:59 (Завтра)"
                     soc_morning_display = float(round_f(self._get_soc_from_log(sim_log, morning_key_disp, b_soc), 1))
                     
-                    key_after_disp = f"{first_block_end % 24:02d}:59" + (" (Завтра)" if first_block_end >= 24 else "")
-                    display_soc_after = float(round_f(self._get_soc_from_log(sim_log, key_after_disp, b_soc), 1))
-
-                    # v11.4.44: Post-sim sell_diagnosis correction.
-                    # sell_diagnosis was computed BEFORE recursive base_target raise and uses
-                    # inflated surplus_for_morning (from buggy natural_morning_soc).
-                    # Now we have accurate soc_morning_display and display_soc_after from night sub-sim.
-                    # Compare gaps to their respective targets to identify actual binding constraint.
-                    if sale_is_active_disp:
-                        # v11.6.91: Correct gaps for binding diagnostic
-                        _morning_floor = min_soc_val + 2.0
-                        morning_gap_pct = soc_morning_display - float(target_morning_soc)
-                        user_gap_pct = display_soc_after - float(_ui_floor)
-                        # v11.6.79: Updated binding check (removed surplus_for_morning)
-                        is_power_limited = (physical_limit_dc <= surplus_for_user_limit + 0.05)
-                        floor_was_raised = (base_target > user_discharge_limit + 0.5)
-                        # v11.5.2: Morning liberal mode was active (base_target lowered to min_soc+5)
-                        # but the recursive deficit fix raised it back above the liberal floor.
-                        # In this case floor_was_raised=False (base_target==user_discharge_limit),
-                        # but it's still home protection, not the user's intentional limit.
-                        liberal_was_overridden = (
-                            _is_morning_liberal
-                            and (base_target > min_soc_val + 5.0 + 0.5)
-                        )
-                        morning_is_binding = (morning_gap_pct <= user_gap_pct)
-                        if not is_power_limited:
-                            if floor_was_raised or liberal_was_overridden:
-                                # System raised the floor above the intended sell floor → защита дома
-                                if _ui_floor < target_morning_soc:
-                                    sell_diagnosis = f"Утренний лимит ({int(_ui_floor)}%)"
-                                else:
-                                    sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
-                            elif morning_is_binding:
-                                # Morning reserve was the tighter constraint
-                                if _ui_floor < target_morning_soc:
-                                    sell_diagnosis = f"Утренний лимит ({int(_ui_floor)}%)"
-                                else:
-                                    sell_diagnosis = f"Защита дома (Рассвет {int(target_morning_soc)}%)"
-                            else:
-                                # User limit was binding, floor not raised
-                                sell_diagnosis = f"Лимит пользователя ({int(_ui_floor)}%)"
-
-                    if soc_morning_display < float(target_morning_soc) - 0.1:
-                        # Safety Block Active
-                        power_needed = 0.0
-                        res["recommended_power_kw"] = 0.0
-                        res["power_decision"] = f"Защита дома (Прогноз {soc_morning_display:.1f}%)"
-                        res["planned_power_per_h"] = {} # Clear the plan - nothing to sell!
-                        res_soc_after = display_soc_after
-                        res_soc_morning = soc_morning_display
-                        res["note"] = f"Блокировка: прогноз на утро ({soc_morning_display:.1f}%) ниже резерва ({target_morning_soc}%)"
+                    _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
+                    if _all_sell_hrs:
+                        _soc_vals = []
+                        for _h in _all_sell_hrs:
+                            _k = f"{_h % 24:02d}:59" + (" (Завтра)" if _h >= 24 else "")
+                            if _v := self._get_soc_from_log(sim_log, _k, None):
+                                _soc_vals.append(float(_v))
+                        display_soc_after = min(_soc_vals) if _soc_vals else b_soc
                     else:
-                        # v11.4.43: Always use sell_diagnosis for power_decision.
-                        # sell_diagnosis is computed via the correct cascade:
-                        #   physical_limit → user_limit → morning_protection
-                        # The previous elif branches used surplus_for_morning which is inflated
-                        # by buggy natural_morning_soc from sim_log_base, causing the wrong branch
-                        # to fire and overriding the correctly identified constraint (e.g. АКБ limit).
+                        display_soc_after = b_soc
                         
-                        # v11.6.98: Fixed "АКБ у порога" false positive.
-                        # The old check (b_soc <= display_soc_after) falsely triggered during morning
-                        # solar charging because display_soc_after would rise above b_soc.
-                        # Now we strictly check if we are at or below the applicable UI floor.
-                        if b_soc <= float(_ui_floor) + 0.1 and power_needed > 0.01:
-                            power_needed = 0.0
-                            res["power_decision"] = f"АКБ у порога ({b_soc:.1f}% \u2264 {_ui_floor:.1f}%)"
-                            res["planned_power_per_h"] = {}
-                        elif display_soc_after < float(_ui_floor) - 0.1 and power_needed > 0.01:
-                            power_needed = 0.0
-                            res["power_decision"] = f"Блокировка (Прогноз {display_soc_after:.1f}% < {_ui_floor:.1f}%)"
-                            res["planned_power_per_h"] = {}
-                        else:
-                            # v11.6.53: Smart Pool Splitting Status (Round 118)
-                            future_sells = {h: p for h, p in sell_commands.items() if h >= cur_hour and p > 0.01} if 'sell_commands' in locals() else {}
-                            if future_sells:
-                                _epochs_ref = epochs if 'epochs' in locals() and epochs else [list(future_sells.keys())]
-                                pool_strs = []
-                                for ei, ep in enumerate(_epochs_ref):
-                                    ep_sells = {h: p for h, p in future_sells.items() if h in ep}
-                                    if not ep_sells:
-                                        continue
-                                    
-                                    h_list = sorted(ep_sells.keys())
-                                    
-                                    # v11.6.114: Group contiguous hours for accurate summary
-                                    groups = []
-                                    current_group = [h_list[0]]
-                                    for i in range(1, len(h_list)):
-                                        if h_list[i] == h_list[i-1] + 1:
-                                            current_group.append(h_list[i])
-                                        else:
-                                            groups.append(current_group)
-                                            current_group = [h_list[i]]
-                                    groups.append(current_group)
-                                    
-                                    if ei == 0:
-                                        group_strs = []
-                                        for g in groups:
-                                            g_sum = sum(ep_sells[h] for h in g)
-                                            first_g = g[0]
-                                            last_g = g[-1]
-                                            is_morning = (first_g % 24) >= 4 and (first_g % 24) <= 12
-                                            prefix = "допродажа " if is_morning and g != groups[0] else ""
-                                            if len(g) > 1:
-                                                group_strs.append(f"{prefix}{g_sum:.1f}кВтч в {self._format_h(first_g)}-{self._format_h(last_g)}")
-                                            else:
-                                                group_strs.append(f"{prefix}{g_sum:.1f}кВтч в {self._format_h(first_g)}")
-                                        
-                                        pool_strs.append(", ".join(group_strs))
-                                    else:
-                                        pool_strs.append(f"+ Пул {ei+1} (↑ солнце): {self._format_h(h_list[0])}")
-                                
-                                if len(pool_strs) > 0:
-                                    res["power_decision"] = f"{sell_diagnosis} | " + ", ".join(pool_strs)
+                    res["projected_soc_after_sale"] = round_f(display_soc_after, 1)
+                    res["projected_soc_morning"] = round_f(soc_morning_display, 1)
+
+                    # v11.6.162: Status Label Construction
+                    limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
+                    if base_target > min_soc_val + 0.5:
+                        limit_label = f"Защита дома ({base_target:.1f}%)"
+                    
+                    # Core Diagnostic
+                    total_planned_ac = sum(sell_commands.get(int(h), 0.0) * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h in _all_sell_hrs)
+                    if total_planned_ac < (available_sell_ac - 0.3) and total_planned_ac < (work_max_p * 0.9):
+                         sell_diagnosis = f"Ограничено мощностью АКБ ({total_planned_ac:.1f}/{available_sell_ac:.1f}кВтч)"
+                    else:
+                         sell_diagnosis = limit_label
+
+                    # v11.6.53: Smart Pool Splitting Status
+                    future_sells = {h: p for h, p in sell_commands.items() if h >= cur_hour and p > 0.01}
+                    if future_sells:
+                        _epochs_ref = epochs if 'epochs' in locals() and epochs else [list(future_sells.keys())]
+                        pool_strs = []
+                        for ei, ep in enumerate(_epochs_ref):
+                            ep_sells = {h: p for h, p in future_sells.items() if h in ep}
+                            if not ep_sells: continue
+                            
+                            h_list = sorted(ep_sells.keys())
+                            groups = []
+                            current_group = [h_list[0]]
+                            for i in range(1, len(h_list)):
+                                if h_list[i] == h_list[i-1] + 1: current_group.append(h_list[i])
                                 else:
-                                    res["power_decision"] = sell_diagnosis
+                                    groups.append(current_group)
+                                    current_group = [h_list[i]]
+                            groups.append(current_group)
+                            
+                            if ei == 0:
+                                group_strs = []
+                                for g in groups:
+                                    g_sum = sum(ep_sells[h] for h in g)
+                                    first_g = g[0]
+                                    last_g = g[-1]
+                                    is_morn = (first_g % 24) >= 4 and (first_g % 24) <= 12
+                                    prefix = "допродажа " if is_morn and g != groups[0] else ""
+                                    if len(g) > 1:
+                                        group_strs.append(f"{prefix}{g_sum:.1f}кВтч в {self._format_h(first_g)}-{self._format_h(last_g)}")
+                                    else:
+                                        group_strs.append(f"{prefix}{g_sum:.1f}кВтч в {self._format_h(first_g)}")
+                                pool_strs.append(", ".join(group_strs))
                             else:
-                                res["power_decision"] = sell_diagnosis
-                        res_soc_after = display_soc_after
-                        res_soc_morning = soc_morning_display
+                                pool_strs.append(f"+ Пул {ei+1} (↑ солнце): {self._format_h(h_list[0])}")
+                        
+                        res["power_decision"] = f"{sell_diagnosis} | " + ", ".join(pool_strs)
+                    else:
+                        res["power_decision"] = sell_diagnosis
+                        
+                    res_soc_after = float(res["projected_soc_after_sale"])
+                    res_soc_morning = float(res["projected_soc_morning"])
 
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
