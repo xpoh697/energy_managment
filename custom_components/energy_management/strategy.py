@@ -2322,6 +2322,10 @@ class StrategyEngine:
                     # and must be sorted globally by price!
                     sell_pool = [h for h in target_hours_sorted if h >= cur_hour]
                     
+                    # v11.6.190: Initialize bottleneck flags to prevent UnboundLocalError
+                    _is_p_limited = False
+                    _is_u_limited = False
+                    
                     epochs = []
                     current_epoch = []
                     for h in sorted(sell_pool):
