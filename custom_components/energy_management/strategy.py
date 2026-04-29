@@ -137,7 +137,7 @@ class StrategyEngine:
                     # Note: We use a simplified check for baseline inclusion
                     baseline_commands[int(h_b)] = float(max_p)
         
-        _, baseline_log, _ = self.run_soc_simulation(current_soc, sim_range, now, baseline_commands)
+        _, baseline_log, *_ = self.run_soc_simulation(current_soc, sim_range, now, baseline_commands)
         
         # Find natural SOC at sunrise
         natural_morning_soc = current_soc
