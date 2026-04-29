@@ -2615,7 +2615,7 @@ class StrategyEngine:
                         
                         limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
                         if not _is_u_limited and base_target > min_soc_val + 0.5:
-                            limit_label = f"Защита дома ({base_target:.1f}%)"
+                            limit_label = f"Защита дома (Цель {min_soc_bat_val + soc_buffer_full:.0f}% к утру)"
                         
                         if _is_p_limited:
                              limit_label = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
