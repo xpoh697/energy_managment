@@ -2259,11 +2259,9 @@ class StrategyEngine:
                     else:
                         sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома ({min_soc_val:.0f}%→{base_target:.0f}%)"
 
-                    # v11.3.23 / v11.5.0: Full transparency diagnostics
-                    _lib_tag = " [Утро: буфер=5%]" if _is_morning_liberal else ""
-                    # v11.6.118: Show Natural End SOC (S_nat) in diagnostics
-                    diag = f"{sell_diagnosis}{_lib_tag} | M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Nat:{natural_soc_after_sale:.1f}%)"
-                    res["arbitrage_sell_limit_reason"] = f"{diag} | Cap:{b_cap:.1f} T:{base_target:.0f}%"
+                    # v11.6.167: Clean human-readable status construction
+                    res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis}{_lib_tag} (Цель: {base_target:.0f}%)"
+                    res["_debug_limit_info"] = f"M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Nat:{natural_soc_after_sale:.1f}%)"
                     # res["power_decision"] = (f"Распределение на {num_peaks_left:.1f}ч{_lib_tag}" if num_peaks_left > 1.1 else f"{sell_diagnosis}{_lib_tag}") # v11.6.161: Moved to end
                     
                     # v11.3.37: UI Feedback for Smart Deficit Throttling
@@ -2509,7 +2507,7 @@ class StrategyEngine:
                     key_after = f"{last_h_sell_pool1 % 24:02d}:59" + (" (Завтра)" if last_h_sell_pool1 >= 24 else "")
 
                     # v11.6.159: Iterative EXACT morning SOC targeting (max 3 passes)
-                    res["arbitrage_limit_reason"] = "Pass0"
+                    _pass_log = "Pass0"
                     for pass_idx in range(3):
                         morning_gap = target_morning_soc - soc_morning
                         if abs(morning_gap) <= 0.1:
@@ -2597,7 +2595,15 @@ class StrategyEngine:
                             dynamic_floors=_strat_floors
                         )
                         soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
-                        res["arbitrage_limit_reason"] += f" | P{pass_idx+1}:{soc_morning:.1f}%"
+                        _pass_log += f" | P{pass_idx+1}:{soc_morning:.1f}%"
+                        
+                        # Update user status if floor changed significantly
+                        if abs(base_target - min_soc_val) > 0.5:
+                             res["arbitrage_sell_limit_reason"] = f"Защита дома ({min_soc_val:.0f}%→{base_target:.0f}%)"
+                        else:
+                             res["arbitrage_sell_limit_reason"] = f"Лимит пользователя ({min_soc_val:.0f}%)"
+
+                        res["_debug_passes"] = _pass_log
 
                         
                         # 5. Re-extract markers
