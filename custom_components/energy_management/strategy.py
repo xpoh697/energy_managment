@@ -2494,18 +2494,17 @@ class StrategyEngine:
                     key_morning = f"{sunrise_h-1:02d}:59 (Завтра)"
                     soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
 
-                    # v11.6.157: Target EXACT morning SOC. 
-                    # Run fix if we are either below OR significantly above target (to sell more).
-                    morning_gap = target_morning_soc - soc_morning
-                    if abs(morning_gap) > 0.1:
-                        # 1. Update the base target floor (applies to future epochs)
-                        # If we have a surplus (morning_gap < 0), we LOWER the floor to sell more.
-                        # If we have a deficit (morning_gap > 0), we RAISE it.
+                    # v11.6.159: Iterative EXACT morning SOC targeting (max 3 passes)
+                    res["arbitrage_limit_reason"] = "Pass0"
+                    for pass_idx in range(3):
+                        morning_gap = target_morning_soc - soc_morning
+                        if abs(morning_gap) <= 0.1:
+                            break
+                            
+                        # 1. Update the base target floor
                         base_target = min(100.0, max(min_soc_val + 2.0, base_target + morning_gap))
                         
-                        # v11.6.158: Re-calculate available volume WITH house load awareness
-                        # We must subtract what the house will eat DURING the sale period,
-                        # otherwise we over-allocate and fall below target at sunrise.
+                        # 2. Re-calculate available volume WITH house load awareness
                         _rem_start_soc = soc_at_start if 'soc_at_start' in locals() else b_soc
                         rem_base_dc_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0))
                         
@@ -2571,10 +2570,11 @@ class StrategyEngine:
                                 else:
                                     sell_commands[int(h)] = 0.0
                         
-                        # v11.6.84: All 'liberation' is now unified in the main distribution cycles above.
-
-                        # 4. Re-run final simulation to verify the fix
+                        # 4. Re-run final simulation to verify the fix for next iteration
                         sim_commands_fix = {int(h): cmd for h, cmd in sell_commands.items()}
+                        if best_buy_h is not None and best_buy_h < sim_end_h:
+                            sim_commands_fix[int(best_buy_h)] = float(max_p)
+                            
                         _, sim_log, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, sim_commands_fix, 
                             b_min_soc=base_target,
@@ -2582,15 +2582,8 @@ class StrategyEngine:
                             ignore_blended=True,
                             dynamic_floors=_strat_floors
                         )
-                        if best_buy_h is not None and best_buy_h < sim_end_h:
-                            sim_commands_fix[int(best_buy_h)] = float(max_p)
-                        
-                        # v11.6.73: Synchronize charge constraints
-                        _, sim_log, _ = self.run_soc_simulation(
-                            b_soc, sim_range, now, sim_commands_fix, 
-                            no_battery_charge_until=_sell_sim_no_charge_until,
-                            ignore_blended=True
-                        )
+                        soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_after)
+                        res["arbitrage_limit_reason"] += f" | P{pass_idx+1}:{soc_morning:.1f}%"
 
                         
                         # 5. Re-extract markers
