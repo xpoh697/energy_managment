@@ -937,20 +937,20 @@ class StrategyEngine:
             # 4. Inverter Command (AI Buying/Selling)
             cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
 
-            # v11.6.16: In negative-price buy window (pv_curtail_hours), the inverter:
-            # - Powers the house from the grid (battery does NOT drain from house consumption)
-            # - Curtails PV (gen=0)
-            # - Charges battery only from cmd_p (grid)
-            # Therefore: total_net_kw = cmd_p (ignoring gen and cons — both handled by grid)
-            if pv_curtail_hours and h_abs in pv_curtail_hours:
-                total_net_kw = float(cmd_p)
-            # v7.2 - Unified unit handling: Power (kW) * Time (h) = Energy (kWh)
-            elif no_battery_charge or (no_battery_charge_until is not None and h_abs < no_battery_charge_until):
-                # v11.1.39: PV only covers load, no battery charge from surplus
+            # v11.6.154: Pure Discharge Logic.
+            # If we are selling (cmd_p > 0), PV does NOT charge the battery.
+            # It only covers the house load, and the rest goes to the grid (ignored here).
+            is_selling = bool(cmd_p > 0.01)
+            
+            if no_battery_charge or is_selling or (no_battery_charge_until is not None and h_abs < no_battery_charge_until):
+                # PV only covers load, no battery charge from surplus
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
-                total_net_kw = float(p_for_house - expected_cons_kw + cmd_p)
+                rem_cons = expected_cons_kw - p_for_house
+                # Battery net: discharge command PLUS remaining house needs
+                total_net_kw = -cmd_p - rem_cons
             else:
-                total_net_kw = float(expected_gen_kw - expected_cons_kw + cmd_p)
+                # Normal mode: PV covers load and then charges battery
+                total_net_kw = expected_gen_kw - expected_cons_kw - cmd_p
 
             
             if total_net_kw > 0.001: 
