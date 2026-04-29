@@ -2634,7 +2634,7 @@ class StrategyEngine:
                         elif _is_u_limited:
                              res["arbitrage_sell_limit_reason"] = f"Лимит пользователя ({min_soc_val:.0f}%)"
                         else:
-                             res["arbitrage_sell_limit_reason"] = f"Защита дома ({base_target:.1f}%)"
+                             res["arbitrage_sell_limit_reason"] = f"Защита дома (Цель {min_soc_bat_val + soc_buffer_full:.0f}% к утру)"
 
                         res["_debug_passes"] = _pass_log
 
@@ -2694,7 +2694,7 @@ class StrategyEngine:
                     # v11.6.162: Status Label Construction
                     limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
                     if base_target > min_soc_val + 0.5:
-                        limit_label = f"Защита дома ({base_target:.1f}%)"
+                        limit_label = f"Защита дома (Цель {min_soc_bat_val + soc_buffer_full:.0f}% к утру)"
                     
                     # v11.6.185: Restore missing variable for energy calculation
                     _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
