@@ -2240,6 +2240,12 @@ class StrategyEngine:
                         # target_morning_soc remains as calculated at line 1978 (buffer-aware)
                         pass
                     
+                    # v11.6.128: Conditional Morning Liberation.
+                    # Only allow deeper discharge (to 12%) if we HAVE enough energy for tomorrow
+                    # AND we are not preparing for a higher-priced evening peak (deficit throttling).
+                    _has_deficit_for_bonus = bool(morning_deficit_fix > 0.1 or (is_preparing_for_peak and base_target > user_discharge_limit + 1.0))
+                    _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale and not _has_deficit_for_bonus else 0.0
+
                     # v11.3.11: Factor in physical energy capacity of the identified peaks
                     # Using global max_p which already accounts for CONF_BATTERY_MAX_POWER (e.g. 6.2kW)
                     # Auto-convert Watts to kW if user entered 6200 instead of 6.2
@@ -2249,12 +2255,6 @@ class StrategyEngine:
                     total_h_allowed = num_peaks_left
                     physical_limit_dc = (work_max_p * total_h_allowed) / eff
                     
-                    # v11.6.84: Expand budget to accommodate deeper morning discharge (15% vs 18%)
-                    # v11.6.104: Use soc_buffer_full instead of soc_buffer_val to guarantee the 3% bonus 
-                    # even if the autopilot raised base_target to 18%.
-
-
-                    _morning_lib_surplus_dc = (soc_buffer_full - 2.0) * b_cap / 100.0 if has_morning_sale else 0.0
                     # v11.6.118: Use natural_soc_after_sale instead of soc_at_start.
                     # This accounts for house consumption, inverter losses and solar income 
                     # during the sale window, ensuring we hit the target SOC precisely.
