@@ -2619,8 +2619,10 @@ class StrategyEngine:
                         _is_u_limited = (available_sell_dc <= (surplus_for_user_limit + 0.01) and surplus_for_user_limit < (surplus_for_morning - 0.1))
                         
                         limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
-                        if not _is_u_limited and base_target > min_soc_val + 0.5:
-                            limit_label = f"Защита дома (Цель {min_soc_bat_val + soc_buffer_full:.0f}% к утру)"
+                        _disp_goal = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
+                        _disp_txt = f"Защита дома (Лимит {_disp_goal:.0f}% УТРО)" if 4 <= (cur_hour % 24) <= 12 else f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
+                        res["arbitrage_sell_limit_reason"] = _disp_txt
+                        limit_label = _disp_txt
                         
                         if _is_p_limited:
                              limit_label = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
@@ -2634,7 +2636,7 @@ class StrategyEngine:
                         elif _is_u_limited:
                              res["arbitrage_sell_limit_reason"] = f"Лимит пользователя ({min_soc_val:.0f}%)"
                         else:
-                             res["arbitrage_sell_limit_reason"] = f"Защита дома (Цель {min_soc_bat_val + soc_buffer_full:.0f}% к утру)"
+                             res["arbitrage_sell_limit_reason"] = _disp_txt
 
                         res["_debug_passes"] = _pass_log
 
@@ -2694,7 +2696,8 @@ class StrategyEngine:
                     # v11.6.162: Status Label Construction
                     limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
                     if base_target > min_soc_val + 0.5:
-                        limit_label = f"Защита дома (Цель {min_soc_bat_val + soc_buffer_full:.0f}% к утру)"
+                        _disp_goal = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
+                        limit_label = f"Защита дома (Лимит {_disp_goal:.0f}% УТРО)" if 4 <= (cur_hour % 24) <= 12 else f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
                     
                     # v11.6.185: Restore missing variable for energy calculation
                     _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
