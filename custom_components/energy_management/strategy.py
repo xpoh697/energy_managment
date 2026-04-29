@@ -1914,27 +1914,7 @@ class StrategyEngine:
                     soc_buffer_full = 3.0 if min_soc_val > 25.0 else soc_buffer_val
                     soc_buffer_val = 3.0 if min_soc_val > 25.0 else soc_buffer_val
                     
-                    # v11.6.205: Refined Preliminary Peak Detection for budget accuracy.
-                    # We must account for BOTH price limits AND arbitrage opportunities.
-                    _prelim_peaks = []
-                    for h_str, p_val in today_prices.items():
-                        h_int = int(h_str)
-                        if h_int < cur_hour: continue
-                        norm_p = float(normalize_float(p_val))
-                        cheap_p_back, _ = get_best_buyback(h_int)
-                        gain = float(norm_p * eff - cheap_p_back - deg_cost)
-                        if norm_p >= sell_limit or gain >= threshold:
-                            _prelim_peaks.append(h_int)
-                            
-                    for h_str, p_val in tomorrow_prices.items():
-                        h_int = int(h_str) + 24
-                        norm_p = float(normalize_float(p_val))
-                        cheap_p_back, _ = get_best_buyback(h_int)
-                        gain = float(norm_p * eff - cheap_p_back - deg_cost)
-                        if norm_p >= sell_limit or gain >= threshold:
-                            _prelim_peaks.append(h_int)
-                    
-                    target_hours_sorted = sorted(list(set(_prelim_peaks)))
+                    soc_buffer_val = 3.0 if min_soc_val > 25.0 else soc_buffer_val
                     
                     # v11.4.30: Early Detection for Morning Liberalization
                     # We need solar context to decide if we relax the buffer
