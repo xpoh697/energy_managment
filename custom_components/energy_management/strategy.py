@@ -2266,10 +2266,10 @@ class StrategyEngine:
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < (min(surplus_for_morning, surplus_for_user_limit) - 0.1):
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     else:
-                        sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома ({base_target:.1f}%)"
+                        sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома (Цель {min_soc_bat_val + soc_buffer_full:.0f}% к утру)"
 
                     # v11.6.167 / v11.6.169: Clean human-readable status construction
-                    res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis} (Цель: {base_target:.0f}%)"
+                    res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis}"
                     # Detailed debug is moved to internal attributes
                     res["_debug_limit_info"] = f"M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Nat:{natural_soc_after_sale:.1f}%)"
                     res["_debug_passes"] = _pass_log if '_pass_log' in locals() else ""
@@ -2761,7 +2761,12 @@ class StrategyEngine:
                     # Update the Diagnostic Reason string to be HONEST
                     true_sell_diag = res["power_decision"]
                     if "Защита дома" in true_sell_diag:
-                        true_sell_diag = "Защита дома"
+                        # v11.6.198: Keep the target SOC in the diagnostic string
+                        if "(" in true_sell_diag and ")" in true_sell_diag:
+                             _diag_parts = true_sell_diag.split(")")
+                             true_sell_diag = _diag_parts[0] + ")"
+                        else:
+                             true_sell_diag = "Защита дома"
                     
                     # v11.6.72: Hyper-Detailed Diagnostics for Budget Debugging
                     diag_fixed = f"{true_sell_diag} | TRUE_M:{true_m_surplus:.1f} TRUE_U:{true_u_surplus:.1f} P:{physical_limit_dc:.1f}"
