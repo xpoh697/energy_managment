@@ -2218,10 +2218,7 @@ class StrategyEngine:
                     if first_h_sell is not None and first_h_sell > cur_hour:
                         prev_h = first_h_sell - 1
                         key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                        _val_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
-                        # v11.6.280: Limit start_soc by current b_soc to prevent "phantom charge" 
-                        # if real battery is lower than simulation baseline.
-                        soc_at_start = min(float(b_soc), float(_val_start))
+                        soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     else:
                         soc_at_start = b_soc
                     
@@ -2349,13 +2346,16 @@ class StrategyEngine:
                         
                     key_sunrise = f"{_h_sunrise_target % 24:02d}:59" + (" (Завтра)" if _h_sunrise_target >= 24 else "")
                     
-                    # Forced Night Sub-Simulation (v11.6.270)
-                    _night_sim_range = list(range(cur_hour, _h_sunrise_target + 1))
+                    # v11.6.285: Forced Night Sub-Simulation for Sunrise SOC
+                    # v11.6.285: Start simulation from the PROJECTED SOC at sale start (soc_at_start)
+                    # at the time of sale start (first_h_sell), to account for upcoming charging.
+                    _sim_start_h = first_h_sell if first_h_sell is not None else cur_hour
+                    _night_sim_range = list(range(_sim_start_h, _h_sunrise_target + 1))
                     if _night_sim_range:
-                         _, _night_log, _ = self.run_soc_simulation(b_soc, _night_sim_range, now, no_solar=True)
-                         natural_soc_at_sunrise = self._get_soc_from_log(_night_log, key_sunrise, b_soc)
+                         _, _night_log, _ = self.run_soc_simulation(soc_at_start, _night_sim_range, now, no_solar=True)
+                         natural_soc_at_sunrise = self._get_soc_from_log(_night_log, key_sunrise, soc_at_start)
                     else:
-                         natural_soc_at_sunrise = b_soc
+                         natural_soc_at_sunrise = soc_at_start
 
                     surplus_for_morning = max(0.0, (natural_soc_at_sunrise - _m_floor) * b_cap / 100.0)
                     
