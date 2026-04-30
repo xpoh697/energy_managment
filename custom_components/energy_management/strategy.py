@@ -2542,23 +2542,14 @@ class StrategyEngine:
                                      surplus_h_dc = max(0.0, (h_soc_s - h_floor) * b_cap / 100.0)
                                      p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
-                            if (rem_base_ac + rem_bonus_ac) > 0.05:
-                                # v11.6.90: Segregate budgets starting from sunrise_h
-                                is_morning = sunrise_h <= (h % 24) <= 12
+                                # v11.6.330: Greedy Price Priority (Profit Max)
+                                # We fill the best hours with MAX power first.
+                                actual_power = min(p_alloc, (rem_base_ac + rem_bonus_ac) / h_f)
                                 
-                                # 1. Try to take from base budget first (Limit 18%)
-                                power_from_base = min(p_alloc, rem_base_ac / h_f)
-                                rem_base_ac -= (power_from_base * h_f)
-                                
-                                # 2. If it's morning and base is empty, take from bonus (Limit 15%)
-                                power_from_bonus = 0.0
-                                if is_morning and (p_alloc - power_from_base) > 0.01:
-                                    power_from_bonus = min(p_alloc - power_from_base, rem_bonus_ac / h_f)
-                                    rem_bonus_ac -= (power_from_bonus * h_f)
-                                
-                                actual_power = power_from_base + power_from_bonus
                                 if actual_power > 0.01:
                                     sell_commands[int(h)] = round_f(actual_power, 3)
+                                    # Reduce budget by what we actually PLANNED to discharge
+                                    rem_base_ac = max(0.0, rem_base_ac - (actual_power * h_f))
                     
                     # v11.6.83: Morning Floor Liberation is now integrated into the core distribution loop
                     # via dynamic h_floor and expanded budget.
@@ -2657,6 +2648,7 @@ class StrategyEngine:
                     # v11.6.203: Synchronize recursive target with dynamic morning limits
                     _m_recursive_target = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
                     
+                    _rem_start_soc = b_soc
                     _pass_log = "Pass0"
                     for pass_idx in range(3):
                         morning_gap = _m_recursive_target - soc_morning
@@ -2699,32 +2691,18 @@ class StrategyEngine:
                                     current_surplus_dc_fix = max(0.0, (b_soc - h_floor_fix) * b_cap / 100.0)
                                     p_alloc_fix = min(max_p, (current_surplus_dc_fix * eff) / h_f)
                                 else:
-                                    # v11.6.110: Same fix in Step 2 (Recursive Fix)
-                                    # v11.6.111: Same fix for suffix in Step 2
                                     _prev_h_f = h - 1
                                     _prev_h_key_f = f"{(_prev_h_f)%24:02d}:59" + (" (Завтра)" if _prev_h_f >= 24 else "")
                                     if h_soc_sf := self._get_soc_from_log(sim_log_base, _prev_h_key_f, b_soc):
                                          surplus_hf_dc = max(0.0, (h_soc_sf - h_floor_fix) * b_cap / 100.0)
                                          p_alloc_fix = min(max_p, (surplus_hf_dc * eff) / h_f)
                                 
-                                if (rem_base_ac_fix + rem_bonus_ac_fix) > 0.05:
-                                    is_morning_fix = sunrise_h <= (h % 24) <= 12
-                                    
-                                    # 1. Base
-                                    p_base_fix = min(p_alloc_fix, rem_base_ac_fix / h_f)
-                                    rem_base_ac_fix -= (p_base_fix * h_f)
-                                    
-                                    # 2. Bonus
-                                    p_bonus_fix = 0.0
-                                    if is_morning_fix and (p_alloc_fix - p_base_fix) > 0.01:
-                                        p_bonus_fix = min(p_alloc_fix - p_base_fix, rem_bonus_ac_fix / h_f)
-                                        rem_bonus_ac_fix -= (p_bonus_fix * h_f)
-                                        
-                                    actual_p_fix = p_base_fix + p_bonus_fix
-                                    if actual_p_fix > 0.01:
-                                        sell_commands[int(h)] = round_f(actual_p_fix, 3)
-                                    else:
-                                        sell_commands[int(h)] = 0.0
+                                # v11.6.330: Greedy Price Priority (Profit Max)
+                                actual_p_fix = min(p_alloc_fix, (rem_base_ac_fix + rem_bonus_ac_fix) / h_f)
+                                
+                                if actual_p_fix > 0.01:
+                                    sell_commands[int(h)] = round_f(actual_p_fix, 3)
+                                    rem_base_ac_fix = max(0.0, rem_base_ac_fix - (actual_p_fix * h_f))
                                 else:
                                     sell_commands[int(h)] = 0.0
                         
@@ -3081,8 +3059,7 @@ class StrategyEngine:
                         discharge_dc_local = (p_val * h_f_local) / eff
                         pure_discharge_pct_local = (discharge_dc_local + house_rem_dc_local) / b_cap * 100.0 if b_cap > 0.1 else 0.0
                         
-                        # v11.6.315: Cumulative Target SOC for UI consistency
-                        # We calculate the target reached AFTER this hour's planned sale.
+                        _target_limit_local = min_soc_val + 2.0 if (4 <= (h_idx % 24) < 12) else base_target
                         h_target = max(_target_limit_local, _h_start_soc - pure_discharge_pct_local)
                         
                         # Update _h_start_soc for the NEXT hour in the loop (to keep it cumulative)
