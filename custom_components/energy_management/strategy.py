@@ -2389,9 +2389,11 @@ class StrategyEngine:
                     # v11.6.285: Start simulation from the PROJECTED SOC at sale start (soc_at_start)
                     # at the time of sale start (first_h_sell), to account for upcoming charging.
                     _sim_start_h = first_h_sell if first_h_sell is not None else cur_hour
+                    # v11.6.364: Allow early morning solar in budget if plentiful
+                    _night_sim_no_solar = not solar_is_plentiful
                     _night_sim_range = list(range(_sim_start_h, _h_sunrise_target + 1))
                     if _night_sim_range:
-                         _, _night_log, _ = self.run_soc_simulation(soc_at_start, _night_sim_range, now, no_solar=True)
+                         _, _night_log, _ = self.run_soc_simulation(soc_at_start, _night_sim_range, now, no_solar=_night_sim_no_solar)
                          natural_soc_at_sunrise = self._get_soc_from_log(_night_log, key_sunrise, soc_at_start)
                     else:
                          natural_soc_at_sunrise = soc_at_start
