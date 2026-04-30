@@ -1262,17 +1262,6 @@ class StrategyEngine:
                 _b_buy = min(_f_buy) if _f_buy else _p_now
                 _gain = float(_b_sell * eff - _p_now - deg_cost)
                 
-                _raw_base = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
-                # v11.6.478: Settings dump. Removed survival_target_kwh to fix scope error.
-                _all_sets = {k: v for k, v in man.settings.items() if "charge" in k or "soc" in k or "limit" in k}
-                res["buy_debug"] = (
-                    f"Причина: {res.get('charge_reason', 'manual')} | База: {base_target:.1f} (Raw: {_raw_base:.1f}) | "
-                    f"Sets: {_all_sets} | "
-                    f"Цена: {_p_now:.2f} | Лимит: {max_p:.2f}"
-                )
-                if _p_now <= 0.0:
-                    res["buy_debug"] += " [Отрицательная цена]"
-
                 is_arb_now = (_gain >= threshold)
                 if negative_hours:
                     target_hours = list(negative_hours)
@@ -1358,6 +1347,18 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Отрицательная цена"
                     self._calculating_strategy = old_calc
+                    # v11.6.479: Final Diagnostic Dump (Moved to end for accuracy)
+                    _raw_base = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
+                    _all_sets = {k: v for k, v in man.settings.items() if "charge" in k or "soc" in k or "limit" in k}
+                    _surv_pct = (survival_target_kwh / b_cap * 100.0) if b_cap > 0 else 0.0
+                    res["buy_debug"] = (
+                        f"Причина: {res.get('charge_reason', 'manual')} | База: {base_target:.1f} (Raw: {_raw_base:.1f}) | "
+                        f"Sets: {_all_sets} | Surv_req: {_surv_pct:.1f}% | "
+                        f"Цена: {float(normalize_float(all_prices.get(cur_hour, 0.0))):.2f} | Лимит: {max_p:.2f}"
+                    )
+                    if float(normalize_float(all_prices.get(cur_hour, 0.0))) <= 0.0:
+                        res["buy_debug"] += " [Отрицательная цена]"
+
                     return res
                 
                 def is_profitable(price, hour):
@@ -1720,8 +1721,9 @@ class StrategyEngine:
                         target_soc = 100.0
                     elif available_today_kwh < survival_target_kwh:
                         res["charge_reason"] = "survival"
-                        target_soc = float(min(base_target, survival_target_kwh / b_cap * 100.0))
-                        res["arbitrage_decision"] = f"Зарядка для обеспечения буфера ({target_soc:.1f}%)"
+                        # v11.6.479: Greedy Survival. Use base_target (100.0) instead of min-requirement.
+                        target_soc = base_target
+                        res["arbitrage_decision"] = f"Зарядка для обеспечения буфера ({survival_target_kwh / b_cap * 100.0:.1f}%)"
                     else:
                         res["charge_reason"] = "cheap"
                         # v11.6.465: Greedy Buy. If we have cheap hours in pool, target base_target (100.0)
@@ -2509,7 +2511,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.478"
+                    # VERSION = "v11.6.479"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
