@@ -1635,7 +1635,7 @@ class StrategyEngine:
                     strict_threshold = max(threshold, 2 * deg_cost)
                     
                     # 1. Look for future sell peaks (arbitrage opportunities)
-                    future_sell_peaks = sorted([h for h in all_sell_prices.items() if h > cur_hour])
+                    future_sell_peaks = sorted([h for h, p in all_sell_prices.items() if h > cur_hour])
                     best_peak_p = 0.0
                     peak_hour = None
                     if future_sell_peaks:
@@ -2502,7 +2502,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.440"
+                    # VERSION = "v11.6.441"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
