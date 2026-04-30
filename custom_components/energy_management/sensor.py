@@ -2823,6 +2823,7 @@ class InverterOperationModeSensor(SensorEntity):
             attrs["next_peak_start_hour"] = self.manager.strategy_engine._format_h(peak_start_abs)
             attrs["morning_soc_target"] = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
             attrs["morning_soc_projected"] = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
+            attrs["buy_debug"] = buy_strategy.get("buy_debug", "Нет данных")
             
             self.manager.current_inverter_mode = mode
 
