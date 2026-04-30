@@ -1887,8 +1887,11 @@ class StrategyEngine:
                         _neg_buy_curtail = set()
                         if is_neg_strategy:
                             _neg_buy_curtail = {h for h in target_hours_sorted if all_buy_prices.get(h, 0.0) < 0.0}
+                        # v11.6.385: IMPORTANT - Universal simulation engine subtracts commands (-cmd_p).
+                        # For BUY mode, we must pass NEGATIVE power to result in ADDITION (charge).
+                        charge_commands_inv = {k: -v for k, v in charge_commands.items()}
                         _, sim_log, _ = self.run_soc_simulation(
-                            b_soc, sim_range, now, charge_commands,
+                            b_soc, sim_range, now, charge_commands_inv,
                             no_battery_charge_until=_buy_sim_no_charge_until,
                             pv_curtail_hours=_neg_buy_curtail or None,
                             ignore_blended=(now.hour < 10)
@@ -2461,7 +2464,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.380"
+                    # VERSION = "v11.6.390"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
@@ -3131,6 +3134,8 @@ class StrategyEngine:
                     # Fallback for forecast display
                     h_soc_sim = float(self._get_soc_from_log(s_log, key_h, target_soc))
                     
+                    # v11.6.385: Show target SOC even for 0.0 kW hours for better plan visibility
+                    t_soc = round_f(float(target_soc), 1)
                     if mode == "sell":
                         h_f_local = max(0.1, (60 - now.minute) / 60.0) if h_idx == cur_hour else 1.0
                         house_cons_local = float(normalize_float(self.manager.get_average_profile("consumption_total", self.manager.custom_period, now.weekday()).get(str(h_idx_norm), 0.5))) * occ_coeff
@@ -3147,14 +3152,14 @@ class StrategyEngine:
                         if p_val > 0.01:
                             p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                         else:
-                            p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc_sim, 1)}%)"
+                            p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                         
                     else:
                         # v11.6.264: Show target SOC for Buy mode too.
                         if p_val > 0.01:
                             p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(target_soc, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                         else:
-                            p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc_sim, 1)}%)"
+                            p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(target_soc, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                     
             res["planned_power_per_h"] = p_distribution
             
