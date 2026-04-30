@@ -1021,7 +1021,6 @@ class StrategyEngine:
             "multi_cycle": "Не предвидится",
             "buy_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_at_end_pct": b_soc, "projected_soc_morning_pct": b_soc},
             "sell_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_after_sale_pct": b_soc, "projected_soc_morning_pct": b_soc},
-            "buy_debug": "Ожидание...",
             "arbitrage_decision": "Нет данных",
             "charge_reason": "none",
             "strategy_candidates": [],
@@ -2777,11 +2776,17 @@ class StrategyEngine:
                     # Fix: ALWAYS compute morning via a short night sub-sim starting from
                     # natural_soc_after_sale (Branch A) or post-sale SOC (Branch B).
                     # v11.6.162: Final Status and Projection Construction
-                    # v11.6.270: Standardize Morning Projection (Dawn Anchor)
-                    # We reuse the key_sunrise and natural_soc_at_sunrise from the nocturnal sim (line 2345)
-                    # to ensure diagnostic parity across all sensors.
+                    # v11.6.275: Standardize Strategic Morning Projection (Dawn Anchor)
+                    # We run a final "Strategic Nocturnal Simulation" to confirm the 18% target.
+                    # This simulation includes planned sales but ignores phantom solar.
+                    _final_sim_range = list(range(cur_hour, _h_sunrise_target + 1))
+                    if _final_sim_range:
+                         _, _strat_log, _ = self.run_soc_simulation(b_soc, _final_sim_range, now, commands=sell_commands, no_solar=True)
+                         soc_morning_display = float(round_f(self._get_soc_from_log(_strat_log, key_sunrise, b_soc), 1))
+                    else:
+                         soc_morning_display = b_soc
+
                     morning_key_disp = key_sunrise
-                    soc_morning_display = float(round_f(natural_soc_at_sunrise, 1))
                     
                     _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
                     if _all_sell_hrs:
