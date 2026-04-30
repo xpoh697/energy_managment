@@ -1047,9 +1047,9 @@ class StrategyEngine:
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
+        _sell_debug = {}
         try:
             cur_hour = int(now.hour)
-            _sell_debug = {}
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
             
