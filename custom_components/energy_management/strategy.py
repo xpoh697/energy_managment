@@ -1021,6 +1021,7 @@ class StrategyEngine:
             "multi_cycle": "Не предвидится",
             "buy_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_at_end_pct": b_soc, "projected_soc_morning_pct": b_soc},
             "sell_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_after_sale_pct": b_soc, "projected_soc_morning_pct": b_soc},
+            "buy_debug": None,
             "arbitrage_decision": "Нет данных",
             "charge_reason": "none",
             "strategy_candidates": [],
@@ -2217,7 +2218,12 @@ class StrategyEngine:
                     if first_h_sell is not None and first_h_sell > cur_hour:
                         prev_h = first_h_sell - 1
                         key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                        soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
+                        _val_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
+                        # v11.6.280: Limit start_soc by current b_soc to prevent "phantom charge" 
+                        # if real battery is lower than simulation baseline.
+                        soc_at_start = min(float(b_soc), float(_val_start))
+                    else:
+                        soc_at_start = b_soc
                     
                     # 2. Daily Surplus (Sunrise-Aware v6.2)
                     # v11.3.9: TRIPLE CONSTRAINT - Sale is limited by: 
