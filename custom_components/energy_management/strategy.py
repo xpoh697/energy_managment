@@ -914,6 +914,10 @@ class StrategyEngine:
             if hist_h_val < 0.01 and (real_h < 8 or real_h > 20):
                 expected_gen_kw = 0.0
 
+            # v11.6.411: PV Curtail logic (Dead parameter revival)
+            if pv_curtail_hours is not None and int(h_abs) in pv_curtail_hours:
+                expected_gen_kw = 0.0
+
             # 3. Expected consumption (v7.9.4 - Base profile)
             p_cons = prof_cons_tom if is_tom else prof_cons_today
             
@@ -1896,7 +1900,8 @@ class StrategyEngine:
                             b_soc, sim_range, now, charge_commands_inv,
                             no_battery_charge_until=_buy_sim_no_charge_until,
                             pv_curtail_hours=_neg_buy_curtail or None,
-                            ignore_blended=(now.hour < 10)
+                            ignore_blended=(now.hour < 10),
+                            no_solar=is_neg_strategy
                         )
                         
                         # 1. Projected SOC at START of the first buy hour
@@ -2464,7 +2469,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.410"
+                    # VERSION = "v11.6.411"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
