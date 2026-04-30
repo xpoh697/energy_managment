@@ -1021,7 +1021,6 @@ class StrategyEngine:
             "multi_cycle": "Не предвидится",
             "buy_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_at_end_pct": b_soc, "projected_soc_morning_pct": b_soc},
             "sell_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_after_sale_pct": b_soc, "projected_soc_morning_pct": b_soc},
-            "buy_debug": None,
             "arbitrage_decision": "Нет данных",
             "charge_reason": "none",
             "strategy_candidates": [],
