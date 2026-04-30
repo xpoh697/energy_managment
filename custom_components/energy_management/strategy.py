@@ -1958,27 +1958,25 @@ class StrategyEngine:
                     occ_coeff = float(occ_coeff)
                     avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
                     
-                    # 1. Survival Floor (13% + 5% = 18%)
-                    house_safety = float(man.get_setting(CONF_EMERGENCY_SOC_LIMIT, 13.0)) + float(man.get_setting(CONF_SOC_BUFFER, 5.0))
-                    user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
-                    survival_limit = max(user_limit, house_safety)
+                    # 1. Survival Target SOC (Sunrise Guard)
+                    # v11.6.367: Evening (13:00-04:00) = 18%, Morning (04:00-10:00) = 15%
+                    _m_survival_target = house_safety if not (4 <= (cur_hour % 24) < 10) else (float(man.get_setting(CONF_EMERGENCY_SOC_LIMIT, 13.0)) + 2.0)
                     
-                    # 2. Night Reserve (Energy needed until sunrise)
-                    # Window: End of today's potential sale (~21:00) until Sunrise Tomorrow.
+                    # 2. User Discharge Limit (Static user setting)
+                    user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
+                    
+                    # 3. House Survival Reserve (consumption from end of potential sale until sunrise)
+                    # Window starts from the end of the current or last sale peak
                     _h_end_est = 21 
                     _h_sunrise_target = sunrise_h - 1
                     night_cons_kwh = sum(float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) for h in range(_h_end_est, _h_sunrise_target + 24 if _h_sunrise_target < _h_end_est else _h_sunrise_target)) * occ_coeff
                     night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
                     
-                    # Global Discharge Floor: Survival + Night Consumption
-                    # v11.6.366: Don't sum user_limit and night_cons if solar is plentiful
-                    # We only need to reserve (18% + night_cons) OR just stay above User Limit (23%)
-                    _night_reserve_floor = house_safety + night_cons_pct
-                    if solar_is_plentiful:
-                        base_target = max(user_limit, _night_reserve_floor)
-                    else:
-                        base_target = max(user_limit + night_cons_pct, _night_reserve_floor)
-                        
+                    # Global Discharge Floor: max(User_Limit, Survival_Target + Night_Consumption)
+                    # v11.6.367: Calculated Target for end-of-sale
+                    _survival_floor = _m_survival_target + night_cons_pct
+                    base_target = max(user_limit, _survival_floor)
+                    
                     user_discharge_limit = base_target 
                     min_soc_val = user_limit
                     
@@ -2444,7 +2442,11 @@ class StrategyEngine:
                     if available_sell_dc <= (physical_limit_dc + 0.001) and physical_limit_dc < (min(surplus_for_morning, surplus_for_user_limit) - 0.1):
                         sell_diagnosis = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
                     else:
-                        sell_diagnosis = f"Лимит пользователя ({min_soc_val:.0f}%)" if base_target <= min_soc_val + 0.5 else f"Защита дома (Цель {base_target:.0f}% к утру)"
+                        # v11.6.367: Bottleneck reporting according to final approved logic
+                        if user_limit >= _survival_floor - 0.5:
+                            sell_diagnosis = f"Лимит пользователя ({user_limit:.0f}%)"
+                        else:
+                            sell_diagnosis = f"Защита дома (Цель {_m_survival_target:.0f}% к утру)"
 
                     # v11.6.167 / v11.6.169: Clean human-readable status construction
                     res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis}"
@@ -2761,11 +2763,11 @@ class StrategyEngine:
                         _is_p_limited = (available_sell_dc <= (physical_limit_dc + 0.01) and physical_limit_dc < (min(surplus_for_morning, surplus_for_user_limit) - 0.1))
                         _is_u_limited = (available_sell_dc <= (surplus_for_user_limit + 0.01) and surplus_for_user_limit < (surplus_for_morning - 0.1))
                         
-                        limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
-                        _disp_goal = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
-                        _disp_txt = f"Защита дома (Лимит {_disp_goal:.0f}% УТРО)" if 4 <= (cur_hour % 24) <= 12 else f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
-                        res["arbitrage_sell_limit_reason"] = _disp_txt
-                        limit_label = _disp_txt
+                        limit_label = f"Лимит пользователя ({user_limit:.0f}%)"
+                        if user_limit < _survival_floor - 0.5:
+                            _disp_txt = f"Защита дома (Цель {_m_survival_target:.0f}% УТРО)" if 4 <= (cur_hour % 24) <= 10 else f"Защита дома (Цель {_m_survival_target:.0f}% к утру)"
+                            res["arbitrage_sell_limit_reason"] = _disp_txt
+                            limit_label = _disp_txt
                         
                         if _is_p_limited:
                              limit_label = f"Лимит мощности АКБ ({work_max_p:.1f}кВт)"
