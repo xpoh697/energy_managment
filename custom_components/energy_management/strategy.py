@@ -984,11 +984,14 @@ class StrategyEngine:
             # due to house load, not artificially 'stick' to it.
             
             # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
-            history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
+            log_key_str = f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")
+            history_log[log_key_str] = {
                 "soc": round_f(float(simulated_soc), 1),
                 "gen_kw": round_f(float(expected_gen_kw), 3),
                 "load_kw": round_f(float(expected_cons_kw), 3)
             }
+            # v11.6.375: Store integer key as well for robust programmatic access
+            history_log[int(h_abs)] = history_log[log_key_str]
 
         return float(simulated_soc), history_log, float(overflow_kwh)
 
@@ -1659,11 +1662,14 @@ class StrategyEngine:
                         
                         # v11.6.258: Patience Mode. If negative prices ahead, set threshold to survival floor
                         # for all positive-price hours. No point buying at 0.8 if -0.9 is coming.
-                        p_buy_h = all_buy_prices.get(h_b, 999.0)
-                        if negative_hours and p_buy_h > 0.0:
+                        # v11.6.375: If price is negative, we ALWAYS prefer buying over solar (get paid).
+                        # Set threshold to 101% so it's never skipped by max_dry_soc.
+                        if p_buy_h < 0.0:
+                             _solar_threshold = 101.0
+                        elif negative_hours and p_buy_h > 0.0:
                              _solar_threshold = float(min_soc + soc_buffer)
                         else:
-                             _solar_threshold = 99.0 if (p_buy_h <= buy_limit or p_buy_h <= 0.0) else 90.0
+                             _solar_threshold = 99.0 if p_buy_h <= buy_limit else 90.0
                         
                         if max_dry_soc < _solar_threshold:
                             pool_useful.append(h_b)
@@ -1883,8 +1889,7 @@ class StrategyEngine:
                                     else:
                                         break
                                 
-                                key_end = f"{last_h_buy_immediate % 24:02d}:59" + (" (Завтра)" if last_h_buy_immediate >= 24 else "")
-                                soc_at_end = self._get_soc_from_log(sim_log, key_end, b_soc)
+                                soc_at_end = self._get_soc_from_log(sim_log, int(last_h_buy_immediate), b_soc)
                             else:
                                 soc_at_end = b_soc
                         else:
@@ -1895,8 +1900,6 @@ class StrategyEngine:
                         if cur_hour >= _h_sunrise_target:
                             _h_sunrise_target += 24
                         
-                        key_morning = f"{_h_sunrise_target % 24:02d}:59" + (" (Завтра)" if _h_sunrise_target >= 24 else "")
-                        
                         # Forced Night Sub-Simulation for BUY mode morning projection
                         # to ensure the "Morning" state shows the natural battery level before solar starts.
                         _night_sim_range = list(range(cur_hour, _h_sunrise_target + 1))
@@ -1906,7 +1909,7 @@ class StrategyEngine:
                              # Wait, soc_at_end is already the SOC at the end of the buy window.
                              # We should simulate from there to sunrise.
                              _, _night_log, _ = self.run_soc_simulation(soc_at_end, _night_sim_range, now, no_solar=True)
-                             soc_morning = self._get_soc_from_log(_night_log, key_morning, soc_at_end)
+                             soc_morning = self._get_soc_from_log(_night_log, int(_h_sunrise_target), soc_at_end)
                         else:
                              soc_morning = soc_at_end
 
