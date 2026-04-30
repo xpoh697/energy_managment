@@ -2906,7 +2906,33 @@ class StrategyEngine:
                     # We recalculate M, U based on what the simulation JUST confirmed.
                     true_m_surplus = round(((soc_morning - target_morning_soc) * b_cap / 100.0), 1)
                     true_u_surplus = round(((soc_after - base_target) * b_cap / 100.0), 1)
+
+                    # v7.1: Note: Simulation results are no longer used to override target_soc (v11.1.61).
+                    # v11.1.20 - Calculate potential gain using target_price if we are preparing for a future peak
+                    best_sell_price_for_arb = max(cur_p_f, float(target_price or 0.0))
+                    gain_for_attr = float(best_sell_price_for_arb * eff - p_bb - deg_cost) if h_bb is not None else 0.0
+
+                    # Arbitrage details for UI attributes
+                    # v11.6.71: Synchronize attributes with the FINAL results (including Step 2)
+                    final_total_sell_ac = sum(sell_commands.values()) if sell_commands else 0.0
                     
+                    res["arbitrage_buyback"] = {
+                        "power_kw": 0.0,
+                        "note": "Нет выгодного окна для откупа",
+                        "available_kwh": float(round_f(final_total_sell_ac, 2)),
+                        "sunrise_hour": sunrise_h,
+                        "soc_buffer_pct": float(soc_buffer_val),
+                        "target_morning_soc_pct": float(target_morning_soc),
+                        "reserve_kwh": float(round_f(target_morning_soc * b_cap / 100.0, 2)),
+                        "energy_to_wait_kwh": float(round_f(total_cons_to_sunrise, 2)),
+                        "ai_floor_soc_pct": float(round_f(ai_soc_floor_final, 1)),
+                        "gatekeeper_floor": float(round_f(res.get("morning_autopilot_floor", ai_soc_floor_final), 1)),
+                    }
+
+                    if h_bb is not None and (gain_for_attr >= threshold):
+                        res["arbitrage_buyback"]["power_kw"] = max_p
+                        res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
+
                     # v11.6.200: Update the Diagnostic Reason string only if power_decision exists
                     true_sell_diag = res.get("power_decision")
                     if true_sell_diag:
@@ -2926,15 +2952,10 @@ class StrategyEngine:
                             f"M_dc:{surplus_for_morning:.2f} U_dc:{surplus_for_user_limit:.2f} AC:{available_sell_ac:.2f} "
                             f"NoChg:{_sell_sim_no_charge_until}"
                         )
-
-
-
-
-            # v7.1: Note: Simulation results are no longer used to override target_soc (v11.1.61).
-            # v11.1.20 - Calculate potential gain using target_price if we are preparing for a future peak
-            best_sell_price_for_arb = max(cur_p_f, float(target_price or 0.0))
-            gain_for_attr = float(best_sell_price_for_arb * eff - p_bb - deg_cost) if h_bb is not None else 0.0
-
+            # v11.6.225: Do NOT filter out hours with 0.0 kW power.
+            # Show all candidates to the user for transparency.
+            _filtered_targets = list(target_hours_sorted)
+            target_hours_sorted = _filtered_targets
 
             # v11.6.261: Move shared result population out of conditional blocks
             # Use current peak power only if we are actually in a peak hour
@@ -2943,32 +2964,6 @@ class StrategyEngine:
                 res["state"] = "active"
             
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
-
-            # Arbitrage details for UI attributes
-            # v11.6.71: Synchronize attributes with the FINAL results (including Step 2)
-            final_total_sell_ac = sum(sell_commands.values()) if sell_commands else 0.0
-            
-            res["arbitrage_buyback"] = {
-                "power_kw": 0.0,
-                "note": "Нет выгодного окна для откупа",
-                "available_kwh": float(round_f(final_total_sell_ac, 2)),
-                "sunrise_hour": sunrise_h,
-                "soc_buffer_pct": float(soc_buffer_val),
-                "target_morning_soc_pct": float(target_morning_soc),
-                "reserve_kwh": float(round_f(target_morning_soc * b_cap / 100.0, 2)),
-                "energy_to_wait_kwh": float(round_f(total_cons_to_sunrise, 2)),
-                "ai_floor_soc_pct": float(round_f(ai_soc_floor_final, 1)),
-                "gatekeeper_floor": float(round_f(res.get("morning_autopilot_floor", ai_soc_floor_final), 1)),
-            }
-
-            if h_bb is not None and (gain_for_attr >= threshold):
-                res["arbitrage_buyback"]["power_kw"] = max_p
-                res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
-                
-            # v11.6.225: Do NOT filter out hours with 0.0 kW power.
-            # Show all candidates to the user for transparency.
-            _filtered_targets = list(target_hours_sorted)
-            target_hours_sorted = _filtered_targets
 
             # v11.6.258: Filter active list for UI to exclude zero-power hours UNLESS they are negative
             # This makes the UI much cleaner and prevents "scary" high-price active periods with 0.0kW
