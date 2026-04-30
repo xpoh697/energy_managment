@@ -1049,6 +1049,7 @@ class StrategyEngine:
         self._calculating_strategy = True
         try:
             cur_hour = int(now.hour)
+            _sell_debug = {}
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
             
@@ -1933,14 +1934,14 @@ class StrategyEngine:
                         }
                 else: # sell
                     # v11.6.355: Comprehensive Sell Debug
-                    _sell_debug = {
+                    _sell_debug.update({
                         "server_time": now.strftime("%H:%M:%S"),
                         "cur_hour": int(now.hour),
                         "b_soc": round_f(b_soc, 1),
                         "max_p": round_f(max_p, 2),
-                        "f_today": round_f(float(man.get_forecast_value(man.solar_tomorrow_sensors[0] if isinstance(man.solar_tomorrow_sensors, list) else man.solar_tomorrow_sensors) or 0.0), 1), # Placeholder, will update later
+                        "f_today": round_f(float(man.get_forecast_value(man.solar_tomorrow_sensors[0] if isinstance(man.solar_tomorrow_sensors, list) else man.solar_tomorrow_sensors) or 0.0), 1),
                         "f_tom": 0.0
-                    }
+                    })
                     # Sell mode (v11.1.51)
                     # Use existing Target SOC Sell as floor for AI selling
                     # v11.6.301: Restore missing variables after refactor
@@ -2991,11 +2992,12 @@ class StrategyEngine:
             if in_peak and (power_needed > 0.05 or cur_hour in negative_hours):
                 res["state"] = "active"
             
-            _sell_debug["in_peak"] = in_peak
-            _sell_debug["power_needed"] = round_f(power_needed, 3)
-            _sell_debug["final_state"] = res["state"]
-            _sell_debug["f_tom"] = round_f(f_tom, 1)
-            res["sell_debug"] = _sell_debug
+            if _sell_debug:
+                _sell_debug["in_peak"] = in_peak
+                _sell_debug["power_needed"] = round_f(power_needed, 3)
+                _sell_debug["final_state"] = res["state"]
+                _sell_debug["f_tom"] = round_f(f_tom, 1)
+                res["arbitrage_sell_debug"] = _sell_debug
             
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
 
