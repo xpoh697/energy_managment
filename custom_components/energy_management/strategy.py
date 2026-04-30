@@ -2353,7 +2353,7 @@ class StrategyEngine:
                     _h_sunrise_target = sunrise_h - 1
                     if cur_hour >= _h_sunrise_target:
                         _h_sunrise_target += 24
-                                           # v11.6.305: Dynamic Evening Floor (Night-Aware Budgeting)
+                                           # v11.6.301: Dynamic Evening Floor (Night-Aware Budgeting)
                     # To have 18% in the morning, we MUST stop selling when we reach 18% + Night_Load.
                     # Otherwise, the house will drain the battery to 0% by dawn.
                     _h_end_sale = max(target_hours_sorted) if target_hours_sorted else cur_hour
@@ -2822,6 +2822,9 @@ class StrategyEngine:
                         for _h in _all_sell_hrs:
                             _k = f"{_h % 24:02d}:59" + (" (Завтра)" if _h >= 24 else "")
                             if _v := self._get_soc_from_log(sim_log, _k, b_soc):
+                                # v11.6.315: Price-Priority Distribution (Profit Maximization)
+                                # We fill the most expensive hours first as requested by the user.
+                                _all_sell_hrs_sorted = sorted(_all_sell_hrs, key=lambda h: all_prices.get(h, 0.0), reverse=True)
                                 _soc_vals.append(float(_v))
                         display_soc_after = min(_soc_vals) if _soc_vals else b_soc
                     else:
@@ -3090,8 +3093,12 @@ class StrategyEngine:
                         pure_discharge_pct_local = (discharge_dc_local + house_rem_dc_local) / b_cap * 100.0 if b_cap > 0.1 else 0.0
                         
                         _target_limit_local = min_soc_val + 2.0 if (sunrise_h <= h_idx_norm <= 12) else base_target
-                        # Target is start_soc minus pure discharge (ignoring solar)
+                        # v11.6.315: Cumulative Target SOC for UI consistency
+                        # We calculate the target reached AFTER this hour's planned sale.
                         h_target = max(_target_limit_local, _h_start_soc - pure_discharge_pct_local)
+                        
+                        # Update _h_start_soc for the NEXT hour in the loop (to keep it cumulative)
+                        _h_start_soc = h_target
                         
                         if p_val > 0.01:
                             p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
