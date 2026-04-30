@@ -2307,7 +2307,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.235"
+                    # VERSION = "v11.6.236"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
@@ -2673,7 +2673,7 @@ class StrategyEngine:
                         
                         limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
                         _disp_goal = (min_soc_bat_val + 2.0) if 4 <= (now.hour % 24) < 10 else (min_soc_bat_val + soc_buffer_full)
-                        _disp_txt = f"Защита дома (Лимит {_disp_goal:.0f}% УТРО)" if 4 <= (now.hour % 24) < 10 else f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
+                        _disp_txt = f"Защита дома (Цель {_disp_goal:.0f}%)"
                         res["arbitrage_sell_limit_reason"] = _disp_txt
                         limit_label = _disp_txt
                         
