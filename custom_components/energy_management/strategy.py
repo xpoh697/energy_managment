@@ -2947,7 +2947,7 @@ class StrategyEngine:
 
             # Use current peak power only if we are actually in a peak hour
             in_peak = (cur_hour in target_hours_sorted)
-            if in_peak and power_needed > 0.05:
+            if in_peak and (power_needed > 0.05 or cur_hour in negative_hours):
                 res["state"] = "active"
             
             real_cmd_p = power_needed if in_peak else 0.0
