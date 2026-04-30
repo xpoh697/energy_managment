@@ -1347,18 +1347,14 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Отрицательная цена"
                     self._calculating_strategy = old_calc
-                    # v11.6.479: Final Diagnostic Dump (Moved to end for accuracy)
+                    
+                    # v11.6.482: Diagnostics restored for early exit
                     _raw_base = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
                     _all_sets = {k: v for k, v in man.settings.items() if "charge" in k or "soc" in k or "limit" in k}
-                    _surv_pct = (survival_target_kwh / b_cap * 100.0) if b_cap > 0 else 0.0
                     res["buy_debug"] = (
                         f"Причина: {res.get('charge_reason', 'manual')} | База: {base_target:.1f} (Raw: {_raw_base:.1f}) | "
-                        f"Sets: {_all_sets} | Surv_req: {_surv_pct:.1f}% | "
-                        f"Цена: {float(normalize_float(all_prices.get(cur_hour, 0.0))):.2f} | Лимит: {max_p:.2f}"
+                        f"Sets: {_all_sets} | Цена: {float(normalize_float(all_prices.get(cur_hour, 0.0))):.2f}"
                     )
-                    if float(normalize_float(all_prices.get(cur_hour, 0.0))) <= 0.0:
-                        res["buy_debug"] += " [Отрицательная цена]"
-
                     return res
                 
                 def is_profitable(price, hour):
@@ -1700,7 +1696,7 @@ class StrategyEngine:
                         # v11.6.375: If price is negative, we ALWAYS prefer buying over solar (get paid).
                         # Set threshold to 101% so it's never skipped by max_dry_soc.
                         p_buy_h = float(all_buy_prices.get(int(h_b), 999.0))
-                        if p_buy_h < 0.0:
+                        if p_buy_h < 0.0 or available_today_kwh < survival_target_kwh:
                              _solar_threshold = 101.0
                         elif negative_hours and p_buy_h > 0.0:
                              _solar_threshold = float(min_soc + soc_buffer)
