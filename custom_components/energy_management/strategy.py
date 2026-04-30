@@ -969,7 +969,7 @@ class StrategyEngine:
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
                 # Battery net: discharge command PLUS remaining house needs
-                # "version": "v11.6.440": In BUY mode (allow_discharge=False), house load is covered by grid directly.
+                # "version": "v11.6.455": In BUY mode (allow_discharge=False), house load is covered by grid directly.
                 if not allow_discharge:
                     total_net_kw = -cmd_p
                 else:
@@ -1264,7 +1264,7 @@ class StrategyEngine:
                 
                 res["buy_debug"] = (
                     f"Цена: {_p_now:.2f} | Лучшая продажа позже: {_b_sell:.2f} | "
-                    f"Лучшая покупка позже: {_b_buy:.2f} | Выгода арб: {_gain:.2f} (Порог: {threshold}) | КПД: {eff_coeff:.2f}"
+                    f"Лучшая покупка позже: {_b_buy:.2f} | Выгода арб: {_gain:.2f} (Порог: {threshold}) | КПД: {eff_coeff:.2f} | Лимит: {max_p:.2f}"
                 )
                 if _p_now <= 0.0:
                     res["buy_debug"] += " [Отрицательная цена]"
@@ -1711,10 +1711,9 @@ class StrategyEngine:
                         target_soc = 100.0
                     elif is_strict_arb:
                         res["charge_reason"] = "arbitrage"
-                        # Adaptive Target: 100% minus what the sun gives eventually
-                        expected_soc_at_peak, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, int(peak_h))), now, commands=None)
-                        sun_gain_pct = max(0.0, expected_soc_at_peak - b_soc)
-                        target_soc = float(min(100.0, 100.0 - sun_gain_pct))
+                        # v11.6.455: Greedy Arbitrage. Do NOT reserve space for the sun.
+                        # Fill the battery 100% if it's profitable to do so.
+                        target_soc = 100.0
                     elif available_today_kwh < survival_target_kwh:
                         res["charge_reason"] = "survival"
                         target_soc = float(min(base_target, survival_target_kwh / b_cap * 100.0))
@@ -2215,8 +2214,8 @@ class StrategyEngine:
                     
                     # Replacement Cost Logic: 
                     # If we sell now, and tomorrow morning we have EXCESS solar (more than house needs), 
-                    # then the "cost" of that energy is 0 (it would have been sold anyway).
-                    # But if tomorrow we will be short on solar, then selling now means we lose "free" energy.
+                    # then the \"cost\" of that energy is 0 (it would have been sold anyway).
+                    # But if tomorrow we will be short on solar, then selling now means we lose \"free\" energy.
                     tomorrow_solar_total = f_tom
                     
                     # 1. First safety check: Base consumption tomorrow (essential needs only)
@@ -2308,7 +2307,7 @@ class StrategyEngine:
                     
                     # --- TWO-STEP SAFETY CHECK (Refined v6.2) ---
                     # 1. Base-only Gatekeeper: Can we cover Essential House Needs for the next 24+ hours?
-                    # v11.4.31: In morning solar window, we make the Gatekeeper "blind" to tomorrow's deficit.
+                    # v11.4.31: In morning solar window, we make the Gatekeeper \"blind\" to tomorrow's deficit.
                     # This allows the simulation (Step 2) to be the primary decision maker.
                     work_cons_to_sunrise = 0.0 if is_morning_solar_v2 else total_cons_to_sunrise
                     work_deficit_tomorrow = 0.0 if is_morning_solar_v2 else base_deficit_tomorrow
@@ -2400,7 +2399,7 @@ class StrategyEngine:
                         # v11.6.208: Calculate expected house load during the sale window (in kWh)
                         house_load_during_sale_dc = max(0.0, (soc_at_start - natural_soc_after_sale) * b_cap / 100.0)
                         
-                        # v11.3.60: Morning Survival Feedback Loop (The "Autopilot" Floor)
+                        # v11.3.60: Morning Survival Feedback Loop (The \"Autopilot\" Floor)
                         # We calculate the exact SOC floor needed to guarantee the morning target.
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
@@ -2505,7 +2504,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.442"
+                    # VERSION = "v11.6.455"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
