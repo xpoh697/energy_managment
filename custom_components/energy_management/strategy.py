@@ -2228,13 +2228,10 @@ class StrategyEngine:
                                     deficit_pct = 100.0 - max_recharge_soc
                                     base_target = min(100.0, base_target + deficit_pct)
                                     
-                        if True:
-                            # v11.6.213: Anchor budget to the actual MINIMUM SOC in the 48h simulation.
-                            # If tomorrow is sunny, the battery will refill, and the minimum SOC 
-                            # will be reached exactly at the end of the night (sunrise).
-                            _socs = [float(s.get("soc", b_soc)) for s in sim_log_base.values()]
-                            natural_min_soc = min(_socs) if _socs else b_soc
-                            natural_soc_after_sale = natural_min_soc
+                            # v11.6.229: natural_soc_after_sale must be at the END of the peak epoch, not global min
+                            _h_last_peak = max(future_active_sell_base) if future_active_sell_base else cur_hour
+                            _k_end_peak = f"{_h_last_peak % 24:02d}:59" + (" (Завтра)" if _h_last_peak >= 24 else "")
+                            natural_soc_after_sale = self._get_soc_from_log(sim_log_base, _k_end_peak, b_soc)
                         
                         # v11.6.208: Calculate expected house load during the sale window (in kWh)
                         house_load_during_sale_dc = max(0.0, (soc_at_start - natural_soc_after_sale) * b_cap / 100.0)
@@ -2282,7 +2279,7 @@ class StrategyEngine:
                     # TS 6.1: In the morning window (planned for sunrise), the limit is User_Limit + 2%
                     _m_floor = min_soc_val + 2.0
                     
-                    key_sunrise = f"{sunrise_h % 24:02d}:00" + (" (Завтра)" if sunrise_h >= 24 else "")
+                    key_sunrise = f"{sunrise_h % 24:02d}:59" + (" (Завтра)" if sunrise_h >= 24 else "")
                     natural_soc_at_sunrise = self._get_soc_from_log(sim_log_base, key_sunrise, b_soc)
                     surplus_for_morning = max(0.0, (natural_soc_at_sunrise - _m_floor) * b_cap / 100.0)
                     
@@ -2291,13 +2288,14 @@ class StrategyEngine:
                     _u_floor = min_soc_val
                     _k_end_hour = f"{cur_hour % 24:02d}:59"
                     _natural_soc_now = self._get_soc_from_log(sim_log_base, _k_end_hour, b_soc)
-                    surplus_for_user_limit = max(0.0, (_natural_soc_now - _u_floor) * b_cap / 100.0)
+                    # v11.6.229: Use soc_at_start to allow planning evening peak even if currently low (due to solar)
+                    surplus_for_user_limit = max(0.0, (max(_natural_soc_now, soc_at_start) - _u_floor) * b_cap / 100.0)
                     
                     # Choose most restrictive budget
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.228"
+                    # VERSION = "v11.6.229"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
