@@ -1873,8 +1873,11 @@ class StrategyEngine:
                                 est_soc = soc_at_start_plan + (added_kwh_dc / b_cap * 100.0)
                                 cc_cv_f = float(self.get_cc_cv_ratio(est_soc))
                                 
+                                # v11.6.442: Always use fresh dynamic efficiency
+                                _cur_eff = float(self.get_efficiency_coefficient() or 0.95)
+                                
                                 rem_dc = current_target_dc - added_kwh_dc
-                                p_needed_grid = rem_dc / (eff_coeff * h_factor)
+                                p_needed_grid = rem_dc / (_cur_eff * h_factor)
                                 
                                 p_greedy_grid = min(max_p, p_needed_grid)
                                 p_cc_cv_grid = max_p * cc_cv_f
@@ -1882,7 +1885,7 @@ class StrategyEngine:
                                 
                                 if p_greedy_grid > 0.01:
                                     charge_commands[int(h)] = round_f(p_greedy_grid, 3)
-                                    added_kwh_dc += (p_greedy_grid * h_factor * eff_coeff)
+                                    added_kwh_dc += (p_greedy_grid * h_factor * _cur_eff)
                             
                             # Verification: If we have reached 100% in our internal math, we are good.
                             # But if the CC/CV limit significantly reduced our intake, we might need more hours.
@@ -2502,7 +2505,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.441"
+                    # VERSION = "v11.6.442"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
