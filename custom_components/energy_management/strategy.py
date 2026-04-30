@@ -1960,6 +1960,10 @@ class StrategyEngine:
                     occ_coeff = float(occ_coeff)
                     avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
                     
+                    min_soc_bat_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+                    soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 8.0))
+                    house_safety = min_soc_bat_val + soc_buffer
+                    
                     # 1. Survival Target SOC (Sunrise Guard)
                     # v11.6.367: Evening (13:00-04:00) = 18%, Morning (04:00-10:00) = 15%
                     _m_survival_target = house_safety if not (4 <= (cur_hour % 24) < 10) else (float(man.get_setting(CONF_EMERGENCY_SOC_LIMIT, 13.0)) + 2.0)
