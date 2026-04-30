@@ -2387,10 +2387,9 @@ class StrategyEngine:
                             rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                             rem_bonus_ac = float(max(0.0, surplus_for_morning * eff))
                         else:
-                            # v11.6.217: Fill the energy "tank" based on the MAXIMUM projected SOC
-                            # from the 48h simulation, not just the current SOC.
-                            # This allows planning for evening windows while the battery is still charging.
-                            max_sim_soc = max([float(x.get("soc", b_soc)) for x in sim_log_base.values()] + [b_soc])
+                            # v11.6.219: Use the pre-calculated natural_morning_soc (baseline)
+                            # to fill the energy tank. This is 100% reliable for future planning.
+                            max_sim_soc = max(b_soc, natural_morning_soc)
                             
                             rem_base_ac = float(max(0.0, (max_sim_soc - base_target) * b_cap / 100.0 * eff))
                             
