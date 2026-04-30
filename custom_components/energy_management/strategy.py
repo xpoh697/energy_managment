@@ -1854,12 +1854,35 @@ class StrategyEngine:
                             # v11.6.372: Explicit greedy sorting by price (cheapest first)
                             # Use all_buy_prices with int keys to ensure correct lookup
                             pool_sorted_neg = sorted(pool, key=lambda hr: float(all_buy_prices.get(int(hr), 999.0)))
-                            rem_kwh = energy_to_buy
+                            # v11.6.425: CC/CV-aware Greedy Allocation
+                            # We track DC energy added to correctly estimate CC/CV slowdown
+                            added_kwh_dc = 0.0
+                            target_kwh_dc = (target_soc - soc_at_start_plan) / 100.0 * b_cap
+                            
                             for h in pool_sorted_neg:
+                                if added_kwh_dc >= target_kwh_dc - 0.01: break
                                 h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
-                                p_greedy = min(max_p, rem_kwh / h_factor) if rem_kwh > 0.05 else 0.0
-                                charge_commands[int(h)] = round_f(p_greedy, 3)
-                                rem_kwh -= (p_greedy * h_factor)
+                                
+                                # Estimate SOC to apply CC/CV limit
+                                current_est_soc = soc_at_start_plan + (added_kwh_dc / b_cap * 100.0)
+                                cc_cv_f = float(self.get_cc_cv_ratio(current_est_soc))
+                                
+                                # Effective power (Grid side)
+                                # We need (target - added) DC, which is (target-added)/eff from Grid
+                                rem_dc = target_kwh_dc - added_kwh_dc
+                                p_needed_grid = rem_dc / (eff_coeff * h_factor)
+                                
+                                # Limit by inverter and CC/CV (Inverter limit is Grid-side, CC/CV is DC-side)
+                                # Actually CC/CV limits what battery ACCEPTs (DC).
+                                # max_p is Grid side. So battery accepts max_p * eff * cc_cv.
+                                p_greedy_grid = min(max_p, p_needed_grid)
+                                # Re-check against CC/CV (max battery intake DC / eff_coeff)
+                                p_cc_cv_grid = (max_p * cc_cv_f) # Assume max_p is battery limit
+                                p_greedy_grid = min(p_greedy_grid, p_cc_cv_grid)
+                                
+                                if p_greedy_grid > 0.01:
+                                    charge_commands[int(h)] = round_f(p_greedy_grid, 3)
+                                    added_kwh_dc += (p_greedy_grid * h_factor * eff_coeff)
                         else:
                             total_h_factors = sum(max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0 for h in pool)
                             if total_h_factors > 0.01:
@@ -2470,7 +2493,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.420"
+                    # VERSION = "v11.6.426"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
