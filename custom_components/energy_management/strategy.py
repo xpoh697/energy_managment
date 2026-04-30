@@ -2279,7 +2279,12 @@ class StrategyEngine:
                     # TS 6.1: In the morning window (planned for sunrise), the limit is User_Limit + 2%
                     _m_floor = min_soc_val + 2.0
                     
-                    key_sunrise = f"{sunrise_h % 24:02d}:59" + (" (Завтра)" if sunrise_h >= 24 else "")
+                    # v11.6.230: Always look for NEXT sunrise if current hour is past today's sunrise
+                    _h_sunrise_target = sunrise_h
+                    if cur_hour >= _h_sunrise_target:
+                        _h_sunrise_target += 24
+                        
+                    key_sunrise = f"{_h_sunrise_target % 24:02d}:59" + (" (Завтра)" if _h_sunrise_target >= 24 else "")
                     natural_soc_at_sunrise = self._get_soc_from_log(sim_log_base, key_sunrise, b_soc)
                     surplus_for_morning = max(0.0, (natural_soc_at_sunrise - _m_floor) * b_cap / 100.0)
                     
@@ -2295,7 +2300,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.229"
+                    # VERSION = "v11.6.230"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
