@@ -1696,8 +1696,9 @@ class StrategyEngine:
                         # v11.6.375: If price is negative, we ALWAYS prefer buying over solar (get paid).
                         # Set threshold to 101% so it's never skipped by max_dry_soc.
                         p_buy_h = float(all_buy_prices.get(int(h_b), 999.0))
-                        # v11.6.483: Full Greedy Mode. Ignore solar if price is cheap or negative.
-                        if p_buy_h <= buy_limit or p_buy_h < 0.0 or available_today_kwh < survival_target_kwh:
+                        # v11.6.484: Greedy Mode only for Zero/Negative prices or Survival.
+                        # For positive cheap prices, respect solar reservation (90% threshold).
+                        if p_buy_h <= 0.0 or available_today_kwh < survival_target_kwh:
                              _solar_threshold = 101.0
                         elif negative_hours and p_buy_h > 0.0:
                              _solar_threshold = float(min_soc + soc_buffer)
