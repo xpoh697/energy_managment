@@ -1939,7 +1939,7 @@ class StrategyEngine:
                         "cur_hour": int(now.hour),
                         "b_soc": round_f(b_soc, 1),
                         "max_p": round_f(max_p, 2),
-                        "f_today": round_f(float(man.get_forecast_value(man.solar_tomorrow_sensors[0] if isinstance(man.solar_tomorrow_sensors, list) else man.solar_tomorrow_sensors) or 0.0), 1),
+                        "f_today": round_f(float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0), 1),
                         "f_tom": 0.0
                     })
                     # Sell mode (v11.1.51)
