@@ -1677,8 +1677,6 @@ class StrategyEngine:
                         target_soc = b_soc
                         res["charge_reason"] = "none"
                         pool = [] # Empty pool to clear attributes
-                        target_hours_sorted = [] # v11.6.253: Also clear sorted list to drop 'active' state
-                        pool = [] # Empty pool to clear attributes
                     
                     # User-defined Ceiling (v11.1.62) - Using existing CONF_AI_CHARGE_LIMIT
                     # Skip check if price is negative as requested by USER
