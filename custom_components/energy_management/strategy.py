@@ -2017,7 +2017,7 @@ class StrategyEngine:
                                 )
                     
                     # v11.6.169: Priority Correction (min(M, U, P))
-                    has_morning_sale = any((sunrise_h <= (h % 24) <= 12) for h in target_hours_sorted) if target_hours_sorted else False
+                    has_morning_sale = any((sunrise_h <= (h % 24) < 10) for h in target_hours_sorted) if target_hours_sorted else False
                     # 1. Home Protection Floor (M_floor): Reserve + Buffer
                     _m_floor = min_soc_bat_val + (2.0 if has_morning_sale else soc_buffer_full)
                     
@@ -2307,7 +2307,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.234"
+                    # VERSION = "v11.6.235"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
@@ -2580,8 +2580,10 @@ class StrategyEngine:
                         if morning_gap <= 0.1:
                             break
                             
-                        # 1. Update the base target floor
-                        base_target = min(100.0, max(min_soc_val, base_target + morning_gap))
+                        # 1. Update the available budget instead of modifying base_target
+                        # v11.6.235: Never modify base_target directly in recursion.
+                        # Scale down the available budget by the gap found at sunrise.
+                        rem_base_dc_fix = max(0.0, rem_base_dc_fix - morning_gap)
                         
                         # 2. Re-calculate available volume WITH house load awareness
                         _rem_start_soc = soc_at_start if 'soc_at_start' in locals() else b_soc
@@ -2670,8 +2672,8 @@ class StrategyEngine:
                         _is_u_limited = (available_sell_dc <= (surplus_for_user_limit + 0.01) and surplus_for_user_limit < (surplus_for_morning - 0.1))
                         
                         limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
-                        _disp_goal = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
-                        _disp_txt = f"Защита дома (Лимит {_disp_goal:.0f}% УТРО)" if 4 <= (cur_hour % 24) <= 12 else f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
+                        _disp_goal = (min_soc_bat_val + 2.0) if 4 <= (now.hour % 24) < 10 else (min_soc_bat_val + soc_buffer_full)
+                        _disp_txt = f"Защита дома (Лимит {_disp_goal:.0f}% УТРО)" if 4 <= (now.hour % 24) < 10 else f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
                         res["arbitrage_sell_limit_reason"] = _disp_txt
                         limit_label = _disp_txt
                         
@@ -3016,8 +3018,8 @@ class StrategyEngine:
                     # We target the SOC reached by discharging battery + house load, ignoring solar gain.
                     target_soc = max(0.0, b_soc - pure_discharge_pct)
                     
-                    # v11.6.234: Strictly follow TS: Morning Window (04:00-12:00) ends at 12:00 sharp.
-                    _target_limit = min_soc_val + 2.0 if (4 <= (cur_hour % 24) < 12) else base_target
+                    # v11.6.234: Strictly follow TS: Morning Window (04:00-10:00) ends at 10:00 sharp.
+                    _target_limit = min_soc_val + 2.0 if (4 <= (cur_hour % 24) < 10) else base_target
                     target_soc = max(target_soc, _target_limit)
                 else:
                     # For buying, it's fine to use the simulation log (HH:59)
@@ -3029,6 +3031,13 @@ class StrategyEngine:
                             target_soc = float(self._get_soc_from_log(s_log, key_cur, target_soc))
 
                 
+            if not in_peak and mode == "sell":
+                # v11.6.235: Night floor protection for non-peak hours (4-10 AM)
+                _base_floor_local = base_target
+                if 4 <= (cur_hour % 24) < 10:
+                     _base_floor_local = min_soc_val + 2.0
+                target_soc = max(target_soc, _base_floor_local)
+
             res["target_soc"] = float(round_f(target_soc, 1))
 
             
