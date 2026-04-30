@@ -1231,16 +1231,6 @@ class StrategyEngine:
                         
                         # Use the strict formula: (Sell * Eff) - Buy - Deg >= Threshold
                         gain = float(best_s * eff - buy_p - deg_cost)
-                        
-                        # v11.6.247: Opportunity Cost Check
-                        # If there is a MUCH better buy window later, this window is NOT "profitable" for now.
-                        future_buys = [p_b for h_b, p_b in all_prices.items() if h_b > hour]
-                        better_buy_p = min(future_buys) if future_buys else buy_p
-                        
-                        if better_buy_p < (buy_p - 0.1):
-                             # Waiting for better_buy_p would yield a higher total profit.
-                             return False
-
                         return gain >= threshold
 
                     dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
@@ -2343,7 +2333,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.247"
+                    # VERSION = "v11.6.248"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
