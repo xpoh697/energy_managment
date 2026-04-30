@@ -1022,10 +1022,11 @@ class StrategyEngine:
         can_recharge = False
         house_load_during_sale_dc = 0.0
         
-        # v11.6.227: Global initialization to prevent NameError/UnboundLocalError in all paths
-        b_cap = float(man.battery_capacity or 10.0)
-        b_soc = float(man.battery_soc or 50.0)
-        max_p = float(man.battery_max_power or 3.0)
+        # v11.6.228: Global initialization using methods (v214 compatibility)
+        _b_soc_s, _b_cap_s, _ = man.get_battery_state()
+        b_cap = float(_b_cap_s or 10.0)
+        b_soc = float(_b_soc_s or 50.0)
+        max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
         occ_coeff = 1.0
         eff = 0.95
         min_soc_val = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 15.0))
@@ -1035,6 +1036,10 @@ class StrategyEngine:
         has_morning_sale = False
         soc_at_start = b_soc
         natural_soc_after_sale = b_soc
+        
+        # v11.6.228: Ensure VERSION is defined for the response object
+        from .const import VERSION as CONST_VERSION
+        res["strategy_version"] = CONST_VERSION
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
@@ -2292,7 +2297,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.227"
+                    # VERSION = "v11.6.228"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
