@@ -1939,7 +1939,7 @@ class StrategyEngine:
                         "cur_hour": int(now.hour),
                         "b_soc": round_f(b_soc, 1),
                         "max_p": round_f(max_p, 2),
-                        "f_today": round_f(float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0), 1),
+                        "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
                         "f_tom": 0.0
                     })
                     # Sell mode (v11.1.51)
@@ -1992,6 +1992,7 @@ class StrategyEngine:
                     gen_night_morning = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(0, sunrise_h))
                     f_tom_raw = man.get_forecast_value(man.forecast_tomorrow_sensor)
                     f_tom = float(f_tom_raw) if f_tom_raw is not None else 0.0
+                    solar_is_plentiful = bool(f_tom > 25.0)
                     total_hist_gen_val = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(24))
                     morning_solar_ac = f_tom * (gen_night_morning / total_hist_gen_val) if total_hist_gen_val > 0.1 else 0.0
                     
@@ -2372,8 +2373,12 @@ class StrategyEngine:
                     night_cons_kwh = sum(float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) for h in range(_h_end_sale, _h_sunrise_target)) * occ_coeff
                     night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
                     
+                    # v11.6.355: If tomorrow is sunny, don't reserve user_limit for the morning; 
+                    # only reserve the emergency survival floor (18%) + night load.
+                    _night_survival_base = (min_soc_bat_val + soc_buffer_full) if solar_is_plentiful else (min_soc_val + soc_buffer_full)
+                    
                     # New base target for the evening sale window
-                    base_target = max(base_target, (min_soc_val + soc_buffer_full) + night_cons_pct)
+                    base_target = max(base_target, _night_survival_base + night_cons_pct)
                     target_soc_sell = float(round_f(base_target, 1))
                     
                     # Final safety check: available energy must be positive
