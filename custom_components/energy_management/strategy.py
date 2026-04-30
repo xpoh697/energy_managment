@@ -1000,6 +1000,12 @@ class StrategyEngine:
         if cached and (now - cached["time"]).total_seconds() < 30 and cached["time"].hour == now.hour:
             return cached["res"]
 
+        # v11.6.228: Global initialization using methods (v214 compatibility)
+        _b_soc_s, _b_cap_s, _ = man.get_battery_state()
+        b_cap = float(_b_cap_s or 10.0)
+        b_soc = float(_b_soc_s or 50.0)
+        max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
+
         res = {
             "strategy_version": VERSION,
             "state": "standard",
@@ -1012,8 +1018,9 @@ class StrategyEngine:
             "today_prices": {},
             "tomorrow_prices": {},
             "multi_cycle": "Не предвидится",
-            "buy_simulation": {"projected_soc_at_start_pct": 0.0, "projected_soc_at_end_pct": 0.0, "projected_soc_morning_pct": 0.0},
-            "sell_simulation": {"projected_soc_at_start_pct": 0.0, "projected_soc_after_sale_pct": 0.0, "projected_soc_morning_pct": 0.0},
+            "buy_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_at_end_pct": b_soc, "projected_soc_morning_pct": b_soc},
+            "sell_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_after_sale_pct": b_soc, "projected_soc_morning_pct": b_soc},
+            "buy_debug": "Ожидание...",
             "arbitrage_decision": "Нет данных",
             "charge_reason": "none",
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
@@ -1023,11 +1030,6 @@ class StrategyEngine:
         can_recharge = False
         house_load_during_sale_dc = 0.0
         
-        # v11.6.228: Global initialization using methods (v214 compatibility)
-        _b_soc_s, _b_cap_s, _ = man.get_battery_state()
-        b_cap = float(_b_cap_s or 10.0)
-        b_soc = float(_b_soc_s or 50.0)
-        max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
         occ_coeff = 1.0
         eff = 0.95
         min_soc_val = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 15.0))
@@ -1218,10 +1220,27 @@ class StrategyEngine:
 
             if mode == "buy":
                 res["limit_used"] = buy_limit
+
+                # v11.6.251: Diagnostic prep (moved outside conditional blocks)
+                _p_now = float(normalize_float(all_prices.get(cur_hour, 0.0)))
+                _f_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > cur_hour]
+                _b_sell = max(_f_sell) if _f_sell else 0.0
+                _f_buy = [p_b for h_b, p_b in all_prices.items() if h_b > cur_hour]
+                _b_buy = min(_f_buy) if _f_buy else _p_now
+                _gain = float(_b_sell * eff - _p_now - deg_cost)
+                
+                res["buy_debug"] = (
+                    f"Цена: {_p_now:.2f} | Лучшая продажа позже: {_b_sell:.2f} | "
+                    f"Лучшая покупка позже: {_b_buy:.2f} | Выгода арб: {_gain:.2f} (Порог: {threshold})"
+                )
+                if _p_now <= 0.0:
+                    res["buy_debug"] += " [Отрицательная цена]"
+
                 if negative_hours:
                     target_hours = list(negative_hours)
                     target_price = float(min([all_prices[h] for h in negative_hours]))
                     res["target_price"] = target_price
+                    res["arbitrage_decision"] = f"Отрицательная цена ({cur_p_f:.2f})"
                 else:
                     def is_buy_profitable_arb(buy_p, hour):
                         # Find best future sell price after this buy hour
@@ -1246,17 +1265,6 @@ class StrategyEngine:
                         peaks_tom = get_peaks(wom_filtered, False, buy_limit)
                         combined = peaks_today + peaks_tom
                     
-                    _p_now = float(normalize_float(all_prices.get(cur_hour, 0.0)))
-                    _f_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > cur_hour]
-                    _b_sell = max(_f_sell) if _f_sell else 0.0
-                    _f_buy = [p_b for h_b, p_b in all_prices.items() if h_b > cur_hour]
-                    _b_buy = min(_f_buy) if _f_buy else _p_now
-                    _gain = float(_b_sell * eff - _p_now - deg_cost)
-                    
-                    res["buy_debug"] = (
-                        f"Цена: {_p_now:.2f} | Лучшая продажа позже: {_b_sell:.2f} | "
-                        f"Лучшая покупка позже: {_b_buy:.2f} | Выгода арб: {_gain:.2f} (Порог: {threshold})"
-                    )
 
                     is_arb_window = False
                     if combined:
