@@ -2277,7 +2277,11 @@ class StrategyEngine:
                     
                     # 1. Calculate M (Morning Survival) DC Budget
                     # TS 6.1: In the morning window (planned for sunrise), the limit is the Survival Floor
+                    # v11.6.233: Strictly follow TS: Morning Window (04:00-12:00) uses liberal floor (User+2%)
+                    # Otherwise use base_target (Reserve + Buffer).
                     _m_floor = base_target
+                    if 4 <= (cur_hour % 24) < 12:
+                        _m_floor = min_soc_val + 2.0
                     
                     # v11.6.230: Always look for NEXT sunrise if current hour is past today's sunrise
                     _h_sunrise_target = sunrise_h
@@ -2289,8 +2293,11 @@ class StrategyEngine:
                     surplus_for_morning = max(0.0, (natural_soc_at_sunrise - _m_floor) * b_cap / 100.0)
                     
                     # 2. Calculate U (User Limit) DC Budget
-                    # v11.6.231: Floor must include night consumption to preserve base_target by sunrise
-                    _u_floor = base_target + night_drain_pct
+                    # v11.6.234: Strictly follow TS Section 6.1.1.2: Limits NEVER sum with house consumption.
+                    _u_floor = base_target
+                    if 4 <= (cur_hour % 24) < 12:
+                         _u_floor = min_soc_val + 2.0
+                         
                     _k_end_hour = f"{cur_hour % 24:02d}:59"
                     _natural_soc_now = self._get_soc_from_log(sim_log_base, _k_end_hour, b_soc)
                     # v11.6.229: Use soc_at_start to allow planning evening peak even if currently low (due to solar)
@@ -2300,7 +2307,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.231"
+                    # VERSION = "v11.6.234"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
@@ -3009,8 +3016,8 @@ class StrategyEngine:
                     # We target the SOC reached by discharging battery + house load, ignoring solar gain.
                     target_soc = max(0.0, b_soc - pure_discharge_pct)
                     
-                    # Ensure we never target below the identified safe floor for this hour
-                    _target_limit = min_soc_val + 2.0 if (sunrise_h <= (cur_hour % 24) <= 12) else base_target
+                    # v11.6.234: Strictly follow TS: Morning Window (04:00-12:00) ends at 12:00 sharp.
+                    _target_limit = min_soc_val + 2.0 if (4 <= (cur_hour % 24) < 12) else base_target
                     target_soc = max(target_soc, _target_limit)
                 else:
                     # For buying, it's fine to use the simulation log (HH:59)
