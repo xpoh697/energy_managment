@@ -1931,8 +1931,16 @@ class StrategyEngine:
                     # v11.6.196: Emergency Reserve (min_soc_bat)
                     min_soc_bat_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
                     
-                    # v11.6.162: Min SOC is a HARD floor, not a sunrise target. 
-                    min_soc_val = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 15.0))
+                    # v11.6.241: Strictly follow TS 4.1.6 & 6.1 (Limits NEVER sum)
+                    user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
+                    house_safety = float(man.get_setting(CONF_EMERGENCY_SOC_LIMIT, 13.0)) + float(man.get_setting(CONF_SOC_BUFFER, 5.0))
+                    
+                    # Window logic: 04:00 - 10:00 (Morning) uses liberal limit (user + 2%)
+                    # Other hours (10:00 - 04:00) use strict limit (max(user, house_safety))
+                    if 4 <= (cur_hour % 24) < 10:
+                        min_soc_val = user_limit + 2.0
+                    else:
+                        min_soc_val = max(user_limit, house_safety)
                     
                     # Adaptive buffer: If Min SOC is high (e.g. 70%), we don't need a huge additional buffer.
                     soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
