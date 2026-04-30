@@ -1000,6 +1000,7 @@ class StrategyEngine:
             # due to house load, not artificially 'stick' to it.
             
             # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
+            log_key_str = f"{real_h:02d}:59" + (" (Завтра)" if is_tom else "")
             # v11.6.392: Unified EN string keys for HA UI and programmatic access
             history_log[log_key_str] = {
                 "soc": round_f(float(simulated_soc), 1),
@@ -2465,7 +2466,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.400"
+                    # VERSION = "v11.6.402"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
