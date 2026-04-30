@@ -2509,10 +2509,7 @@ class StrategyEngine:
                             rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                             rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
                         else:
-                            # v11.6.119: Use natural_soc_after_sale instead of soc_at_start.
-                            # This ensures the actual power commands (Planned power) respect 
-                            # the same house-aware budget as the diagnostics.
-                            rem_base_ac = float(max(0.0, (natural_soc_after_sale - base_target) * b_cap / 100.0 * eff))
+                            rem_base_ac = float(max(0.0, (soc_at_start - base_target) * b_cap / 100.0 * eff))
                             capped_bonus_soc = max(0.0, min(soc_at_start, base_target) - (min_soc_val + 2.0))
                             _actual_bonus_dc = (capped_bonus_soc * b_cap / 100.0) if has_morning_sale else 0.0
                             rem_bonus_ac = float(min(_morning_lib_surplus_dc, _actual_bonus_dc) * eff)
@@ -2528,9 +2525,8 @@ class StrategyEngine:
                                 
                             # Selective Throttling strictly for the current hour
                             if h == cur_hour:
-                                house_cons_hourly = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
-                                house_rem_dc = (house_cons_hourly * h_f) / eff
-                                current_surplus_dc = max(0.0, (b_soc - h_floor) * b_cap / 100.0 - house_rem_dc)
+                                house_rem_dc = 0.0 # v11.6.325: House-Blind Selling
+                                current_surplus_dc = max(0.0, (b_soc - h_floor) * b_cap / 100.0)
                                 max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
                                 p_alloc = min(max_p, max_allowed_sell_ac / h_f)
                             else:
@@ -2672,13 +2668,8 @@ class StrategyEngine:
                         # 1. Update the base target floor
                         base_target = min(100.0, max(min_soc_val, base_target + morning_gap))
                         
-                        # 2. Re-calculate available volume WITH house load awareness
-                        _rem_start_soc = soc_at_start if 'soc_at_start' in locals() else b_soc
+                        # v11.6.325: House-Blind Budgeting (Step 2)
                         rem_base_dc_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0))
-                        
-                        # Subtract house load for the first pool (evening sale)
-                        _house_during_fix = house_load_during_sale_dc if 'house_load_during_sale_dc' in locals() else 0.0
-                        rem_base_dc_fix = max(0.0, rem_base_dc_fix - _house_during_fix)
                         
                         rem_base_ac_fix = float(rem_base_dc_fix * eff)
                         
@@ -2704,9 +2695,8 @@ class StrategyEngine:
                                     
                                 p_alloc_fix = max_p
                                 if h == cur_hour:
-                                    house_cons_fix = float(normalize_float(avg_prof_cons.get(str(cur_hour % 24), 0.5))) * occ_coeff
-                                    house_rem_dc_fix = (house_cons_fix * h_f) / eff
-                                    current_surplus_dc_fix = max(0.0, (b_soc - h_floor_fix) * b_cap / 100.0 - house_rem_dc_fix)
+                                    house_rem_dc_fix = 0.0
+                                    current_surplus_dc_fix = max(0.0, (b_soc - h_floor_fix) * b_cap / 100.0)
                                     p_alloc_fix = min(max_p, (current_surplus_dc_fix * eff) / h_f)
                                 else:
                                     # v11.6.110: Same fix in Step 2 (Recursive Fix)
@@ -2860,9 +2850,8 @@ class StrategyEngine:
                         else:
                             sell_commands[h] = 0.0
 
-                    # v11.6.208: Account for house load DURING the sale to stay at the target floor.
+                    # v11.6.325: Unified Budget Distribution (House-Blind)
                     total_planned_ac = sum(sell_commands.values())
-                    total_planned_ac = max(0.0, total_planned_ac - (house_load_during_sale_dc / eff))
 
                     # Update Status Flags
                     _is_p_limited = bool(round(total_planned_ac, 2) >= round(work_max_p * len(_all_sell_hrs) * eff, 2))
@@ -3092,7 +3081,6 @@ class StrategyEngine:
                         discharge_dc_local = (p_val * h_f_local) / eff
                         pure_discharge_pct_local = (discharge_dc_local + house_rem_dc_local) / b_cap * 100.0 if b_cap > 0.1 else 0.0
                         
-                        _target_limit_local = min_soc_val + 2.0 if (sunrise_h <= h_idx_norm <= 12) else base_target
                         # v11.6.315: Cumulative Target SOC for UI consistency
                         # We calculate the target reached AFTER this hour's planned sale.
                         h_target = max(_target_limit_local, _h_start_soc - pure_discharge_pct_local)
