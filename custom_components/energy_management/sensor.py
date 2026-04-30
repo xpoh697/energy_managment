@@ -3430,7 +3430,8 @@ class MarketStrategySensor(SensorEntity):
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
             "planned_power": res.get("planned_power_per_h", {}),
-            "power_decision": res.get("power_decision", "Ожидание")
+            "power_decision": res.get("power_decision", "Ожидание"),
+            "buy_debug": res.get("buy_debug", "Нет данных")
         }
 
         # v7.2 - Hide detailed projections if nothing is planned for today
