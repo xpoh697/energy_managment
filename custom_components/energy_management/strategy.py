@@ -2416,19 +2416,9 @@ class StrategyEngine:
                                 max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
                                 p_alloc = min(max_p, max_allowed_sell_ac / h_f)
                             else:
-                                # v11.6.217: RESTORATION - Future hours MUST use their projected SOC
-                                # at the moment of the peak to determine if they have sellable surplus.
-                                _prev_h = h - 1
-                                _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
-                                natural_soc_at_h = self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc)
-                                
-                                # Local Surplus U (User Limit) - dynamic
-                                local_surplus_u = max(0.0, (natural_soc_at_h - min_soc_val) * b_cap / 100.0)
-                                # Local Surplus M (Morning Survival) - global anchor
-                                local_surplus_m = surplus_for_morning 
-                                
-                                local_total_surplus_dc = min(local_surplus_u, local_surplus_m)
-                                p_alloc = min(max_p, float(max(0.0, local_total_surplus_dc * eff / h_f)))
+                                # v11.6.218: Future peaks take from the global "solar tank" (rem_base_ac).
+                                # The tank already accounts for 15%/18% floors and tomorrow's solar.
+                                p_alloc = max_p
                                 
                             if (rem_base_ac + rem_bonus_ac) > 0.05:
                                 # v11.6.90: Segregate budgets starting from sunrise_h
