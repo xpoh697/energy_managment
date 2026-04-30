@@ -969,7 +969,11 @@ class StrategyEngine:
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
                 # Battery net: discharge command PLUS remaining house needs
-                total_net_kw = -cmd_p - rem_cons
+                # v11.6.436: In BUY mode (allow_discharge=False), house load is covered by grid directly.
+                if not allow_discharge:
+                    total_net_kw = -cmd_p
+                else:
+                    total_net_kw = -cmd_p - rem_cons
             else:
                 # Normal mode: PV covers load and then charges battery
                 _expected_gen_kw_sim = 0.0 if no_solar else expected_gen_kw
