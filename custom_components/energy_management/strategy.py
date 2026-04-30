@@ -2350,7 +2350,7 @@ class StrategyEngine:
                     _h_sunrise_target = sunrise_h - 1
                     if cur_hour >= _h_sunrise_target:
                         _h_sunrise_target += 24
-                                           # v11.6.290: Dynamic Evening Floor (Night-Aware Budgeting)
+                                           # v11.6.301: Dynamic Evening Floor (Night-Aware Budgeting)
                     # To have 18% in the morning, we MUST stop selling when we reach 18% + Night_Load.
                     # Otherwise, the house will drain the battery to 0% by dawn.
                     _h_end_sale = max(target_hours_sorted) if target_hours_sorted else cur_hour
