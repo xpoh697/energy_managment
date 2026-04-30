@@ -1263,12 +1263,13 @@ class StrategyEngine:
                 _gain = float(_b_sell * eff - _p_now - deg_cost)
                 
                 _raw_base = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
-                # v11.6.476: Full settings dump for debugging the 23% ghost
+                # v11.6.477: Full settings dump for debugging the 23% ghost. Fixed NameError.
                 _all_sets = {k: v for k, v in man.settings.items() if "charge" in k or "soc" in k or "limit" in k}
+                _surv_pct = (survival_target_kwh / b_cap * 100.0) if b_cap > 0 else 0.0
                 res["buy_debug"] = (
                     f"Причина: {res.get('charge_reason', 'manual')} | База: {base_target:.1f} (Raw: {_raw_base:.1f}) | "
                     f"Sets: {_all_sets} | "
-                    f"Surv: {survival_target_kwh / b_cap * 100.0:.1f}% | BuyLim: {buy_limit:.2f} | "
+                    f"Surv: {_surv_pct:.1f}% | BuyLim: {buy_limit:.2f} | "
                     f"Цена: {_p_now:.2f} | Лимит: {max_p:.2f}"
                 )
                 if _p_now <= 0.0:
@@ -2510,7 +2511,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.476"
+                    # VERSION = "v11.6.477"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
