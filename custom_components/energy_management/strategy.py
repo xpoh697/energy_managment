@@ -1949,6 +1949,11 @@ class StrategyEngine:
                     
                     # v11.6.300: Global Night Reserve Injection
                     # Calculate this BEFORE any strategy decisions to ensure Target SOC is consistent.
+                    # v11.6.366: Get forecast early for base_target decisions
+                    f_tom_raw = man.get_forecast_value(man.forecast_tomorrow_sensor)
+                    f_tom = float(f_tom_raw) if f_tom_raw is not None else 0.0
+                    solar_is_plentiful = bool(f_tom > 25.0)
+
                     occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
                     occ_coeff = float(occ_coeff)
                     avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
@@ -1966,8 +1971,16 @@ class StrategyEngine:
                     night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
                     
                     # Global Discharge Floor: Survival + Night Consumption
-                    base_target = survival_limit + night_cons_pct
+                    # v11.6.366: Don't sum user_limit and night_cons if solar is plentiful
+                    # We only need to reserve (18% + night_cons) OR just stay above User Limit (23%)
+                    _night_reserve_floor = house_safety + night_cons_pct
+                    if solar_is_plentiful:
+                        base_target = max(user_limit, _night_reserve_floor)
+                    else:
+                        base_target = max(user_limit + night_cons_pct, _night_reserve_floor)
+                        
                     user_discharge_limit = base_target 
+                    min_soc_val = user_limit
                     
                     # Initial defaults for robustness
                     arb_gain = 0.0
@@ -1990,9 +2003,7 @@ class StrategyEngine:
                     
                     # Also include tomorrow morning solar until sunrise in the budget
                     gen_night_morning = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(0, sunrise_h))
-                    f_tom_raw = man.get_forecast_value(man.forecast_tomorrow_sensor)
-                    f_tom = float(f_tom_raw) if f_tom_raw is not None else 0.0
-                    solar_is_plentiful = bool(f_tom > 25.0)
+                    # f_tom already calculated above
                     total_hist_gen_val = sum(float(normalize_float(avg_prof_gen.get(str(h), 0.0))) for h in range(24))
                     morning_solar_ac = f_tom * (gen_night_morning / total_hist_gen_val) if total_hist_gen_val > 0.1 else 0.0
                     
