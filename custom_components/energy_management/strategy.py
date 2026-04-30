@@ -1778,8 +1778,15 @@ class StrategyEngine:
                             if pv_no_bat_block_until is not None:
                                 _effective_block = max(pv_no_bat_block_until, first_h_buy)
                                 _combined_block = max(_combined_block or 0, _effective_block)
+                            # v11.6.265: Cross-Strategy Awareness. 
+                            # Retrieve planned sell commands from the cache to accurately predict 
+                            # SOC at the start of the buy window.
+                            _sell_results = self._strategy_cache.get("market_strategy_sell", {}).get("res", {})
+                            _planned_commands = _sell_results.get("raw_commands", {})
+                            
                             soc_at_start_plan, _, _ = self.run_soc_simulation(
                                 b_soc, sim_range_pre, now,
+                                commands=_planned_commands,
                                 no_battery_charge_until=_combined_block,
                                 no_solar=is_neg_strategy
                             )
@@ -3143,6 +3150,9 @@ class StrategyEngine:
                         cur_mode_text = "Ожидание (Пик цены)"
             
             res["current_mode_text"] = cur_mode_text
+            
+            # v11.6.265: Export raw commands for cross-strategy simulation awareness
+            res["raw_commands"] = sell_commands if mode == "sell" else charge_commands
             
             self._strategy_cache[cache_key] = {"time": now, "res": res}
             return res
