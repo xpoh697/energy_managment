@@ -1615,7 +1615,9 @@ class StrategyEngine:
                         soc_final_dry, dry_log, _ = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
                         max_dry_soc = max([float(st["soc"]) for st in dry_log.values()] + [float(soc_at_b)])
                         
-                        # v11.6.237: Solar Liberalization for Buy.
+                        # v11.6.238: Solar Liberalization for Buy. (Fixing NameError)
+                        p_buy_h = all_buy_prices.get(h_b, 999.0)
+                        
                         # If price is high (> buy_limit), only buy if Sun is insufficient (< 90%).
                         # If price is low (<= buy_limit) or negative, follow the 99% rule.
                         _solar_threshold = 99.0 if (p_buy_h <= buy_limit or p_buy_h <= 0.0) else 90.0
@@ -2309,7 +2311,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.237"
+                    # VERSION = "v11.6.238"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
