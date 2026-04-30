@@ -969,7 +969,7 @@ class StrategyEngine:
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
                 # Battery net: discharge command PLUS remaining house needs
-                # "version": "v11.6.460": In BUY mode (allow_discharge=False), house load is covered by grid directly.
+                # "version": "v11.6.475": In BUY mode (allow_discharge=False), house load is covered by grid directly.
                 if not allow_discharge:
                     total_net_kw = -cmd_p
                 else:
@@ -1262,10 +1262,11 @@ class StrategyEngine:
                 _b_buy = min(_f_buy) if _f_buy else _p_now
                 _gain = float(_b_sell * eff - _p_now - deg_cost)
                 
+                _raw_base = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
                 res["buy_debug"] = (
-                    f"Причина: {res.get('charge_reason', 'manual')} | База: {base_target:.1f} | "
-                    f"Цена: {_p_now:.2f} | Лучшая продажа позже: {_b_sell:.2f} | "
-                    f"Лучшая покупка позже: {_b_buy:.2f} | Выгода арб: {_gain:.2f} (Порог: {threshold}) | КПД: {eff_coeff:.2f} | Лимит: {max_p:.2f}"
+                    f"Причина: {res.get('charge_reason', 'manual')} | База: {base_target:.1f} (Raw: {_raw_base:.1f}) | "
+                    f"Surv: {_s_target:.1f}кВтч | BuyLim: {buy_limit:.2f} | "
+                    f"Цена: {_p_now:.2f} | Лучшая покупка позже: {_b_buy:.2f} | Лимит: {max_p:.2f}"
                 )
                 if _p_now <= 0.0:
                     res["buy_debug"] += " [Отрицательная цена]"
@@ -1636,7 +1637,7 @@ class StrategyEngine:
                     strict_threshold = max(threshold, 2 * deg_cost)
                     
                     # 1. Look for future sell peaks (arbitrage opportunities)
-                    future_sell_peaks = sorted([h for h, p in all_sell_prices.items() if h > cur_hour])
+                    future_sell_peaks = sorted([h for h in all_sell_prices.items() if h > cur_hour])
                     best_peak_p = 0.0
                     peak_hour = None
                     if future_sell_peaks:
@@ -2506,7 +2507,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.460"
+                    # VERSION = "v11.6.475"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
