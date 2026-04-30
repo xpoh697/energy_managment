@@ -1567,7 +1567,7 @@ class StrategyEngine:
                     if not added_bridge:
                         break
                     
-                target_hours = list(survival_hours)
+                target_hours = sorted(list(survival_hours | set(negative_hours if negative_hours else [])))
 
             res["limit_used"] = buy_limit if mode == "buy" else sell_limit
             future_active = sorted([h for h in target_hours if h >= cur_hour])
@@ -1818,7 +1818,9 @@ class StrategyEngine:
 
                         # 3. v11.1.22: Differentiated allocation
                         if is_neg_strategy:
-                            pool_sorted_neg = sorted(pool, key=lambda hr: all_buy_prices.get(hr, 999.0))
+                            # v11.6.372: Explicit greedy sorting by price (cheapest first)
+                            # Use all_buy_prices with int keys to ensure correct lookup
+                            pool_sorted_neg = sorted(pool, key=lambda hr: float(all_buy_prices.get(int(hr), 999.0)))
                             rem_kwh = energy_to_buy
                             for h in pool_sorted_neg:
                                 h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
