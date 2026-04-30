@@ -1720,8 +1720,9 @@ class StrategyEngine:
                         target_soc = float(min(base_target, survival_target_kwh / b_cap * 100.0))
                         res["arbitrage_decision"] = f"Зарядка для обеспечения буфера ({target_soc:.1f}%)"
                     else:
-                        res["charge_reason"] = "none"
-                        target_soc = b_soc
+                        res["charge_reason"] = "cheap"
+                        # v11.6.465: Greedy Buy. If we have cheap hours in pool, target base_target (100.0)
+                        target_soc = base_target
 
                     # Final Override (v6.16): If no useful hours left, sun is sufficient,
                     # OR current SOC is already high enough (prevents micro-buys for 1% arbitrage)
