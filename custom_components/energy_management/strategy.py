@@ -2290,9 +2290,16 @@ class StrategyEngine:
                                 avg_p1 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[0]) / len(epochs_eval[0])
                                 avg_p2 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[1]) / len(epochs_eval[1])
                                 
-                                if max_recharge_soc < 99.0 and avg_p2 > (avg_p1 + 0.05):
+                                # v11.6.355: Disable deficit throttling if tomorrow's forecast is massive (42kWh means no deficit possible)
+                                solar_is_plentiful = bool(f_tom > 25.0)
+                                if max_recharge_soc < 99.0 and avg_p2 > (avg_p1 + 0.05) and not solar_is_plentiful:
                                     deficit_pct = 100.0 - max_recharge_soc
                                     base_target = min(100.0, base_target + deficit_pct)
+                                    _sell_debug["deficit_detected"] = round_f(deficit_pct, 1)
+                                    _sell_debug["max_recharge_soc"] = round_f(max_recharge_soc, 1)
+                                    _sell_debug["deficit_reason"] = "Hold for Window 2"
+                                elif solar_is_plentiful:
+                                    _sell_debug["deficit_reason"] = "Solar Plentiful (Skip Throttling)"
                                     
                             # v11.6.229: natural_soc_after_sale must be at the END of the peak epoch, not global min
                             _h_last_peak = max(future_active_sell_base) if future_active_sell_base else cur_hour
@@ -2319,6 +2326,8 @@ class StrategyEngine:
                         if survival_floor > min_soc_val + 0.5:
                              res["morning_autopilot_active"] = True
                              res["morning_autopilot_floor"] = round_f(survival_floor, 1)
+                             _sell_debug["survival_floor"] = round_f(survival_floor, 1)
+                             _sell_debug["night_drain"] = round_f(night_drain_pct, 1)
                          
                         # target_morning_soc remains as calculated at line 1978 (buffer-aware)
                         pass
@@ -2649,6 +2658,7 @@ class StrategyEngine:
                     _m_recursive_target = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
                     
                     _rem_start_soc = b_soc
+                    _rem_start_soc = b_soc
                     _pass_log = "Pass0"
                     for pass_idx in range(3):
                         morning_gap = _m_recursive_target - soc_morning
@@ -2659,6 +2669,7 @@ class StrategyEngine:
                             
                         # 1. Update the base target floor
                         base_target = min(100.0, max(min_soc_val, base_target + morning_gap))
+                        _sell_debug[f"pass{pass_idx}_floor"] = round_f(base_target, 1)
                         
                         # v11.6.325: House-Blind Budgeting (Step 2)
                         rem_base_dc_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0))
@@ -2737,6 +2748,7 @@ class StrategyEngine:
                         
                         total_planned_ac = sum(cmd * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h, cmd in sell_commands.items())
                         res["power_decision"] = f"{limit_label} | {total_planned_ac:.1f}кВтч в {self._format_h(min(epochs[0]))}-{self._format_h(max(epochs[0]))}"
+                        res["arbitrage_sell_debug"] = _sell_debug
 
                         # Update user status
                         if _is_p_limited:
@@ -2756,6 +2768,9 @@ class StrategyEngine:
                         
                         res["morning_autopilot_active"] = True
                         res["morning_autopilot_floor"] = round_f(base_target, 1)
+
+                    # v11.6.355: Finalize power_needed AFTER all recursive adjustments
+                    power_needed = sell_commands.get(int(cur_hour), 0.0)
 
                     if not target_hours_sorted:
                         power_needed = 0.0
