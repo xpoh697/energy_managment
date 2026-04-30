@@ -2276,6 +2276,9 @@ class StrategyEngine:
                     # Choose most restrictive budget
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
+                    
+                    # v11.6.226: Fix NameError regression from v214 rollback
+                    _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
                     if available_sell_dc <= (surplus_for_user_limit + 0.001) and surplus_for_user_limit < (surplus_for_morning - 0.1):
