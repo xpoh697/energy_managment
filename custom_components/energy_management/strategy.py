@@ -2387,9 +2387,10 @@ class StrategyEngine:
                             rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                             rem_bonus_ac = float(max(0.0, surplus_for_morning * eff))
                         else:
-                            # v11.6.219: Use the pre-calculated natural_morning_soc (baseline)
-                            # to fill the energy tank. This is 100% reliable for future planning.
-                            max_sim_soc = max(b_soc, natural_morning_soc)
+                            # v11.6.220: Hybrid - Use both the log search (to find noon peaks) 
+                            # AND the pre-calculated natural_morning_soc (as a stable fallback).
+                            max_from_log = max([float(x.get("soc", b_soc)) for x in sim_log_base.values()] + [b_soc])
+                            max_sim_soc = max(max_from_log, natural_morning_soc)
                             
                             rem_base_ac = float(max(0.0, (max_sim_soc - base_target) * b_cap / 100.0 * eff))
                             
