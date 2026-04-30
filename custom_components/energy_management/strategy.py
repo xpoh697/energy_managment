@@ -2276,8 +2276,8 @@ class StrategyEngine:
                     # U (User Limit): Calculated for the end of current simulated hour
                     
                     # 1. Calculate M (Morning Survival) DC Budget
-                    # TS 6.1: In the morning window (planned for sunrise), the limit is User_Limit + 2%
-                    _m_floor = min_soc_val + 2.0
+                    # TS 6.1: In the morning window (planned for sunrise), the limit is the Survival Floor
+                    _m_floor = base_target
                     
                     # v11.6.230: Always look for NEXT sunrise if current hour is past today's sunrise
                     _h_sunrise_target = sunrise_h
@@ -2289,8 +2289,8 @@ class StrategyEngine:
                     surplus_for_morning = max(0.0, (natural_soc_at_sunrise - _m_floor) * b_cap / 100.0)
                     
                     # 2. Calculate U (User Limit) DC Budget
-                    # Current hour floor is the raw User Limit (min_soc_val)
-                    _u_floor = min_soc_val
+                    # v11.6.231: Floor must include night consumption to preserve base_target by sunrise
+                    _u_floor = base_target + night_drain_pct
                     _k_end_hour = f"{cur_hour % 24:02d}:59"
                     _natural_soc_now = self._get_soc_from_log(sim_log_base, _k_end_hour, b_soc)
                     # v11.6.229: Use soc_at_start to allow planning evening peak even if currently low (due to solar)
@@ -2300,7 +2300,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.230"
+                    # VERSION = "v11.6.231"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
