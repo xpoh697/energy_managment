@@ -1244,17 +1244,28 @@ class StrategyEngine:
                     target_price = float(min([all_prices[h] for h in negative_hours]))
                     res["target_price"] = target_price
                     res["strategy_candidates"] = [f"{h%24:02d}:00" for h in negative_hours]
-                    if cur_hour in negative_hours:
-                        res["arbitrage_decision"] = f"Отрицательная цена ({cur_p_f:.2f})"
-                    else:
-                        res["arbitrage_decision"] = f"Ожидание отрицательных цен ({cur_p_f:.2f})"
+                    if not is_arb_window:
+                        if cur_hour in negative_hours:
+                            res["arbitrage_decision"] = f"Отрицательная цена ({cur_p_f:.2f})"
+                        else:
+                            res["arbitrage_decision"] = f"Ожидание отрицательных цен ({cur_p_f:.2f})"
                 else:
                     def is_buy_profitable_arb(buy_p, hour):
                         # Find best future sell price after this buy hour
-                        future_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > hour]
-                        if not future_sell: return False
-                        best_s = max(future_sell)
+                        # v11.6.259: Bridge Rule. If negative prices ahead, the sell window MUST
+                        # be BEFORE the first negative price. Otherwise, wait for the minus.
+                        first_neg_h = min(negative_hours) if negative_hours else 999
                         
+                        future_sell_options = {h_s: p_s for h_s, p_s in all_sell_prices.items() if h_s > hour}
+                        if not future_sell_options: return False
+                        
+                        best_s_h = max(future_sell_options, key=lambda k: future_sell_options[k])
+                        best_s = future_sell_options[best_s_h]
+                        
+                        if buy_p > 0.0 and best_s_h >= first_neg_h:
+                             # We can buy cheaper later for this same sell window
+                             return False
+
                         # Use the strict formula: (Sell * Eff) - Buy - Deg >= Threshold
                         gain = float(best_s * eff - buy_p - deg_cost)
                         return gain >= threshold
@@ -1644,12 +1655,14 @@ class StrategyEngine:
                         soc_final_dry, dry_log, _ = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
                         max_dry_soc = max([float(st["soc"]) for st in dry_log.values()] + [float(soc_at_b)])
                         
-                        # v11.6.238: Solar Liberalization for Buy. (Fixing NameError)
+                        # v11.6.258: Patience Mode. If negative prices ahead, set threshold to survival floor
+                        # for all positive-price hours. No point buying at 0.8 if -0.9 is coming.
                         p_buy_h = all_buy_prices.get(h_b, 999.0)
+                        if negative_hours and p_buy_h > 0.0:
+                             _solar_threshold = float(min_soc + soc_buffer)
+                        else:
+                             _solar_threshold = 99.0 if (p_buy_h <= buy_limit or p_buy_h <= 0.0) else 90.0
                         
-                        # If price is high (> buy_limit), only buy if Sun is insufficient (< 90%).
-                        # If price is low (<= buy_limit) or negative, follow the 99% rule.
-                        _solar_threshold = 99.0 if (p_buy_h <= buy_limit or p_buy_h <= 0.0) else 90.0
                         if max_dry_soc < _solar_threshold:
                             pool_useful.append(h_b)
                     
@@ -2917,10 +2930,16 @@ class StrategyEngine:
 
 
                     # v7.1: Note: Simulation results are no longer used to override target_soc (v11.1.61).
-                    
-                    # v11.1.20 - Calculate potential gain using target_price if we are preparing for a future peak
+                        # v11.1.20 - Calculate potential gain using target_price if we are preparing for a future peak
                     best_sell_price_for_arb = max(cur_p_f, float(target_price or 0.0))
                     gain_for_attr = float(best_sell_price_for_arb * eff - p_bb - deg_cost) if h_bb is not None else 0.0
+
+                    # Use current peak power only if we are actually in a peak hour
+                    in_peak = (cur_hour in target_hours_sorted)
+                    if in_peak and (power_needed > 0.05 or cur_hour in negative_hours):
+                        res["state"] = "active"
+                    
+                    res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
 
                     # Arbitrage details for UI attributes
                     # v11.6.71: Synchronize attributes with the FINAL results (including Step 2)
@@ -2948,21 +2967,23 @@ class StrategyEngine:
             _filtered_targets = list(target_hours_sorted)
             target_hours_sorted = _filtered_targets
 
-            # Use current peak power only if we are actually in a peak hour
-            in_peak = (cur_hour in target_hours_sorted)
-            if in_peak and (power_needed > 0.05 or cur_hour in negative_hours):
-                res["state"] = "active"
-            
-            real_cmd_p = power_needed if in_peak else 0.0
-
-            res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
-            
+            # v11.6.258: Filter active list for UI to exclude zero-power hours UNLESS they are negative
+            # This makes the UI much cleaner and prevents "scary" high-price active periods with 0.0kW
             actual_active = [h for h in target_hours_sorted if h >= cur_hour]
+            actual_active_ui = []
+            for h in actual_active:
+                p_h = sell_commands.get(h, 0.0) if mode == "sell" else charge_commands.get(h, 0.0)
+                price_h = all_prices.get(h, 0.0)
+                if p_h > 0.05 or price_h <= 0.0:
+                    actual_active_ui.append(h)
 
+            res["active_hours"] = actual_active_ui
+            res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active_ui])
+            
             # Regenerate active_periods based on final filtered hours (v6.18)
             final_periods = []
-            if actual_active:
-                sorted_fit = sorted(list(set(actual_active)))
+            if actual_active_ui:
+                sorted_fit = sorted(list(set(actual_active_ui)))
                 if sorted_fit:
                     groups = []
                     cur_group = [sorted_fit[0]]
