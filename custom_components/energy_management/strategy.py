@@ -2391,7 +2391,12 @@ class StrategyEngine:
                     _sim_start_h = first_h_sell if first_h_sell is not None else cur_hour
                     # v11.6.364: Allow early morning solar in budget if plentiful
                     _night_sim_no_solar = not solar_is_plentiful
-                    _night_sim_range = list(range(_sim_start_h, _h_sunrise_target + 1))
+                    # v11.6.364: Fix midnight rollover in night range
+                    _night_sim_range = []
+                    _h_walk = _sim_start_h
+                    while _h_walk <= _h_sunrise_target:
+                        _night_sim_range.append(_h_walk)
+                        _h_walk += 1
                     if _night_sim_range:
                          _, _night_log, _ = self.run_soc_simulation(soc_at_start, _night_sim_range, now, no_solar=_night_sim_no_solar)
                          natural_soc_at_sunrise = self._get_soc_from_log(_night_log, key_sunrise, soc_at_start)
