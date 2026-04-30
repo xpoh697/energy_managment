@@ -969,7 +969,7 @@ class StrategyEngine:
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
                 # Battery net: discharge command PLUS remaining house needs
-                # v11.6.436: In BUY mode (allow_discharge=False), house load is covered by grid directly.
+                # "version": "v11.6.440": In BUY mode (allow_discharge=False), house load is covered by grid directly.
                 if not allow_discharge:
                     total_net_kw = -cmd_p
                 else:
@@ -1264,7 +1264,7 @@ class StrategyEngine:
                 
                 res["buy_debug"] = (
                     f"Цена: {_p_now:.2f} | Лучшая продажа позже: {_b_sell:.2f} | "
-                    f"Лучшая покупка позже: {_b_buy:.2f} | Выгода арб: {_gain:.2f} (Порог: {threshold})"
+                    f"Лучшая покупка позже: {_b_buy:.2f} | Выгода арб: {_gain:.2f} (Порог: {threshold}) | КПД: {eff_coeff:.2f}"
                 )
                 if _p_now <= 0.0:
                     res["buy_debug"] += " [Отрицательная цена]"
@@ -1635,7 +1635,7 @@ class StrategyEngine:
                     strict_threshold = max(threshold, 2 * deg_cost)
                     
                     # 1. Look for future sell peaks (arbitrage opportunities)
-                    future_sell_peaks = sorted([h for h, p in all_sell_prices.items() if h > cur_hour])
+                    future_sell_peaks = sorted([h for h in all_sell_prices.items() if h > cur_hour])
                     best_peak_p = 0.0
                     peak_hour = None
                     if future_sell_peaks:
@@ -1718,7 +1718,7 @@ class StrategyEngine:
                     elif available_today_kwh < survival_target_kwh:
                         res["charge_reason"] = "survival"
                         target_soc = float(min(base_target, survival_target_kwh / b_cap * 100.0))
-                        res["arbitrage_decision"] = f"Заряд для обеспечения буфера ({target_soc:.1f}%)"
+                        res["arbitrage_decision"] = f"Зарядка для обеспечения буфера ({target_soc:.1f}%)"
                     else:
                         res["charge_reason"] = "none"
                         target_soc = b_soc
@@ -1854,39 +1854,44 @@ class StrategyEngine:
                         pool_sorted = sorted(pool, key=lambda h: all_buy_prices[h])
 
                         # 3. v11.1.22: Differentiated allocation
-                        if is_neg_strategy:
-                            # v11.6.372: Explicit greedy sorting by price (cheapest first)
-                            # Use all_buy_prices with int keys to ensure correct lookup
-                            pool_sorted_neg = sorted(pool, key=lambda hr: float(all_buy_prices.get(int(hr), 999.0)))
-                            # v11.6.425: CC/CV-aware Greedy Allocation
-                            # We track DC energy added to correctly estimate CC/CV slowdown
+                        # v11.6.440: Recursive Buy Correction Loop
+                        # We track how much DC energy we need to reach the target
+                        current_target_dc = (target_soc - soc_at_start_plan) / 100.0 * b_cap
+                        
+                        for recursive_iter in range(3):
+                            charge_commands = {}
                             added_kwh_dc = 0.0
-                            target_kwh_dc = (target_soc - soc_at_start_plan) / 100.0 * b_cap
+                            
+                            # Sort available hours by price (cheapest first)
+                            pool_sorted_neg = sorted(pool, key=lambda hr: float(all_buy_prices.get(int(hr), 999.0)))
                             
                             for h in pool_sorted_neg:
-                                if added_kwh_dc >= target_kwh_dc - 0.01: break
+                                if added_kwh_dc >= current_target_dc - 0.01: break
                                 h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
                                 
-                                # Estimate SOC to apply CC/CV limit
-                                current_est_soc = soc_at_start_plan + (added_kwh_dc / b_cap * 100.0)
-                                cc_cv_f = float(self.get_cc_cv_ratio(current_est_soc))
+                                # Estimate SOC for CC/CV
+                                est_soc = soc_at_start_plan + (added_kwh_dc / b_cap * 100.0)
+                                cc_cv_f = float(self.get_cc_cv_ratio(est_soc))
                                 
-                                # Effective power (Grid side)
-                                # We need (target - added) DC, which is (target-added)/eff from Grid
-                                rem_dc = target_kwh_dc - added_kwh_dc
+                                rem_dc = current_target_dc - added_kwh_dc
                                 p_needed_grid = rem_dc / (eff_coeff * h_factor)
                                 
-                                # Limit by inverter and CC/CV (Inverter limit is Grid-side, CC/CV is DC-side)
-                                # Actually CC/CV limits what battery ACCEPTs (DC).
-                                # max_p is Grid side. So battery accepts max_p * eff * cc_cv.
                                 p_greedy_grid = min(max_p, p_needed_grid)
-                                # Re-check against CC/CV (max battery intake DC / eff_coeff)
-                                p_cc_cv_grid = (max_p * cc_cv_f) # Assume max_p is battery limit
+                                p_cc_cv_grid = max_p * cc_cv_f
                                 p_greedy_grid = min(p_greedy_grid, p_cc_cv_grid)
                                 
                                 if p_greedy_grid > 0.01:
                                     charge_commands[int(h)] = round_f(p_greedy_grid, 3)
                                     added_kwh_dc += (p_greedy_grid * h_factor * eff_coeff)
+                            
+                            # Verification: If we have reached 100% in our internal math, we are good.
+                            # But if the CC/CV limit significantly reduced our intake, we might need more hours.
+                            if added_kwh_dc >= current_target_dc - 0.05:
+                                break
+                            else:
+                                # Increase the "virtual" target to force more allocation if needed
+                                # (But don't exceed physical limits)
+                                current_target_dc += (current_target_dc - added_kwh_dc)
                         else:
                             total_h_factors = sum(max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0 for h in pool)
                             if total_h_factors > 0.01:
@@ -2497,7 +2502,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.426"
+                    # VERSION = "v11.6.440"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
