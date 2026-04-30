@@ -1023,6 +1023,7 @@ class StrategyEngine:
             "buy_debug": "Ожидание...",
             "arbitrage_decision": "Нет данных",
             "charge_reason": "none",
+            "strategy_candidates": [],
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
         charge_commands = {}
@@ -1240,6 +1241,7 @@ class StrategyEngine:
                     target_hours = list(negative_hours)
                     target_price = float(min([all_prices[h] for h in negative_hours]))
                     res["target_price"] = target_price
+                    res["strategy_candidates"] = [f"{h%24:02d}:00" for h in negative_hours]
                     if cur_hour in negative_hours:
                         res["arbitrage_decision"] = f"Отрицательная цена ({cur_p_f:.2f})"
                     else:
@@ -1271,6 +1273,7 @@ class StrategyEngine:
 
                     is_arb_window = False
                     if combined:
+                        res["strategy_candidates"] = [f"{h%24:02d}:00" for h, p in combined]
                         target_hours = [int(h) for h, p in combined]
                         
                         # --- v6.3: LIFT TOLERANCE FOR PROFITABLE ARBITRAGE ---
