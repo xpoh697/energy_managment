@@ -982,18 +982,6 @@ class StrategyEngine:
             # v11.6.94: Removed hard floor clamp. 
             # The simulation should show NATURAL discharge below the safety floor 
             # due to house load, not artificially 'stick' to it.
-
-    def run_sell_strategy(self, b_soc, b_cap, b_min_soc, eff, max_p, all_sell_prices, now, target_hours_sorted):
-        """Calculates the best selling power setpoints for the current and future hours."""
-        res = {"power": 0.0, "target_soc": b_soc, "status": "Idle"}
-        
-        # v11.6.355: Comprehensive Sell Debug
-        _sell_debug = {
-            "server_time": now.strftime("%H:%M:%S"),
-            "cur_hour": int(now.hour),
-            "b_soc": round_f(b_soc, 1),
-            "max_p": round_f(max_p, 2)
-        }
             
             # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
             history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
@@ -1944,6 +1932,15 @@ class StrategyEngine:
                             "error": str(e)
                         }
                 else: # sell
+                    # v11.6.355: Comprehensive Sell Debug
+                    _sell_debug = {
+                        "server_time": now.strftime("%H:%M:%S"),
+                        "cur_hour": int(now.hour),
+                        "b_soc": round_f(b_soc, 1),
+                        "max_p": round_f(max_p, 2),
+                        "f_today": round_f(float(man.get_forecast_value(man.solar_tomorrow_sensors[0] if isinstance(man.solar_tomorrow_sensors, list) else man.solar_tomorrow_sensors) or 0.0), 1), # Placeholder, will update later
+                        "f_tom": 0.0
+                    }
                     # Sell mode (v11.1.51)
                     # Use existing Target SOC Sell as floor for AI selling
                     # v11.6.301: Restore missing variables after refactor
@@ -2307,11 +2304,6 @@ class StrategyEngine:
                                 if max_recharge_soc < 99.0 and avg_p2 > (avg_p1 + 0.05) and not solar_is_plentiful:
                                     deficit_pct = 100.0 - max_recharge_soc
                                     base_target = min(100.0, base_target + deficit_pct)
-                                    _sell_debug["deficit_detected"] = round_f(deficit_pct, 1)
-                                    _sell_debug["max_recharge_soc"] = round_f(max_recharge_soc, 1)
-                                    _sell_debug["deficit_reason"] = "Hold for Window 2"
-                                elif solar_is_plentiful:
-                                    _sell_debug["deficit_reason"] = "Solar Plentiful (Skip Throttling)"
                                     
                             # v11.6.229: natural_soc_after_sale must be at the END of the peak epoch, not global min
                             _h_last_peak = max(future_active_sell_base) if future_active_sell_base else cur_hour
@@ -2338,8 +2330,6 @@ class StrategyEngine:
                         if survival_floor > min_soc_val + 0.5:
                              res["morning_autopilot_active"] = True
                              res["morning_autopilot_floor"] = round_f(survival_floor, 1)
-                             _sell_debug["survival_floor"] = round_f(survival_floor, 1)
-                             _sell_debug["night_drain"] = round_f(night_drain_pct, 1)
                          
                         # target_morning_soc remains as calculated at line 1978 (buffer-aware)
                         pass
@@ -2670,7 +2660,6 @@ class StrategyEngine:
                     _m_recursive_target = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
                     
                     _rem_start_soc = b_soc
-                    _rem_start_soc = b_soc
                     _pass_log = "Pass0"
                     for pass_idx in range(3):
                         morning_gap = _m_recursive_target - soc_morning
@@ -2681,7 +2670,6 @@ class StrategyEngine:
                             
                         # 1. Update the base target floor
                         base_target = min(100.0, max(min_soc_val, base_target + morning_gap))
-                        _sell_debug[f"pass{pass_idx}_floor"] = round_f(base_target, 1)
                         
                         # v11.6.325: House-Blind Budgeting (Step 2)
                         rem_base_dc_fix = float(max(0.0, (_rem_start_soc - base_target) * b_cap / 100.0))
@@ -2760,7 +2748,6 @@ class StrategyEngine:
                         
                         total_planned_ac = sum(cmd * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0) for h, cmd in sell_commands.items())
                         res["power_decision"] = f"{limit_label} | {total_planned_ac:.1f}кВтч в {self._format_h(min(epochs[0]))}-{self._format_h(max(epochs[0]))}"
-                        res["arbitrage_sell_debug"] = _sell_debug
 
                         # Update user status
                         if _is_p_limited:
@@ -2780,9 +2767,6 @@ class StrategyEngine:
                         
                         res["morning_autopilot_active"] = True
                         res["morning_autopilot_floor"] = round_f(base_target, 1)
-
-                    # v11.6.355: Finalize power_needed AFTER all recursive adjustments
-                    power_needed = sell_commands.get(int(cur_hour), 0.0)
 
                     if not target_hours_sorted:
                         power_needed = 0.0
@@ -2998,7 +2982,10 @@ class StrategyEngine:
             _filtered_targets = list(target_hours_sorted)
             target_hours_sorted = _filtered_targets
 
-            # v11.6.355: Move shared result population out of conditional blocks
+            # v11.6.355: Re-sync power_needed after recursive adjustments
+            power_needed = sell_commands.get(int(cur_hour), 0.0)
+
+            # v11.6.261: Move shared result population out of conditional blocks
             # Use current peak power only if we are actually in a peak hour
             in_peak = (cur_hour in target_hours_sorted)
             if in_peak and (power_needed > 0.05 or cur_hour in negative_hours):
@@ -3007,7 +2994,9 @@ class StrategyEngine:
             _sell_debug["in_peak"] = in_peak
             _sell_debug["power_needed"] = round_f(power_needed, 3)
             _sell_debug["final_state"] = res["state"]
-
+            _sell_debug["f_tom"] = round_f(f_tom, 1)
+            res["sell_debug"] = _sell_debug
+            
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
 
             # v11.6.258: Filter active list for UI to exclude zero-power hours UNLESS they are negative
