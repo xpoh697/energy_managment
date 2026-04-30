@@ -1907,13 +1907,8 @@ class StrategyEngine:
                         if True: # v11.3.97: Always run simulation for telemetry
                             future_active_buy = [h for h in target_hours_sorted if h >= cur_hour]
                             if future_active_buy:
-                                # Find the last hour of the first continuous block
-                                last_h_buy_immediate = future_active_buy[0]
-                                for i in range(1, len(future_active_buy)):
-                                    if future_active_buy[i] == future_active_buy[i-1] + 1:
-                                        last_h_buy_immediate = future_active_buy[i]
-                                    else:
-                                        break
+                                # v11.6.410: Use the ABSOLUTE last hour of the buy plan for the summary
+                                last_h_buy_immediate = max(future_active_buy)
                                 
                                 # v11.6.392: Use explicit string key for lookup
                                 key_end = f"{last_h_buy_immediate % 24:02d}:59" + (" (Завтра)" if last_h_buy_immediate >= 24 else "")
@@ -2469,7 +2464,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.405"
+                    # VERSION = "v11.6.410"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
