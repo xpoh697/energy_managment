@@ -2385,28 +2385,15 @@ class StrategyEngine:
                             _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {}, ignore_blended=True)
                             max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                             rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
-                            rem_bonus_ac = float(max(0.0, surplus_for_morning * eff))
+                            rem_bonus_ac = float(max(0.0, _morning_lib_surplus_dc * eff))
                         else:
-                            # v11.6.220: Hybrid - Use both the log search (to find noon peaks) 
-                            # AND the pre-calculated natural_morning_soc (as a stable fallback).
-                            max_from_log = max([float(x.get("soc", b_soc)) for x in sim_log_base.values()] + [b_soc])
-                            max_sim_soc = max(max_from_log, natural_morning_soc)
-                            
-                            rem_base_ac = float(max(0.0, (max_sim_soc - base_target) * b_cap / 100.0 * eff))
-                            
-                            # v11.6.221: Detailed Debugging for the Energy Tank
-                            res["_debug_tank_info"] = {
-                                "max_sim": round_f(max_sim_soc, 1),
-                                "natural_morning": round_f(natural_morning_soc, 1),
-                                "log_max": round_f(max_from_log, 1),
-                                "base_floor": round_f(base_target, 1),
-                                "tank_kwh": round_f(rem_base_ac, 2)
-                            }
-                            
-                            # Bonus logic for morning (if we are still in the morning window)
-                            capped_bonus_soc = max(0.0, min(max_sim_soc, base_target) - (min_soc_val + 2.0))
+                            # v11.6.119: Use natural_soc_after_sale instead of soc_at_start.
+                            # This ensures the actual power commands (Planned power) respect 
+                            # the same house-aware budget as the diagnostics.
+                            rem_base_ac = float(max(0.0, (natural_soc_after_sale - base_target) * b_cap / 100.0 * eff))
+                            capped_bonus_soc = max(0.0, min(soc_at_start, base_target) - (min_soc_val + 2.0))
                             _actual_bonus_dc = (capped_bonus_soc * b_cap / 100.0) if has_morning_sale else 0.0
-                            rem_bonus_ac = float(min(surplus_for_morning, _actual_bonus_dc) * eff)
+                            rem_bonus_ac = float(min(_morning_lib_surplus_dc, _actual_bonus_dc) * eff)
                             
                         for h in epoch_sorted:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
@@ -2425,9 +2412,17 @@ class StrategyEngine:
                                 max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
                                 p_alloc = min(max_p, max_allowed_sell_ac / h_f)
                             else:
-                                # v11.6.218: Future peaks take from the global "solar tank" (rem_base_ac).
-                                # The tank already accounts for 15%/18% floors and tomorrow's solar.
+                                # For future hours, also respect the local hour-specific floor.
+                                # v11.6.84: Use a more generous simulation-aware cap for morning hours.
                                 p_alloc = max_p
+                                # v11.6.110: Fix key format: log stores "HH:59", not "HH:00".
+                                # Use end-of-previous-hour SOC to represent the SOC entering this hour.
+                                # v11.6.111: Key in history_log uses ' (Завтра)' for h >= 24.
+                                _prev_h = h - 1
+                                _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
+                                if h_soc_s := self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc):
+                                     surplus_h_dc = max(0.0, (h_soc_s - h_floor) * b_cap / 100.0)
+                                     p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
                             if (rem_base_ac + rem_bonus_ac) > 0.05:
                                 # v11.6.90: Segregate budgets starting from sunrise_h
@@ -2567,7 +2562,7 @@ class StrategyEngine:
                         
                         # Bonus in Step 2 for first epoch
                         _actual_bonus_dc_fix = (max(0.0, min(_rem_start_soc, base_target) - (min_soc_val + 2.0)) * b_cap / 100.0) if has_morning_sale else 0.0
-                        rem_bonus_ac_fix = float(min(surplus_for_morning, _actual_bonus_dc_fix) * eff)
+                        rem_bonus_ac_fix = float(min(_morning_lib_surplus_dc, _actual_bonus_dc_fix) * eff)
                             
                         # 3. Re-distribute sell_commands
                         for i, epoch in enumerate(epochs):
@@ -2577,7 +2572,7 @@ class StrategyEngine:
                                 _, throttle_log, _ = self.run_soc_simulation(base_target, sim_hours, now, {})
                                 max_recharge_soc = max([float(x.get("soc", base_target)) for x in throttle_log.values()] + [base_target])
                                 rem_base_ac_fix = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
-                                rem_bonus_ac_fix = float(max(0.0, surplus_for_morning * eff))
+                                rem_bonus_ac_fix = float(max(0.0, _morning_lib_surplus_dc * eff))
                             
                             for h in epoch_sorted:
                                 h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
@@ -2874,7 +2869,7 @@ class StrategyEngine:
                         res["arbitrage_buyback"]["power_kw"] = max_p
                         res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
                 
-            # v11.6.223: Do NOT filter out hours with 0.0 kW power.
+            # v11.6.225: Do NOT filter out hours with 0.0 kW power.
             # Show all candidates to the user for transparency.
             _filtered_targets = list(target_hours_sorted)
             target_hours_sorted = _filtered_targets
