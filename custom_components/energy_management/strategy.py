@@ -2387,11 +2387,15 @@ class StrategyEngine:
                             rem_base_ac = float(max(0.0, (max_recharge_soc - base_target) * b_cap / 100.0) * eff)
                             rem_bonus_ac = float(max(0.0, surplus_for_morning * eff))
                         else:
-                            # v11.6.119: Use natural_soc_after_sale instead of soc_at_start.
-                            # This ensures the actual power commands (Planned power) respect 
-                            # the same house-aware budget as the diagnostics.
-                            rem_base_ac = float(max(0.0, (natural_soc_after_sale - base_target) * b_cap / 100.0 * eff))
-                            capped_bonus_soc = max(0.0, min(soc_at_start, base_target) - (min_soc_val + 2.0))
+                            # v11.6.217: Fill the energy "tank" based on the MAXIMUM projected SOC
+                            # from the 48h simulation, not just the current SOC.
+                            # This allows planning for evening windows while the battery is still charging.
+                            max_sim_soc = max([float(x.get("soc", b_soc)) for x in sim_log_base.values()] + [b_soc])
+                            
+                            rem_base_ac = float(max(0.0, (max_sim_soc - base_target) * b_cap / 100.0 * eff))
+                            
+                            # Bonus logic for morning (if we are still in the morning window)
+                            capped_bonus_soc = max(0.0, min(max_sim_soc, base_target) - (min_soc_val + 2.0))
                             _actual_bonus_dc = (capped_bonus_soc * b_cap / 100.0) if has_morning_sale else 0.0
                             rem_bonus_ac = float(min(surplus_for_morning, _actual_bonus_dc) * eff)
                             
@@ -2412,17 +2416,19 @@ class StrategyEngine:
                                 max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
                                 p_alloc = min(max_p, max_allowed_sell_ac / h_f)
                             else:
-                                # For future hours, also respect the local hour-specific floor.
-                                # v11.6.84: Use a more generous simulation-aware cap for morning hours.
-                                p_alloc = max_p
-                                # v11.6.110: Fix key format: log stores "HH:59", not "HH:00".
-                                # Use end-of-previous-hour SOC to represent the SOC entering this hour.
-                                # v11.6.111: Key in history_log uses ' (Завтра)' for h >= 24.
+                                # v11.6.217: RESTORATION - Future hours MUST use their projected SOC
+                                # at the moment of the peak to determine if they have sellable surplus.
                                 _prev_h = h - 1
                                 _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
-                                if h_soc_s := self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc):
-                                     surplus_h_dc = max(0.0, (h_soc_s - h_floor) * b_cap / 100.0)
-                                     p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
+                                natural_soc_at_h = self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc)
+                                
+                                # Local Surplus U (User Limit) - dynamic
+                                local_surplus_u = max(0.0, (natural_soc_at_h - min_soc_val) * b_cap / 100.0)
+                                # Local Surplus M (Morning Survival) - global anchor
+                                local_surplus_m = surplus_for_morning 
+                                
+                                local_total_surplus_dc = min(local_surplus_u, local_surplus_m)
+                                p_alloc = min(max_p, float(max(0.0, local_total_surplus_dc * eff / h_f)))
                                 
                             if (rem_base_ac + rem_bonus_ac) > 0.05:
                                 # v11.6.90: Segregate budgets starting from sunrise_h
