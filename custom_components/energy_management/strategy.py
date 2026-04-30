@@ -2342,7 +2342,19 @@ class StrategyEngine:
                     _h_sunrise_target = sunrise_h - 1
                     if cur_hour >= _h_sunrise_target:
                         _h_sunrise_target += 24
-                        
+                                           # v11.6.290: Dynamic Evening Floor (Night-Aware Budgeting)
+                    # To have 18% in the morning, we MUST stop selling when we reach 18% + Night_Load.
+                    # Otherwise, the house will drain the battery to 0% by dawn.
+                    _h_end_sale = max(target_hours_sorted) if target_hours_sorted else cur_hour
+                    night_cons_kwh = sum(float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) for h in range(_h_end_sale, _h_sunrise_target)) * occ_coeff
+                    night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
+                    
+                    # New base target for the evening sale window
+                    base_target = max(base_target, (min_soc_val + soc_buffer_full) + night_cons_pct)
+                    target_soc_sell = float(round_f(base_target, 1))
+                    
+                    # Final safety check: available energy must be positive
+                    
                     key_sunrise = f"{_h_sunrise_target % 24:02d}:59" + (" (Завтра)" if _h_sunrise_target >= 24 else "")
                     
                     # v11.6.285: Forced Night Sub-Simulation for Sunrise SOC
