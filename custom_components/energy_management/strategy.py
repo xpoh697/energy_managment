@@ -1223,6 +1223,8 @@ class StrategyEngine:
                 res["limit_used"] = buy_limit
 
                 # v11.6.251: Diagnostic prep (moved outside conditional blocks)
+                res["deg_cost"] = float(deg_cost)
+                res["profit_threshold"] = float(threshold)
                 _p_now = float(normalize_float(all_prices.get(cur_hour, 0.0)))
                 _f_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > cur_hour]
                 _b_sell = max(_f_sell) if _f_sell else 0.0
