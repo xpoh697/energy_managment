@@ -786,14 +786,30 @@ class StrategyEngine:
         finally:
             self._calculating_strategy = old_calc
 
-    def _get_soc_from_log(self, log: dict, key: str, default: Optional[float]) -> Optional[float]:
-        """Safely extract SOC float from simulation log (handles both float and dict formats)."""
+    def _get_soc_from_log(self, log: dict, key: Any, default: Optional[float]) -> Optional[float]:
+        """Safely extract SOC float from simulation log. Supports int, str, and HH:59 formats."""
+        if not log: return default
+        
+        # 1. Direct lookup
         val = log.get(key)
+        
+        # 2. Fallback for integer keys (convert to HH:59 string format)
+        if val is None and isinstance(key, (int, float)):
+            h_abs = int(key)
+            h_rel = h_abs % 24
+            is_tom = h_abs >= 24
+            str_key = f"{h_rel:02d}:59" + (" (Завтра)" if is_tom else "")
+            val = log.get(str_key)
+            
+        # 3. Fallback for string keys that might be integers in the log
+        if val is None and isinstance(key, str) and key.isdigit():
+            val = log.get(int(key))
+
         if isinstance(val, dict):
             res = val.get("soc", default)
         else:
             res = val if val is not None else default
-        return float(res) if res is not None else None
+        return float(res) if res is not None else default
 
     def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False):
         """Universal SOC simulation engine."""
@@ -990,7 +1006,7 @@ class StrategyEngine:
                 "gen_kw": round_f(float(expected_gen_kw), 3),
                 "load_kw": round_f(float(expected_cons_kw), 3)
             }
-            # v11.6.375: Store integer key as well for robust programmatic access
+            # v11.6.380: Also keep int key for efficient programmatic access
             history_log[int(h_abs)] = history_log[log_key_str]
 
         return float(simulated_soc), history_log, float(overflow_kwh)
@@ -1570,7 +1586,11 @@ class StrategyEngine:
                     if not added_bridge:
                         break
                     
-                target_hours = sorted(list(survival_hours | set(negative_hours if negative_hours else [])))
+                # v11.6.380: Safe merge of survival hours and negative price hours
+                merged_hours = set(survival_hours)
+                if negative_hours:
+                    merged_hours.update([int(h) for h in negative_hours])
+                target_hours = sorted(list(merged_hours))
 
             res["limit_used"] = buy_limit if mode == "buy" else sell_limit
             future_active = sorted([h for h in target_hours if h >= cur_hour])
@@ -2441,7 +2461,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.250"
+                    # VERSION = "v11.6.380"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
