@@ -1018,8 +1018,23 @@ class StrategyEngine:
             "arbitrage_buyback": {"opportunity": False, "power_kw": 0.0, "note": ""}
         }
         charge_commands = {}
+        sell_commands = {}
         can_recharge = False
         house_load_during_sale_dc = 0.0
+        
+        # v11.6.227: Global initialization to prevent NameError/UnboundLocalError in all paths
+        b_cap = float(man.battery_capacity or 10.0)
+        b_soc = float(man.battery_soc or 50.0)
+        max_p = float(man.battery_max_power or 3.0)
+        occ_coeff = 1.0
+        eff = 0.95
+        min_soc_val = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 15.0))
+        base_target = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+        sunrise_h = 8
+        _morning_lib_surplus_dc = 0.0
+        has_morning_sale = False
+        soc_at_start = b_soc
+        natural_soc_after_sale = b_soc
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
@@ -2277,7 +2292,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # v11.6.226: Fix NameError regression from v214 rollback
+                    # VERSION = "v11.6.227"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
