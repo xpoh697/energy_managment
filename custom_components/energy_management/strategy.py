@@ -1664,6 +1664,7 @@ class StrategyEngine:
                         # for all positive-price hours. No point buying at 0.8 if -0.9 is coming.
                         # v11.6.375: If price is negative, we ALWAYS prefer buying over solar (get paid).
                         # Set threshold to 101% so it's never skipped by max_dry_soc.
+                        p_buy_h = float(all_buy_prices.get(int(h_b), 999.0))
                         if p_buy_h < 0.0:
                              _solar_threshold = 101.0
                         elif negative_hours and p_buy_h > 0.0:
