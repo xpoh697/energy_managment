@@ -2465,7 +2465,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.395"
+                    # VERSION = "v11.6.400"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
@@ -3156,13 +3156,9 @@ class StrategyEngine:
                             p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                         
                     else:
-                        # v11.6.395: In Buy mode, if power is 0.0, target MUST be current SOC 
-                        # to prevent inverter from autonomous charging.
-                        if p_val > 0.01:
-                            h_target_buy = round_f(target_soc, 1)
-                        else:
-                            h_target_buy = round_f(_h_start_soc, 1)
-                            
+                        # v11.6.400: Target SOC is always the forecast at the end of the hour.
+                        # This gives the inverter a precise step-by-step instruction.
+                        h_target_buy = round_f(h_soc_sim, 1)
                         p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {h_target_buy}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                     
             res["planned_power_per_h"] = p_distribution
@@ -3188,13 +3184,10 @@ class StrategyEngine:
                     _target_limit = min_soc_val + 2.0 if (4 <= (cur_hour % 24) < 12) else base_target
                     target_soc = max(target_soc, _target_limit)
                 else:
-                    # v11.6.395: If current power is 0, target SOC must be current SOC 
-                    # to prevent the inverter from autonomous grid charging.
-                    if power_needed < 0.01:
-                        target_soc = float(b_soc)
-                    else:
-                        # v11.6.395: Moved target_soc logic to final centralized block at line 3190
-                        target_soc = target_soc
+                    # v11.6.400: Target SOC for current hour is the forecast at the end of THIS hour.
+                    # This ensures the inverter follows the step-by-step filling instructions.
+                    h_key_now = f"{cur_hour % 24:02d}:59"
+                    target_soc = float(self._get_soc_from_log(s_log, h_key_now, b_soc))
 
                 
             res["target_soc"] = float(round_f(target_soc, 1))
