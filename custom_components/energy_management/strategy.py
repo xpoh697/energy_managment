@@ -811,7 +811,7 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else default
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -914,7 +914,7 @@ class StrategyEngine:
             if hist_h_val < 0.01 and (real_h < 8 or real_h > 20):
                 expected_gen_kw = 0.0
 
-            # v11.6.411: PV Curtail logic (Dead parameter revival)
+            # v11.6.412: PV Curtail logic (Dead parameter revival)
             if pv_curtail_hours is not None and int(h_abs) in pv_curtail_hours:
                 expected_gen_kw = 0.0
 
@@ -993,7 +993,7 @@ class StrategyEngine:
                 
                 overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
                 overflow_kwh += overflow_h
-            elif total_net_kw < -0.001: 
+            elif total_net_kw < -0.001 and allow_discharge: 
                 sim_eff = float(max(0.85, eff_coeff))
                 actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
                 if b_cap_f > 0.1:
@@ -1822,7 +1822,7 @@ class StrategyEngine:
                                 commands=_planned_commands,
                                 no_battery_charge_until=_combined_block,
                                 no_solar=is_neg_strategy,
-                                ignore_blended=(now.hour < 10)
+                                allow_discharge=False # v11.6.412: In BUY mode, grid covers load
                             )
 
                         # 1. Calculate how much kWh we roughly need to add based on EXPECTED SOC
@@ -1901,7 +1901,8 @@ class StrategyEngine:
                             no_battery_charge_until=_buy_sim_no_charge_until,
                             pv_curtail_hours=_neg_buy_curtail or None,
                             ignore_blended=(now.hour < 10),
-                            no_solar=is_neg_strategy
+                            no_solar=is_neg_strategy,
+                            allow_discharge=False # v11.6.412: In BUY mode, grid covers load
                         )
                         
                         # 1. Projected SOC at START of the first buy hour
@@ -2469,7 +2470,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.411"
+                    # VERSION = "v11.6.412"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
