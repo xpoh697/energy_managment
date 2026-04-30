@@ -982,6 +982,18 @@ class StrategyEngine:
             # v11.6.94: Removed hard floor clamp. 
             # The simulation should show NATURAL discharge below the safety floor 
             # due to house load, not artificially 'stick' to it.
+
+    def run_sell_strategy(self, b_soc, b_cap, b_min_soc, eff, max_p, all_sell_prices, now, target_hours_sorted):
+        """Calculates the best selling power setpoints for the current and future hours."""
+        res = {"power": 0.0, "target_soc": b_soc, "status": "Idle"}
+        
+        # v11.6.355: Comprehensive Sell Debug
+        _sell_debug = {
+            "server_time": now.strftime("%H:%M:%S"),
+            "cur_hour": int(now.hour),
+            "b_soc": round_f(b_soc, 1),
+            "max_p": round_f(max_p, 2)
+        }
             
             # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
             history_log[f"{real_h:0>2}:59" + (" (Завтра)" if is_tom else "")] = {
@@ -2986,12 +2998,16 @@ class StrategyEngine:
             _filtered_targets = list(target_hours_sorted)
             target_hours_sorted = _filtered_targets
 
-            # v11.6.261: Move shared result population out of conditional blocks
+            # v11.6.355: Move shared result population out of conditional blocks
             # Use current peak power only if we are actually in a peak hour
             in_peak = (cur_hour in target_hours_sorted)
             if in_peak and (power_needed > 0.05 or cur_hour in negative_hours):
                 res["state"] = "active"
             
+            _sell_debug["in_peak"] = in_peak
+            _sell_debug["power_needed"] = round_f(power_needed, 3)
+            _sell_debug["final_state"] = res["state"]
+
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
 
             # v11.6.258: Filter active list for UI to exclude zero-power hours UNLESS they are negative

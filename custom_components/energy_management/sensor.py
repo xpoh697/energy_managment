@@ -2552,6 +2552,13 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
         pv_curtail_hours = buy_sim.get("pv_curtail_hours")
 
         # 2. Run Unified Simulation Engine
+        # v11.6.355: Comprehensive Sell Debug
+        _sell_debug = {
+            "server_time": now.strftime("%H:%M:%S"),
+            "cur_hour": int(now.hour),
+            "b_soc": round_f(batt_soc, 1),
+            "max_p": round_f(0.0, 2)
+        }
         simulated_soc, charge_log, _ = self.manager.run_soc_simulation(
             batt_soc, sim_hours, now,
             commands=merged_commands,
@@ -3431,7 +3438,8 @@ class MarketStrategySensor(SensorEntity):
             "prices_tomorrow": tom_fmt,
             "planned_power": res.get("planned_power_per_h", {}),
             "power_decision": res.get("power_decision", "Ожидание"),
-            "buy_debug": res.get("buy_debug", "Нет данных")
+            "buy_debug": res.get("buy_debug", "Нет данных"),
+            "sell_debug": res.get("arbitrage_sell_debug", "Нет данных")
         }
 
         # v7.2 - Hide detailed projections if nothing is planned for today
