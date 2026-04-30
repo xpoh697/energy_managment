@@ -3064,13 +3064,9 @@ class InverterOperationModeSensor(SensorEntity):
             # Evaluate if we can sell PV profitably instead of just waiting
             can_sell_pv = False
             if cur_price is not None and cur_price >= price_sell_only_pv and has_surplus:
-                morning_soc_proj = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
-                target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
-                is_low_for_morning = bool(morning_soc_proj < target_morning)
-                is_throttled = bool(sell_strategy.get("recommended_power_kw", 0.0) < 0.01 and rel_h in sell_strategy.get("active_hours", []))
-                is_energy_low_for_evening = bool(is_preparing_for_peak or is_low_for_morning)
-                
-                if is_before_limit_hour and not (is_throttled or is_energy_low_for_evening) and cur_price > 0:
+                # v11.6.370: If waiting for negative price today, we prioritize PV sale regardless of tomorrow's deficit.
+                # The negative price window will recharge the battery anyway.
+                if is_before_limit_hour and cur_price > 0:
                     can_sell_pv = True
             
             if can_sell_pv:

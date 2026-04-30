@@ -1646,7 +1646,7 @@ class StrategyEngine:
                     for h_b in pool:
                         # 1. Prediction of SOC at the START of this hour (solar only)
                         sim_to_b = list(range(cur_hour, int(h_b)))
-                        soc_at_b, _, _ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None)
+                        soc_at_b, _, _ = self.run_soc_simulation(b_soc, sim_to_b, now, commands=None, ignore_blended=(now.hour < 10))
                         
                         # Fix (v6.16): For future hours, use Minute 0 to get FULL solar hour in simulation.
                         # This prevents "losing" solar minutes due to now.minute offset.
@@ -1654,7 +1654,7 @@ class StrategyEngine:
                         
                         # 2. Prediction of MAX SOC achieved by Sun alone TODAY starting from this hour
                         sim_eod = list(range(int(h_b), 24))
-                        soc_final_dry, dry_log, _ = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None)
+                        soc_final_dry, dry_log, _ = self.run_soc_simulation(soc_at_b, sim_eod, sim_start_time, commands=None, ignore_blended=(now.hour < 10))
                         max_dry_soc = max([float(st["soc"]) for st in dry_log.values()] + [float(soc_at_b)])
                         
                         # v11.6.258: Patience Mode. If negative prices ahead, set threshold to survival floor
@@ -1719,7 +1719,7 @@ class StrategyEngine:
                         if first_neg_h is not None and first_neg_h > cur_hour:
                             # Simulation: Can we survive until first_neg_h without extra charging from PV?
                             sim_range_neg = list(range(cur_hour, first_neg_h))
-                            soc_at_neg, _, _ = self.run_soc_simulation(b_soc, sim_range_neg, now, no_battery_charge=True)
+                            soc_at_neg, _, _ = self.run_soc_simulation(b_soc, sim_range_neg, now, no_battery_charge=True, ignore_blended=(now.hour < 10))
                             
                             # v11.6.28: threshold uses CONF_MIN_SOC_BAT (emergency_soc_limit, default 10%).
                             # At the negative price hour, the system immediately starts buying from grid,
@@ -1753,7 +1753,7 @@ class StrategyEngine:
                             _hours_to_full = len(_chk_range)  # pessimistic default
                             if _chk_range:
                                 try:
-                                    _, _chk_log, _ = self.run_soc_simulation(b_soc, _chk_range, now, {})
+                                    _, _chk_log, _ = self.run_soc_simulation(b_soc, _chk_range, now, {}, ignore_blended=(now.hour < 10))
                                     for _ci, _cv in enumerate(_chk_log.values()):
                                         _cv_soc = _cv.get("soc", 0.0) if isinstance(_cv, dict) else float(_cv)
                                         if _cv_soc >= (_ai_target_soc - 0.5):
@@ -1788,7 +1788,8 @@ class StrategyEngine:
                                 b_soc, sim_range_pre, now,
                                 commands=_planned_commands,
                                 no_battery_charge_until=_combined_block,
-                                no_solar=is_neg_strategy
+                                no_solar=is_neg_strategy,
+                                ignore_blended=(now.hour < 10)
                             )
 
                         # 1. Calculate how much kWh we roughly need to add based on EXPECTED SOC
@@ -1860,7 +1861,8 @@ class StrategyEngine:
                         _, sim_log, _ = self.run_soc_simulation(
                             b_soc, sim_range, now, charge_commands,
                             no_battery_charge_until=_buy_sim_no_charge_until,
-                            pv_curtail_hours=_neg_buy_curtail or None
+                            pv_curtail_hours=_neg_buy_curtail or None,
+                            ignore_blended=(now.hour < 10)
                         )
                         
                         # 1. Projected SOC at START of the first buy hour
