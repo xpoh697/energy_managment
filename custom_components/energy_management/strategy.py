@@ -1934,17 +1934,34 @@ class StrategyEngine:
                 else: # sell
                     # Sell mode (v11.1.51)
                     # Use existing Target SOC Sell as floor for AI selling
-                    base_target = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
-                    user_discharge_limit = base_target  # v11.4.39: Store original user value before any system corrections
+                    # v11.6.300: Global Night Reserve Injection
+                    # Calculate this BEFORE any strategy decisions to ensure Target SOC is consistent.
+                    occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
+                    occ_coeff = float(occ_coeff)
+                    avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
+                    
+                    # 1. Survival Floor (13% + 5% = 18%)
+                    house_safety = float(man.get_setting(CONF_EMERGENCY_SOC_LIMIT, 13.0)) + float(man.get_setting(CONF_SOC_BUFFER, 5.0))
+                    user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
+                    survival_limit = max(user_limit, house_safety)
+                    
+                    # 2. Night Reserve (Energy needed until sunrise)
+                    # Window: End of today's potential sale (~21:00) until Sunrise Tomorrow.
+                    _h_end_est = 21 
+                    _h_sunrise_target = sunrise_h - 1
+                    night_cons_kwh = sum(float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) for h in range(_h_end_est, _h_sunrise_target + 24 if _h_sunrise_target < _h_end_est else _h_sunrise_target)) * occ_coeff
+                    night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
+                    
+                    # Global Discharge Floor: Survival + Night Consumption
+                    base_target = survival_limit + night_cons_pct
+                    user_discharge_limit = base_target 
+                    
                     # Initial defaults for robustness
                     arb_gain = 0.0
                     cheap_h_back = None
                     best_buy_h = None
                     cheap_p_back = 0.0
                     cur_p_f = float(normalize_float(today_prices.get(str(cur_hour), 0.0)))
-                    
-                    occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
-                    occ_coeff = float(occ_coeff)
                     
                     budget_data_sell = {}
                     eff_coeff_val = 1.0
@@ -1954,10 +1971,8 @@ class StrategyEngine:
                             budget_data_sell = budget_data_raw
                             eff_coeff_val = float(normalize_float(budget_data_sell.get("efficiency_coefficient", 1.0)))
                         
-                    
                     # Correct reserve for House needs: Now -> Midnight -> Sunrise Tomorrow
                     rem_cons_today = float(normalize_float(budget_data_sell.get("expected_consumption", 0.0)))
-                    avg_prof_cons = man.get_average_profile("consumption_base", man.custom_period, "all")
                     cons_night_morning = sum(float(normalize_float(avg_prof_cons.get(str(h), 0.0))) for h in range(0, sunrise_h)) * occ_coeff
                     
                     # Also include tomorrow morning solar until sunrise in the budget
@@ -1969,19 +1984,12 @@ class StrategyEngine:
                     
                     eff = eff_coeff_val if eff_coeff_val > 0.1 else 0.95
                     
-                    # v11.6.196: Emergency Reserve (min_soc_bat)
-                    min_soc_bat_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
-                    
-                    # v11.6.241: Strictly follow TS 4.1.6 & 6.1 (Limits NEVER sum)
-                    user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
-                    house_safety = float(man.get_setting(CONF_EMERGENCY_SOC_LIMIT, 13.0)) + float(man.get_setting(CONF_SOC_BUFFER, 5.0))
-                    
                     # Window logic: 04:00 - 12:00 (Morning Autopilot) uses liberal limit (user + 2.0)
-                    # Other hours (12:00 - 04:00) use strict limit (max(user, house_safety))
+                    # Other hours (12:00 - 04:00) use strict limit (base_target)
                     if 4 <= (cur_hour % 24) < 12:
                         min_soc_val = user_limit + 2.0
                     else:
-                        min_soc_val = max(user_limit, house_safety)
+                        min_soc_val = base_target
                     
                     # Adaptive buffer: If Min SOC is high (e.g. 70%), we don't need a huge additional buffer.
                     soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
