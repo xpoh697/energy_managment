@@ -1857,7 +1857,7 @@ class StrategyEngine:
                             rem_kwh = energy_to_buy
                             for h in pool_sorted_neg:
                                 h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
-                                p_greedy = min(max_p * 0.9, rem_kwh / h_factor) if rem_kwh > 0.05 else 0.0
+                                p_greedy = min(max_p, rem_kwh / h_factor) if rem_kwh > 0.05 else 0.0
                                 charge_commands[int(h)] = round_f(p_greedy, 3)
                                 rem_kwh -= (p_greedy * h_factor)
                         else:
@@ -2470,7 +2470,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.412"
+                    # VERSION = "v11.6.420"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
