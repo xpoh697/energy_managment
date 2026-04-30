@@ -2874,14 +2874,9 @@ class StrategyEngine:
                         res["arbitrage_buyback"]["power_kw"] = max_p
                         res["arbitrage_buyback"]["note"] = f"Откуп в {self._format_h(h_bb)} по {p_bb:.2f}"
                 
-            # v11.6.116: Filter out hours with 0.0 kW power from planning completely.
-            # Strategy is only active if planned power > 0.01 or (BUY mode and negative price).
-            _filtered_targets = []
-            for h in target_hours_sorted:
-                p_val = sell_commands.get(h, 0.0) if mode == "sell" else charge_commands.get(h, 0.0)
-                is_neg_buy = (mode == "buy" and negative_hours and h in negative_hours)
-                if p_val > 0.01 or is_neg_buy:
-                    _filtered_targets.append(h)
+            # v11.6.223: Do NOT filter out hours with 0.0 kW power.
+            # Show all candidates to the user for transparency.
+            _filtered_targets = list(target_hours_sorted)
             target_hours_sorted = _filtered_targets
 
             # Use current peak power only if we are actually in a peak hour
