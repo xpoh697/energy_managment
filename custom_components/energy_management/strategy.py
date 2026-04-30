@@ -1934,6 +1934,9 @@ class StrategyEngine:
                 else: # sell
                     # Sell mode (v11.1.51)
                     # Use existing Target SOC Sell as floor for AI selling
+                    # v11.6.301: Restore missing variables after refactor
+                    min_soc_bat_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+                    
                     # v11.6.300: Global Night Reserve Injection
                     # Calculate this BEFORE any strategy decisions to ensure Target SOC is consistent.
                     occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
@@ -2350,7 +2353,7 @@ class StrategyEngine:
                     _h_sunrise_target = sunrise_h - 1
                     if cur_hour >= _h_sunrise_target:
                         _h_sunrise_target += 24
-                                           # v11.6.301: Dynamic Evening Floor (Night-Aware Budgeting)
+                                           # v11.6.305: Dynamic Evening Floor (Night-Aware Budgeting)
                     # To have 18% in the morning, we MUST stop selling when we reach 18% + Night_Load.
                     # Otherwise, the house will drain the battery to 0% by dawn.
                     _h_end_sale = max(target_hours_sorted) if target_hours_sorted else cur_hour
