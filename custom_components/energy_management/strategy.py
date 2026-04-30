@@ -1886,23 +1886,25 @@ class StrategyEngine:
                         else:
                             soc_at_end = b_soc
                             
-                        # 3. Projected SOC TOMORROW MORNING (At actual sunrise)
-                        # v7.9.8 - Ensure consistency with Energy Balance sensor
-                        sunrise_h_sim = 8
-                        prof_gen_tom = man.get_average_profile("generation", self.manager.custom_period, (now + timedelta(days=1)).weekday())
-                        for h in range(24):
-                            if float(prof_gen_tom.get(str(h), 0.0)) > 0.05:
-                                sunrise_h_sim = h
-                                break
-                                
-                        key_morning = f"{sunrise_h_sim:02d}:59 (Завтра)"
-                        soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_at_end)
+                        # 3. Projected SOC TOMORROW MORNING (Dawn Anchor v11.6.270)
+                        _h_sunrise_target = sunrise_h - 1
+                        if cur_hour >= _h_sunrise_target:
+                            _h_sunrise_target += 24
                         
-                        # v7.2 - CLEANUP: If no buy is currently planned for today, return current SOC
-                        if not target_hours_sorted:
-                            power_needed = 0.0
-                            soc_at_start = b_soc
-                            soc_at_end = b_soc
+                        key_morning = f"{_h_sunrise_target % 24:02d}:59" + (" (Завтра)" if _h_sunrise_target >= 24 else "")
+                        
+                        # Forced Night Sub-Simulation for BUY mode morning projection
+                        # to ensure the "Morning" state shows the natural battery level before solar starts.
+                        _night_sim_range = list(range(cur_hour, _h_sunrise_target + 1))
+                        if _night_sim_range:
+                             # Sim starting from soc_at_end (after buy window) or current b_soc?
+                             # v11.6.270: Start from sim_log result at key_end (post-buy state)
+                             # Wait, soc_at_end is already the SOC at the end of the buy window.
+                             # We should simulate from there to sunrise.
+                             _, _night_log, _ = self.run_soc_simulation(soc_at_end, _night_sim_range, now, no_solar=True)
+                             soc_morning = self._get_soc_from_log(_night_log, key_morning, soc_at_end)
+                        else:
+                             soc_morning = soc_at_end
 
                         res["buy_simulation"] = {
                             "projected_soc_at_start_pct": float(round_f(soc_at_start, 1)),
@@ -1975,9 +1977,9 @@ class StrategyEngine:
                     user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
                     house_safety = float(man.get_setting(CONF_EMERGENCY_SOC_LIMIT, 13.0)) + float(man.get_setting(CONF_SOC_BUFFER, 5.0))
                     
-                    # Window logic: 04:00 - 10:00 (Morning) uses liberal limit (user + 2%)
-                    # Other hours (10:00 - 04:00) use strict limit (max(user, house_safety))
-                    if 4 <= (cur_hour % 24) < 10:
+                    # Window logic: 04:00 - 12:00 (Morning Autopilot) uses liberal limit (user + 2.0)
+                    # Other hours (12:00 - 04:00) use strict limit (max(user, house_safety))
+                    if 4 <= (cur_hour % 24) < 12:
                         min_soc_val = user_limit + 2.0
                     else:
                         min_soc_val = max(user_limit, house_safety)
@@ -2335,13 +2337,21 @@ class StrategyEngine:
                     if 4 <= (cur_hour % 24) < 12:
                         _m_floor = min_soc_val + 2.0
                     
-                    # v11.6.230: Always look for NEXT sunrise if current hour is past today's sunrise
-                    _h_sunrise_target = sunrise_h
+                    # v11.6.270: Standardize Dawn Anchor to sunrise_h - 1
+                    _h_sunrise_target = sunrise_h - 1
                     if cur_hour >= _h_sunrise_target:
                         _h_sunrise_target += 24
                         
                     key_sunrise = f"{_h_sunrise_target % 24:02d}:59" + (" (Завтра)" if _h_sunrise_target >= 24 else "")
-                    natural_soc_at_sunrise = self._get_soc_from_log(sim_log_base, key_sunrise, b_soc)
+                    
+                    # Forced Night Sub-Simulation (v11.6.270)
+                    _night_sim_range = list(range(cur_hour, _h_sunrise_target + 1))
+                    if _night_sim_range:
+                         _, _night_log, _ = self.run_soc_simulation(b_soc, _night_sim_range, now, no_solar=True)
+                         natural_soc_at_sunrise = self._get_soc_from_log(_night_log, key_sunrise, b_soc)
+                    else:
+                         natural_soc_at_sunrise = b_soc
+
                     surplus_for_morning = max(0.0, (natural_soc_at_sunrise - _m_floor) * b_cap / 100.0)
                     
                     # 2. Calculate U (User Limit) DC Budget
@@ -2767,8 +2777,11 @@ class StrategyEngine:
                     # Fix: ALWAYS compute morning via a short night sub-sim starting from
                     # natural_soc_after_sale (Branch A) or post-sale SOC (Branch B).
                     # v11.6.162: Final Status and Projection Construction
-                    morning_key_disp = f"{sunrise_h - 1:02d}:59 (Завтра)"
-                    soc_morning_display = float(round_f(self._get_soc_from_log(sim_log, morning_key_disp, b_soc), 1))
+                    # v11.6.270: Standardize Morning Projection (Dawn Anchor)
+                    # We reuse the key_sunrise and natural_soc_at_sunrise from the nocturnal sim (line 2345)
+                    # to ensure diagnostic parity across all sensors.
+                    morning_key_disp = key_sunrise
+                    soc_morning_display = float(round_f(natural_soc_at_sunrise, 1))
                     
                     _all_sell_hrs = [h for h in target_hours_sorted if h >= cur_hour]
                     if _all_sell_hrs:
@@ -2892,8 +2905,8 @@ class StrategyEngine:
                     res["sell_simulation"] = {
                         "projected_soc_at_sale_start_pct": float(round_f(soc_at_start, 1)),
                         "projected_soc_after_sale_pct": float(round_f(soc_after, 1)),
-                        "projected_soc_morning_pct": float(res_soc_morning),
-                        "projected_soc_morning": float(res_soc_morning),
+                        "projected_soc_morning_pct": float(round_f(soc_morning_display, 1)),
+                        "projected_soc_morning": float(round_f(soc_morning_display, 1)),
                         "log": sim_log
                     }
                     res["projected_soc_after_sale"] = round_f(soc_after, 1)
@@ -2901,7 +2914,8 @@ class StrategyEngine:
 
                     # v11.4.04: Reciprocal Surplus Calculation (Simulation Monarchy)
                     # We recalculate M, U based on what the simulation JUST confirmed.
-                    true_m_surplus = round(((soc_morning - target_morning_soc) * b_cap / 100.0), 1)
+                    # v11.6.270: Use standardized soc_morning_display for TRUE_M consistency.
+                    true_m_surplus = round(((soc_morning_display - target_morning_soc) * b_cap / 100.0), 1)
                     true_u_surplus = round(((soc_after - base_target) * b_cap / 100.0), 1)
 
                     # v7.1: Note: Simulation results are no longer used to override target_soc (v11.1.61).
