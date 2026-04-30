@@ -1668,7 +1668,7 @@ class StrategyEngine:
                             pool_useful.append(h_b)
                     
                     pool = pool_useful
-                    if cur_hour in negative_hours:
+                    if negative_hours:
                         res["charge_reason"] = "negative"
                         target_soc = 100.0
                     elif is_strict_arb:
@@ -3002,8 +3002,8 @@ class StrategyEngine:
                         else:
                             final_periods.append(f"{h_min:02d}:00{suffix_min} - {h_max:02d}:59{suffix_max}")
 
-            res["active_hours"] = actual_active
-            res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active])
+            res["active_hours"] = actual_active_ui
+            res["active_hours_formatted"] = ", ".join([self._format_h(h) for h in actual_active_ui])
             res["active_periods"] = ", ".join(final_periods) if final_periods else "Нет"
             
             p_distribution = {}
@@ -3012,10 +3012,10 @@ class StrategyEngine:
                 s_log = sim_info.get("log", {}) if sim_info else {}
                 
                 # v11.6.40: Show ALL hours of the first Energy Pool in planned_power
-                _first_window_active = res.get("first_pool_hours", actual_active)
+                _first_window_active = res.get("first_pool_hours", actual_active_ui)
                 
                 # v11.6.116: Filter UI display to match the 0.0kW cleanup
-                _first_window_active = [h for h in _first_window_active if h in target_hours_sorted]
+                _first_window_active = [h for h in _first_window_active if h in actual_active_ui]
                 
                 for h_idx in sorted(_first_window_active):
                     h_label = self._format_h(h_idx)
