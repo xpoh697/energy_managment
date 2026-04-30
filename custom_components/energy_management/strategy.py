@@ -1240,7 +1240,10 @@ class StrategyEngine:
                     target_hours = list(negative_hours)
                     target_price = float(min([all_prices[h] for h in negative_hours]))
                     res["target_price"] = target_price
-                    res["arbitrage_decision"] = f"Отрицательная цена ({cur_p_f:.2f})"
+                    if cur_hour in negative_hours:
+                        res["arbitrage_decision"] = f"Отрицательная цена ({cur_p_f:.2f})"
+                    else:
+                        res["arbitrage_decision"] = f"Ожидание отрицательных цен ({cur_p_f:.2f})"
                 else:
                     def is_buy_profitable_arb(buy_p, hour):
                         # Find best future sell price after this buy hour
@@ -1646,7 +1649,7 @@ class StrategyEngine:
                             pool_useful.append(h_b)
                     
                     pool = pool_useful
-                    if negative_hours:
+                    if cur_hour in negative_hours:
                         res["charge_reason"] = "negative"
                         target_soc = 100.0
                     elif is_strict_arb:
@@ -1666,7 +1669,7 @@ class StrategyEngine:
                     # Final Override (v6.16): If no useful hours left, sun is sufficient,
                     # OR current SOC is already high enough (prevents micro-buys for 1% arbitrage)
                     # v11.1.30: Bypass these checks if price is negative (always useful to fill the battery)
-                    should_skip_buy = (not pool or target_soc <= (b_soc + 0.5)) and not negative_hours
+                    should_skip_buy = (not pool or target_soc <= (b_soc + 0.5)) and (cur_hour not in negative_hours)
                     if should_skip_buy:
                         target_soc = b_soc
                         res["charge_reason"] = "none"
