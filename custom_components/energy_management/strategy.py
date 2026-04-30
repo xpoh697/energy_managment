@@ -2394,6 +2394,15 @@ class StrategyEngine:
                             
                             rem_base_ac = float(max(0.0, (max_sim_soc - base_target) * b_cap / 100.0 * eff))
                             
+                            # v11.6.221: Detailed Debugging for the Energy Tank
+                            res["_debug_tank_info"] = {
+                                "max_sim": round_f(max_sim_soc, 1),
+                                "natural_morning": round_f(natural_morning_soc, 1),
+                                "log_max": round_f(max_from_log, 1),
+                                "base_floor": round_f(base_target, 1),
+                                "tank_kwh": round_f(rem_base_ac, 2)
+                            }
+                            
                             # Bonus logic for morning (if we are still in the morning window)
                             capped_bonus_soc = max(0.0, min(max_sim_soc, base_target) - (min_soc_val + 2.0))
                             _actual_bonus_dc = (capped_bonus_soc * b_cap / 100.0) if has_morning_sale else 0.0

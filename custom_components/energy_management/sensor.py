@@ -3450,7 +3450,8 @@ class MarketStrategySensor(SensorEntity):
                 "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
                 "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
                 "arbitrage_limit_reason": res.get("arbitrage_sell_limit_reason", ""),
-                "arbitrage_gatekeeper_floor": res.get("arbitrage_buyback", {}).get("gatekeeper_floor", 0.0)
+                "arbitrage_gatekeeper_floor": res.get("arbitrage_buyback", {}).get("gatekeeper_floor", 0.0),
+                "debug_energy_tank": res.get("_debug_tank_info", {})
             })
         else: # buy
             attrs.update({
