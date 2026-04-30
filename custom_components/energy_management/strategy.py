@@ -1674,6 +1674,8 @@ class StrategyEngine:
                         target_soc = b_soc
                         res["charge_reason"] = "none"
                         pool = [] # Empty pool to clear attributes
+                        target_hours_sorted = [] # v11.6.253: Also clear sorted list to drop 'active' state
+                        pool = [] # Empty pool to clear attributes
                     
                     # User-defined Ceiling (v11.1.62) - Using existing CONF_AI_CHARGE_LIMIT
                     # Skip check if price is negative as requested by USER
@@ -2945,7 +2947,7 @@ class StrategyEngine:
 
             # Use current peak power only if we are actually in a peak hour
             in_peak = (cur_hour in target_hours_sorted)
-            if in_peak:
+            if in_peak and power_needed > 0.05:
                 res["state"] = "active"
             
             real_cmd_p = power_needed if in_peak else 0.0
