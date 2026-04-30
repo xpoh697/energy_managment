@@ -795,7 +795,7 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else None
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -952,7 +952,8 @@ class StrategyEngine:
                 total_net_kw = -cmd_p - rem_cons
             else:
                 # Normal mode: PV covers load and then charges battery
-                total_net_kw = expected_gen_kw - expected_cons_kw - cmd_p
+                _expected_gen_kw_sim = 0.0 if no_solar else expected_gen_kw
+                total_net_kw = _expected_gen_kw_sim - expected_cons_kw - cmd_p
 
             
             if total_net_kw > 0.001: 
@@ -1779,7 +1780,8 @@ class StrategyEngine:
                                 _combined_block = max(_combined_block or 0, _effective_block)
                             soc_at_start_plan, _, _ = self.run_soc_simulation(
                                 b_soc, sim_range_pre, now,
-                                no_battery_charge_until=_combined_block
+                                no_battery_charge_until=_combined_block,
+                                no_solar=is_neg_strategy
                             )
 
                         # 1. Calculate how much kWh we roughly need to add based on EXPECTED SOC
@@ -1796,9 +1798,9 @@ class StrategyEngine:
                         if res.get("charge_reason") == "survival":
                             energy_to_buy = theoretical_gap_kwh
                         elif is_neg_strategy:
-                            # v11.6.16: In negative-price buy window, house is powered from grid.
-                            # Battery does NOT drain from consumption during buy hours.
-                            # We only need to charge the theoretical gap (no pool_cons needed).
+                            # v11.6.264: For negative prices, we want to maximize grid intake.
+                            # We assume a 0% solar contribution during these hours to ensure 
+                            # we fill the battery as much as possible while being paid for it.
                             energy_to_buy = theoretical_gap_kwh
                         else:
                             energy_to_buy = theoretical_gap_kwh + pool_cons
@@ -1855,20 +1857,8 @@ class StrategyEngine:
                         )
                         
                         # 1. Projected SOC at START of the first buy hour
-                        if True: # v11.3.97: Always run simulation for telemetry
-                            valid_buy_hours = [t for t in target_hours_sorted if t >= cur_hour]
-                            if valid_buy_hours:
-                                first_h_buy_sim = min(valid_buy_hours)
-                                if first_h_buy_sim > cur_hour:
-                                    prev_h = first_h_buy_sim - 1
-                                    key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                                    soc_at_start = self._get_soc_from_log(sim_log, key_start, b_soc)
-                                else:
-                                    soc_at_start = b_soc
-                            else:
-                                soc_at_start = b_soc
-                        else:
-                            soc_at_start = b_soc
+                        # v11.6.264: Use the baseline calculated for the planning gap
+                        soc_at_start = soc_at_start_plan if target_hours_sorted else b_soc
 
                         # 2. Projected SOC AFTER the first continuous buy window
                         if True: # v11.3.97: Always run simulation for telemetry
@@ -3055,7 +3045,11 @@ class StrategyEngine:
                             p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc_sim, 1)}%)"
                         
                     else:
-                        p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc_sim, 1)}%)"
+                        # v11.6.264: Show target SOC for Buy mode too.
+                        if p_val > 0.01:
+                            p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(target_soc, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
+                        else:
+                            p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Прогноз: {round_f(h_soc_sim, 1)}%)"
                     
             res["planned_power_per_h"] = p_distribution
             
@@ -3080,13 +3074,9 @@ class StrategyEngine:
                     _target_limit = min_soc_val + 2.0 if (4 <= (cur_hour % 24) < 12) else base_target
                     target_soc = max(target_soc, _target_limit)
                 else:
-                    # For buying, it's fine to use the simulation log (HH:59)
-                    sim_info = res.get("buy_simulation")
-                    if sim_info:
-                        s_log = sim_info.get("log", {})
-                        key_cur = f"{now.hour:02d}:59"
-                        if key_cur in s_log:
-                            target_soc = float(self._get_soc_from_log(s_log, key_cur, target_soc))
+                    # For buying, use the global target_soc (e.g. 100%) so the inverter 
+                    # doesn't stop early if the simulation was conservative.
+                    target_soc = target_soc
 
                 
             res["target_soc"] = float(round_f(target_soc, 1))
