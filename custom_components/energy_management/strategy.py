@@ -1231,6 +1231,16 @@ class StrategyEngine:
                         
                         # Use the strict formula: (Sell * Eff) - Buy - Deg >= Threshold
                         gain = float(best_s * eff - buy_p - deg_cost)
+                        
+                        # v11.6.247: Opportunity Cost Check
+                        # If there is a MUCH better buy window later, this window is NOT "profitable" for now.
+                        future_buys = [p_b for h_b, p_b in all_prices.items() if h_b > hour]
+                        better_buy_p = min(future_buys) if future_buys else buy_p
+                        
+                        if better_buy_p < (buy_p - 0.1):
+                             # Waiting for better_buy_p would yield a higher total profit.
+                             return False
+
                         return gain >= threshold
 
                     dynamic_buy_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
@@ -1249,6 +1259,19 @@ class StrategyEngine:
                     is_arb_window = False
                     if combined:
                         target_hours = [int(h) for h, p in combined]
+                        
+                        # v11.6.247: Debug info for the current hour
+                        _p_now = float(normalize_float(all_prices.get(cur_hour, 0.0)))
+                        _f_sell = [p_s for h_s, p_s in all_sell_prices.items() if h_s > cur_hour]
+                        _b_sell = max(_f_sell) if _f_sell else 0.0
+                        _f_buy = [p_b for h_b, p_b in all_prices.items() if h_b > cur_hour]
+                        _b_buy = min(_f_buy) if _f_buy else _p_now
+                        _gain = float(_b_sell * eff - _p_now - deg_cost)
+                        
+                        res["buy_debug"] = (
+                            f"Цена: {_p_now:.2f} | Лучшая продажа позже: {_b_sell:.2f} | "
+                            f"Лучшая покупка позже: {_b_buy:.2f} | Выгода арб: {_gain:.2f} (Порог: {threshold})"
+                        )
                         
                         # --- v6.3: LIFT TOLERANCE FOR PROFITABLE ARBITRAGE ---
                         # If an hour is profitable for arbitrage, we MUST include it in target_hours
@@ -2320,7 +2343,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.242"
+                    # VERSION = "v11.6.247"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
