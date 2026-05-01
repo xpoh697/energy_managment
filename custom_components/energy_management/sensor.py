@@ -67,7 +67,7 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-STORAGE_VERSION = "v11.6.495"
+STORAGE_VERSION = 1
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the sensor platform."""
