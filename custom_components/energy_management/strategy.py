@@ -1,5 +1,5 @@
 import logging
-# MarketStrategy Version: v11.6.522
+# MarketStrategy Version: v11.6.523
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -1550,9 +1550,11 @@ class StrategyEngine:
             if target_hours:
                 truncated = [target_hours[0]]
                 for i in range(1, len(target_hours)):
+                    # v11.6.523: Never truncate negative price hours.
+                    p_this = float(all_prices.get(target_hours[i], 0.0))
                     # v11.3.4: If we have a double-cycle opportunity, allow large gaps between cycles.
                     # Otherwise, only plan for the immediate block of peaks (standard behavior).
-                    if (target_hours[i] - target_hours[i-1] <= 12) or can_recharge:
+                    if (target_hours[i] - target_hours[i-1] <= 12) or can_recharge or p_this <= 0:
                         truncated.append(target_hours[i])
                     else:
                         break
