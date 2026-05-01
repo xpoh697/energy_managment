@@ -2088,6 +2088,7 @@ class StrategyEngine:
                         "b_soc": round_f(b_soc, 1),
                         "soc_at_start": round_f(soc_at_start if 'soc_at_start' in locals() else 0.0, 1),
                         "base_target": round_f(base_target if 'base_target' in locals() else 0.0, 1),
+                        "night_cons": round_f(night_cons_kwh if 'night_cons_kwh' in locals() else 0.0, 2),
                         "available_ac": round_f(available_sell_ac if 'available_sell_ac' in locals() else 0.0, 2),
                         "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
                         "f_tom": round_f(f_tom, 1)
