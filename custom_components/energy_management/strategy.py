@@ -1464,7 +1464,8 @@ class StrategyEngine:
                             
                             norm_p = float(normalize_float(p_val))
                             ok_arb, _, _, _ = is_profitable(norm_p, h_int)
-                            if norm_p >= sell_limit or ok_arb:
+                            # v11.6.546: Include all identified tech peaks regardless of arbitrage threshold.
+                            if norm_p >= sell_limit or ok_arb or (h_int in tech_peaks_all):
                                 peaks_candidates_all.append((h_int, norm_p))
                                 
                         for h_str, p_val in tomorrow_prices.items():
