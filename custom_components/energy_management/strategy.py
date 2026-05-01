@@ -1,5 +1,5 @@
 import logging
-# MarketStrategy Version: v11.6.521
+# MarketStrategy Version: v11.6.522
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -1879,7 +1879,11 @@ class StrategyEngine:
                             pool_sorted_neg = sorted(pool, key=lambda hr: float(all_buy_prices.get(int(hr), 999.0)))
                             
                             for h in pool_sorted_neg:
-                                if added_kwh_dc >= current_target_dc - 0.01: break
+                                price_h = float(all_buy_prices.get(int(h), 999.0))
+                                # v11.6.522: Negative Price Priority.
+                                # If price is <= 0, we don't break even if we reached target energy.
+                                if added_kwh_dc >= current_target_dc - 0.01 and price_h > 0: break
+                                
                                 h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
                                 
                                 # Estimate SOC for CC/CV
@@ -1890,7 +1894,8 @@ class StrategyEngine:
                                 _cur_eff = float(self.get_efficiency_coefficient() or 0.95)
                                 
                                 rem_dc = current_target_dc - added_kwh_dc
-                                p_needed_grid = rem_dc / (_cur_eff * h_factor)
+                                # v11.6.522: For negative prices, target maximum possible power
+                                p_needed_grid = max_p if price_h <= 0 else (rem_dc / (_cur_eff * h_factor))
                                 
                                 p_greedy_grid = min(max_p, p_needed_grid)
                                 p_cc_cv_grid = max_p * cc_cv_f
