@@ -1,5 +1,5 @@
 import logging
-# MarketStrategy Version: v11.6.527
+# MarketStrategy Version: v11.6.528
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -1039,7 +1039,7 @@ class StrategyEngine:
         if cached and (now - cached["time"]).total_seconds() < 30 and cached["time"].hour == now.hour:
             return cached["res"]
 
-        # v11.6.228: Global initialization using methods (v214 compatibility)
+        # v11.6.228: Global initialization
         _b_soc_s, _b_cap_s, _ = man.get_battery_state()
         b_cap = float(_b_cap_s or 10.0)
         b_soc = float(_b_soc_s or 50.0)
@@ -1095,6 +1095,13 @@ class StrategyEngine:
                 p_st = dict(man.data.get(f"prices_{mode}", {}))
                 today_prices = dict(p_st.get(today_str, {}))
                 tomorrow_prices = dict(p_st.get(tomorrow_str, {}))
+                
+                # v11.6.528: Source-Level Cycle Isolation for BUY mode.
+                # If tomorrow is > 12h away from end of today, hide it.
+                if mode == "buy" and tomorrow_prices:
+                    tom_h_first = min(int(h) for h in tomorrow_prices.keys())
+                    if (tom_h_first + 24 - 23) > 12:
+                        tomorrow_prices = {}
             except Exception as e:
                 _LOGGER.error(f"Error fetching prices in MarketStrategy: {e}")
                 return res
