@@ -974,6 +974,7 @@ class StrategyEngine:
                 # PV only covers load, no battery charge from surplus
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
+                VERSION = "v11.6.497"
                 # v11.6.491: BUY mode sign correction
                 if not allow_discharge:
                     total_net_kw = cmd_p
@@ -2517,7 +2518,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # version: v11.6.496
+                    # version: v11.6.497
                     max_batt_p = max_p
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
