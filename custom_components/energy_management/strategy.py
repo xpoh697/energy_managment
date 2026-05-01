@@ -1550,11 +1550,11 @@ class StrategyEngine:
             if target_hours:
                 truncated = [target_hours[0]]
                 for i in range(1, len(target_hours)):
-                    # v11.6.523: Never truncate negative price hours.
-                    p_this = float(all_prices.get(target_hours[i], 0.0))
                     # v11.3.4: If we have a double-cycle opportunity, allow large gaps between cycles.
                     # Otherwise, only plan for the immediate block of peaks (standard behavior).
-                    if (target_hours[i] - target_hours[i-1] <= 12) or can_recharge or p_this <= 0:
+                    # v11.6.525: Strict Cycle Isolation. If gap > 12h, we ignore future windows
+                    # until the current cycle (today) is complete.
+                    if (target_hours[i] - target_hours[i-1] <= 12) or can_recharge:
                         truncated.append(target_hours[i])
                     else:
                         break
@@ -1878,12 +1878,14 @@ class StrategyEngine:
                             added_kwh_dc = 0.0
                             
                             # Sort available hours by price (cheapest first)
+                            # v11.6.525: Price sorting restored as requested.
+                            # Combined with strict truncation (night-aware), this is safe.
                             pool_sorted_neg = sorted(pool, key=lambda hr: float(all_buy_prices.get(int(hr), 999.0)))
                             
                             for h in pool_sorted_neg:
                                 price_h = float(all_buy_prices.get(int(h), 999.0))
-                                # v11.6.522: Negative Price Priority.
-                                # If price is <= 0, we don't break even if we reached target energy.
+                                # v11.6.525: Negative Price Priority.
+                                # If price is <= 0, we NEVER break. We fill all negative hours.
                                 if added_kwh_dc >= current_target_dc - 0.01 and price_h > 0: break
                                 
                                 h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
