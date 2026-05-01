@@ -1,5 +1,4 @@
 import logging
-# MarketStrategy Version: v11.6.528
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -1161,7 +1160,12 @@ class StrategyEngine:
 
             cur_p_f = all_prices.get(cur_hour, 0.0)
                 
-            negative_hours = [int(h) for h, p in all_prices.items() if p <= 0 and h >= cur_hour] # v11.6.508: Greedy zero
+            negative_hours_raw = sorted([int(h) for h, p in all_prices.items() if p <= 0 and h >= cur_hour])
+            negative_hours = []
+            for h in negative_hours_raw:
+                if negative_hours and (h - negative_hours[-1] > 12):
+                    break # v11.6.529: Strict Cycle Isolation. Ignore tomorrow if there's a night gap.
+                negative_hours.append(h)
 
             buy_limit = float(man.get_setting(CONF_PRICE_BUY_LIMIT, 2.0))
             sell_limit = float(man.get_setting(CONF_PRICE_SELL_LIMIT, 5.0))
