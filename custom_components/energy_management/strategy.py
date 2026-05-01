@@ -1385,6 +1385,8 @@ class StrategyEngine:
                 if negative_hours and cur_hour in negative_hours:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Отрицательная цена"
+                    # v11.6.534: Fill candidates even in early exit to avoid 'Empty Strategy' UI confusion
+                    res["strategy_candidates"] = [f"{h%24:02d}:00" for h in sorted(list(all_sell_prices.keys())) if all_sell_prices[h] >= sell_limit]
                     self._calculating_strategy = old_calc
                     
                     # v11.6.482: Diagnostics restored for early exit
