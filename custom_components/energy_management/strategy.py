@@ -1,5 +1,5 @@
 import logging
-# MarketStrategy Version: v11.6.520
+# MarketStrategy Version: v11.6.521
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -3227,11 +3227,15 @@ class StrategyEngine:
                             p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                         
                     else:
-                        # v11.6.518: Target SOC floor for the plan display
+                        # v11.6.521: Sync recommended_power with the actual Plan for current hour
                         sim_target_h = round_f(h_soc_sim, 1)
                         # If this is the current hour, apply the floor protection
                         h_target_buy = max(b_soc, sim_target_h) if (h_idx == cur_hour and res.get("charge_reason") != "none") else sim_target_h
                         p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {h_target_buy}% | Прогноз: {sim_target_h}%)"
+                        
+                        if h_idx == cur_hour:
+                            # Force the active command to match the plan
+                            res["recommended_power_kw"] = float(round_f(p_val, 2))
                     
             res["planned_power_per_h"] = p_distribution
             
