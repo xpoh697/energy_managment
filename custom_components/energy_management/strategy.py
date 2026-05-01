@@ -1046,7 +1046,7 @@ class StrategyEngine:
         max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
 
         res = {
-            "strategy_version": "v11.6.502",
+            "strategy_version": VERSION,
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -2518,7 +2518,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    res["version"] = "v11.6.499"
+                    res["version"] = VERSION
                     max_batt_p = max_p
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
