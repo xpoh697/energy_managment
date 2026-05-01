@@ -2087,6 +2087,7 @@ class StrategyEngine:
                         }
                 else: # sell
                     _prof_debug = ""
+                    soc_at_start = float(b_soc)
                     # v11.6.355: Comprehensive Sell Debug
                     pass # v11.6.544: Debug block moved below to prevent UnboundLocalError
                     # Sell mode (v11.1.51)
