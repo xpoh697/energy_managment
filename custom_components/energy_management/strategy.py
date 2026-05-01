@@ -926,6 +926,12 @@ class StrategyEngine:
             occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
             occ_coeff = float(occ_coeff)
             expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
+            
+            # v11.6.556: Simulation Sanity Cap. 
+            # If the profile predicts an insane load (>3kW) at night, it's a 'ghost' (glitch).
+            # We cap it to a sane 0.5kW to prevent budget suppression.
+            if (real_h >= 22 or real_h <= 6) and expected_cons_kw > 3.0:
+                expected_cons_kw = 0.5
 
             # v11.1.15 - Blended Anchor: Smoothly transition from profile to real-time load
             # to avoid discontinuities at the top of the hour (v7.9.7 fix)
