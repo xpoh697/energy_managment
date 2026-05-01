@@ -2139,9 +2139,11 @@ class EnergyProfileManager:
             t_soc_new = float(res.get("target_soc", 0.0))
             stored_p = float(stored.get("power", 0.0))
             
-            # v11.6.105: High-Water Mark Anchor. 
-            # Update the anchor if it's a new hour OR if the strategy allows MORE power than previously locked.
-            # This prevents power from dropping (reducing jitter), but allows it to increase if the budget grows.
+            # v11.6.516: High-Water Mark Anchor (Revised).
+            # Update the anchor if:
+            # 1. It's a new hour.
+            # 2. Strategy suggests MORE power than currently locked (budget increase).
+            # If power drops, we stay at the previously locked maximum to avoid jitter.
             if stored.get("hour_key") != hour_key or p_val_new > (stored_p + 0.05):
                 c_amps = 0.0
                 if self.battery_voltage_sensor:

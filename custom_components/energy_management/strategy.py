@@ -1,5 +1,5 @@
 import logging
-# MarketStrategy Version: v11.6.512
+# MarketStrategy Version: v11.6.516
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -979,7 +979,7 @@ class StrategyEngine:
             
             # 2. Total Net Power for battery
             # Positive = Flow INTO battery, Negative = Flow OUT of battery
-            # v11.6.512: In BUY mode (allow_discharge=False), house load is covered by grid bypass
+            # v11.6.515: In BUY mode (allow_discharge=False), house load is covered by grid bypass
             # and does NOT drain the battery. We only subtract rem_cons if discharge is allowed.
             if not allow_discharge:
                 # Battery only gets solar surplus or grid charge commands.
@@ -3255,10 +3255,12 @@ class StrategyEngine:
                     _target_limit = min_soc_val + 2.0 if (4 <= (cur_hour % 24) < 12) else base_target
                     target_soc = max(target_soc, _target_limit)
                 else:
-                    # v11.6.400: Target SOC for current hour is the forecast at the end of THIS hour.
-                    # This ensures the inverter follows the step-by-step filling instructions.
+                    # v11.6.515: Step-by-step Target SOC for current hour.
+                    # Protective Floor: In BUY mode, don't let target SOC drop below current SOC 
+                    # while waiting for the price window, to prevent unwanted inverter discharge.
                     h_key_now = f"{cur_hour % 24:02d}:59"
-                    target_soc = float(self._get_soc_from_log(s_log, h_key_now, b_soc))
+                    sim_target = float(self._get_soc_from_log(s_log, h_key_now, b_soc))
+                    target_soc = max(b_soc, sim_target) if (res.get("charge_reason") in ["negative", "survival", "cheap"]) else sim_target
 
                 
             res["target_soc"] = float(round_f(target_soc, 1))
