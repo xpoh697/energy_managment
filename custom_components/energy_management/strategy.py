@@ -1388,7 +1388,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.6.508"
+                    res["strategy_version"] = VERSION
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -2009,6 +2009,19 @@ class StrategyEngine:
                         # v11.6.30: Expose charge_commands in res so BatterySocPredictionSensor
                         # can pass real buy power commands to its own simulation.
                         res["charge_commands"] = {int(k): float(v) for k, v in charge_commands.items()}
+                        
+                        # v11.6.509: Detailed diagnostics for UI (as per Section 4.2.5 of TZ)
+                        _neg_tag = "[Отрицательная цена]" if cur_hour in negative_hours else ""
+                        if not _neg_tag and negative_hours:
+                            _neg_tag = "Ожидание отрицательных цен"
+                        
+                        res["buy_debug"] = (
+                            f"{_neg_tag} | Цена: {_p_now:.2f} | "
+                            f"Цель: {target_soc:.1f}% (Лимит: {base_target:.1f}%) | "
+                            f"Лучшая продажа позже: {_b_sell:.2f} | "
+                            f"Лучшая покупка позже: {_b_buy:.2f} | "
+                            f"Выгода арб: {_gain:.2f} (Порог: {threshold:.2f})"
+                        ).strip(" | ")
                     except Exception as e:
                         _LOGGER.error("Error in MarketStrategy BUY simulation: %s", e)
                         res["buy_simulation"] = {
