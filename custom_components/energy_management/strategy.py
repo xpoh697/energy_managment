@@ -2086,6 +2086,7 @@ class StrategyEngine:
                             "error": str(e)
                         }
                 else: # sell
+                    _prof_debug = ""
                     # v11.6.355: Comprehensive Sell Debug
                     pass # v11.6.544: Debug block moved below to prevent UnboundLocalError
                     # Sell mode (v11.1.51)
