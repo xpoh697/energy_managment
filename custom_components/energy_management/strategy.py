@@ -2679,7 +2679,8 @@ class StrategyEngine:
                         target_soc = base_target
                         decision_tag = f"{decision_tag} | {sell_diagnosis}"
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
-                        # v11.6.544: Comprehensive Sell Debug (Moved here for safety)
+                        
+                        # v11.6.555: Comprehensive Sell Debug (Corrected Integration)
                         _sell_debug.update({
                             "server_time": now.strftime("%H:%M:%S"),
                             "cur_hour": int(now.hour),
@@ -2688,7 +2689,8 @@ class StrategyEngine:
                             "base_target": round_f(base_target if 'base_target' in locals() else 0.0, 1),
                             "night_cons": round_f(night_cons_kwh if 'night_cons_kwh' in locals() else 0.0, 2),
                             "available_ac": round_f(available_sell_ac, 2),
-                            "sim_log": _sim_extract,
+                            "sim_log": "|".join([f"{h % 24}: {self._get_soc_from_log(sim_log_base, h, 0.0):.0f}%" for h in range(cur_hour, cur_hour + 12)]),
+                            "final_targets": str(target_hours_sorted),
                             "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
                             "f_tom": round_f(f_tom if 'f_tom' in locals() else 0.0, 1)
                         })
