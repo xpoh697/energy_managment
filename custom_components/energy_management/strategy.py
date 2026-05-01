@@ -2132,7 +2132,7 @@ class StrategyEngine:
                     night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
                     
                     # v11.6.547: Profile Diagnostic String
-                    _prof_debug = f"Keys:{len(avg_prof_cons or {})} Sum:{sum(float(normalize_float(v)) for v in (avg_prof_cons or {}).values()):.1f} Occ:{occ_coeff:.2f}"
+                    _prof_debug = f"Keys:{len(avg_prof_cons or {})} Sum:{sum(float(normalize_float(v)) for v in (avg_prof_cons or {}).values()):.1f} Occ:{occ_coeff:.2f} SurpDC:{early_surplus_dc:.1f}"
                     
                     # Global Discharge Floor: max(User_Limit, Survival_Target + Night_Consumption)
                     # v11.6.367: Calculated Target for end-of-sale
