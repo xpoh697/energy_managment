@@ -2086,9 +2086,11 @@ class StrategyEngine:
                         "server_time": now.strftime("%H:%M:%S"),
                         "cur_hour": int(now.hour),
                         "b_soc": round_f(b_soc, 1),
-                        "max_p": round_f(max_p, 2),
+                        "soc_at_start": round_f(soc_at_start if 'soc_at_start' in locals() else 0.0, 1),
+                        "base_target": round_f(base_target if 'base_target' in locals() else 0.0, 1),
+                        "available_ac": round_f(available_sell_ac if 'available_sell_ac' in locals() else 0.0, 2),
                         "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
-                        "f_tom": 0.0
+                        "f_tom": round_f(f_tom, 1)
                     })
                     # Sell mode (v11.1.51)
                     # Use existing Target SOC Sell as floor for AI selling
