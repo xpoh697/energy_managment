@@ -969,25 +969,24 @@ class StrategyEngine:
             # v11.6.154: Pure Discharge Logic.
             # If we are selling (cmd_p > 0), PV does NOT charge the battery.
             # It only covers the house load, and the rest goes to the grid (ignored here).
-            is_selling = bool(cmd_p > 0.01)
+            # v11.6.500: Unified Sign Convention
+            # cmd_p > 0: Forced Charge (Grid/Manual)
+            # cmd_p < 0: Forced Discharge (Export)
+            # Balance = (Solar - Load) + Grid_Command
+            _expected_gen_kw_sim = 0.0 if no_solar else expected_gen_kw
             
-            if no_battery_charge or is_selling or (no_battery_charge_until is not None and h_abs < no_battery_charge_until):
-                # PV only covers load, no battery charge from surplus
-                p_for_house = min(expected_gen_kw, expected_cons_kw)
-                rem_cons = expected_cons_kw - p_for_house
-                VERSION = "v11.6.499"
-                # v11.6.491: BUY mode sign correction
-                if not allow_discharge:
-                    total_net_kw = cmd_p
-                else:
-                    total_net_kw = -cmd_p - rem_cons
-            else:
-                # Normal mode: PV covers load and then charges battery
-                _expected_gen_kw_sim = 0.0 if no_solar else expected_gen_kw
-                if not allow_discharge:
-                    total_net_kw = _expected_gen_kw_sim + cmd_p
-                else:
-                    total_net_kw = _expected_gen_kw_sim - expected_cons_kw - cmd_p
+            # 1. House Load Balance (Solar covers load first)
+            p_for_house = min(_expected_gen_kw_sim, expected_cons_kw)
+            rem_gen = _expected_gen_kw_sim - p_for_house
+            rem_cons = expected_cons_kw - p_for_house
+            
+            # 2. Total Net Power for battery
+            # Positive = Flow INTO battery, Negative = Flow OUT of battery
+            total_net_kw = rem_gen - rem_cons + cmd_p
+            
+            # Safety: if allow_discharge=False, we can't have negative net (except natural loss)
+            if not allow_discharge and total_net_kw < -0.001:
+                total_net_kw = max(0.0, rem_gen + cmd_p) # Only solar/charge can go in
 
             
             if total_net_kw > 0.001: 
@@ -1942,17 +1941,17 @@ class StrategyEngine:
                         _neg_buy_curtail = set()
                         if is_neg_strategy:
                             _neg_buy_curtail = {h for h in target_hours_sorted if all_buy_prices.get(h, 0.0) < 0.0}
-                        # v11.6.385: IMPORTANT - Universal simulation engine subtracts commands (-cmd_p).
-                        # For BUY mode, we must pass NEGATIVE power to result in ADDITION (charge).
-                        charge_commands_inv = {k: -v for k, v in charge_commands.items()}
+                        # v11.6.500: Universal simulation engine now uses POSITIVE cmd_p for charge.
+                        # No need for inversion.
                         _, sim_log, _ = self.run_soc_simulation(
-                            b_soc, sim_range, now, charge_commands_inv,
+                            b_soc, sim_range, now, charge_commands,
                             no_battery_charge_until=_buy_sim_no_charge_until,
                             pv_curtail_hours=_neg_buy_curtail or None,
                             ignore_blended=(now.hour < 10),
                             no_solar=is_neg_strategy,
-                            allow_discharge=False # v11.6.412: In BUY mode, grid covers load
+                            allow_discharge=True
                         )
+                        # v11.6.412: In BUY mode, grid covers load
                         
                         # 1. Projected SOC at START of the first buy hour
                         # v11.6.264: Use the baseline calculated for the planning gap
@@ -2734,8 +2733,10 @@ class StrategyEngine:
                         else:
                             _strat_floors[h_sim] = base_target
 
+                    # v11.6.500: SELL commands must be NEGATIVE for discharge in simulation.
+                    sim_commands_neg = {k: -v for k, v in sim_commands.items()}
                     _, sim_log, _ = self.run_soc_simulation(
-                        b_soc, sim_range, now, sim_commands, 
+                        b_soc, sim_range, now, sim_commands_neg, 
                         b_min_soc=base_target,
                         no_battery_charge_until=_sell_sim_no_charge_until,
                         ignore_blended=True,
@@ -2839,8 +2840,10 @@ class StrategyEngine:
                         if best_buy_h is not None and best_buy_h < sim_end_h:
                             sim_commands_fix[int(best_buy_h)] = float(max_p)
                             
+                        # v11.6.500: SELL commands must be NEGATIVE for discharge.
+                        sim_commands_fix_neg = {k: -v for k, v in sim_commands_fix.items()}
                         _, sim_log, _ = self.run_soc_simulation(
-                            b_soc, sim_range, now, sim_commands_fix, 
+                            b_soc, sim_range, now, sim_commands_fix_neg, 
                             b_min_soc=base_target,
                             no_battery_charge_until=_sell_sim_no_charge_until,
                             ignore_blended=True,
@@ -3211,9 +3214,8 @@ class StrategyEngine:
                             p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                         
                     else:
-                        # v11.6.400: Target SOC is always the forecast at the end of the hour.
-                        # This gives the inverter a precise step-by-step instruction.
-                        h_target_buy = round_f(h_soc_sim, 1)
+                        # v11.6.500: Target SOC is the intent (base_target), Forecast is the result.
+                        h_target_buy = round_f(base_target, 1)
                         p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {h_target_buy}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                     
             res["planned_power_per_h"] = p_distribution
