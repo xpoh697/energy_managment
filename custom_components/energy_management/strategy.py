@@ -1038,11 +1038,15 @@ class StrategyEngine:
         if cached and (now - cached["time"]).total_seconds() < 30 and cached["time"].hour == now.hour:
             return cached["res"]
 
-        # v11.6.228: Global initialization
+        # v11.6.532: Full initialization restoration
         _b_soc_s, _b_cap_s, _ = man.get_battery_state()
         b_cap = float(_b_cap_s or 10.0)
         b_soc = float(_b_soc_s or 50.0)
         max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
+        
+        # Restore missing settings for SELL mode
+        deg_cost = float(man.get_setting(CONF_BATTERY_DEG_COST, 0.05))
+        prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
             "strategy_version": VERSION,
@@ -1056,6 +1060,8 @@ class StrategyEngine:
             "today_prices": {},
             "tomorrow_prices": {},
             "multi_cycle": "Не предвидится",
+            "deg_cost": deg_cost,
+            "profit_threshold": prof_thresh,
             "buy_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_at_end_pct": b_soc, "projected_soc_morning_pct": b_soc},
             "sell_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_after_sale_pct": b_soc, "projected_soc_morning_pct": b_soc},
             "arbitrage_decision": "Нет данных",
