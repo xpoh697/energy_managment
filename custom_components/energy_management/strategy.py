@@ -2126,7 +2126,7 @@ class StrategyEngine:
                     
                     # v11.6.547: Fallback to at least 4.0 kWh for night if profile is zero (Safety)
                     if night_cons_kwh < 0.1:
-                        night_cons_kwh = 4.0
+                        night_cons_kwh = 3.0
                         
                     night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
                     
@@ -3198,6 +3198,7 @@ class StrategyEngine:
                 _sell_debug["power_needed"] = round_f(power_needed, 3)
                 _sell_debug["final_state"] = res["state"]
                 _sell_debug["f_tom"] = round_f(f_tom, 1)
+                _sell_debug["night_prof"] = _prof_debug
                 res["arbitrage_sell_debug"] = _sell_debug
             
             res["recommended_power_kw"] = float(round_f(min(float(power_needed), max_p), 3))
