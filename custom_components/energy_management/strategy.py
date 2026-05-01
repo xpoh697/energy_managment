@@ -1021,8 +1021,16 @@ class StrategyEngine:
             # The simulation should show NATURAL discharge below the safety floor 
             # due to house load, not artificially 'stick' to it.
             
+            # v11.6.557: Midnight Deep Trace
+            if real_h == 23 or real_h == 0:
+                trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} Stp:{step_duration:.2f} C:{expected_cons_kw:.3f} G:{expected_gen_kw:.3f}"
+                _LOGGER.debug(f"[SimTrace] {trace_msg}")
+                # Store in manager for UI exposure
+                if not hasattr(man, "midnight_trace"): man.midnight_trace = []
+                man.midnight_trace.append(trace_msg)
+
             # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
-            real_h = h_abs % 24
+            real_h_log = h_abs % 24
             is_tom = (h_abs >= 24)
             log_key_str = f"{real_h:02d}:59" + (" (Завтра)" if is_tom else "")
             
@@ -2697,6 +2705,7 @@ class StrategyEngine:
                             "available_ac": round_f(available_sell_ac, 2),
                             "sim_log": "|".join([f"{h % 24}: {self._get_soc_from_log(sim_log_base, h, 0.0):.0f}%" for h in range(cur_hour, cur_hour + 12)]),
                             "final_targets": str(target_hours_sorted),
+                            "midnight_trace": "|".join(getattr(man, "midnight_trace", [])[-4:]),
                             "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
                             "f_tom": round_f(f_tom if 'f_tom' in locals() else 0.0, 1)
                         })
