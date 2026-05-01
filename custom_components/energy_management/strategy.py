@@ -860,6 +860,7 @@ class StrategyEngine:
         max_batt_p = float(max_batt_p_v) if max_batt_p_v is not None else 5.0
         man = self.manager
         all_prices = {}
+        history_log = {}
         try:
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -974,7 +975,7 @@ class StrategyEngine:
                 # PV only covers load, no battery charge from surplus
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
-                VERSION = "v11.6.497"
+                VERSION = "v11.6.499"
                 # v11.6.491: BUY mode sign correction
                 if not allow_discharge:
                     total_net_kw = cmd_p
@@ -1046,7 +1047,7 @@ class StrategyEngine:
         max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
 
         res = {
-            "strategy_version": VERSION,
+            "strategy_version": "v11.6.499",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -1388,7 +1389,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = VERSION
+                    res["strategy_version"] = "v11.6.499"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -2518,7 +2519,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # version: v11.6.497
+                    res["version"] = "v11.6.499"
                     max_batt_p = max_p
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
