@@ -2082,17 +2082,7 @@ class StrategyEngine:
                         }
                 else: # sell
                     # v11.6.355: Comprehensive Sell Debug
-                    _sell_debug.update({
-                        "server_time": now.strftime("%H:%M:%S"),
-                        "cur_hour": int(now.hour),
-                        "b_soc": round_f(b_soc, 1),
-                        "soc_at_start": round_f(soc_at_start if 'soc_at_start' in locals() else 0.0, 1),
-                        "base_target": round_f(base_target if 'base_target' in locals() else 0.0, 1),
-                        "night_cons": round_f(night_cons_kwh if 'night_cons_kwh' in locals() else 0.0, 2),
-                        "available_ac": round_f(available_sell_ac if 'available_sell_ac' in locals() else 0.0, 2),
-                        "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
-                        "f_tom": round_f(f_tom, 1)
-                    })
+                    pass # v11.6.544: Debug block moved below to prevent UnboundLocalError
                     # Sell mode (v11.1.51)
                     # Use existing Target SOC Sell as floor for AI selling
                     # v11.6.301: Restore missing variables after refactor
@@ -2654,6 +2644,18 @@ class StrategyEngine:
                         target_soc = base_target
                         decision_tag = f"{decision_tag} | {sell_diagnosis}"
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
+                        # v11.6.544: Comprehensive Sell Debug (Moved here for safety)
+                        _sell_debug.update({
+                            "server_time": now.strftime("%H:%M:%S"),
+                            "cur_hour": int(now.hour),
+                            "b_soc": round_f(b_soc, 1),
+                            "soc_at_start": round_f(soc_at_start if 'soc_at_start' in locals() else 0.0, 1),
+                            "base_target": round_f(base_target if 'base_target' in locals() else 0.0, 1),
+                            "night_cons": round_f(night_cons_kwh if 'night_cons_kwh' in locals() else 0.0, 2),
+                            "available_ac": round_f(available_sell_ac, 2),
+                            "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
+                            "f_tom": round_f(f_tom if 'f_tom' in locals() else 0.0, 1)
+                        })
                         
                     # --- v11.6.38: Energy Pooling (Round 108) ---
                     # Group hours into pools separated by SOLAR GENERATION.
