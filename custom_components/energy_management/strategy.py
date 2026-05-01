@@ -1388,7 +1388,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.6.499"
+                    res["strategy_version"] = "v11.6.505"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
@@ -1949,7 +1949,7 @@ class StrategyEngine:
                             pv_curtail_hours=_neg_buy_curtail or None,
                             ignore_blended=(now.hour < 10),
                             no_solar=is_neg_strategy,
-                            allow_discharge=True
+                            allow_discharge=False # v11.6.505: In BUY mode, grid covers load
                         )
                         # v11.6.412: In BUY mode, grid covers load
                         
