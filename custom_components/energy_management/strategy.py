@@ -1459,17 +1459,21 @@ class StrategyEngine:
                         for h_str, p_val in today_prices.items():
                             h_int = int(h_str)
                             if h_int < cur_hour: continue
+                            # v11.6.538: Filter by identified morning/evening peaks only
+                            if h_int not in tech_peaks_all: continue
+                            
                             norm_p = float(normalize_float(p_val))
                             ok_arb, _, _, _ = is_profitable(norm_p, h_int)
-                            # v11.3.54: Only consider if price meets limit OR it's a profitable arbitrage cycle. 
                             if norm_p >= sell_limit or ok_arb:
                                 peaks_candidates_all.append((h_int, norm_p))
                                 
                         for h_str, p_val in tomorrow_prices.items():
                             h_int = int(h_str) + 24
+                            # v11.6.538: Filter by peaks
+                            if h_int not in tech_peaks_all: continue
+                            
                             norm_p = float(normalize_float(p_val))
                             ok_arb, _, _, _ = is_profitable(norm_p, h_int)
-                            # v11.3.54
                             if norm_p >= sell_limit or ok_arb:
                                 peaks_candidates_all.append((h_int, norm_p))
                                 
