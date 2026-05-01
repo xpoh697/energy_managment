@@ -1,4 +1,5 @@
 import logging
+# MarketStrategy Version: v11.6.512
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -38,10 +39,6 @@ _get_kwh_val = get_kwh_val
 _normalize_float = normalize_float
 
 _LOGGER = logging.getLogger(__name__)
-
-
-
-# Market Strategy Engine v5.1 - Fixed NameError
 class StrategyEngine:
     """Mathematical engine for energy management strategies and simulations."""
     manager: 'EnergyProfileManager'
@@ -982,11 +979,14 @@ class StrategyEngine:
             
             # 2. Total Net Power for battery
             # Positive = Flow INTO battery, Negative = Flow OUT of battery
-            total_net_kw = rem_gen - rem_cons + cmd_p
-            
-            # Safety: if allow_discharge=False, we can't have negative net (except natural loss)
-            if not allow_discharge and total_net_kw < -0.001:
-                total_net_kw = max(0.0, rem_gen + cmd_p) # Only solar/charge can go in
+            # v11.6.512: In BUY mode (allow_discharge=False), house load is covered by grid bypass
+            # and does NOT drain the battery. We only subtract rem_cons if discharge is allowed.
+            if not allow_discharge:
+                # Battery only gets solar surplus or grid charge commands.
+                # House load (rem_cons) is ignored as it's grid-powered.
+                total_net_kw = rem_gen + cmd_p
+            else:
+                total_net_kw = rem_gen - rem_cons + cmd_p
 
             
             if total_net_kw > 0.001: 
