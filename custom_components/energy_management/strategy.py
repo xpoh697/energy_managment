@@ -1571,6 +1571,11 @@ class StrategyEngine:
                         better_peak_p = all_sell_prices.get(better_peak_h, 0.0) if better_peak_h else 0.0
                         is_better_ahead = bool(better_peak_h and better_peak_h > cur_hour and better_peak_p > cur_p_f + 0.05)
                         
+                        # v11.6.553: If we have physical surplus, we DON'T wait for better peaks. 
+                        # We sell NOW to make room for tomorrow's sun.
+                        if early_surplus_dc > 0.1:
+                            is_better_ahead = False
+                        
                         if cur_p_f >= sell_limit and cur_p_f > 0 and not is_better_ahead: status = "Продажа (Лимит)"
                         elif cur_gain >= threshold and cur_p_f > 0 and not is_better_ahead: status = "Продажа (Арбитраж)"
                         
