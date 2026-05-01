@@ -1428,7 +1428,7 @@ class StrategyEngine:
                                     
                             start_soc = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
                             sim_r = list(range(int(start_h) + 1, int(end_h)))
-                            if not sim_r: return False, "Слишком короткий период"
+                            if not sim_r: return True, "Ок (Кластер)"
                             
                             sim_s = now if start_h == cur_hour else now.replace(minute=0, second=0, microsecond=0)
                             _, log_d, _ = self.run_soc_simulation(start_soc, sim_r, sim_s, commands=None)
