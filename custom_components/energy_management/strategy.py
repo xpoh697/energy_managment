@@ -1046,7 +1046,7 @@ class StrategyEngine:
         max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
 
         res = {
-            "strategy_version": "v11.6.499",
+            "strategy_version": "v11.6.502",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -3214,8 +3214,9 @@ class StrategyEngine:
                             p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {round_f(h_target, 1)}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                         
                     else:
-                        # v11.6.500: Target SOC is the intent (base_target), Forecast is the result.
-                        h_target_buy = round_f(base_target, 1)
+                        # v11.6.502: Target SOC is the forecast at the end of the hour.
+                        # This gives the inverter a precise step-by-step instruction.
+                        h_target_buy = round_f(h_soc_sim, 1)
                         p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {h_target_buy}% | Прогноз: {round_f(h_soc_sim, 1)}%)"
                     
             res["planned_power_per_h"] = p_distribution
