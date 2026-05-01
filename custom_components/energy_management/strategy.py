@@ -1141,7 +1141,7 @@ class StrategyEngine:
             for h, p in tomorrow_prices.items(): all_prices[int(h) + 24] = float(normalize_float(p))
             cur_p_f = all_prices.get(cur_hour, 0.0)
                 
-            negative_hours = [int(h) for h, p in all_prices.items() if p < 0 and h >= cur_hour]
+            negative_hours = [int(h) for h, p in all_prices.items() if p <= 0 and h >= cur_hour] # v11.6.508: Greedy zero
 
             buy_limit = float(man.get_setting(CONF_PRICE_BUY_LIMIT, 2.0))
             sell_limit = float(man.get_setting(CONF_PRICE_SELL_LIMIT, 5.0))
@@ -1388,7 +1388,7 @@ class StrategyEngine:
                     res["state"] = "price_limit_not_met"
                     res["arbitrage_decision"] = "Нет ценового окна"
                 else:
-                    res["strategy_version"] = "v11.6.505"
+                    res["strategy_version"] = "v11.6.508"
                     dynamic_sell_ai = bool(man.get_setting(CONF_DYNAMIC_SOC_SELL, True))
                     if not dynamic_sell_ai:
                         # Use all hours meeting the limit
