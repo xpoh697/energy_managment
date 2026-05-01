@@ -2748,6 +2748,16 @@ class StrategyEngine:
                     rem_kwh_sell = available_sell_ac
                     
                     for i, epoch in enumerate(epochs):
+                        # v11.6.560: 5-Hour Peak Centering
+                        if len(epoch) > 5:
+                            p_hour = max(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0))
+                            p_idx = epoch.index(p_hour)
+                            start_idx = max(0, p_idx - 2)
+                            end_idx = min(len(epoch), start_idx + 5)
+                            if end_idx - start_idx < 5: # Shift back if at end
+                                start_idx = max(0, end_idx - 5)
+                            epoch = epoch[start_idx:end_idx]
+                            
                         epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
                         
                         if i > 0:
