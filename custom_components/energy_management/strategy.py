@@ -2755,17 +2755,8 @@ class StrategyEngine:
                     else:
                         target_soc = base_target
 
-                    # v11.4.06: Clean Arbitrage reporting (Sell mode)
-                    best_buy_p, best_buy_h = get_best_buyback(cur_hour)
-                    if best_buy_h is not None:
-                        pot_gain_val = cur_p_f * eff - best_buy_p - deg_cost
-                        global_arb_note = f"Купим в {self._format_h(best_buy_h)} по {best_buy_p:.2f} | Выгода {pot_gain_val:.2f}"
-                    else:
-                        global_arb_note = "Нет окна откупа"
-
-                    if man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
-                        res["arbitrage_decision"] = f"Продаем сейчас по {cur_p_f:.2f} | {global_arb_note}"
-                    else:
+                    # v11.6.541: Redundant reporting block removed to prevent overwriting correctly calculated status.
+                    if not man.get_setting(CONF_DYNAMIC_SOC_SELL, True):
                         res["arbitrage_decision"] = "Ручной режим (AI выкл.)"
                         
                     target_soc = float(min(100.0, target_soc))
