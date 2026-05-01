@@ -2549,9 +2549,13 @@ class StrategyEngine:
                     _h_walk = _h_end_sale
                     _night_sum = 0.0
                     while _h_walk < _h_sunrise_target:
-                        _night_sum += float(normalize_float(avg_prof_cons.get(str(_h_walk % 24), 0.0)))
+                        _night_sum += get_prof_val(avg_prof_cons, _h_walk % 24)
                         _h_walk += 1
-                    night_cons_kwh = _night_sum * occ_coeff
+                    
+                    # v11.6.547: Do NOT overwrite the robustly calculated night_cons_kwh from Step 1
+                    # unless this specific calculation yields a HIGHER (safer) value.
+                    _temp_night_kwh = _night_sum * occ_coeff
+                    night_cons_kwh = max(night_cons_kwh, _temp_night_kwh)
                     night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
                     
                     # v11.6.355: If tomorrow is sunny, don't reserve user_limit for the morning; 
