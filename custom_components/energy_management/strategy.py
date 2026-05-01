@@ -1044,8 +1044,8 @@ class StrategyEngine:
         b_soc = float(_b_soc_s or 50.0)
         max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
         
-        # Restore missing settings for SELL mode
-        deg_cost = float(man.get_setting(CONF_BATTERY_DEG_COST, 0.05))
+        # Restore missing settings for SELL mode (v11.6.533)
+        deg_cost = float(self.get_battery_degradation_cost())
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
