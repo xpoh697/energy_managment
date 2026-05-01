@@ -1021,10 +1021,10 @@ class StrategyEngine:
             # The simulation should show NATURAL discharge below the safety floor 
             # due to house load, not artificially 'stick' to it.
             
-            # v11.6.557: Midnight Deep Trace
+            # v11.6.558: Midnight Deep Trace (WARNING level for visibility)
             if real_h == 23 or real_h == 0:
                 trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} Stp:{step_duration:.2f} C:{expected_cons_kw:.3f} G:{expected_gen_kw:.3f}"
-                _LOGGER.debug(f"[SimTrace] {trace_msg}")
+                _LOGGER.warning(f"[SimTrace] {trace_msg}")
                 # Store in manager for UI exposure
                 if not hasattr(man, "midnight_trace"): man.midnight_trace = []
                 man.midnight_trace.append(trace_msg)
