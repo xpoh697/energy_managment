@@ -2778,6 +2778,10 @@ class StrategyEngine:
                                 current_surplus_dc = max(0.0, (b_soc - h_floor) * b_cap / 100.0)
                                 max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
                                 p_alloc = min(max_p, max_allowed_sell_ac / h_f)
+                                
+                                # v11.6.559: Physical Surplus Priority Override
+                                if b_soc > 95.0:
+                                    p_alloc = max_p
                             else:
                                 # For future hours, also respect the local hour-specific floor.
                                 # v11.6.84: Use a more generous simulation-aware cap for morning hours.
