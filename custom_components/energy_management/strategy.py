@@ -2694,21 +2694,7 @@ class StrategyEngine:
                         decision_tag = f"{decision_tag} | {sell_diagnosis}"
                         available_sell_ac = float(max(0.0, available_sell_dc * eff))
                         
-                        # v11.6.555: Comprehensive Sell Debug (Corrected Integration)
-                        _sell_debug.update({
-                            "server_time": now.strftime("%H:%M:%S"),
-                            "cur_hour": int(now.hour),
-                            "b_soc": round_f(b_soc, 1),
-                            "soc_at_start": round_f(soc_at_start if 'soc_at_start' in locals() else 0.0, 1),
-                            "base_target": round_f(base_target if 'base_target' in locals() else 0.0, 1),
-                            "night_cons": round_f(night_cons_kwh if 'night_cons_kwh' in locals() else 0.0, 2),
-                            "available_ac": round_f(available_sell_ac, 2),
-                            "sim_log": "|".join([f"{h % 24}: {self._get_soc_from_log(sim_log_base, h, 0.0):.0f}%" for h in range(cur_hour, cur_hour + 12)]),
-                            "final_targets": str(target_hours_sorted),
-                            "midnight_trace": "|".join(getattr(man, "midnight_trace", [])[-4:]),
-                            "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
-                            "f_tom": round_f(f_tom if 'f_tom' in locals() else 0.0, 1)
-                        })
+                        # v11.6.565: Diagnostic update moved to the end of the allocation block
                         
                     # --- v11.6.38: Energy Pooling (Round 108) ---
                     # Group hours into pools separated by SOLAR GENERATION.
@@ -2751,17 +2737,17 @@ class StrategyEngine:
                     rem_kwh_sell = available_sell_ac
                     
                     for i, epoch in enumerate(epochs):
-                        # v11.6.560: 5-Hour Peak Centering
+                        # v11.6.565: Mandatory 5-Hour Peak Centering
                         if len(epoch) > 5:
                             p_hour = max(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0))
                             p_idx = epoch.index(p_hour)
-                            start_idx = max(0, p_idx - 2)
-                            end_idx = min(len(epoch), start_idx + 5)
-                            if end_idx - start_idx < 5: # Shift back if at end
-                                start_idx = max(0, end_idx - 5)
-                            epoch = epoch[start_idx:end_idx]
-                            
-                        # Sort by price, but if battery is full (>95%), force current hour to the TOP
+                            # Center 2 hours before and 2 hours after
+                            s_idx = max(0, p_idx - 2)
+                            e_idx = min(len(epoch), s_idx + 5)
+                            if e_idx - s_idx < 5: s_idx = max(0, e_idx - 5)
+                            epoch = epoch[s_idx:e_idx]
+                        
+                        # Sort by price, but force current hour to top if battery is full
                         epoch_sorted = sorted(epoch, key=lambda hr: (999.0 if (hr == cur_hour and b_soc > 95.0) else all_sell_prices.get(hr, 0.0)), reverse=True)
                         
                         if i > 0:
@@ -2820,9 +2806,23 @@ class StrategyEngine:
                         if i == 0:
                             res["sell_alloc_debug"] = " | ".join(_alloc_trace)
                     
-                    # v11.6.83: Morning Floor Liberation is now integrated into the core distribution loop
-                    # via dynamic h_floor and expanded budget.
-
+                    # v11.6.565: Final Diagnostic Update (Moved here for accuracy)
+                    target_hours_sorted = sorted(list(set([h for h, p in sell_commands.items() if p > 0.05] + (epochs[0] if epochs else []))))
+                    _sell_debug.update({
+                        "server_time": now.strftime("%H:%M:%S"),
+                        "cur_hour": int(now.hour),
+                        "b_soc": round_f(b_soc, 1),
+                        "soc_at_start": round_f(soc_at_start if 'soc_at_start' in locals() else 0.0, 1),
+                        "base_target": round_f(base_target if 'base_target' in locals() else 0.0, 1),
+                        "night_cons": round_f(night_cons_kwh if 'night_cons_kwh' in locals() else 0.0, 2),
+                        "available_ac": round_f(available_sell_ac, 2),
+                        "sim_log": "|".join([f"{h % 24}: {self._get_soc_from_log(sim_log_base, h, 0.0):.0f}%" for h in range(cur_hour, cur_hour + 12)]),
+                        "final_targets": str(target_hours_sorted),
+                        "midnight_trace": "|".join(getattr(man, "midnight_trace", [])[-4:]),
+                        "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
+                        "f_tom": round_f(f_tom if 'f_tom' in locals() else 0.0, 1)
+                    })
+                    
                     power_needed = sell_commands.get(int(cur_hour), 0.0)
 
                     
