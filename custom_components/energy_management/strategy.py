@@ -974,7 +974,7 @@ class StrategyEngine:
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
                 # Battery net: discharge command PLUS remaining house needs
-                 "version": "v11.6.489": In BUY mode (allow_discharge=False), house load is covered by grid directly.
+                # version: v11.6.490: In BUY mode (allow_discharge=False), house load is covered by grid directly.
                 if not allow_discharge:
                     total_net_kw = cmd_p
                 else:
@@ -2519,7 +2519,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.489"
+                    # VERSION = "v11.6.490"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
