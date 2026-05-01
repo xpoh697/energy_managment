@@ -2766,7 +2766,9 @@ class StrategyEngine:
                                 _prev_h = h - 1
                                 _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
                                 if h_soc_s := self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc):
-                                     surplus_h_dc = max(0.0, (h_soc_s - h_floor) * b_cap / 100.0)
+                                     # v11.6.550: Use REAL state (soc_at_start) for the first epoch to override conservative simulation.
+                                     _eff_soc = max(h_soc_s, (soc_at_start - 5.0) if i == 0 else 0.0)
+                                     surplus_h_dc = max(0.0, (_eff_soc - h_floor) * b_cap / 100.0)
                                      p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
                                 # v11.6.330: Greedy Price Priority (Profit Max)
