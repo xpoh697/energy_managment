@@ -1255,6 +1255,9 @@ class StrategyEngine:
             max_gain_sell_now = -999.0
             for h_s, p_s in all_sell_prices.items():
                 if int(h_s) < cur_hour: continue
+                # v11.6.536: Sell price must be non-negative to be considered for arbitrage sell-now
+                if float(p_s) < 0: continue
+                
                 p_b, h_b = get_best_buyback(h_s)
                 if h_b is not None:
                     gain = float(float(p_s) * eff - float(p_b) - deg_cost)
@@ -1529,6 +1532,10 @@ class StrategyEngine:
                             target_hours = []
                             target_price = 0.0
                         else:
+                            # v11.6.536: Restore target_hours from safe_peaks
+                            target_hours = sorted([int(h) for h, p in safe_peaks])
+                            target_price = float(max([p for h, p in safe_peaks]))
+                            
                             # v11.3.46 Logic: 
                             # If we have distinct peak windows (e.g. 09:00 and 19:00), show last_recharge_reason.
                             # If we have a cluster (19,20), but something was skipped, show skipped reasons.
