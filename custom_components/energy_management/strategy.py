@@ -1563,12 +1563,18 @@ class StrategyEngine:
                         cur_gain = float(cur_p_f * eff - cheap_p_back - deg_cost)
                         
                         status = "Ожидание"
-                        if cur_p_f >= sell_limit: status = "Продажа (Лимит)"
-                        elif cur_gain >= threshold: status = "Продажа (Арбитраж)"
+                        # v11.6.540: Global Peak Protection. 
+                        # Don't sell now if there is a significantly better peak ahead.
+                        better_peak_h = best_arb_pair[0]
+                        better_peak_p = all_sell_prices.get(better_peak_h, 0.0) if better_peak_h else 0.0
+                        is_better_ahead = bool(better_peak_h and better_peak_h > cur_hour and better_peak_p > cur_p_f + 0.05)
+                        
+                        if cur_p_f >= sell_limit and cur_p_f > 0 and not is_better_ahead: status = "Продажа (Лимит)"
+                        elif cur_gain >= threshold and cur_p_f > 0 and not is_better_ahead: status = "Продажа (Арбитраж)"
                         
                         detail = f"Цена {cur_p_f:.2f}" if status == "Продажа (Лимит)" else f"Сейчас {cur_p_f:.2f}. {global_arb_note}"
-                        if best_arb_pair[0] is not None and best_arb_pair[0] > cur_hour and all_sell_prices.get(best_arb_pair[0], 0) > cur_p_f + 0.01:
-                             detail += f" | Ждем главного пика в {self._format_h(best_arb_pair[0])}"
+                        if is_better_ahead:
+                             detail += f" | Ждем главного пика в {self._format_h(better_peak_h)} (по {better_peak_p:.2f})"
                         
                         res["arbitrage_decision"] = f"{status}: {detail}"
 
