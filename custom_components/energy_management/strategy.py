@@ -1451,6 +1451,10 @@ class StrategyEngine:
                         peaks_candidates_all = []
                         all_h_possible = sorted(list(set(list(today_prices.keys()) + list(tomorrow_prices.keys()))), key=lambda x: int(x))
                         
+                        # v11.6.547: Early Surplus Detection for candidate validation
+                        # We use a simple conservative estimate: (Current SOC - User Limit)
+                        early_surplus_dc = max(0.0, (b_soc - float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))) * b_cap / 100.0)
+
                         # Get technical peaks for comparison
                         tech_peaks_today = [int(h) for h, p in get_peaks(today_morn, True, sell_limit) + get_peaks(today_eve, True, sell_limit)]
                         tech_peaks_tom = [int(h) + 24 for h, p in get_peaks(tom_morn, True, sell_limit) + get_peaks(tom_eve, True, sell_limit)]
@@ -1497,7 +1501,7 @@ class StrategyEngine:
                             if curr_p < best_future_p:
                                 best_future_h = next(fp[0] for fp in future_peaks if fp[1] == best_future_p)
                                 cr, reason = _can_recharge_between(curr_h, best_future_h, curr_p, best_future_p)
-                                if curr_p >= sell_limit: cr = True # v11.3.97: Respect User Limit
+                                if curr_p >= sell_limit or (early_surplus_dc > 0.1): cr = True # v11.6.547: Respect Surplus
                                 if cr:
                                     if is_tech_peak:
                                         safe_peaks.append((curr_h, curr_p))
@@ -2111,11 +2115,19 @@ class StrategyEngine:
                     # 2. User Discharge Limit (Static user setting)
                     user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
                     
-                    # 3. House Survival Reserve (consumption from end of potential sale until sunrise)
-                    # Window starts from the end of the current or last sale peak
+                    # v11.6.547: Robust profile retrieval (try both str and int keys)
+                    def get_prof_val(p, h):
+                        return float(normalize_float(p.get(str(h), p.get(int(h), 0.0))))
+                    
                     _h_end_est = 21 
                     _h_sunrise_target = sunrise_h - 1
-                    night_cons_kwh = sum(float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) for h in range(_h_end_est, _h_sunrise_target + 24 if _h_sunrise_target < _h_end_est else _h_sunrise_target)) * occ_coeff
+                    _n_range = range(_h_end_est, _h_sunrise_target + 24 if _h_sunrise_target < _h_end_est else _h_sunrise_target)
+                    night_cons_kwh = sum(get_prof_val(avg_prof_cons, h % 24) for h in _n_range) * occ_coeff
+                    
+                    # v11.6.547: Fallback to at least 4.0 kWh for night if profile is zero (Safety)
+                    if night_cons_kwh < 0.1:
+                        night_cons_kwh = 4.0
+                        
                     night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
                     
                     # Global Discharge Floor: max(User_Limit, Survival_Target + Night_Consumption)
@@ -2388,13 +2400,17 @@ class StrategyEngine:
                         work_deficit_tomorrow, total_solar_to_sunrise, b_cap, eff
                     )
                     
-                    # 1. Projected SOC at START of the first peak (v11.3.20: Early detection)
+                    # 1. Projected SOC at START of the first peak
+                    # v11.6.547: If sale starts within 2 hours, anchor to current SOC to avoid simulation noise
                     soc_at_start = b_soc
                     first_h_sell = min(t for t in target_hours_sorted if t >= cur_hour) if target_hours_sorted else None
-                    if first_h_sell is not None and first_h_sell > cur_hour:
-                        prev_h = first_h_sell - 1
-                        key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                        soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
+                    if first_h_sell is not None:
+                        if first_h_sell <= cur_hour + 1:
+                            soc_at_start = b_soc
+                        else:
+                            prev_h = first_h_sell - 1
+                            key_start = f"{prev_h % 24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                            soc_at_start = self._get_soc_from_log(sim_log_base, key_start, b_soc) or b_soc
                     else:
                         soc_at_start = b_soc
                     
