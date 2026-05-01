@@ -2524,7 +2524,13 @@ class StrategyEngine:
                     # To have 18% in the morning, we MUST stop selling when we reach 18% + Night_Load.
                     # Otherwise, the house will drain the battery to 0% by dawn.
                     _h_end_sale = max(target_hours_sorted) if target_hours_sorted else cur_hour
-                    night_cons_kwh = sum(float(normalize_float(avg_prof_cons.get(str(h % 24), 0.0))) for h in range(_h_end_sale, _h_sunrise_target)) * occ_coeff
+                    # v11.6.545: Robust hour walking to handle midnight rollover for night consumption
+                    _h_walk = _h_end_sale
+                    _night_sum = 0.0
+                    while _h_walk < _h_sunrise_target:
+                        _night_sum += float(normalize_float(avg_prof_cons.get(str(_h_walk % 24), 0.0)))
+                        _h_walk += 1
+                    night_cons_kwh = _night_sum * occ_coeff
                     night_cons_pct = (night_cons_kwh * 100.0 / b_cap) if b_cap > 1.0 else 0.0
                     
                     # v11.6.355: If tomorrow is sunny, don't reserve user_limit for the morning; 
