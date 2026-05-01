@@ -1,5 +1,5 @@
 import logging
-# MarketStrategy Version: v11.6.526
+# MarketStrategy Version: v11.6.527
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -1139,6 +1139,19 @@ class StrategyEngine:
             all_prices = {}
             for h, p in today_prices.items(): all_prices[int(h)] = float(normalize_float(p))
             for h, p in tomorrow_prices.items(): all_prices[int(h) + 24] = float(normalize_float(p))
+            
+            # v11.6.527: Absolute Entry-Level Cycle Isolation for BUY mode.
+            # If we are buying, we MUST NOT even know about tomorrow if there's a night gap.
+            if mode == "buy":
+                _sorted_h = sorted(all_prices.keys())
+                _final_all = {}
+                for h in _sorted_h:
+                    if h < cur_hour: continue
+                    if _final_all and (h - max(_final_all.keys()) > 12):
+                        break # Night gap detected, ignore everything after
+                    _final_all[h] = all_prices[h]
+                all_prices = _final_all
+
             cur_p_f = all_prices.get(cur_hour, 0.0)
                 
             negative_hours = [int(h) for h, p in all_prices.items() if p <= 0 and h >= cur_hour] # v11.6.508: Greedy zero
