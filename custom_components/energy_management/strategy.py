@@ -811,7 +811,7 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else default
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True):
+    def run_soc_simulation(self, start_soc, sim_range, start_time, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -855,8 +855,9 @@ class StrategyEngine:
         # v11.6.57: ignore_blended allows skipping the last_blended_coeff (which can be <0.2 in the morning)
         blended_coeff = 1.0 if ignore_blended else float(getattr(man, "last_blended_coeff", 1.0))
         eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
-        fraction_left_h1 = float(1.0 - (now.minute / 60.0))
+        fraction_left_h1 = float(1.0 - (start_time.minute / 60.0))
         max_batt_p_v = man.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
+        max_batt_p = float(max_batt_p_v) if max_batt_p_v is not None else 5.0
         man = self.manager
         all_prices = {}
         try:
@@ -2516,7 +2517,8 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.491"
+                    # VERSION = "v11.6.494"
+                    max_batt_p = max_p
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
