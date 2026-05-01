@@ -857,30 +857,18 @@ class StrategyEngine:
         eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
         fraction_left_h1 = float(1.0 - (now.minute / 60.0))
         max_batt_p_v = man.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
-        max_batt_p = float(max_batt_p_v) if max_batt_p_v is not None else 5.0
-
-        sim_consumed_today = {str(s_id): float(man.daily_deduct_consumption.get(str(s_id), 0.0)) 
-                             for s_id in man.deduct_settings}
-        sim_consumed_tom = {str(s_id): 0.0 for s_id in man.deduct_settings}
-
-        dist_today = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
-        dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, (now + timedelta(days=1)).strftime("%Y-%m-%d"))
-
-
-        simulated_soc = float(start_soc)
-        overflow_kwh = 0.0
-        
-        # v11.6.488: Pre-load prices to support dynamic solar blocking
         man = self.manager
         all_prices = {}
         try:
-            today_str = now.strftime("%Y-%m-%d")
-            tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+            today_str = start_time.strftime("%Y-%m-%d")
+            tomorrow_str = (start_time + timedelta(days=1)).strftime("%Y-%m-%d")
             p_buy = dict(man.data.get("prices_buy", {}))
             for h, p in p_buy.get(today_str, {}).items(): all_prices[int(h)] = float(normalize_float(p))
             for h, p in p_buy.get(tomorrow_str, {}).items(): all_prices[int(h) + 24] = float(normalize_float(p))
         except Exception:
             pass
+
+        simulated_soc = float(start_soc)
         overflow_kwh = 0.0
         for i, h_abs in enumerate(sim_range):
             real_h = int(h_abs % 24)
@@ -954,7 +942,7 @@ class StrategyEngine:
                 # v11.1.15 - Blended Solar Anchor: Same logic as load to prevent sawtooth
                 real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
                 if real_gen_kw > 0.01:
-                    anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
+                    anchor_weight = max(0.0, min(1.0, (start_time.minute / 60.0)))
                     expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
 
             # v11.4.49: Idle/losses correction — add BEFORE net computation.
@@ -986,7 +974,7 @@ class StrategyEngine:
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
                 # Battery net: discharge command PLUS remaining house needs
-                 "version": "v11.6.488": In BUY mode (allow_discharge=False), house load is covered by grid directly.
+                 "version": "v11.6.489": In BUY mode (allow_discharge=False), house load is covered by grid directly.
                 if not allow_discharge:
                     total_net_kw = cmd_p
                 else:
@@ -2531,7 +2519,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.488"
+                    # VERSION = "v11.6.489"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
