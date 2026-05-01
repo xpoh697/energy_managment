@@ -868,7 +868,19 @@ class StrategyEngine:
 
 
         simulated_soc = float(start_soc)
-        history_log = {}
+        overflow_kwh = 0.0
+        
+        # v11.6.488: Pre-load prices to support dynamic solar blocking
+        man = self.manager
+        all_prices = {}
+        try:
+            today_str = now.strftime("%Y-%m-%d")
+            tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+            p_buy = dict(man.data.get("prices_buy", {}))
+            for h, p in p_buy.get(today_str, {}).items(): all_prices[int(h)] = float(normalize_float(p))
+            for h, p in p_buy.get(tomorrow_str, {}).items(): all_prices[int(h) + 24] = float(normalize_float(p))
+        except Exception:
+            pass
         overflow_kwh = 0.0
         for i, h_abs in enumerate(sim_range):
             real_h = int(h_abs % 24)
@@ -974,7 +986,7 @@ class StrategyEngine:
                 p_for_house = min(expected_gen_kw, expected_cons_kw)
                 rem_cons = expected_cons_kw - p_for_house
                 # Battery net: discharge command PLUS remaining house needs
-                # "version": "v11.6.487": In BUY mode (allow_discharge=False), house load is covered by grid directly.
+                 "version": "v11.6.488": In BUY mode (allow_discharge=False), house load is covered by grid directly.
                 if not allow_discharge:
                     total_net_kw = cmd_p
                 else:
@@ -2519,7 +2531,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.487"
+                    # VERSION = "v11.6.488"
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
                     # Update base_target for diagnostics
