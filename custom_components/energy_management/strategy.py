@@ -2631,7 +2631,8 @@ class StrategyEngine:
                     # v11.6.167 / v11.6.169: Clean human-readable status construction
                     res["arbitrage_sell_limit_reason"] = f"{sell_diagnosis}"
                     # Detailed debug is moved to internal attributes
-                    res["_debug_limit_info"] = f"M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% (Sunrise:{natural_soc_at_sunrise:.1f}%)"
+                    _sim_extract = "|".join([f"{h % 24}: {self._get_soc_from_log(sim_log_base, f'{h % 24:02d}:59', 0.0):.0f}%" for h in range(cur_hour, cur_hour + 12)])
+                    res["_debug_limit_info"] = f"M:{surplus_for_morning:.1f} U:{surplus_for_user_limit:.1f} P:{physical_limit_dc:.1f} S:{soc_at_start:.1f}% | Sim:{_sim_extract}"
                     res["_debug_passes"] = _pass_log if '_pass_log' in locals() else ""
                     # res["power_decision"] = (f"Распределение на {num_peaks_left:.1f}ч{_lib_tag}" if num_peaks_left > 1.1 else f"{sell_diagnosis}{_lib_tag}") # v11.6.161: Moved to end
                     
@@ -2687,6 +2688,7 @@ class StrategyEngine:
                             "base_target": round_f(base_target if 'base_target' in locals() else 0.0, 1),
                             "night_cons": round_f(night_cons_kwh if 'night_cons_kwh' in locals() else 0.0, 2),
                             "available_ac": round_f(available_sell_ac, 2),
+                            "sim_log": _sim_extract,
                             "f_today": round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1),
                             "f_tom": round_f(f_tom if 'f_tom' in locals() else 0.0, 1)
                         })
