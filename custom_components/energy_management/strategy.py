@@ -1,5 +1,5 @@
 import logging
-# MarketStrategy Version: v11.6.524
+# MarketStrategy Version: v11.6.526
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -1550,14 +1550,21 @@ class StrategyEngine:
             if target_hours:
                 truncated = [target_hours[0]]
                 for i in range(1, len(target_hours)):
-                    # v11.3.4: If we have a double-cycle opportunity, allow large gaps between cycles.
-                    # Otherwise, only plan for the immediate block of peaks (standard behavior).
-                    # v11.6.525: Strict Cycle Isolation. If gap > 12h, we ignore future windows
-                    # until the current cycle (today) is complete.
-                    if (target_hours[i] - target_hours[i-1] <= 12) or can_recharge:
-                        truncated.append(target_hours[i])
+                    # v11.6.526: NUCLEAR Cycle Isolation. 
+                    # If mode is BUY, we NEVER look past a 12h gap (night).
+                    # We don't care if we can recharge or not - we focus ONLY on the current window.
+                    _gap = target_hours[i] - target_hours[i-1]
+                    if mode == "buy":
+                        if _gap <= 12:
+                            truncated.append(target_hours[i])
+                        else:
+                            break # STRICT BREAK for buy mode
                     else:
-                        break
+                        # For SELL mode, we keep the original 'can_recharge' logic
+                        if (_gap <= 12) or can_recharge:
+                            truncated.append(target_hours[i])
+                        else:
+                            break
                 target_hours = truncated
 
             # Survival Logic
