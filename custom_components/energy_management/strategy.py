@@ -1,4 +1,5 @@
 import logging
+# MarketStrategy Version: v11.6.530
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -3274,8 +3275,11 @@ class StrategyEngine:
                         p_distribution[h_label] = f"{round_f(p_val, 2)} kW (Цель: {h_target_buy}% | Прогноз: {sim_target_h}%)"
                         
                         if h_idx == cur_hour:
-                            # Force the active command to match the plan
-                            res["recommended_power_kw"] = float(round_f(p_val, 2))
+                            # v11.6.530: Force active power and calculate Amps
+                            _p_final = float(round_f(p_val, 2))
+                            res["recommended_power_kw"] = _p_final
+                            # v11.6.530: Precise Amps calculation for hardware (Power * 1000 / Voltage)
+                            res["recommended_amps"] = round(_p_final * 1000 / 51.2, 1)
                     
             res["planned_power_per_h"] = p_distribution
             
