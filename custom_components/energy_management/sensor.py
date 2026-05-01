@@ -67,7 +67,7 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-STORAGE_VERSION = 1
+STORAGE_VERSION = "v11.6.495"
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the sensor platform."""
@@ -1830,7 +1830,7 @@ class EnergyProfileManager:
 
         # Not enough data to distinguish — return 1.0
         if home_count < 5 or away_count < 3:
-            return 1.0, home_count, away_count, current_occ, active_sensors, 0.0, 0.0
+            return 1.0, home_count, away_count, current_occ, active_sensors, avg_home, avg_away
 
         avg_home = home_total / home_count
         avg_away = away_total / away_count
@@ -2197,9 +2197,9 @@ class EnergyProfileManager:
         """Analyze current day state and return permissions for heavy loads."""
         return self.strategy_engine.get_budget_and_permissions(days_for_profile, skip_strategy_check)
 
-    def run_soc_simulation(self, start_soc, sim_hours_abs, start_time=None, commands=None, **kwargs):
+    def run_soc_simulation(self, start_soc, sim_hours_abs, now=None, commands=None, **kwargs):
         """Universal SOC simulation engine."""
-        now = start_time or dt_util.now()
+        now = now or dt_util.now()
         return self.strategy_engine.run_soc_simulation(start_soc, sim_hours_abs, now, commands, **kwargs)
 
     def _update_bms_learned_profile(self, now):
@@ -3419,7 +3419,7 @@ class MarketStrategySensor(SensorEntity):
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
         attrs = {
-            "strategy_version": res.get("strategy_version", VERSION),
+            "strategy_version": "v11.6.495",
             "strategy_candidates": res.get("strategy_candidates", []),
             "deg_cost": res.get("deg_cost", 0.0),
             "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),

@@ -489,7 +489,7 @@ class StrategyEngine:
             sim_res_soc, sim_log, overflow_kwh = self.run_soc_simulation(
                 start_soc=b_soc_f,
                 sim_range=sim_range,
-                start_time=now,
+                now=now,
                 b_min_soc=0.0, # Budget calc needs natural discharge
                 house_profile_override="consumption_base"
             )
@@ -811,7 +811,7 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else default
 
-    def run_soc_simulation(self, start_soc, sim_range, start_time, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -855,14 +855,14 @@ class StrategyEngine:
         # v11.6.57: ignore_blended allows skipping the last_blended_coeff (which can be <0.2 in the morning)
         blended_coeff = 1.0 if ignore_blended else float(getattr(man, "last_blended_coeff", 1.0))
         eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
-        fraction_left_h1 = float(1.0 - (start_time.minute / 60.0))
+        fraction_left_h1 = float(1.0 - (now.minute / 60.0))
         max_batt_p_v = man.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
         max_batt_p = float(max_batt_p_v) if max_batt_p_v is not None else 5.0
         man = self.manager
         all_prices = {}
         try:
-            today_str = start_time.strftime("%Y-%m-%d")
-            tomorrow_str = (start_time + timedelta(days=1)).strftime("%Y-%m-%d")
+            today_str = now.strftime("%Y-%m-%d")
+            tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
             p_buy = dict(man.data.get("prices_buy", {}))
             for h, p in p_buy.get(today_str, {}).items(): all_prices[int(h)] = float(normalize_float(p))
             for h, p in p_buy.get(tomorrow_str, {}).items(): all_prices[int(h) + 24] = float(normalize_float(p))
@@ -943,7 +943,7 @@ class StrategyEngine:
                 # v11.1.15 - Blended Solar Anchor: Same logic as load to prevent sawtooth
                 real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
                 if real_gen_kw > 0.01:
-                    anchor_weight = max(0.0, min(1.0, (start_time.minute / 60.0)))
+                    anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
                     expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
 
             # v11.4.49: Idle/losses correction — add BEFORE net computation.
@@ -2517,7 +2517,7 @@ class StrategyEngine:
                     available_sell_dc = min(surplus_for_morning, surplus_for_user_limit, physical_limit_dc)
                     available_sell_dc = max(0.0, available_sell_dc)
                     
-                    # VERSION = "v11.6.494"
+                    "version": "v11.6.496"
                     max_batt_p = max_p
                     _morning_lib_surplus_dc = max(0.0, surplus_for_user_limit - surplus_for_morning)
 
