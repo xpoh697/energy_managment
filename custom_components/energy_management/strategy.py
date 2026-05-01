@@ -1382,21 +1382,6 @@ class StrategyEngine:
                             res["arbitrage_decision"] = f"Покупаем сейчас по {cur_p_f:.2f} | Нет выгодной цели продажи"
             else: # sell
                 res["limit_used"] = sell_limit
-                if negative_hours and cur_hour in negative_hours:
-                    res["state"] = "price_limit_not_met"
-                    res["arbitrage_decision"] = "Отрицательная цена"
-                    # v11.6.534: Fill candidates even in early exit to avoid 'Empty Strategy' UI confusion
-                    res["strategy_candidates"] = [f"{h%24:02d}:00" for h in sorted(list(all_sell_prices.keys())) if all_sell_prices[h] >= sell_limit]
-                    self._calculating_strategy = old_calc
-                    
-                    # v11.6.482: Diagnostics restored for early exit
-                    _raw_base = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
-                    _all_sets = {k: v for k, v in man.settings.items() if "charge" in k or "soc" in k or "limit" in k}
-                    res["buy_debug"] = (
-                        f"Причина: {res.get('charge_reason', 'manual')} | База: {base_target:.1f} (Raw: {_raw_base:.1f}) | "
-                        f"Sets: {_all_sets} | Цена: {float(normalize_float(all_prices.get(cur_hour, 0.0))):.2f}"
-                    )
-                    return res
                 
                 def is_profitable(price, hour):
                     cheap_p_back, cheap_h = get_best_buyback(hour)
