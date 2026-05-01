@@ -489,7 +489,7 @@ class StrategyEngine:
             sim_res_soc, sim_log, overflow_kwh = self.run_soc_simulation(
                 start_soc=b_soc_f,
                 sim_range=sim_range,
-                now=now,
+                start_time=now,
                 b_min_soc=0.0, # Budget calc needs natural discharge
                 house_profile_override="consumption_base"
             )
