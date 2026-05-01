@@ -2128,8 +2128,11 @@ class EnergyProfileManager:
         # v11.3.2: Capture Power/SOC/Amps anchor at the start of the hour or mode entry
         now = dt_util.now()
         cur_hour = now.hour
-        # v11.6.518: Allow anchoring for both active and preparing states to ensure stable Target SOC floor
-        is_active = res.get("state") in ["active", "preparing_arbitrage"]
+        # v11.6.520: Broad Anchor Permission.
+        # We allow anchoring whenever there is a strategic reason (charge_reason), 
+        # even if the state is 'standard' or 'price_limit_not_met'.
+        # This prevents Target SOC from dropping to 0 in the UI/Inverter.
+        is_active = res.get("state") in ["active", "preparing_arbitrage"] or res.get("charge_reason", "none") != "none"
         
         # Unified key for the current hour and mode
         hour_key = f"{cur_hour}_{mode}"
