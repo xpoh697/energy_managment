@@ -1,5 +1,5 @@
 import logging
-# MarketStrategy Version: v11.6.518
+# MarketStrategy Version: v11.6.519
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
