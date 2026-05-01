@@ -2761,7 +2761,8 @@ class StrategyEngine:
                                 start_idx = max(0, end_idx - 5)
                             epoch = epoch[start_idx:end_idx]
                             
-                        epoch_sorted = sorted(epoch, key=lambda hr: all_sell_prices.get(hr, 0.0), reverse=True)
+                        # Sort by price, but if battery is full (>95%), force current hour to the TOP
+                        epoch_sorted = sorted(epoch, key=lambda hr: (999.0 if (hr == cur_hour and b_soc > 95.0) else all_sell_prices.get(hr, 0.0)), reverse=True)
                         
                         if i > 0:
                             sim_hours = list(range(max(epochs[i-1]) + 1, min(epoch)))
