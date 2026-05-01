@@ -2741,6 +2741,7 @@ class StrategyEngine:
                             _actual_bonus_dc = (capped_bonus_soc * b_cap / 100.0) if has_morning_sale else 0.0
                             rem_bonus_ac = float(min(_morning_lib_surplus_dc, _actual_bonus_dc) * eff)
                             
+                        _alloc_trace = []
                         for h in epoch_sorted:
                             h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
                             p_alloc = max_p
@@ -2760,9 +2761,6 @@ class StrategyEngine:
                                 # For future hours, also respect the local hour-specific floor.
                                 # v11.6.84: Use a more generous simulation-aware cap for morning hours.
                                 p_alloc = max_p
-                                # v11.6.110: Fix key format: log stores "HH:59", not "HH:00".
-                                # Use end-of-previous-hour SOC to represent the SOC entering this hour.
-                                # v11.6.111: Key in history_log uses ' (Завтра)' for h >= 24.
                                 _prev_h = h - 1
                                 _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
                                 if h_soc_s := self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc):
@@ -2772,13 +2770,16 @@ class StrategyEngine:
                                      p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
                                 
                                 # v11.6.330: Greedy Price Priority (Profit Max)
-                                # We fill the best hours with MAX power first.
                                 actual_power = min(p_alloc, (rem_base_ac + rem_bonus_ac) / h_f)
+                                
+                                _alloc_trace.append(f"{h}:{actual_power:.1f}kW(B:{rem_base_ac:.1f}/P:{p_alloc:.1f})")
                                 
                                 if actual_power > 0.01:
                                     sell_commands[int(h)] = round_f(actual_power, 3)
-                                    # Reduce budget by what we actually PLANNED to discharge
                                     rem_base_ac = max(0.0, rem_base_ac - (actual_power * h_f))
+                        
+                        if i == 0:
+                            res["sell_alloc_debug"] = " | ".join(_alloc_trace)
                     
                     # v11.6.83: Morning Floor Liberation is now integrated into the core distribution loop
                     # via dynamic h_floor and expanded budget.
