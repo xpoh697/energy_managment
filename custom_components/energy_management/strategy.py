@@ -1493,7 +1493,7 @@ class StrategyEngine:
                             future_peaks = peaks_candidates_all[i+1:]
                             
                             if not future_peaks:
-                                if is_tech_peak:
+                                if is_tech_peak or (early_surplus_dc > 0.1):
                                     safe_peaks.append((curr_h, curr_p))
                                 continue
                                 
@@ -1503,20 +1503,17 @@ class StrategyEngine:
                                 cr, reason = _can_recharge_between(curr_h, best_future_h, curr_p, best_future_p)
                                 if curr_p >= sell_limit or (early_surplus_dc > 0.1): cr = True # v11.6.547: Respect Surplus
                                 if cr:
-                                    if is_tech_peak:
+                                    if is_tech_peak or (early_surplus_dc > 0.1):
                                         safe_peaks.append((curr_h, curr_p))
                                         last_recharge_reason = reason
-                                    # v11.3.47: Remove 'skipped' noise for non-peaks
                                 else:
-                                    # v11.3.42+44: Report skipped due to recharge deficiency
                                     if is_tech_peak:
                                         short_reason = reason.replace("Неблагоприятно", "Нет усл.").replace("Благоприятно", "Ок")
                                         skipped_reasons.append(f"{curr_h%24:02d}:00 ({short_reason})")
                             else:
                                 # Primary peak (no higher future peak)
-                                if is_tech_peak:
+                                if is_tech_peak or (early_surplus_dc > 0.1):
                                     safe_peaks.append((curr_h, curr_p))
-                                # v11.3.47: No more 'Below peak' reporting to keep status clean
                                     
                         # v11.3.46: Final reporting and diagnostic data
                         def format_skipped(reasons):
