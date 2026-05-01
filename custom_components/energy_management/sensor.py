@@ -2128,7 +2128,8 @@ class EnergyProfileManager:
         # v11.3.2: Capture Power/SOC/Amps anchor at the start of the hour or mode entry
         now = dt_util.now()
         cur_hour = now.hour
-        is_active = res.get("state") == "active"
+        # v11.6.518: Allow anchoring for both active and preparing states to ensure stable Target SOC floor
+        is_active = res.get("state") in ["active", "preparing_arbitrage"]
         
         # Unified key for the current hour and mode
         hour_key = f"{cur_hour}_{mode}"
