@@ -2743,7 +2743,10 @@ class StrategyEngine:
                     # v11.6.180: Define the first pool for UI display filtering
                     if epochs:
                         res["first_pool_hours"] = epochs[0]
-                        
+                    
+                    # v11.6.561: Raw Epochs Debug
+                    res["sell_debug"]["raw_epochs"] = str(epochs)
+                    
                     sell_commands = {int(h): 0.0 for h in sell_pool}
                     rem_kwh_sell = available_sell_ac
                     
