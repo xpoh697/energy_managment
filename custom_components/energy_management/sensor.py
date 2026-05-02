@@ -3064,43 +3064,39 @@ class InverterOperationModeSensor(SensorEntity):
             # v11.6.32 - Priority 1: Buying (Strictly restricted to active AI strategy)
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ"
-        elif is_buying_active and is_forecast:
-            mode = "buy"
-            reason = "Активна стратегия ПОКУПКИ (Прогноз)"
         
+        elif batt_soc <= min_soc:
+            # v11.6.567 - Priority 2: Emergency SOC management (Survival First)
+            if has_surplus:
+                if cur_price is not None and cur_price < price_stop_sell:
+                    mode = "stop_sale"
+                    reason = f"Добор солнца без экспорта (Цена {cur_price or 0.0:.2f} < {price_stop_sell})"
+                else:
+                    mode = "sale_pv"
+                    reason = f"Добор солнца в АКБ (limit: {min_soc}%)"
+            else:
+                mode = "bat_emergency"
+                reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
+
         elif is_waiting_for_neg:
-            # v11.6.22 - Priority 2: Wait for negative price (Elevated over Emergency SOC)
-            # Evaluate if we can sell PV profitably instead of just waiting
+            # v11.6.567 - Priority 3: Wait for negative price
+            # We ONLY wait if there's actually something to wait for (solar presence or daytime)
             can_sell_pv = False
             if cur_price is not None and cur_price >= price_sell_only_pv and has_surplus:
-                # v11.6.370: If waiting for negative price today, we prioritize PV sale regardless of tomorrow's deficit.
-                # The negative price window will recharge the battery anyway.
                 if is_before_limit_hour and cur_price > 0:
                     can_sell_pv = True
             
             if can_sell_pv:
                 mode = "sale_pv_no_bat"
                 reason = f"Продажа только солнца: Цена ({cur_price:.2f}) >= Порога ({price_sell_only_pv:.2f}) (Ожидаем отриц. цену)"
-            else:
+            elif has_surplus:
                 mode = "no_pv_sale_no_bat"
                 neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
                 reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
-
-        elif batt_soc <= min_soc:
-            # v11.6.7 - Priority 3: Emergency SOC management
-            if has_surplus:
-                if cur_price is not None and cur_price < price_stop_sell:
-                    # Battery low + Cheap price: stop_sale allows charge but blocks unprofitable export
-                    mode = "stop_sale"
-                    reason = f"Добор солнца без экспорта (Цена {cur_price or 0.0:.2f} < {price_stop_sell})"
-                else:
-                    # Battery low + Good price: sale_pv allows charge and exports excess
-                    mode = "sale_pv"
-                    reason = f"Добор солнца в АКБ (limit: {min_soc}%)"
             else:
-                # No sun (insufficient surplus): Recovery wait
-                mode = "bat_emergency"
-                reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
+                # v11.6.567: No surplus at night? Fallback to standard daytime/night logic
+                mode = "sale_pv"
+                reason = "Ожидание отриц. цен (ночь): Стандартная работа"
 
         elif is_selling_active:
             # Active AI / Arbitrage strategy
