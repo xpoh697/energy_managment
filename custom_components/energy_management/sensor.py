@@ -1866,12 +1866,13 @@ class EnergyProfileManager:
                 else:
                     res[sh] = 0.0
             elif h == cur_hour:
-                # Use current real-time value, but sanitize base_load to prevent spike poisoning
+                # Use current real-time value (v11.6.568: Use Power (kW) instead of Energy (kWh))
                 if profile_type == "consumption_base": 
-                    safe_base_p = min(1.2, float(self.current_consumption_base))
-                    res[sh] = round_f(safe_base_p, 3)
-                elif profile_type == "consumption_total": res[sh] = round_f(self.current_consumption_total, 3)
-                elif profile_type == "generation": res[sh] = round_f(self.current_generation, 3)
+                    res[sh] = round_f(float(getattr(self, "avg_base_load_kw", 0.5)), 3)
+                elif profile_type == "consumption_total": 
+                    res[sh] = round_f(float(self.avg_load_kw), 3)
+                elif profile_type == "generation": 
+                    res[sh] = round_f(float(self.avg_gen_kw), 3)
                 else: res[sh] = 0.0
             else:
                 # v7.9.9 - Use get_average_profile to ensure MEDIAN filter is applied to history
@@ -3049,10 +3050,16 @@ class InverterOperationModeSensor(SensorEntity):
         # We drop the cur_price < price_sell_only_pv condition here.
         # If we can wait for a negative price, we MUST block charging. 
         # Inside the ladder, we will decide whether to sell PV or just wait.
-        if can_wait and neg_h is not None:
+        # v11.6.568: Night Guard. Don't block charging if history says there's no PV anyway.
+        # This prevents the mode from sticking at night due to sensor noise (e.g. 0.06 kW).
+        is_gen_night = False
+        try:
+            prof_gen = self.manager.get_average_profile("generation", self.manager.custom_period, "all")
+            is_gen_night = float(prof_gen.get(str(sim_h), 0.0)) < 0.01
+        except Exception: pass
+
+        if can_wait and neg_h is not None and not is_gen_night:
             # v11.6.29: Use check_h_abs (absolute hour) to compare with neg_h (absolute hour).
-            # Previously used check_h_rel (relative = offset from now), which caused hours AFTER
-            # the negative price window to still show no_pv_sale_no_bat (e.g., rel=4 < neg_h=12 → True).
             if not is_forecast or check_h_abs < neg_h:
                 # 1. Check if there are any planned AI sales between now and the negative price
                 planned_sales = [h for h in sell_strategy.get("active_hours", []) if check_h_abs <= h < neg_h]

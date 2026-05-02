@@ -1023,7 +1023,8 @@ class StrategyEngine:
             
             # v11.6.558: Midnight Deep Trace (WARNING level for visibility)
             if real_h == 23 or real_h == 0:
-                trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} Stp:{step_duration:.2f} C:{expected_cons_kw:.3f} G:{expected_gen_kw:.3f}"
+                # v11.6.568: Enhanced trace with capacity and occupancy
+                trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} Stp:{step_duration:.2f} C:{expected_cons_kw:.3f} G:{expected_gen_kw:.3f} Occ:{blended_coeff:.2f}"
                 _LOGGER.warning(f"[SimTrace] {trace_msg}")
                 # Store in manager for UI exposure
                 if not hasattr(man, "midnight_trace"): man.midnight_trace = []
@@ -2765,45 +2766,59 @@ class StrategyEngine:
                             rem_bonus_ac = float(min(_morning_lib_surplus_dc, _actual_bonus_dc) * eff)
                             
                         _alloc_trace = []
-                        for h in epoch_sorted:
-                            h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
-                            p_alloc = max_p
+                        # v11.6.568: Fair-Greedy Allocation (Price-Balanced)
+                        # Group hours into price buckets (0.05 hysteresis)
+                        buckets = []
+                        if epoch_sorted:
+                            current_bucket = [epoch_sorted[0]]
+                            for h_next in epoch_sorted[1:]:
+                                p_cur = all_sell_prices.get(current_bucket[0], 0.0)
+                                p_next = all_sell_prices.get(h_next, 0.0)
+                                if abs(p_cur - p_next) <= 0.05:
+                                    current_bucket.append(h_next)
+                                else:
+                                    buckets.append(current_bucket)
+                                    current_bucket = [h_next]
+                            buckets.append(current_bucket)
+
+                        for bucket in buckets:
+                            # Distribute rem_base_ac among hours in the bucket evenly
+                            bucket_rem_base = rem_base_ac
+                            bucket_rem_bonus = rem_bonus_ac
                             
-                            # v11.6.90: Morning Floor starts EXACTLY at sunrise
-                            h_floor = base_target
-                            if sunrise_h <= (h % 24) <= 12:
-                                h_floor = min_soc_val + 2.0
+                            # We distribute rem_base_ac + rem_bonus_ac among hours
+                            for h in bucket:
+                                h_f_loc = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
+                                h_floor = base_target
+                                if sunrise_h <= (h % 24) <= 12:
+                                    h_floor = min_soc_val + 2.0
                                 
-                            # Selective Throttling strictly for the current hour
-                            if h == cur_hour:
-                                house_rem_dc = 0.0 # v11.6.325: House-Blind Selling
-                                current_surplus_dc = max(0.0, (b_soc - h_floor) * b_cap / 100.0)
-                                max_allowed_sell_ac = float(max(0.0, current_surplus_dc * eff))
-                                p_alloc = min(max_p, max_allowed_sell_ac / h_f)
-                                
-                                # v11.6.559: Physical Surplus Priority Override
-                                if b_soc > 95.0:
-                                    p_alloc = max_p
-                            else:
-                                # For future hours, also respect the local hour-specific floor.
-                                # v11.6.84: Use a more generous simulation-aware cap for morning hours.
+                                # Re-calculate p_alloc for this specific hour
                                 p_alloc = max_p
-                                _prev_h = h - 1
-                                _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
-                                if h_soc_s := self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc):
-                                     # v11.6.550: Use REAL state (soc_at_start) for the first epoch to override conservative simulation.
-                                     _eff_soc = max(h_soc_s, (soc_at_start - 5.0) if i == 0 else 0.0)
-                                     surplus_h_dc = max(0.0, (_eff_soc - h_floor) * b_cap / 100.0)
-                                     p_alloc = min(max_p, (surplus_h_dc * eff) / h_f)
+                                if h == cur_hour:
+                                    current_surplus_dc = max(0.0, (b_soc - h_floor) * b_cap / 100.0)
+                                    p_alloc = min(max_p, (current_surplus_dc * eff) / h_f_loc)
+                                    if b_soc > 95.0: p_alloc = max_p
+                                else:
+                                    _prev_h = h - 1
+                                    _prev_h_key = f"{(_prev_h)%24:02d}:59" + (" (Завтра)" if _prev_h >= 24 else "")
+                                    if h_soc_s := self._get_soc_from_log(sim_log_base, _prev_h_key, b_soc):
+                                         _eff_soc = max(h_soc_s, (soc_at_start - 5.0) if i == 0 else 0.0)
+                                         surplus_h_dc = max(0.0, (_eff_soc - h_floor) * b_cap / 100.0)
+                                         p_alloc = min(max_p, (surplus_h_dc * eff) / h_f_loc)
+
+                                # Allocate evenly from the bucket's share
+                                # Fair share = (Total Pool Energy) / (Hours in Pool)
+                                pool_energy = (bucket_rem_base + bucket_rem_bonus)
+                                fair_power = (pool_energy / len(bucket)) / h_f_loc
                                 
-                                # v11.6.330: Greedy Price Priority (Profit Max)
-                                actual_power = min(p_alloc, (rem_base_ac + rem_bonus_ac) / h_f)
-                                
-                                _alloc_trace.append(f"{h}:{actual_power:.1f}kW(B:{rem_base_ac:.1f}/P:{p_alloc:.1f})")
-                                
+                                actual_power = min(p_alloc, fair_power)
                                 if actual_power > 0.01:
                                     sell_commands[int(h)] = round_f(actual_power, 3)
-                                    rem_base_ac = max(0.0, rem_base_ac - (actual_power * h_f))
+                                    # Update global remaining
+                                    rem_base_ac = max(0.0, rem_base_ac - (actual_power * h_f_loc))
+                                    # Update bucket local remaining to ensure we don't over-allocate if p_alloc is small
+                                    # (Not strictly needed if we just update rem_base_ac, but cleaner)
                         
                         if i == 0:
                             res["sell_alloc_debug"] = " | ".join(_alloc_trace)
@@ -3333,7 +3348,8 @@ class StrategyEngine:
                     t_soc = round_f(float(target_soc), 1)
                     if mode == "sell":
                         h_f_local = max(0.1, (60 - now.minute) / 60.0) if h_idx == cur_hour else 1.0
-                        house_cons_local = float(normalize_float(self.manager.get_average_profile("consumption_total", self.manager.custom_period, now.weekday()).get(str(h_idx_norm), 0.5))) * occ_coeff
+                        # v11.6.568: Use Predicted Profile (Synced with simulation)
+                        house_cons_local = float(normalize_float(self.manager.get_predicted_profile("consumption_total").get(str(h_idx_norm), 0.5))) * occ_coeff
                         house_rem_dc_local = (house_cons_local * h_f_local) / eff
                         discharge_dc_local = (p_val * h_f_local) / eff
                         pure_discharge_pct_local = (discharge_dc_local + house_rem_dc_local) / b_cap * 100.0 if b_cap > 0.1 else 0.0
@@ -3373,7 +3389,8 @@ class StrategyEngine:
             if in_peak:
                 if mode == "sell":
                     h_f = max(0.1, (60 - now.minute) / 60.0)
-                    house_cons = float(normalize_float(self.manager.get_average_profile("consumption_total", self.manager.custom_period, now.weekday()).get(str(cur_hour), 0.5))) * occ_coeff
+                    # v11.6.568: Use Predicted Profile (Synced with simulation)
+                    house_cons = float(normalize_float(self.manager.get_predicted_profile("consumption_total").get(str(cur_hour), 0.5))) * occ_coeff
                     house_rem_dc = (house_cons * h_f) / eff
                     discharge_dc = (power_needed * h_f) / eff
                     pure_discharge_pct = (discharge_dc + house_rem_dc) / b_cap * 100.0 if b_cap > 0.1 else 0.0
