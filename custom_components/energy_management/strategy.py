@@ -1960,8 +1960,9 @@ class StrategyEngine:
                                 _cur_eff = float(self.get_efficiency_coefficient() or 0.95)
                                 
                                 rem_dc = current_target_dc - added_kwh_dc
-                                # v11.6.522: For negative prices, target maximum possible power
-                                p_needed_grid = max_p if price_h <= 0 else (rem_dc / (_cur_eff * h_factor))
+                                # v11.6.566: Even for negative prices, respect the physical capacity limit (rem_dc)
+                                # Target as much as we can fit, but no more.
+                                p_needed_grid = (rem_dc / (_cur_eff * h_factor)) if rem_dc > 0 else 0.0
                                 
                                 p_greedy_grid = min(max_p, p_needed_grid)
                                 p_cc_cv_grid = max_p * cc_cv_f
@@ -2746,6 +2747,7 @@ class StrategyEngine:
                             e_idx = min(len(epoch), s_idx + 5)
                             if e_idx - s_idx < 5: s_idx = max(0, e_idx - 5)
                             epoch = epoch[s_idx:e_idx]
+                            epochs[i] = epoch # v11.6.566: Force global visibility of the 5h window
                         
                         # Sort by price, but force current hour to top if battery is full
                         epoch_sorted = sorted(epoch, key=lambda hr: (999.0 if (hr == cur_hour and b_soc > 95.0) else all_sell_prices.get(hr, 0.0)), reverse=True)
