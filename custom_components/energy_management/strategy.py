@@ -3095,19 +3095,46 @@ class StrategyEngine:
                     res["projected_soc_morning"] = round_f(soc_morning_display, 1)
 
                     # v11.6.162: Status Label Construction
-                    # Step 2: Optimized Distribution (v11.6.208: Prioritize PRICE over Time)
-                    # We sort by price descending to fill the most profitable hours first.
-                    _all_sell_hrs_sorted = sorted(_all_sell_hrs, key=lambda h: all_prices.get(h, 0.0), reverse=True)
+                    # v11.6.570: Epoch-Aware Bucket Distribution (Pool-Aware Pricing)
+                    # We only distribute available_sell_ac among hours in the FIRST epoch.
+                    # This prevents tomorrow's evening peaks from stealing today's surplus.
+                    _first_epoch = epochs[0] if 'epochs' in locals() and epochs else _all_sell_hrs
+                    _epoch_sorted = sorted(_first_epoch, key=lambda hr: all_prices.get(hr, 0.0), reverse=True)
                     
-                    rem_budget_dc = available_sell_dc
-                    for h in _all_sell_hrs_sorted:
-                        h_eff_p = work_max_p * (max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0)
-                        can_take_dc = min(rem_budget_dc, h_eff_p * eff)
-                        if can_take_dc > 0.01:
-                            sell_commands[h] = float(can_take_dc / eff)
-                            rem_budget_dc -= can_take_dc
-                        else:
-                            sell_commands[h] = 0.0
+                    # Group hours into price buckets (0.05 hysteresis) for Fair-Greedy smoothing
+                    buckets = []
+                    if _epoch_sorted:
+                        current_bucket = [_epoch_sorted[0]]
+                        for h_next in _epoch_sorted[1:]:
+                            p_cur = all_prices.get(current_bucket[0], 0.0)
+                            p_next = all_prices.get(h_next, 0.0)
+                            if abs(p_cur - p_next) <= 0.05:
+                                current_bucket.append(h_next)
+                            else:
+                                buckets.append(current_bucket)
+                                current_bucket = [h_next]
+                        buckets.append(current_bucket)
+
+                    rem_budget_ac = available_sell_ac
+                    # Clear commands for ALL candidate hours before redistribution
+                    for h_to_clr in target_hours_sorted: sell_commands[int(h_to_clr)] = 0.0
+
+                    for bucket in buckets:
+                        if rem_budget_ac <= 0.01: break
+                        
+                        bucket_items = []
+                        for h in bucket:
+                            h_f = max(0.1, (60 - now.minute) / 60.0) if h == cur_hour else 1.0
+                            max_h_ac = work_max_p * h_f 
+                            bucket_items.append((h, h_f, max_h_ac))
+                        
+                        # Fair share AC energy per hour in bucket
+                        fair_share_ac = rem_budget_ac / len(bucket)
+                        for h, h_f, max_h_ac in bucket_items:
+                            can_take_ac = min(fair_share_ac, max_h_ac)
+                            if can_take_ac > 0.01:
+                                sell_commands[int(h)] = float(round_f(can_take_ac / h_f, 3))
+                                rem_budget_ac -= (sell_commands[int(h)] * h_f)
 
                     # v11.6.325: Unified Budget Distribution (House-Blind)
                     total_planned_ac = sum(sell_commands.values())
