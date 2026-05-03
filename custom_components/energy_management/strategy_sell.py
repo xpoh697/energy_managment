@@ -448,10 +448,15 @@ class StrategySell(StrategyEngine):
 
             # v11.7.55: Rock-solid sim_log display
             debug_log_parts = []
-            for h in range(cur_hour, cur_hour + 12):
+            for h in range(cur_hour, cur_hour + 24): # Show full 24h
                 h_rel = h % 24
-                is_tom = (h >= 24)
-                key = f"{h_rel:02d}:59" + (" (Завтра)" if is_tom else "")
+                day_suffix = ""
+                if h >= 48:
+                    day_suffix = " (Через день)"
+                elif h >= 24:
+                    day_suffix = " (Завтра)"
+                
+                key = f"{h_rel:02d}:59{day_suffix}"
                 val = sim_log.get(key)
                 
                 if isinstance(val, dict):

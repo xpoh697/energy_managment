@@ -1046,7 +1046,14 @@ class StrategyEngine:
                 # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
                 real_h_log = h_abs % 24
                 is_tom = (h_abs >= 24)
-                log_key_str = f"{real_h:02d}:59" + (" (Завтра)" if is_tom else "")
+                # v11.7.57: Differentiate Tomorrow vs Day After Tomorrow
+                day_suffix = ""
+                if h_abs >= 48:
+                    day_suffix = " (Через день)"
+                elif h_abs >= 24:
+                    day_suffix = " (Завтра)"
+                    
+                log_key_str = f"{real_h:02d}:59{day_suffix}"
                 
                 # v11.6.392: Unified EN string keys for HA UI and programmatic access
                 history_log[log_key_str] = {
