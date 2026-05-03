@@ -453,7 +453,13 @@ class StrategySell(StrategyEngine):
                         if val is not None: break
                 
                 if isinstance(val, dict):
-                    net = val.get('gen_kw',0) - val.get('load_kw',0)
+                    # v11.7.49: Real Net = (Gen - Load) + CMD
+                    gen = val.get('gen', val.get('gen_kw', 0.0))
+                    load = val.get('load', val.get('load_kw', 0.0))
+                    
+                    # Try to find the command for this hour in sell_commands
+                    cmd = sell_commands.get(h, 0.0)
+                    net = gen - load - cmd # selling is a negative delta for SOC
                     return f"{val.get('soc', 0):.0f}% ({net:.1f}k)"
                 return f"{val:.0f}%" if val is not None else "---"
 
