@@ -2810,9 +2810,20 @@ class InverterOperationModeSensor(SensorEntity):
                     t_soc = sell_strategy.get("target_soc", 0.0)
                     c_amps_fixed = None
             else:
+                # v11.7.2: If either strategy is active for the current hour, pull its targets
+                # even if the mode is not 'buy' or 'sale_pv_bat' (e.g. dynamic arbitrage)
                 p_val = 0.0
                 t_soc = 0.0
                 c_amps_fixed = 0.0
+                
+                if sell_strategy.get("state") == "active":
+                    p_val = sell_strategy.get("recommended_power_kw", 0.0)
+                    t_soc = sell_strategy.get("target_soc", 0.0)
+                elif buy_strategy.get("state") == "active":
+                    p_val = buy_strategy.get("recommended_power_kw", 0.0)
+                    t_soc = buy_strategy.get("target_soc", 0.0)
+                else:
+                    t_soc = float(round_f(batt_soc, 1))
 
             # Extract diagnostic info
             if not chg_reason:
@@ -3443,7 +3454,7 @@ class MarketStrategySensor(SensorEntity):
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
-            "planned_power": res.get("planned_power_per_h", {}),
+            "planned_power": {h: f"{d['power']} (Target SOC: {d['soc']}%)" if isinstance(d, dict) else d for h, d in res.get("planned_power_per_h", {}).items()},
             "power_decision": res.get("power_decision", "Ожидание"),
             "buy_debug": res.get("buy_debug", "Нет данных"),
             "sell_debug": res.get("arbitrage_sell_debug", "Нет данных")
