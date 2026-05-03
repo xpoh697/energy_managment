@@ -309,15 +309,24 @@ class StrategySell(StrategyEngine):
                     elif best_peak_h >= 24: peak_key += " (Завтра)"
                     
                     soc_at_peak = self._get_soc_from_log(sim_log_peak, peak_key, b_soc)
-                    target_soc_at_peak = 100.0
                     
-                    if soc_at_peak < target_soc_at_peak - 0.5:
+                    # NEW v11.7.66: Check if we hit 100% ANYTIME before the peak
+                    hit_full_before = False
+                    for k, v in sim_log_peak.items():
+                        if ":" in k and "100%" in str(v):
+                            hit_full_before = True
+                            break
+                    
+                    target_soc_at_peak = 100.0
+                    if soc_at_peak < target_soc_at_peak - 0.5 and not hit_full_before:
                         deficit_kwh = (target_soc_at_peak - soc_at_peak) * b_cap / 100.0
                         available_sell_ac = max(0.0, available_sell_ac - (deficit_kwh * eff))
                         limit_reason = f"Peak Prep {best_peak_h%24:02d}:00 ({round_f(best_peak_p,2)})"
                         next_peak_h = best_peak_h 
                     else:
                         next_peak_h = best_peak_h 
+                        if hit_full_before:
+                            limit_reason = "None (Will hit 100% anyway)"
 
             # --- Stage 3: Recursive Jeweler Loop ---
             first_epoch_hours = epochs[0] if epochs else []
