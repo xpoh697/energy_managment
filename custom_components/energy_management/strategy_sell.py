@@ -304,7 +304,9 @@ class StrategySell(StrategyEngine):
                 "f_tom": f_tom_val,
                 "target_price": target_price,
                 "cur_p": cur_p_f,
-                "raw_epochs": str(epochs)
+                "raw_epochs": str(epochs),
+                "price_sorted": str(target_hours_by_price),
+                "commands": {f"{h%24:02d}h": p for h, p in sell_commands.items()}
             }
 
             if sell_commands.get(cur_hour, 0.0) > 0.05:
