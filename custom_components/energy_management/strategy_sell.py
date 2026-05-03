@@ -444,12 +444,12 @@ class StrategySell(StrategyEngine):
 
             # Enhanced sim_log with Net power to find the "phantom" discharge
             def _get_soc_and_net(log, h):
-                val = log.get(h) # Try direct integer first
-                if val is None:
-                    h_rel = h % 24
-                    keys = [f"{h_rel:02d}:59 (Завтра)", f"{h_rel:02d}:59"] if h >= 24 else [f"{h_rel:02d}:59", f"{h_rel:02d}:59 (Завтра)"]
-                    for k in keys:
-                        val = log.get(k)
+                h_rel = h % 24
+                is_tom = (h >= 24)
+                
+                # Use exactly the same key format as in run_soc_simulation
+                key = f"{h_rel:02d}:59" + (" (Завтра)" if is_tom else "")
+                val = log.get(key)
                         if val is not None: break
                 
                 if isinstance(val, dict):
