@@ -482,6 +482,7 @@ class StrategySell(StrategyEngine):
                 "base_target": round_f(base_target, 1),
                 "available_ac": round_f(current_budget_ac, 2),
                 "limit_reason": limit_reason or "None",
+                "next_peak": f"{next_peak_h % 24:02d}:00" if next_peak_h >= 0 else "None",
                 "soc_at_peak": f"{soc_at_peak:.1f}%" if 'soc_at_peak' in locals() else "N/A",
                 "house_until_sunrise": round_f(house_kwh_until_sunrise, 2),
                 "house_h": prof_cons_debug,
