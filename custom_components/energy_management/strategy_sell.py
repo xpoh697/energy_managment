@@ -225,9 +225,13 @@ class StrategySell(StrategyEngine):
             is_morning_window = (4 <= current_hour_in_24 < 10)
             active_floor = (min_soc_val + 2.0) if is_morning_window else max(user_limit, min_soc_val + soc_buffer)
             
-            # Initial potential budget (max discharge possible until morning floor)
-            # v11.7.68: Use 15.0 floor for morning budget always
-            floor_for_budget = 15.0 if is_morning_window else active_floor
+            # Initial potential budget (max discharge possible until window-specific floor)
+            # v11.7.69: Budget for the NEXT target hour depends on ITS time window
+            first_target_h = target_hours[0] if target_hours else cur_hour
+            first_target_h_rel = first_target_h % 24
+            is_target_morning = (4 <= first_target_h_rel < 10)
+            
+            floor_for_budget = (min_soc_val + 2.0) if is_target_morning else active_floor
             available_sell_dc = max(0.0, (b_soc - floor_for_budget) * b_cap / 100.0)
             available_sell_ac = max(0.0, available_sell_dc * eff)
             limit_reason = ""
@@ -407,13 +411,15 @@ class StrategySell(StrategyEngine):
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
                 h_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
                 
-                # v11.7.68: Fix Target SOC to 15.0% for morning window to prevent premature stop
-                if is_morning_window:
-                    h_soc = 15.0
+                # v11.7.69: Dynamic Target SOC Floor per hour (TS 183/185)
+                h_rel = h % 24
+                h_floor = (min_soc_val + 2.0) if (4 <= h_rel < 10) else (min_soc_val + soc_buffer)
                 
+                # If we are in the window, force target to floor to prevent inverter stop
+                # unless we are already below it.
                 planned_results[h_fmt] = {
                     "power": round_f(p, 3),
-                    "soc": round_f(h_soc, 1)
+                    "soc": round_f(h_floor, 1)
                 }
 
             # 5. UI Diagnostics
@@ -464,10 +470,17 @@ class StrategySell(StrategyEngine):
             
             res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
             
-            # v11.7.20 Limit Reason Reporting
+            # v11.7.69 Limit Reason Reporting
             # Priority: Solar Deficit > Next Peak > Gatekeeper > User > Inverter
-            overall_limit = limit_reason if limit_reason else ("User" if current_budget_ac < available_sell_ac - 0.1 else "")
-            
+            overall_limit = limit_reason
+            if not overall_limit:
+                if current_budget_ac < (available_sell_ac - 0.1):
+                    # Check if it was house consumption until sunrise
+                    if gatekeeper_floor > active_floor + 0.1:
+                        overall_limit = "Gatekeeper"
+                    else:
+                        overall_limit = "User Limit"
+
             if cur_hour in active_h:
                 p_now = sell_commands.get(cur_hour, 0.0)
                 if overall_limit:
@@ -479,7 +492,7 @@ class StrategySell(StrategyEngine):
                 else:
                     res["power_decision"] = "Активно"
             else:
-                res["power_decision"] = "Ожидание пика"
+                res["power_decision"] = f"Ожидание пика ({overall_limit})" if overall_limit else "Ожидание пика"
             
             # Restore old sell_debug structure
             f_today = round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1)
