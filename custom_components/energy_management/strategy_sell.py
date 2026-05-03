@@ -226,7 +226,9 @@ class StrategySell(StrategyEngine):
             active_floor = (min_soc_val + 2.0) if is_morning_window else max(user_limit, min_soc_val + soc_buffer)
             
             # Initial potential budget (max discharge possible until morning floor)
-            available_sell_dc = max(0.0, (b_soc - 15.0) * b_cap / 100.0)
+            # v11.7.68: Use 15.0 floor for morning budget always
+            floor_for_budget = 15.0 if is_morning_window else active_floor
+            available_sell_dc = max(0.0, (b_soc - floor_for_budget) * b_cap / 100.0)
             available_sell_ac = max(0.0, available_sell_dc * eff)
             limit_reason = ""
 
@@ -404,6 +406,10 @@ class StrategySell(StrategyEngine):
                 
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
                 h_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
+                
+                # v11.7.68: Fix Target SOC to 15.0% for morning window to prevent premature stop
+                if is_morning_window:
+                    h_soc = 15.0
                 
                 planned_results[h_fmt] = {
                     "power": round_f(p, 3),

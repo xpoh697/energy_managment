@@ -1008,7 +1008,12 @@ class StrategyEngine:
                 if not allow_discharge:
                     total_net_kw = rem_gen + cmd_p
                 else:
-                    total_net_kw = rem_gen - rem_cons + cmd_p
+                    # v11.7.68: Solar Bypass during Sale
+                    # If selling (cmd_p < -0.01), solar (rem_gen) does NOT help the battery discharge
+                    if cmd_p < -0.01:
+                        total_net_kw = -rem_cons + cmd_p
+                    else:
+                        total_net_kw = rem_gen - rem_cons + cmd_p
 
             
                 if total_net_kw > 0.001: 

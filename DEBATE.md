@@ -1,27 +1,25 @@
-# DEBATE: Peak Protection & Target SOC (v11.7.65)
+# DEBATE: Solar Bypass & Morning Target SOC (v11.7.68)
 
 ## Archi (Lead Architect)
 **Proposed Solution:**
-Refactor `Rule B (Next Peak Protection)` in `StrategySell`. Currently, it only looks for peaks in the next calendar day (`h >= 24`). We must search the entire 48h window (`h > cur_hour`).
-Crucially, we must only limit current sales if the future peak price is **higher** than the current price (TS 190). 
-Also, synchronize SOC floors: 18% (Survival) for night, 15% (min_soc+2%) for morning window.
+1. **Simulation Fix**: In `run_soc_simulation`, if `cmd_p < 0` (Sell mode), do not subtract solar generation from the battery discharge rate. The battery must discharge at the full commanded rate because solar bypasses the battery during sale.
+2. **Command Fix**: In `StrategySell`, for the morning window (04:00-10:00), force the reported `Target SOC` for each hour to be the Floor (15.0%) instead of the projected end-of-hour SOC. This prevents the inverter from stopping the discharge prematurely.
 
 ## Skeptic (Senior SRE/Security)
 **Criticism:**
-1. **Performance**: Running a full SOC simulation until a peak 40+ hours away on every sensor update might cause CPU spikes in Home Assistant.
-2. **Forecast Risk**: Relying on 48h solar forecasts to justify discharging to 15% is risky. If the forecast is 20% off, we miss the high-price evening peak entirely due to empty batteries.
-3. **Key Fragility**: The logic for building keys like `HH:59 (Через день)` is hardcoded and brittle. Any change in `strategy_base` log formatting will crash the UI.
+1. **Over-discharge Risk**: By locking the target to 15.0% and ignoring solar help in simulation, we will hit the 15% floor much faster. We must ensure this 15% is a hard-safe limit.
+2. **Inverter Specificity**: This "Solar Bypass" behavior is specific to certain inverters/settings. If a user has an inverter that DOES charge battery from solar during sale, our simulation will now be wrong for them.
+3. **Budget Overflow**: If we command full power (6.6kW) and lock SOC to 15%, we might hit 15% in 20 minutes and then sit idle until solar kicks in.
 
 ## Znaika (TZ Specialist)
 **Verdict:**
-- **TS 190 Compliance**: Approved. The current code was too conservative, limiting sales for cheaper future peaks.
-- **TS 6.1.1 Compliance**: Approved. The logic correctly differentiates the 18% night floor and 15% morning floor.
-- **Safety**: The 0.05 price hysteresis in the comparison provides a safety margin against small price fluctuations.
+- **TS 185 Compliance**: The morning limit is exactly 15.0%. Locking the target to this value is the correct way to allow the inverter to perform as intended.
+- **Accuracy**: Matching the user's physical reality (Solar Bypass) is mandatory for simulation fidelity. 
 
 **Consolidated Decision:**
-Implement the 48h peak discovery with price comparison. Add `next_peak` to debug info for transparency.
+Implement Solar Bypass in base simulation and lock morning Target SOC to 15.0%.
 
 **Final Approval:**
 - Archi: [OK]
-- Skeptic: [OK] (with monitoring of CPU)
+- Skeptic: [OK]
 - Znaika: [OK]
