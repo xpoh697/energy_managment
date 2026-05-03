@@ -259,7 +259,7 @@ class StrategySell(StrategyEngine):
             }
             res["raw_commands"] = sell_commands
             res["recommended_power_kw"] = sell_commands.get(cur_hour, 0.0)
-            res["limit_used"] = base_target
+            res["limit_used"] = sell_limit
             res["target_price"] = target_price
             res["strategy_candidates"] = [f"{h%24:02d}:00" for h in target_hours]
             res["active_hours"] = active_h
@@ -279,7 +279,7 @@ class StrategySell(StrategyEngine):
             
             res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
             res["power_decision"] = "Активно" if cur_hour in active_h else "Ожидание"
-            res["arbitrage_sell_debug"] = f"Бюджет AC: {available_sell_ac:.2f}кВтч | Доступно DC: {available_sell_dc:.2f}кВтч"
+            res["arbitrage_sell_debug"] = f"Бюджет AC: {available_sell_ac:.2f}кВтч | Порог SOC: {base_target}%"
 
             if sell_commands.get(cur_hour, 0.0) > 0.05:
                 res["state"] = "active"

@@ -238,7 +238,8 @@ class StrategyBuy(StrategyEngine):
                 res["planned_power_per_h"] = {f"{h%24:02d}:00": p for h, p in charge_commands.items()}
                 res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
                 res["active_periods"] = f"{min(target_hours)%24:02d}:00 - {max(target_hours)%24:02d}:59"
-                res["buy_debug"] = f"Бюджет DC: {needed_kwh_dc:.2f}кВтч | Причина: {res['charge_reason']}"
+                res["buy_debug"] = f"Бюджет DC: {needed_kwh_dc:.2f}кВтч | Порог SOC: {min_soc}%"
+                res["limit_used"] = buy_limit
                 
                 if charge_commands.get(cur_hour, 0.0) > 0.05: res["state"] = "active"
 
