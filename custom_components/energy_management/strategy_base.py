@@ -424,10 +424,10 @@ class StrategyEngine:
             # --- Curtailment Correction (v4.2/v11.7.47) ---
             # Generation is throttled if:
             # 1. Mode is 'stop_sale' AND battery is full (>90%).
-            # 2. Mode is 'no_pv_sale_no_bat' or 'sale_pv_no_bat' (waiting for negative prices).
+            # 2. Mode is 'no_pv_sale_no_bat' (waiting for negative prices).
             # 3. Current price is negative (we don't want PV to charge battery or export).
             cur_mode = getattr(man, "current_inverter_mode", "")
-            is_no_pv_mode = cur_mode in ["no_pv_sale_no_bat", "sale_pv_no_bat"]
+            is_no_pv_mode = cur_mode == "no_pv_sale_no_bat"
             
             # Get current buy price
             cur_price = 0.0
