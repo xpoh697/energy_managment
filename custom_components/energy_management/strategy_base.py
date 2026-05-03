@@ -1032,13 +1032,11 @@ class StrategyEngine:
                     else:
                         simulated_soc = 0.0
                 
-                # v11.6.558: Midnight and Morning Trace
-                if real_h == 23 or real_h == 0 or (6 <= real_h <= 10):
+                # v11.7.50: Midnight Jump Hunter
+                if real_h == 23 or real_h == 0 or real_h == 1:
                     trust_val = tom_coeff if is_tom else blended_coeff
-                    # v11.6.568: Enhanced trace with G and Trust
-                    trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} G:{expected_gen_kw:.3f} Trust:{trust_val:.2f}"
+                    trace_msg = f"[H:{h_abs} R:{real_h}] SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} G:{expected_gen_kw:.3f} C:{expected_cons_kw:.3f} CMD:{cmd_p:.2f} Trust:{trust_val:.2f}"
                     _LOGGER.warning(f"[SimTrace] {trace_msg}")
-                    # Store in manager for UI exposure
                     if not hasattr(man, "midnight_trace"): man.midnight_trace = []
                     man.midnight_trace.append(trace_msg)
 
