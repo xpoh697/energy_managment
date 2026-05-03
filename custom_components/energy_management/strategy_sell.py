@@ -325,7 +325,23 @@ class StrategySell(StrategyEngine):
             res["target_price"] = target_price
             res["strategy_candidates"] = [f"{h%24:02d}:00" for h in target_hours]
             res["active_hours"] = active_h
-            res["planned_power_per_h"] = {f"{h%24:02d}:00": p for h, p in sell_commands.items()}
+            # v11.7.2: Build the hourly plan with both power and target SOC from simulation
+            planned_results = {}
+            for h, p in sell_commands.items():
+                if p <= 0: continue
+                h_fmt = f"{h%24:02d}:00"
+                if h >= 24: h_fmt += " (Завтра)"
+                
+                # Get SOC at the end of this hour from sim_log
+                h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
+                h_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
+                
+                planned_results[h_fmt] = {
+                    "power": round_f(p, 3),
+                    "soc": round_f(h_soc, 1)
+                }
+            res["planned_power_per_h"] = planned_results
+            res["target_soc"] = planned_results.get(f"{cur_hour%24:02d}:00", {}).get("soc", round_f(b_soc, 1))
             
             def group_h(hours):
                 if not hours: return ""

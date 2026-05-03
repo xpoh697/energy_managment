@@ -243,7 +243,22 @@ class StrategyBuy(StrategyEngine):
                         groups.append(f"{p[0]%24:02d}:00-{p[-1]%24:02d}:59")
                     return ", ".join(groups)
 
-                res["planned_power_per_h"] = {f"{h%24:02d}:00": p for h, p in charge_commands.items()}
+                # v11.7.2: Build the hourly plan with both power and target SOC from simulation
+                planned_results = {}
+                for h, p in charge_commands.items():
+                    if p <= 0: continue
+                    h_fmt = f"{h%24:02d}:00"
+                    if h >= 24: h_fmt += " (Завтра)"
+                    
+                    h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
+                    h_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
+                    
+                    planned_results[h_fmt] = {
+                        "power": round_f(p, 3),
+                        "soc": round_f(h_soc, 1)
+                    }
+                res["planned_power_per_h"] = planned_results
+                res["target_soc"] = planned_results.get(f"{cur_hour%24:02d}:00", {}).get("soc", round_f(b_soc, 1))
                 res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
                 res["active_periods"] = group_h(target_hours)
                 res["buy_debug"] = f"Бюджет DC: {needed_kwh_dc:.2f}кВтч | Порог SOC: {min_soc}%"
