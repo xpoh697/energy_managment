@@ -289,7 +289,22 @@ class StrategySell(StrategyEngine):
             
             res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
             res["power_decision"] = "Активно" if cur_hour in active_h else "Ожидание"
-            res["arbitrage_sell_debug"] = f"Бюджет AC: {available_sell_ac:.2f}кВтч | Порог SOC: {base_target}%"
+            
+            # Restore old sell_debug structure
+            f_today = round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1)
+            f_tom_val = round_f(float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0), 1)
+            
+            res["arbitrage_sell_debug"] = {
+                "base_target": round_f(base_target, 1),
+                "available_ac": round_f(available_sell_ac, 2),
+                "sim_log": "|".join([f"{h % 24}: {self._get_soc_from_log(sim_log, h, 0.0):.0f}%" for h in range(cur_hour, cur_hour + 12)]),
+                "final_targets": str(target_hours),
+                "midnight_trace": "|".join(getattr(man, "midnight_trace", [])[-4:]),
+                "f_today": f_today,
+                "f_tom": f_tom_val,
+                "target_price": target_price,
+                "cur_p": cur_p_f
+            }
 
             if sell_commands.get(cur_hour, 0.0) > 0.05:
                 res["state"] = "active"
