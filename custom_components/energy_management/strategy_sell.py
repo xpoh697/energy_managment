@@ -193,14 +193,43 @@ class StrategySell(StrategyEngine):
                     is_ok, _ = is_profitable(p, h)
                     if p >= sell_limit or is_ok or surplus_dc > 0.1:
                         safe_peaks.append(h)
-                target_hours = sorted(safe_peaks)
-                if target_hours:
-                    target_price = max([all_sell_prices[h] for h in target_hours], default=0.0)
-                    epochs = self._group_contiguous(target_hours)
-
+            target_hours = sorted(safe_peaks)
             if not target_hours:
                 res["state"] = "price_limit_not_met"
                 return res
+
+            target_price = max([all_sell_prices[h] for h in target_hours], default=0.0)
+
+            # --- TS 6.1 Sunrise Guard & Budget Grouping ---
+            # Initial contiguity grouping
+            initial_epochs = self._group_contiguous(target_hours)
+            
+            # Merge epochs if no recharge opportunity exists between them
+            # We use the baseline simulation to check if SOC increases
+            sim_range = list(range(cur_hour, max(target_hours) + 1))
+            _, base_log, _ = self.run_soc_simulation(b_soc, sim_range, now, {})
+            
+            epochs = []
+            if initial_epochs:
+                current_epoch = list(initial_epochs[0])
+                for next_epoch in initial_epochs[1:]:
+                    # Check SOC at end of current vs start of next
+                    h_end_prev = current_epoch[-1]
+                    h_start_next = next_epoch[0]
+                    
+                    k_end = f"{h_end_prev % 24:02d}:59" + (" (Завтра)" if h_end_prev >= 24 else "")
+                    k_start = f"{h_start_next % 24:02d}:59" + (" (Завтра)" if h_start_next >= 24 else "")
+                    
+                    soc_end = self._get_soc_from_log(base_log, k_end, b_soc)
+                    soc_start = self._get_soc_from_log(base_log, k_start, b_soc)
+                    
+                    # If SOC didn't increase significantly (no recharge), merge
+                    if soc_start <= soc_end + 1.0:
+                        current_epoch.extend(next_epoch)
+                    else:
+                        epochs.append(current_epoch)
+                        current_epoch = list(next_epoch)
+                epochs.append(current_epoch)
 
             # --- TS 6.1 Sunrise Guard (Survival Logic) ---
             min_soc_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
@@ -306,7 +335,7 @@ class StrategySell(StrategyEngine):
                 "cur_p": cur_p_f,
                 "raw_epochs": str(epochs),
                 "price_sorted": str(target_hours_by_price),
-                "commands": {f"{h%24:02d}h": p for h, p in sell_commands.items()}
+                "commands": {f"{h}h": p for h, p in sell_commands.items()}
             }
 
             if sell_commands.get(cur_hour, 0.0) > 0.05:
