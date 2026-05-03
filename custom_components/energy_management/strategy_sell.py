@@ -310,10 +310,10 @@ class StrategySell(StrategyEngine):
                     
                     soc_at_peak = self._get_soc_from_log(sim_log_peak, peak_key, b_soc)
                     
-                    # NEW v11.7.66: Check if we hit 100% ANYTIME before the peak
+                    # NEW v11.7.67: Check if we hit 100% ANYTIME before the peak
                     hit_full_before = False
                     for k, v in sim_log_peak.items():
-                        if ":" in k and "100%" in str(v):
+                        if isinstance(v, dict) and v.get("soc", 0.0) >= 99.9:
                             hit_full_before = True
                             break
                     
