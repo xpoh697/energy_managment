@@ -330,7 +330,8 @@ class StrategySell(StrategyEngine):
                     now=now,
                     commands=sim_commands_neg,
                     house_profile_override="consumption_base",
-                    ignore_blended=True
+                    ignore_blended=True,
+                    attempt=attempt # v11.7.56
                 )
                 
                 # v11.7.54: Raw Log Dump
