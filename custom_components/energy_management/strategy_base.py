@@ -1034,7 +1034,8 @@ class StrategyEngine:
                 history_log[log_key_str] = {
                     "soc": round_f(float(simulated_soc), 1),
                     "gen_kw": round_f(float(expected_gen_kw), 3),
-                    "load_kw": round_f(float(expected_cons_kw), 3)
+                    "load_kw": round_f(float(expected_cons_kw), 3),
+                    "trust": round_f(float(tom_coeff if is_tom else blended_coeff), 2)
                 }
             except Exception as e:
                 _LOGGER.error(f"Simulation error at hour {h_abs}: {e}")
