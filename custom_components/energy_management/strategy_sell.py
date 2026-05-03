@@ -429,7 +429,7 @@ class StrategySell(StrategyEngine):
             last_sell_h = max(active_h) if active_h else cur_hour
             
             res["sell_simulation"] = {
-                "projected_soc_at_sale_start_pct": round_f(_get_soc_val(sim_log, first_sell_h), 1),
+                "projected_soc_at_sale_start_pct": round_f(_get_soc_val(sim_log, first_sell_h - 1), 1),
                 "projected_soc_after_sale_pct": round_f(_get_soc_val(sim_log, last_sell_h), 1),
                 "projected_soc_morning_pct": round_f(_get_soc_val(sim_log, morning_h_abs), 1),
                 "log": sim_log
