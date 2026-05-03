@@ -174,6 +174,7 @@ class StrategySell(StrategyEngine):
             if not dynamic_sell:
                 target_hours = [h for h, p in all_sell_prices.items() if p >= sell_limit and h >= cur_hour]
                 target_price = max([all_sell_prices[h] for h in target_hours], default=0.0)
+                epochs = self._group_contiguous(target_hours)
             else:
                 # Find tech peaks
                 tech_peaks = []
@@ -195,6 +196,7 @@ class StrategySell(StrategyEngine):
                 target_hours = sorted(safe_peaks)
                 if target_hours:
                     target_price = max([all_sell_prices[h] for h in target_hours], default=0.0)
+                    epochs = self._group_contiguous(target_hours)
 
             if not target_hours:
                 res["state"] = "price_limit_not_met"
