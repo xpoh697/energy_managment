@@ -1015,11 +1015,11 @@ class StrategyEngine:
                     else:
                         simulated_soc = 0.0
                 
-                # v11.6.558: Midnight Deep Trace (WARNING level for visibility)
-                if real_h == 23 or real_h == 0:
+                # v11.6.558: Midnight and Morning Trace
+                if real_h == 23 or real_h == 0 or (6 <= real_h <= 10):
                     trust_val = tom_coeff if is_tom else blended_coeff
-                    # v11.6.568: Enhanced trace with capacity and occupancy
-                    trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} Stp:{step_duration:.2f} C:{expected_cons_kw:.3f} G:{expected_gen_kw:.3f} Trust:{trust_val:.2f}"
+                    # v11.6.568: Enhanced trace with G and Trust
+                    trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} G:{expected_gen_kw:.3f} Trust:{trust_val:.2f}"
                     _LOGGER.warning(f"[SimTrace] {trace_msg}")
                     # Store in manager for UI exposure
                     if not hasattr(man, "midnight_trace"): man.midnight_trace = []
@@ -1033,8 +1033,8 @@ class StrategyEngine:
                 # v11.6.392: Unified EN string keys for HA UI and programmatic access
                 history_log[log_key_str] = {
                     "soc": round_f(float(simulated_soc), 1),
-                    "gen_kw": round_f(float(expected_gen_kw), 3),
-                    "load_kw": round_f(float(expected_cons_kw), 3),
+                    "gen": round_f(float(expected_gen_kw), 2),
+                    "load": round_f(float(expected_cons_kw), 2),
                     "trust": round_f(float(tom_coeff if is_tom else blended_coeff), 2)
                 }
             except Exception as e:
