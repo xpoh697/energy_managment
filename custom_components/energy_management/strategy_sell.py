@@ -486,6 +486,7 @@ class StrategySell(StrategyEngine):
                 "soc_at_peak": f"{soc_at_peak:.1f}%" if 'soc_at_peak' in locals() else "N/A",
                 "house_until_sunrise": round_f(house_kwh_until_sunrise, 2),
                 "house_h": prof_cons_debug,
+                "sim_gen": round_f(sum(float(v.get('gen', 0)) for v in sim_log.values()), 1),
                 "sim_log": " | ".join(debug_log_parts),
                 "final_targets": str(target_hours),
                 "f_today": f_today,
