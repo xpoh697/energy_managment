@@ -833,6 +833,9 @@ class StrategyEngine:
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
+        
+        # v11.7.51: Start SOC Debug
+        _LOGGER.warning(f"[SimStart] start_soc: {start_soc} (type: {type(start_soc)})")
 
         man = man or self.manager
         _, batt_cap, _ = man.get_battery_state()

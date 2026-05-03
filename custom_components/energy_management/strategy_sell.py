@@ -308,7 +308,7 @@ class StrategySell(StrategyEngine):
             
             current_budget_ac = available_sell_ac
             sell_commands = {}
-            sim_log = {}
+            sim_log = {} # Fresh log for this calculation
             
             for attempt in range(5):
                 temp_commands = {}
