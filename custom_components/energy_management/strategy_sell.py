@@ -52,6 +52,7 @@ class StrategySell(StrategyEngine):
         max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
         deg_cost = float(self.get_battery_degradation_cost())
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
+        target_price = 0.0
 
         res = {
             "strategy_version": VERSION,
@@ -170,6 +171,7 @@ class StrategySell(StrategyEngine):
             
             if not dynamic_sell:
                 target_hours = [h for h, p in all_sell_prices.items() if p >= sell_limit and h >= cur_hour]
+                target_price = max([all_sell_prices[h] for h in target_hours], default=0.0)
             else:
                 # Find tech peaks
                 tech_peaks = []
@@ -189,6 +191,8 @@ class StrategySell(StrategyEngine):
                     if p >= sell_limit or is_ok or surplus_dc > 0.1:
                         safe_peaks.append(h)
                 target_hours = sorted(safe_peaks)
+                if target_hours:
+                    target_price = max([all_sell_prices[h] for h in target_hours], default=0.0)
 
             if not target_hours:
                 res["state"] = "price_limit_not_met"
