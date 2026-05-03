@@ -226,9 +226,12 @@ class StrategySell(StrategyEngine):
             available_sell_dc = min(surplus_for_morning, surplus_for_user_limit)
             available_sell_ac = max(0.0, available_sell_dc * eff)
             
-            # 3. Fair-Greedy Allocation
+            # 3. Fair-Greedy Allocation (Price Priority as per TS 4.1.3)
+            # v11.6.330: Sort target hours by price DESCENDING
+            target_hours_by_price = sorted(target_hours_sorted, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
+            
             rem_ac = available_sell_ac
-            for h in target_hours_sorted:
+            for h in target_hours_by_price:
                 if rem_ac <= 0.01: break
                 h_f = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
                 p_alloc = min(max_p, rem_ac / h_f)
