@@ -241,8 +241,13 @@ class StrategySell(StrategyEngine):
             # --- Stage 1: Strategic Thresholds (TS 6.1.1) ---
             # Gatekeeper = Emergency Reserve (18%) + House load kWh until sunrise
             survival_reserve = min_soc_val + soc_buffer # 18.0%
+            # v11.7.71: Fixed Morning Horizon. 
+            # If we are in the morning (e.g. 7 AM), the next survival point is tomorrow morning (8 AM + 24).
             morning_h = man.get_sunrise_hour() or 8
-            morning_h_abs = morning_h + 24 if now.hour >= 18 else morning_h
+            morning_h_abs = morning_h
+            if cur_hour >= 4: # If we already entered the "Today's survival window", look at "Tomorrow"
+                morning_h_abs += 24
+            
             morning_key = f"{morning_h%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
             
             # Sum up kWh from consumption_base profile
@@ -459,6 +464,7 @@ class StrategySell(StrategyEngine):
                 "projected_soc_at_sale_start_pct": round_f(_get_soc_val(sim_log, first_sell_h - 1), 1),
                 "projected_soc_after_sale_pct": round_f(_get_soc_val(sim_log, last_sell_h), 1),
                 "projected_soc_morning_pct": round_f(_get_soc_val(sim_log, morning_h_abs), 1),
+                "hit_full_before": hit_full_before if 'hit_full_before' in locals() else False,
                 "log": sim_log
             }
             res["raw_commands"] = sell_commands
@@ -470,16 +476,24 @@ class StrategySell(StrategyEngine):
             
             res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
             
-            # v11.7.69 Limit Reason Reporting
-            # Priority: Solar Deficit > Next Peak > Gatekeeper > User > Inverter
+            # v11.7.70 Deep Limit Diagnostics
             overall_limit = limit_reason
             if not overall_limit:
-                if current_budget_ac < (available_sell_ac - 0.1):
-                    # Check if it was house consumption until sunrise
+                p_now = sell_commands.get(cur_hour, 0.0)
+                # If we are selling LESS than inverter can handle, find out why
+                if p_now < max_p - 0.05:
                     if gatekeeper_floor > active_floor + 0.1:
-                        overall_limit = "Gatekeeper"
+                        overall_limit = f"Gatekeeper ({round_f(gatekeeper_floor,1)}%)"
+                    elif is_morning_window:
+                        overall_limit = f"Morning Floor ({round_f(min_soc_val + 2.0, 1)}%)"
+                    elif active_floor > min_soc_val + soc_buffer + 0.1:
+                        overall_limit = f"User Limit ({round_f(user_limit, 1)}%)"
                     else:
-                        overall_limit = "User Limit"
+                        overall_limit = f"Survival Floor ({round_f(min_soc_val + soc_buffer, 1)}%)"
+            
+            # v11.7.70 Hotfix: If limit was None (Will hit 100%), but we are at floor, append it
+            if limit_reason == "None (Will hit 100% anyway)" and overall_limit != limit_reason:
+                overall_limit = f"Full Recharge OK | {overall_limit}"
 
             if cur_hour in active_h:
                 p_now = sell_commands.get(cur_hour, 0.0)

@@ -3135,9 +3135,11 @@ class InverterOperationModeSensor(SensorEntity):
             target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
             is_low_for_morning = bool(morning_soc_proj < target_morning)
             
-            # v11.3.40: Strategic Preparation Detection
-            # If we are holding charge (mode will be sale_pv) despite high prices, we are preparing.
-            is_energy_low_for_evening = bool(is_preparing_for_peak or is_low_for_morning)
+            # v11.7.71: Strategic override for sale_pv_no_bat
+            # If simulation confirms we will hit 100% SOC before the next peak, 
+            # then we are NOT "low for evening" and can sell surplus PV now.
+            hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
+            is_energy_low_for_evening = bool((is_preparing_for_peak or is_low_for_morning) and not hit_full_before)
             
             # Smart Deficit Throttling Awareness
             is_throttled = bool(sell_strategy.get("recommended_power_kw", 0.0) < 0.01 and rel_h in sell_strategy.get("active_hours", []))
