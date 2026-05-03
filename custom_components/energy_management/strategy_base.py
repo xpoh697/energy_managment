@@ -65,6 +65,19 @@ class StrategyEngine:
         d = "Завтра " if h_abs >= 24 else ""
         return f"{d}{h_abs % 24:02d}:00"
 
+    def _group_contiguous(self, hours):
+        """Groups a list of hours into contiguous periods."""
+        if not hours: return []
+        sorted_h = sorted(hours)
+        groups = []
+        start = sorted_h[0]
+        for i in range(1, len(sorted_h)):
+            if sorted_h[i] != sorted_h[i-1] + 1:
+                groups.append(list(range(start, sorted_h[i-1] + 1)))
+                start = sorted_h[i]
+        groups.append(list(range(start, sorted_h[-1] + 1)))
+        return groups
+
     def get_battery_degradation_cost(self):
         """Cost of battery wear per kWh (Cycle Cost). Syncs with UI sensor."""
         batt_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)

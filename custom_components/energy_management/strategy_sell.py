@@ -271,14 +271,10 @@ class StrategySell(StrategyEngine):
             
             def group_h(hours):
                 if not hours: return ""
-                sorted_h = sorted(hours)
+                periods = self._group_contiguous(hours)
                 groups = []
-                start = sorted_h[0]
-                for i in range(1, len(sorted_h)):
-                    if sorted_h[i] != sorted_h[i-1] + 1:
-                        groups.append(f"{start%24:02d}:00-{sorted_h[i-1]%24:02d}:59")
-                        start = sorted_h[i]
-                groups.append(f"{start%24:02d}:00-{sorted_h[-1]%24:02d}:59")
+                for p in periods:
+                    groups.append(f"{p[0]%24:02d}:00-{p[-1]%24:02d}:59")
                 return ", ".join(groups)
 
             res["active_periods"] = group_h(active_h)
