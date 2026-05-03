@@ -256,7 +256,7 @@ class StrategySell(StrategyEngine):
             # 5. UI Diagnostics
             active_h = [h for h, p in sell_commands.items() if p > 0.05]
             res["sell_simulation"] = {
-                "projected_soc_at_start_pct": b_soc,
+                "projected_soc_at_sale_start_pct": b_soc,
                 "projected_soc_after_sale_pct": round_f(soc_after, 1),
                 "projected_soc_morning_pct": round_f(soc_morning, 1),
                 "log": sim_log
