@@ -405,12 +405,21 @@ class StrategySell(StrategyEngine):
             res["active_periods"] = group_h(active_h)
             res["analyzed_window"] = f"До {max(active_h)%24:02d}:59" + (" (Завтра)" if max(active_h) >= 24 else "") if active_h else "Нет продажи"
             
-            soc_after = self._get_soc_from_log(sim_log, f"{max(target_hours)%24:02d}:59" if target_hours else f"{cur_hour%24:02d}:59", b_soc)
-            sunrise_soc = self._get_soc_from_log(sim_log, morning_key, b_soc)
+            # v11.7.58: Correctly find SOC from log using new keys
+            def _get_soc_val(log, h_abs):
+                h_rel = h_abs % 24
+                day_suffix = ""
+                if h_abs >= 48: day_suffix = " (Через день)"
+                elif h_abs >= 24: day_suffix = " (Завтра)"
+                return self._get_soc_from_log(log, f"{h_rel:02d}:59{day_suffix}", b_soc)
+
+            first_sell_h = min(active_h) if active_h else cur_hour
+            last_sell_h = max(active_h) if active_h else cur_hour
+            
             res["sell_simulation"] = {
-                "projected_soc_at_sale_start_pct": b_soc,
-                "projected_soc_after_sale_pct": round_f(soc_after, 1),
-                "projected_soc_morning_pct": round_f(sunrise_soc, 1),
+                "projected_soc_at_sale_start_pct": round_f(_get_soc_val(sim_log, first_sell_h), 1),
+                "projected_soc_after_sale_pct": round_f(_get_soc_val(sim_log, last_sell_h), 1),
+                "projected_soc_morning_pct": round_f(_get_soc_val(sim_log, morning_window_start_abs), 1),
                 "log": sim_log
             }
             res["raw_commands"] = sell_commands
