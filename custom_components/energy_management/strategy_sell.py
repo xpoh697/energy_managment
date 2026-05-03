@@ -419,7 +419,7 @@ class StrategySell(StrategyEngine):
             res["sell_simulation"] = {
                 "projected_soc_at_sale_start_pct": round_f(_get_soc_val(sim_log, first_sell_h), 1),
                 "projected_soc_after_sale_pct": round_f(_get_soc_val(sim_log, last_sell_h), 1),
-                "projected_soc_morning_pct": round_f(_get_soc_val(sim_log, morning_window_start_abs), 1),
+                "projected_soc_morning_pct": round_f(_get_soc_val(sim_log, morning_h_abs), 1),
                 "log": sim_log
             }
             res["raw_commands"] = sell_commands
