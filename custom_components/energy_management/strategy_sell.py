@@ -445,34 +445,32 @@ class StrategySell(StrategyEngine):
             # House profile for debug
             prof_cons_debug = "|".join([f"{h%24}:{(float(prof_cons_tom.get(str(h%24), 0.0)) if h>=24 else float(prof_cons_cur.get(str(h%24), 0.0))):.1f}" for h in range(cur_hour, cur_hour + 12)])
 
-            # Enhanced sim_log with Net power to find the "phantom" discharge
-            def _get_soc_and_net(log, h):
+            # v11.7.55: Rock-solid sim_log display
+            debug_log_parts = []
+            for h in range(cur_hour, cur_hour + 12):
                 h_rel = h % 24
                 is_tom = (h >= 24)
-                
-                # Use exactly the same key format as in run_soc_simulation
                 key = f"{h_rel:02d}:59" + (" (Завтра)" if is_tom else "")
-                val = log.get(key)
+                val = sim_log.get(key)
                 
                 if isinstance(val, dict):
-                    # v11.7.49: Real Net = (Gen - Load) + CMD
                     gen = val.get('gen', val.get('gen_kw', 0.0))
                     load = val.get('load', val.get('load_kw', 0.0))
-                    
-                    # Try to find the command for this hour in sell_commands
                     cmd = sell_commands.get(h, 0.0)
-                    net = gen - load - cmd # selling is a negative delta for SOC
-                    return f"{val.get('soc', 0):.0f}% ({net:.1f}k)"
-                return f"{val:.0f}%" if val is not None else "---"
+                    net = gen - load - cmd
+                    debug_log_parts.append(f"{h_rel}: {val.get('soc', 0):.0f}% ({net:.1f}k)")
+                else:
+                    debug_log_parts.append(f"{h_rel}: ---")
 
             res["arbitrage_sell_debug"] = {
+                "start_soc": b_soc,
                 "base_target": round_f(base_target, 1),
                 "available_ac": round_f(current_budget_ac, 2),
                 "limit_reason": limit_reason or "None",
                 "soc_at_peak": f"{soc_at_peak:.1f}%" if 'soc_at_peak' in locals() else "N/A",
                 "house_until_sunrise": round_f(house_kwh_until_sunrise, 2),
                 "house_h": prof_cons_debug,
-                "sim_log": "|".join([f"{h % 24}: {_get_soc_and_net(sim_log, h)}" for h in range(cur_hour, cur_hour + 12)]),
+                "sim_log": " | ".join(debug_log_parts),
                 "final_targets": str(target_hours),
                 "f_today": f_today,
                 "f_tom": f_tom_val,
