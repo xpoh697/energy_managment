@@ -450,7 +450,6 @@ class StrategySell(StrategyEngine):
                 # Use exactly the same key format as in run_soc_simulation
                 key = f"{h_rel:02d}:59" + (" (Завтра)" if is_tom else "")
                 val = log.get(key)
-                        if val is not None: break
                 
                 if isinstance(val, dict):
                     # v11.7.49: Real Net = (Gen - Load) + CMD
