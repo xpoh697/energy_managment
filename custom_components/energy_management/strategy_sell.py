@@ -263,9 +263,38 @@ class StrategySell(StrategyEngine):
             available_sell_dc = min(surplus_for_morning, surplus_for_user_limit)
             available_sell_ac = max(0.0, available_sell_dc * eff)
             
+            # v11.7.0: Inter-epoch Arbitrage (Reservation for higher future peaks)
+            # If Epoch 2 is more profitable and solar is weak, reserve energy.
+            if len(epochs) > 1:
+                e1 = epochs[0]
+                e2 = epochs[1]
+                max_p1 = max([all_sell_prices.get(h, 0.0) for h in e1], default=0.0)
+                max_p2 = max([all_sell_prices.get(h, 0.0) for h in e2], default=0.0)
+                
+                if max_p2 > max_p1:
+                    # Calculate how much solar we expect tomorrow before the next epoch
+                    # For simplicity, we use f_tom directly as the recharge potential
+                    f_tom_val = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
+                    
+                    # Deficit: energy needed to reach 100% SOC minus available solar
+                    # We assume we want to be at 100% for the better epoch
+                    required_recharge_dc = b_cap # max recharge needed from 0 to 100
+                    recharge_potential_dc = f_tom_val
+                    
+                    # We only care about the deficit relative to current SOC
+                    expected_soc_after_solar = min(100.0, b_soc + (recharge_potential_dc / b_cap * 100.0))
+                    deficit_soc = max(0.0, 100.0 - expected_soc_after_solar)
+                    deficit_kwh_ac = (deficit_soc * b_cap / 100.0) * eff
+                    
+                    if deficit_kwh_ac > 0:
+                        res["note"] = f"Бюджет ограничен для Эпохи 2 (Дефицит: {deficit_kwh_ac:.1f}кВтч)"
+                        available_sell_ac = max(0.0, available_sell_ac - deficit_kwh_ac)
+
             # 3. Fair-Greedy Allocation (Price Priority as per TS 4.1.3)
-            # v11.6.330: Sort target hours by price DESCENDING
-            target_hours_by_price = sorted(target_hours_sorted, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
+            # v11.7.0: Current surplus budget (available_sell_ac) is only for the FIRST epoch
+            # (until next recharge). Subsequent epochs will have their own budgets.
+            first_epoch_hours = epochs[0] if epochs else []
+            target_hours_by_price = sorted(first_epoch_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
             
             rem_ac = available_sell_ac
             for h in target_hours_by_price:
