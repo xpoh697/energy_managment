@@ -235,9 +235,21 @@ class StrategyBuy(StrategyEngine):
                     v_val = float(man.get_sensor_float(man.battery_voltage_sensor) or 52.0)
                 res["recommended_amps"] = round_f((charge_commands.get(cur_hour, 0.0) * 1000.0) / v_val, 1) if v_val > 0 else 0.0
                 
+                def group_h(hours):
+                    if not hours: return ""
+                    sorted_h = sorted(hours)
+                    groups = []
+                    start = sorted_h[0]
+                    for i in range(1, len(sorted_h)):
+                        if sorted_h[i] != sorted_h[i-1] + 1:
+                            groups.append(f"{start%24:02d}:00-{sorted_h[i-1]%24:02d}:59")
+                            start = sorted_h[i]
+                    groups.append(f"{start%24:02d}:00-{sorted_h[-1]%24:02d}:59")
+                    return ", ".join(groups)
+
                 res["planned_power_per_h"] = {f"{h%24:02d}:00": p for h, p in charge_commands.items()}
                 res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
-                res["active_periods"] = f"{min(target_hours)%24:02d}:00 - {max(target_hours)%24:02d}:59"
+                res["active_periods"] = group_h(target_hours)
                 res["buy_debug"] = f"Бюджет DC: {needed_kwh_dc:.2f}кВтч | Порог SOC: {min_soc}%"
                 res["limit_used"] = buy_limit
                 

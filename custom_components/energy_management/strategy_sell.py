@@ -265,11 +265,21 @@ class StrategySell(StrategyEngine):
             res["active_hours"] = active_h
             res["planned_power_per_h"] = {f"{h%24:02d}:00": p for h, p in sell_commands.items()}
             
+            def group_h(hours):
+                if not hours: return ""
+                sorted_h = sorted(hours)
+                groups = []
+                start = sorted_h[0]
+                for i in range(1, len(sorted_h)):
+                    if sorted_h[i] != sorted_h[i-1] + 1:
+                        groups.append(f"{start%24:02d}:00-{sorted_h[i-1]%24:02d}:59")
+                        start = sorted_h[i]
+                groups.append(f"{start%24:02d}:00-{sorted_h[-1]%24:02d}:59")
+                return ", ".join(groups)
+
+            res["active_periods"] = group_h(active_h)
             if active_h:
-                start_h = min(active_h)
-                end_h = max(active_h)
-                res["analyzed_window"] = f"До {end_h%24:02d}:59"
-                res["active_periods"] = f"{start_h%24:02d}:00 - {end_h%24:02d}:59"
+                res["analyzed_window"] = f"До {max(active_h)%24:02d}:59"
             
             # recommended_amps (if voltage is available)
             v_val = 52.0 # Default fallback
