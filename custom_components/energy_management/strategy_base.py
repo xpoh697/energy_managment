@@ -861,8 +861,16 @@ class StrategyEngine:
         # boundaries and an average of 50% of the real rate.
         prof_losses = dict(man.get_average_profile("losses", 7))
         
-        # v11.6.57: ignore_blended allows skipping the last_blended_coeff (which can be <0.2 in the morning)
-        blended_coeff = 1.0 if ignore_blended else float(getattr(man, "last_blended_coeff", 1.0))
+        # v11.6.57: ignore_blended allows skipping the last_blended_coeff
+        # v11.7.46: Reset stickiness — if we are in the first hour of the day, force 1.0
+        blended_coeff = 1.0
+        if not ignore_blended:
+            if now.hour > 0:
+                blended_coeff = float(getattr(man, "last_blended_coeff", 1.0))
+            else:
+                # Midnight reset to prevent yesterday's pessimism from poisoning tomorrow's plan
+                blended_coeff = 1.0
+                man.last_blended_coeff = 1.0
         eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
         fraction_left_h1 = float(1.0 - (now.minute / 60.0))
         max_batt_p_v = man.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
