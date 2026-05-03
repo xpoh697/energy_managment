@@ -882,178 +882,163 @@ class StrategyEngine:
         simulated_soc = float(start_soc)
         overflow_kwh = 0.0
         for i, h_abs in enumerate(sim_range):
-            real_h = int(h_abs % 24)
-            is_tom = bool(h_abs >= 24)
-            h_str = str(real_h)
+            try:
+                real_h = int(h_abs % 24)
+                is_tom = bool(h_abs >= 24)
+                h_str = str(real_h)
             
-            step_duration = float(fraction_left_h1 if i == 0 else 1.0)
-            if step_duration <= 0.001: continue
+                step_duration = float(fraction_left_h1 if i == 0 else 1.0)
+                if step_duration <= 0.001: continue
 
-            # 1. Generation Forecast for this hour
-            if is_tom:
-                if dist_tom:
-                    total_dist = sum(dist_tom.values())
-                    h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    expected_gen_kw = float(dist_tom.get(h_str, 0.0) / total_dist * f_tom * blended_coeff * h_acc) if total_dist > 0.1 else 0.0
-                else:
-                    total_hist = sum(prof_gen_tom.values())
-                    h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    expected_gen_kw = float(normalize_float(prof_gen_tom.get(h_str, 0.0)) / total_hist * f_tom * blended_coeff * h_acc) if total_hist > 0.1 else 0.0
-            else:
-                if dist_today:
-                    # v7.5 - Pro-rate the current hour weight to match f_today (remaining energy)
-                    cur_h_weight = float(dist_today.get(h_str, 0.0))
-                    rem_dist = (cur_h_weight * step_duration) + sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
-                    
-                    h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    # v7.6.1 - Correct units: Power (kW) = Weight / Sum_Weights * Total_Energy * Calibration * Hourly_Bias
-                    expected_gen_kw = float(cur_h_weight / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
-                else:
-                    cur_h_hist = float(prof_gen_today.get(h_str, 0.0))
-                    rem_hist = (cur_h_hist * step_duration) + sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
-                    
-                    h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
-                    expected_gen_kw = float(cur_h_hist / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
-            
-            # v7.8.6 - Dynamic Solar Night Clamp
-            # We determine if it's "night" by checking the historical generation profile.
-            p_gen_check = prof_gen_tom if is_tom else prof_gen_today
-            hist_h_val = float(normalize_float(p_gen_check.get(h_str, 0.0)))
-            
-            # If history says 0 and it's typical night hours, force 0.
-            # This prevents the "Weighted inflation" from turnining technical noise into 2kW at 2 AM.
-            if hist_h_val < 0.01 and (real_h < 8 or real_h > 20):
                 expected_gen_kw = 0.0
-
-            # v11.6.412: PV Curtail logic (Dead parameter revival)
-            if pv_curtail_hours is not None and int(h_abs) in pv_curtail_hours:
-                expected_gen_kw = 0.0
-
-            # 3. Expected consumption (v7.9.4 - Base profile)
-            p_cons = prof_cons_tom if is_tom else prof_cons_today
+                expected_cons_kw = 0.0
+                tom_coeff = 1.0
+                
+                # 1. Generation Forecast for this hour
+                if is_tom:
+                    h_key = f"{real_h:02d}:00"
+                    # v11.7.40: Ignore blended_coeff for tomorrow's forecast to prevent double-pessimism
+                    tom_coeff = 1.0 
+                    if dist_tom:
+                        total_dist = sum(float(normalize_float(v)) for v in dist_tom.values())
+                        h_acc, _ = self.get_hourly_accuracy_coeff(real_h)
+                        expected_gen_kw = float(float(normalize_float(dist_tom.get(h_key, 0.0))) / total_dist * f_tom * tom_coeff * h_acc) if total_dist > 0.1 else 0.0
+                    else:
+                        total_hist = sum(float(normalize_float(v)) for v in prof_gen_tom.values())
+                        h_acc, _ = self.get_hourly_accuracy_coeff(real_h)
+                        expected_gen_kw = float(float(normalize_float(prof_gen_tom.get(h_str, 0.0))) / total_hist * f_tom * tom_coeff * h_acc) if total_hist > 0.1 else 0.0
+                else:
+                    if dist_today:
+                        # v7.5 - Pro-rate the current hour weight to match f_today (remaining energy)
+                        cur_h_weight = float(dist_today.get(h_str, 0.0))
+                        rem_dist = (cur_h_weight * step_duration) + sum(float(dist_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
+                        
+                        h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
+                        # v7.6.1 - Correct units: Power (kW) = Weight / Sum_Weights * Total_Energy * Calibration * Hourly_Bias
+                        expected_gen_kw = float(cur_h_weight / rem_dist * f_today * blended_coeff * h_acc) if rem_dist > 0.1 else 0.0
+                    else:
+                        cur_h_hist = float(prof_gen_today.get(h_str, 0.0))
+                        rem_hist = (cur_h_hist * step_duration) + sum(float(prof_gen_today.get(str(hr), 0.0)) for hr in range(now.hour + 1, 24))
+                        
+                        h_acc, _ = self.get_hourly_accuracy_coeff(int(h_abs) % 24)
+                        expected_gen_kw = float(cur_h_hist / rem_hist * f_today * blended_coeff * h_acc) if rem_hist > 0.1 else 0.0
             
-            # v11.4.49: Always use consumption_total (as configured) — both total and base
-            # are ≈identical at night anyway (backup confirmed: night profiles differ <0.01 kWh/h).
-            # Over-conservatism is preferred per user: 'better too much than too little at sunrise'.
-            
-            occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
-            occ_coeff = float(occ_coeff)
-            expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
-            
-            # v11.6.556: Simulation Sanity Cap. 
-            # If the profile predicts an insane load (>3kW) at night, it's a 'ghost' (glitch).
-            # We cap it to a sane 0.5kW to prevent budget suppression.
-            if (real_h >= 22 or real_h <= 6) and expected_cons_kw > 3.0:
-                expected_cons_kw = 0.5
-
-            # v11.1.15 - Blended Anchor: Smoothly transition from profile to real-time load
-            # to avoid discontinuities at the top of the hour (v7.9.7 fix)
-            if i == 0:
-                anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
-                # Only anchor if we have a reasonable load reading
-                real_load = float(getattr(man, "avg_base_load_kw" if house_profile_override == "consumption_base" else "avg_load_kw", expected_cons_kw))
-                expected_cons_kw = (real_load * anchor_weight) + (expected_cons_kw * (1.0 - anchor_weight))
-            
-            # First hour solar correction: 
-            if i == 0:
-                # v11.1.15 - Blended Solar Anchor: Same logic as load to prevent sawtooth
-                real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
-                if real_gen_kw > 0.01:
+                # v7.8.6 - Dynamic Solar Night Clamp
+                # We determine if it's "night" by checking the historical generation profile.
+                p_gen_check = prof_gen_tom if is_tom else prof_gen_today
+                hist_h_val = float(normalize_float(p_gen_check.get(h_str, 0.0)))
+                
+                # If history says 0 and it's typical night hours, force 0.
+                # v11.7.27: Relaxed morning clamp to 06:00 to allow sunrise anticipation.
+                if hist_h_val < 0.01 and (real_h < 6 or real_h > 21):
+                    expected_gen_kw = 0.0
+    
+                # v11.6.412: PV Curtail logic (Dead parameter revival)
+                if pv_curtail_hours is not None and int(h_abs) in pv_curtail_hours:
+                    expected_gen_kw = 0.0
+    
+                # 3. Expected consumption (v7.9.4 - Base profile)
+                p_cons = prof_cons_tom if is_tom else prof_cons_today
+                
+                # v11.4.49: Always use consumption_total (as configured)
+                occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
+                occ_coeff = float(occ_coeff)
+                expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
+                
+                # v11.6.556: Simulation Sanity Cap. 
+                if (real_h >= 22 or real_h <= 6) and expected_cons_kw > 3.0:
+                    expected_cons_kw = 0.5
+    
+                # v11.1.15 - Blended Anchor
+                if i == 0:
                     anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
-                    expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
-
-            # v11.4.49: Idle/losses correction — add BEFORE net computation.
-            # BUG fixed: idle_p was previously added to expected_cons_kw AFTER total_net_kw
-            # was already calculated → had ZERO effect on SOC simulation (only polluted log).
-            # Additionally, man.current_losses is an intra-hour kWh accumulator:
-            #   • resets to 0 at every hour boundary → idle_p = 0 exactly at hour start
-            #   • averages ~0.05 kWh mid-hour but historical rate is 0.10 kWh/h at night
-            # Fix: use pre-loaded historical losses profile (kWh/h) for THIS simulated hour.
-            if eff_coeff < 0.999:  # If eff sensor embeds losses already, skip to avoid double-count
-                idle_p = float(prof_losses.get(h_str, 0.05))
-                expected_cons_kw += idle_p
-
-            # v11.6.487: Block solar if price is zero or negative (panels disconnected)
-            _h_price = float(normalize_float(all_prices.get(int(h_abs), 0.1)))
-            if _h_price <= 0.0:
-                expected_gen_kw = 0.0
-
-            # 4. Inverter Command (AI Buying/Selling)
-            cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
-
-            # v11.6.154: Pure Discharge Logic.
-            # If we are selling (cmd_p > 0), PV does NOT charge the battery.
-            # It only covers the house load, and the rest goes to the grid (ignored here).
-            # v11.6.500: Unified Sign Convention
-            # cmd_p > 0: Forced Charge (Grid/Manual)
-            # cmd_p < 0: Forced Discharge (Export)
-            # Balance = (Solar - Load) + Grid_Command
-            _expected_gen_kw_sim = 0.0 if no_solar else expected_gen_kw
+                    real_load = float(getattr(man, "avg_base_load_kw" if house_profile_override == "consumption_base" else "avg_load_kw", expected_cons_kw))
+                    expected_cons_kw = (real_load * anchor_weight) + (expected_cons_kw * (1.0 - anchor_weight))
             
-            # 1. House Load Balance (Solar covers load first)
-            p_for_house = min(_expected_gen_kw_sim, expected_cons_kw)
-            rem_gen = _expected_gen_kw_sim - p_for_house
-            rem_cons = expected_cons_kw - p_for_house
-            
-            # 2. Total Net Power for battery
-            # Positive = Flow INTO battery, Negative = Flow OUT of battery
-            # v11.6.515: In BUY mode (allow_discharge=False), house load is covered by grid bypass
-            # and does NOT drain the battery. We only subtract rem_cons if discharge is allowed.
-            if not allow_discharge:
-                # Battery only gets solar surplus or grid charge commands.
-                # House load (rem_cons) is ignored as it's grid-powered.
-                total_net_kw = rem_gen + cmd_p
-            else:
-                total_net_kw = rem_gen - rem_cons + cmd_p
-
-            
-            if total_net_kw > 0.001: 
-                # v11.1.62 - bat_emergency recovery: Allow charging from solar 'crumbs' even in emergency
-                # to match inverter's physical behavior (steering to limit+1%).
-                acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))
-                actual_charge_kw = float(min(total_net_kw * eff_coeff, max_batt_p * acc_ratio))
+                # First hour solar correction: 
+                if i == 0:
+                    # v11.1.15 - Blended Solar Anchor: Same logic as load to prevent sawtooth
+                    real_gen_kw = float(getattr(man, "avg_gen_kw", 0.0))
+                    if real_gen_kw > 0.01:
+                        anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
+                        expected_gen_kw = (real_gen_kw * anchor_weight) + (expected_gen_kw * (1.0 - anchor_weight))
+    
+                # v11.4.49: Idle/losses correction — add BEFORE net computation.
+                if eff_coeff < 0.999:  # If eff sensor embeds losses already, skip to avoid double-count
+                    idle_p = float(prof_losses.get(h_str, 0.05))
+                    expected_cons_kw += idle_p
+    
+                # v11.6.487: Block solar if price is zero or negative (panels disconnected)
+                _h_price = float(normalize_float(all_prices.get(int(h_abs), 0.1)))
+                if _h_price <= 0.0:
+                    expected_gen_kw = 0.0
+    
+                # 4. Inverter Command (AI Buying/Selling)
+                cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
+    
+                # Balance = (Solar - Load) + Grid_Command
+                _expected_gen_kw_sim = 0.0 if no_solar else expected_gen_kw
                 
-                old_soc = simulated_soc
-                if b_cap_f > 0.1:
-                    simulated_soc = float(min(100.0, simulated_soc + (actual_charge_kw * step_duration / b_cap_f * 100.0)))
+                # 1. House Load Balance (Solar covers load first)
+                p_for_house = min(_expected_gen_kw_sim, expected_cons_kw)
+                rem_gen = _expected_gen_kw_sim - p_for_house
+                rem_cons = expected_cons_kw - p_for_house
                 
-                # v11.0.6 - Track overflow energy (AC kWh)
-                actual_stored_kwh_ac = 0.0
-                if b_cap_f > 0.1:
-                    actual_stored_kwh_ac = ((simulated_soc - old_soc) / 100.0 * b_cap_f) / max(0.1, eff_coeff)
-                
-                overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
-                overflow_kwh += overflow_h
-            elif total_net_kw < -0.001 and allow_discharge: 
-                sim_eff = float(max(0.85, eff_coeff))
-                actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
-                if b_cap_f > 0.1:
-                    simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
-            
-            # v11.6.94: Removed hard floor clamp. 
-            # The simulation should show NATURAL discharge below the safety floor 
-            # due to house load, not artificially 'stick' to it.
-            
-            # v11.6.558: Midnight Deep Trace (WARNING level for visibility)
-            if real_h == 23 or real_h == 0:
-                # v11.6.568: Enhanced trace with capacity and occupancy
-                trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} Stp:{step_duration:.2f} C:{expected_cons_kw:.3f} G:{expected_gen_kw:.3f} Occ:{blended_coeff:.2f}"
-                _LOGGER.warning(f"[SimTrace] {trace_msg}")
-                # Store in manager for UI exposure
-                if not hasattr(man, "midnight_trace"): man.midnight_trace = []
-                man.midnight_trace.append(trace_msg)
+                # 2. Total Net Power for battery
+                if not allow_discharge:
+                    total_net_kw = rem_gen + cmd_p
+                else:
+                    total_net_kw = rem_gen - rem_cons + cmd_p
 
-            # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
-            real_h_log = h_abs % 24
-            is_tom = (h_abs >= 24)
-            log_key_str = f"{real_h:02d}:59" + (" (Завтра)" if is_tom else "")
             
-            # v11.6.392: Unified EN string keys for HA UI and programmatic access
-            history_log[log_key_str] = {
-                "soc": round_f(float(simulated_soc), 1),
-                "gen_kw": round_f(float(expected_gen_kw), 3),
-                "load_kw": round_f(float(expected_cons_kw), 3)
-            }
+                if total_net_kw > 0.001: 
+                    # v11.1.62 - bat_emergency recovery
+                    acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))
+                    actual_charge_kw = float(min(total_net_kw * eff_coeff, max_batt_p * acc_ratio))
+                    
+                    old_soc = simulated_soc
+                    if b_cap_f > 0.1:
+                        simulated_soc = float(min(100.0, simulated_soc + (actual_charge_kw * step_duration / b_cap_f * 100.0)))
+                    
+                    # v11.0.6 - Track overflow energy (AC kWh)
+                    actual_stored_kwh_ac = 0.0
+                    if b_cap_f > 0.1:
+                        actual_stored_kwh_ac = ((simulated_soc - old_soc) / 100.0 * b_cap_f) / max(0.1, eff_coeff)
+                    
+                    overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
+                    overflow_kwh += overflow_h
+                elif total_net_kw < -0.001 and allow_discharge: 
+                    sim_eff = float(max(0.85, eff_coeff))
+                    actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
+                    if b_cap_f > 0.1:
+                        simulated_soc = float(max(0.0, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
+                    else:
+                        simulated_soc = 0.0
+                
+                # v11.6.558: Midnight Deep Trace (WARNING level for visibility)
+                if real_h == 23 or real_h == 0:
+                    trust_val = tom_coeff if is_tom else blended_coeff
+                    # v11.6.568: Enhanced trace with capacity and occupancy
+                    trace_msg = f"H:{h_abs} R:{real_h} SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} Stp:{step_duration:.2f} C:{expected_cons_kw:.3f} G:{expected_gen_kw:.3f} Trust:{trust_val:.2f}"
+                    _LOGGER.warning(f"[SimTrace] {trace_msg}")
+                    # Store in manager for UI exposure
+                    if not hasattr(man, "midnight_trace"): man.midnight_trace = []
+                    man.midnight_trace.append(trace_msg)
+
+                # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
+                real_h_log = h_abs % 24
+                is_tom = (h_abs >= 24)
+                log_key_str = f"{real_h:02d}:59" + (" (Завтра)" if is_tom else "")
+                
+                # v11.6.392: Unified EN string keys for HA UI and programmatic access
+                history_log[log_key_str] = {
+                    "soc": round_f(float(simulated_soc), 1),
+                    "gen_kw": round_f(float(expected_gen_kw), 3),
+                    "load_kw": round_f(float(expected_cons_kw), 3)
+                }
+            except Exception as e:
+                _LOGGER.error(f"Simulation error at hour {h_abs}: {e}")
+                continue
 
         return float(simulated_soc), history_log, float(overflow_kwh)
 

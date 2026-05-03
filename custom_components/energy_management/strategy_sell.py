@@ -193,119 +193,122 @@ class StrategySell(StrategyEngine):
                     is_ok, _ = is_profitable(p, h)
                     if p >= sell_limit or is_ok or surplus_dc > 0.1:
                         safe_peaks.append(h)
-            target_hours = sorted(safe_peaks)
+            target_hours = sorted([h for h in safe_peaks if h >= cur_hour])
             if not target_hours:
                 res["state"] = "price_limit_not_met"
+                res["current_mode_text"] = "Нет будущих окон"
                 return res
 
-            target_price = max([all_sell_prices[h] for h in target_hours], default=0.0)
+            target_price = all_sell_prices.get(target_hours[0], 0.0) if target_hours else 0.0
 
             # --- TS 6.1 Sunrise Guard & Budget Grouping ---
             # Initial contiguity grouping
-            initial_epochs = self._group_contiguous(target_hours)
+            epochs = self._group_contiguous(target_hours)
             
-            # Merge epochs if no recharge opportunity exists between them
-            # We use the baseline simulation to check if SOC increases
-            sim_range = list(range(cur_hour, max(target_hours) + 1))
-            _, base_log, _ = self.run_soc_simulation(b_soc, sim_range, now, {})
-            
-            epochs = []
-            if initial_epochs:
-                current_epoch = list(initial_epochs[0])
-                for next_epoch in initial_epochs[1:]:
-                    # Check SOC at end of current vs start of next
-                    h_end_prev = current_epoch[-1]
-                    h_start_next = next_epoch[0]
-                    
-                    k_end = f"{h_end_prev % 24:02d}:59" + (" (Завтра)" if h_end_prev >= 24 else "")
-                    k_start = f"{h_start_next % 24:02d}:59" + (" (Завтра)" if h_start_next >= 24 else "")
-                    
-                    soc_end = self._get_soc_from_log(base_log, k_end, b_soc)
-                    soc_start = self._get_soc_from_log(base_log, k_start, b_soc)
-                    
-                    # If SOC didn't increase significantly (no recharge), merge
-                    if soc_start <= soc_end + 1.0:
-                        current_epoch.extend(next_epoch)
-                    else:
-                        epochs.append(current_epoch)
-                        current_epoch = list(next_epoch)
-                epochs.append(current_epoch)
-
-            # --- TS 6.1 Sunrise Guard (Survival Logic) ---
             min_soc_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
             user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
             soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 5.0))
-            
-            survival_floor = min_soc_val + soc_buffer
-            base_target = max(user_limit, survival_floor)
-            
-            # v11.6.214: Multi-pass Allocation & Recursive Survival
-            sell_commands = {}
-            target_hours_sorted = sorted(target_hours)
-            
-            # 1. Initial Pass (Simulation without selling)
-            sim_range = list(range(cur_hour, max(target_hours_sorted) + 24))
-            _, base_log, _ = self.run_soc_simulation(b_soc, sim_range, now, {})
-            
-            # 2. Budgeting
-            # Choose most restrictive floor: User Limit or Survival until Sunrise
-            _h_sunrise_target = sunrise_h - 1
-            if cur_hour >= _h_sunrise_target: _h_sunrise_target += 24
-            key_sunrise = f"{_h_sunrise_target % 24:02d}:59" + (" (Завтра)" if _h_sunrise_target >= 24 else "")
-            
-            natural_soc_at_sunrise = self._get_soc_from_log(base_log, key_sunrise, b_soc)
-            # v11.7.6: TS 4.1.6 House-Blind Budgeting (Clean SOC Delta)
+            # Window check
             current_hour_in_24 = cur_hour % 24
             is_morning_window = (4 <= current_hour_in_24 < 10)
+            active_floor = (min_soc_val + 2.0) if is_morning_window else max(user_limit, min_soc_val + soc_buffer)
+            
+            # Initial potential budget (max discharge possible until morning floor)
+            available_sell_dc = max(0.0, (b_soc - 15.0) * b_cap / 100.0)
+            available_sell_ac = max(0.0, available_sell_dc * eff)
+            limit_reason = ""
+
+                    
+
+            # --- Stage 1: Strategic Thresholds (TS 6.1.1) ---
+            # Gatekeeper = Emergency Reserve (18%) + House load kWh until sunrise
+            survival_reserve = min_soc_val + soc_buffer # 18.0%
+            morning_h = man.get_sunrise_hour() or 8
+            morning_h_abs = morning_h + 24 if now.hour >= 18 else morning_h
+            morning_key = f"{morning_h%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
+            
+            # Sum up kWh from consumption_base profile
+            prof_cons_cur = dict(man.get_average_profile("consumption_base", 7, now.weekday()))
+            prof_cons_tom = dict(man.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
+            
+            # --- TS 6.1.1 Gatekeeper Window Logic ---
+            is_morning_window = (4 <= (cur_hour % 24) < 10)
             
             if is_morning_window:
-                active_floor = min_soc_val + 2.0
+                # Morning: Hard Floor 15% (min_soc + 2%), NO Gatekeeper
+                base_target = min_soc_val + 2.0
+                limit_reason = "Morning Floor"
             else:
-                active_floor = base_target
+                # v11.7.35: Extended range to 10:00 AM to cover the whole morning window
+                occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
+                occ_coeff = float(occ_coeff)
+                morning_window_end_abs = (10 + 24) if cur_hour >= 18 else 10
                 
-            available_sell_dc = max(0.0, (b_soc - active_floor) * b_cap / 100.0)
-            available_sell_ac = max(0.0, available_sell_dc * eff)
-            
-            gatekeeper_floor = active_floor
-            limit_reason = ""
-            
-            # v11.7.0: Inter-epoch Arbitrage (Reservation for higher future peaks)
-            # If Epoch 2 is more profitable and solar is weak, reserve energy.
-            if len(epochs) > 1:
-                e1 = epochs[0]
-                e2 = epochs[1]
-                max_p1 = max([all_sell_prices.get(h, 0.0) for h in e1], default=0.0)
-                max_p2 = max([all_sell_prices.get(h, 0.0) for h in e2], default=0.0)
-                
-                if max_p2 > max_p1:
-                    # Calculate how much solar we expect tomorrow before the next epoch
-                    # For simplicity, we use f_tom directly as the recharge potential
-                    f_tom_val = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
+                # Calculate house load until sunrise (for survival) but plan until end of window
+                house_kwh_until_sunrise = 0.0
+                for h_abs in range(cur_hour, morning_window_end_abs):
+                    h_rel = str(h_abs % 24)
+                    p_cons = prof_cons_tom if h_abs >= 24 else prof_cons_cur
+                    h_load = float(normalize_float(p_cons.get(h_rel, 0.4))) * occ_coeff
                     
-                    # Deficit: energy needed to reach 100% SOC minus available solar
-                    # We assume we want to be at 100% for the better epoch
-                    required_recharge_dc = b_cap # max recharge needed from 0 to 100
-                    recharge_potential_dc = f_tom_val
+                    step = 1.0
+                    if h_abs == cur_hour:
+                        step = 1.0 - (now.minute / 60.0)
                     
-                    # We only care about the deficit relative to current SOC
-                    expected_soc_after_solar = min(100.0, b_soc + (recharge_potential_dc / b_cap * 100.0))
-                    deficit_soc = max(0.0, 100.0 - expected_soc_after_solar)
-                    deficit_kwh_ac = (deficit_soc * b_cap / 100.0) * eff
-                    
-                    if deficit_kwh_ac > 0.01:
-                        limit_reason = "Gatekeeper"
-                        gatekeeper_floor = active_floor + deficit_soc
-                        available_sell_ac = max(0.0, available_sell_ac - deficit_kwh_ac)
-            
-            res["gatekeeper_floor"] = round_f(gatekeeper_floor, 1)
+                    # Only count towards survival reserve until actual sunrise
+                    if h_abs < morning_h_abs:
+                        house_kwh_until_sunrise += h_load * step
+                  
+                gatekeeper_floor = survival_reserve + (house_kwh_until_sunrise / b_cap * 100.0)
+                base_target = max(active_floor, gatekeeper_floor)
 
-            # 3. Recursive Allocation Loop (TS 4.1.5 / 6.1.3.2)
+            # --- Stage 2: Budget Reductions (Solar Deficit & Next Peak) ---
+            # Rule A: Solar Deficit (Protection for weak Day 2 generation)
+            f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
+            tomorrow_morning_h = morning_h + 24
+            next_morning_h = morning_h + 48
+            # Total house need tomorrow until Day 3 morning
+            tomorrow_house_need_kwh = sum(float(normalize_float(prof_cons_tom.get(str(h % 24), 0.0))) for h in range(tomorrow_morning_h, next_morning_h))
+            
+            solar_deficit_kwh_ac = max(0.0, tomorrow_house_need_kwh - f_tom)
+            if solar_deficit_kwh_ac > 0.1:
+                available_sell_ac = max(0.0, available_sell_ac - solar_deficit_kwh_ac)
+                if not limit_reason: limit_reason = "Solar Deficit"
+
+            # Rule B: Next Peak Protection (Double Cycle Optimizer)
+            tomorrow_h = [h for h in all_sell_prices if h >= 24]
+            if tomorrow_h:
+                best_tom_p = max([all_sell_prices.get(h, 0.0) for h in tomorrow_h])
+                if best_tom_p > cur_p_f + 0.05:
+                    best_tom_h = [h for h in tomorrow_h if all_sell_prices.get(h) == best_tom_p][0]
+                    # Simulation until that peak to see if we reach 100%
+                    _, sim_log_peak, _ = self.run_soc_simulation(
+                        start_soc=b_soc,
+                        sim_range=list(range(cur_hour, best_tom_h + 1)),
+                        now=now,
+                        commands={},
+                        house_profile_override="consumption_base",
+                        ignore_blended=True
+                    )
+                    if sim_log_peak:
+                        # v11.7.29: Use :59 format to match simulation log keys
+                        peak_key = f"{best_tom_h%24:02d}:59" + (" (Завтра)" if best_tom_h >= 24 else "")
+                        soc_at_peak = self._get_soc_from_log(sim_log_peak, peak_key, b_soc)
+                        
+                        target_soc_at_peak = 100.0
+                        if soc_at_peak < target_soc_at_peak:
+                            deficit_kwh = (target_soc_at_peak - soc_at_peak) * b_cap / 100.0
+                            available_sell_ac = max(0.0, available_sell_ac - (deficit_kwh * eff))
+                            limit_reason = f"Next Peak Reserve ({target_soc_at_peak:.0f}%)"
+
+            # --- Stage 3: Recursive Jeweler Loop ---
             first_epoch_hours = epochs[0] if epochs else []
             target_hours_by_price = sorted(first_epoch_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
+            last_sell_h = max(first_epoch_hours) if first_epoch_hours else cur_hour
             
             current_budget_ac = available_sell_ac
-            target_survival = min_soc_val + soc_buffer
             sell_commands = {}
+            sim_log = {}
             
             for attempt in range(5):
                 temp_commands = {}
@@ -315,50 +318,59 @@ class StrategySell(StrategyEngine):
                     h_f = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
                     p_alloc = min(max_p, rem_ac / h_f)
                     temp_commands[h] = round_f(p_alloc, 3)
-                    rem_ac -= (p_alloc * h_f)
+                    rem_ac = max(0.0, rem_ac - (p_alloc * h_f))
                 
-                sim_commands_neg = {h: -p for h, p in temp_commands.items()}
-                _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_commands_neg, b_min_soc=base_target)
-                soc_at_sunrise = self._get_soc_from_log(sim_log, key_sunrise, b_soc)
+                sell_commands = temp_commands
+                sim_commands_neg = {h: -p for h, p in sell_commands.items()}
+                sim_range = list(range(cur_hour, morning_window_end_abs + 1))
                 
-                if soc_at_sunrise >= target_survival - 0.2:
-                    sell_commands = temp_commands
-                    break
+                res_soc, sim_log, _ = self.run_soc_simulation(
+                    start_soc=b_soc,
+                    sim_range=list(range(cur_hour, cur_hour + 48)),
+                    now=now,
+                    commands=sim_commands_neg,
+                    house_profile_override="consumption_base",
+                    ignore_blended=True
+                )
+                
+                # Check end-of-sale SOC
+                last_h_key = f"{last_sell_h%24:02d}:59" + (" (Завтра)" if last_sell_h >= 24 else "")
+                end_of_sale_soc = self._get_soc_from_log(sim_log, last_h_key, b_soc)
+                
+                # Check Sunrise SOC
+                sunrise_soc = self._get_soc_from_log(sim_log, morning_key, b_soc)
+                
+                # Dynamic targets
+                is_last_h_morning = (4 <= (last_sell_h % 24) < 10)
+                target_at_end = (min_soc_val + 2.0) if is_last_h_morning else base_target
+                
+                # Deficit: Must satisfy both end-of-sale target AND sunrise survival
+                d_end = target_at_end - end_of_sale_soc
+                d_morning = survival_reserve - sunrise_soc
+                
+                # v11.7.27: Anti-clamping penalty. If we hit 0%, assume we need more reduction.
+                if sunrise_soc < 0.1: d_morning += 5.0 
+                if end_of_sale_soc < 0.1: d_end += 5.0
+                
+                total_deficit_soc = max(d_end, d_morning)
+                
+                if total_deficit_soc > 0.1:
+                    reduction_ac = (total_deficit_soc * b_cap / 100.0) * eff
+                    current_budget_ac = max(0.0, current_budget_ac - reduction_ac)
+                    if not limit_reason: 
+                        limit_reason = "Gatekeeper" if d_morning > d_end else "User"
                 else:
-                    deficit_kwh_dc = (target_survival - soc_at_sunrise) * b_cap / 100.0
-                    current_budget_ac = max(0.0, current_budget_ac - (deficit_kwh_dc * eff))
-                    if not limit_reason: limit_reason = "Sunrise"
-                    sell_commands = temp_commands
-            
-            # Final simulation check
-            sim_commands_neg = {h: -p for h, p in sell_commands.items()}
-            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_commands_neg, b_min_soc=base_target)
-            
-            soc_after = self._get_soc_from_log(sim_log, f"{max(target_hours)%24:02d}:59" if target_hours else f"{cur_hour%24:02d}:59", b_soc)
-            soc_morning = self._get_soc_from_log(sim_log, key_sunrise, b_soc)
-            
-            # 5. UI Diagnostics
-            active_h = [h for h, p in sell_commands.items() if p > 0.05]
-            res["sell_simulation"] = {
-                "projected_soc_at_sale_start_pct": b_soc,
-                "projected_soc_after_sale_pct": round_f(soc_after, 1),
-                "projected_soc_morning_pct": round_f(soc_morning, 1),
-                "log": sim_log
-            }
-            res["raw_commands"] = sell_commands
-            res["recommended_power_kw"] = sell_commands.get(cur_hour, 0.0)
-            res["limit_used"] = sell_limit
-            res["target_price"] = target_price
-            res["strategy_candidates"] = [f"{h%24:02d}:00" for h in target_hours]
-            res["active_hours"] = active_h
-            # v11.7.2: Build the hourly plan with both power and target SOC from simulation
+                    break
+
+            # 4. Build the hourly plan (Honest Simulation)
             planned_results = {}
-            for h, p in sell_commands.items():
+            sorted_h_keys = sorted(sell_commands.keys())
+            for h in sorted_h_keys:
+                p = sell_commands[h]
                 if p <= 0: continue
                 h_fmt = f"{h%24:02d}:00"
                 if h >= 24: h_fmt += " (Завтра)"
                 
-                # Get SOC at the end of this hour from sim_log
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
                 h_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
                 
@@ -366,37 +378,60 @@ class StrategySell(StrategyEngine):
                     "power": round_f(p, 3),
                     "soc": round_f(h_soc, 1)
                 }
+
+            # 5. UI Diagnostics
             res["planned_power_per_h"] = planned_results
-            res["target_soc"] = planned_results.get(f"{cur_hour%24:02d}:00", {}).get("soc", round_f(b_soc, 1))
+            res["target_soc"] = round_f(active_floor, 1)
+            res["recommended_power_kw"] = sell_commands.get(cur_hour, 0.0)
+            res["limit_used"] = sell_limit
+            res["target_price"] = target_price
+            res["gatekeeper_floor"] = round_f(gatekeeper_floor, 1) if not is_morning_window else 15.0
+            res["strategy_candidates"] = [f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "") for h in target_hours]
+            active_h = [h for h, p in sell_commands.items() if p > 0.05]
+            res["active_hours"] = active_h
             
             def group_h(hours):
                 if not hours: return ""
                 periods = self._group_contiguous(hours)
                 groups = []
                 for p in periods:
-                    groups.append(f"{p[0]%24:02d}:00-{p[-1]%24:02d}:59")
+                    groups.append(f"{p[0]%24:02d}:00-{p[-1]%24:02d}:59" + (" (Завтра)" if p[0] >= 24 else ""))
                 return ", ".join(groups)
 
             res["active_periods"] = group_h(active_h)
-            if active_h:
-                res["analyzed_window"] = f"До {max(active_h)%24:02d}:59"
+            res["analyzed_window"] = f"До {max(active_h)%24:02d}:59" + (" (Завтра)" if max(active_h) >= 24 else "") if active_h else "Нет продажи"
             
-            # recommended_amps (if voltage is available)
-            v_val = 52.0 # Default fallback
+            soc_after = self._get_soc_from_log(sim_log, f"{max(target_hours)%24:02d}:59" if target_hours else f"{cur_hour%24:02d}:59", b_soc)
+            sunrise_soc = self._get_soc_from_log(sim_log, morning_key, b_soc)
+            res["sell_simulation"] = {
+                "projected_soc_at_sale_start_pct": b_soc,
+                "projected_soc_after_sale_pct": round_f(soc_after, 1),
+                "projected_soc_morning_pct": round_f(sunrise_soc, 1),
+                "log": sim_log
+            }
+            res["raw_commands"] = sell_commands
+            
+            v_val = 52.0
             if man.battery_voltage_sensor:
                 v_val = float(man.get_sensor_float(man.battery_voltage_sensor) or 52.0)
             res["recommended_amps"] = round_f((sell_commands.get(cur_hour, 0.0) * 1000.0) / v_val, 1) if v_val > 0 else 0.0
             
             res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
-            # v11.7.8: Detailed Power Decision (Reasons)
+            
+            # v11.7.20 Limit Reason Reporting
+            # Priority: Solar Deficit > Next Peak > Gatekeeper > User > Inverter
+            overall_limit = limit_reason if limit_reason else ("User" if current_budget_ac < available_sell_ac - 0.1 else "")
+            
             if cur_hour in active_h:
                 p_now = sell_commands.get(cur_hour, 0.0)
-                if p_now >= max_p - 0.05:
+                if overall_limit:
+                    res["power_decision"] = f"Лимит: {overall_limit}"
+                    if p_now >= max_p - 0.05:
+                        res["power_decision"] += " (Инвертор)"
+                elif p_now >= max_p - 0.05:
                     res["power_decision"] = "Лимит: Инвертор"
-                elif limit_reason:
-                    res["power_decision"] = f"Лимит: {limit_reason}"
                 else:
-                    res["power_decision"] = "Лимит: Пользователь" if rem_ac < 0.1 else "Активно"
+                    res["power_decision"] = "Активно"
             else:
                 res["power_decision"] = "Ожидание пика"
             
@@ -404,18 +439,37 @@ class StrategySell(StrategyEngine):
             f_today = round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1)
             f_tom_val = round_f(float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0), 1)
             
+            # House profile for debug
+            prof_cons_debug = "|".join([f"{h%24}:{(float(prof_cons_tom.get(str(h%24), 0.0)) if h>=24 else float(prof_cons_cur.get(str(h%24), 0.0))):.1f}" for h in range(cur_hour, cur_hour + 12)])
+
+            # Enhanced sim_log with Net power to find the "phantom" discharge
+            def _get_soc_and_net(log, h):
+                val = log.get(h) # Try direct integer first
+                if val is None:
+                    h_rel = h % 24
+                    keys = [f"{h_rel:02d}:59 (Завтра)", f"{h_rel:02d}:59"] if h >= 24 else [f"{h_rel:02d}:59", f"{h_rel:02d}:59 (Завтра)"]
+                    for k in keys:
+                        val = log.get(k)
+                        if val is not None: break
+                
+                if isinstance(val, dict):
+                    net = val.get('gen_kw',0) - val.get('load_kw',0)
+                    return f"{val.get('soc', 0):.0f}% ({net:.1f}k)"
+                return f"{val:.0f}%" if val is not None else "---"
+
             res["arbitrage_sell_debug"] = {
                 "base_target": round_f(base_target, 1),
-                "available_ac": round_f(available_sell_ac, 2),
-                "sim_log": "|".join([f"{h % 24}: {self._get_soc_from_log(sim_log, h, 0.0):.0f}%" for h in range(cur_hour, cur_hour + 12)]),
+                "available_ac": round_f(current_budget_ac, 2),
+                "limit_reason": limit_reason or "None",
+                "soc_at_peak": f"{soc_at_peak:.1f}%" if 'soc_at_peak' in locals() else "N/A",
+                "house_until_sunrise": round_f(house_kwh_until_sunrise, 2),
+                "house_h": prof_cons_debug,
+                "sim_log": "|".join([f"{h % 24}: {_get_soc_and_net(sim_log, h)}" for h in range(cur_hour, cur_hour + 12)]),
                 "final_targets": str(target_hours),
-                "midnight_trace": "|".join(getattr(man, "midnight_trace", [])[-4:]),
                 "f_today": f_today,
                 "f_tom": f_tom_val,
-                "target_price": target_price,
+                "target_price": round_f(target_price, 3) if current_budget_ac > 0.01 else 0.0,
                 "cur_p": cur_p_f,
-                "raw_epochs": str(epochs),
-                "price_sorted": str(target_hours_by_price),
                 "commands": {f"{h}h": p for h, p in sell_commands.items()}
             }
 

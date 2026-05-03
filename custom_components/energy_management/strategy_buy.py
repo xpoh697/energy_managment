@@ -220,6 +220,7 @@ class StrategyBuy(StrategyEngine):
                 key_morning = f"{(sunrise_h-1)%24:02d}:59 (Завтра)"
                 soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_end)
                 
+                res["gatekeeper_floor"] = min_soc
                 res["buy_simulation"] = {
                     "projected_soc_at_start_pct": round_f(soc_at_start_plan, 1),
                     "projected_soc_at_end_pct": round_f(soc_end, 1),

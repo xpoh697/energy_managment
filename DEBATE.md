@@ -1,13 +1,21 @@
-# Debate: Energy Management Strategy Synchronization (v11.7.9)
+# DEBATE: Jeweler Energy Arbitration Stabilization (v11.7.42)
 
 ## Archi (Lead Architect)
-Implementation of House-Blind budgeting combined with the Recursive Fix loop is a massive win for the system's "vibe" and accuracy. We're now following the SOC-Commander principle: the allocator is optimistic, and the simulator is the safety guard. This eliminates the "pre-subtraction" of house load that was causing the user's limit to be breached prematurely.
+We have fully stabilized the Jeweler strategy.
+1. Solar forecasts for tomorrow are now correctly identified via `HH:00` keys.
+2. The double-pessimism (0.31 coefficient) for tomorrow has been eliminated by enforcing `tom_coeff = 1.0`.
+3. The simulation loop is now error-resilient using a `try-except` block, preventing "Midnight Collapse".
+4. Indentation errors have been manually corrected and verified.
 
 ## Skeptic (Senior SRE/Security)
-I've reviewed the recursive loop. 5 iterations provide enough convergence without risking CPU spikes or infinite loops. The 0.2% tolerance in `soc_at_sunrise >= target_survival - 0.2` prevents jitter. Naming "Лимит: Пользователь" instead of "Бюджет" is correct because it directly links the constraint to the `ai_discharge_limit_soc` setting, making it intuitive for the user.
+The implementation is much more robust now.
+- `try-except` prevents total simulation failure on malformed hourly data.
+- Zero-division protection for battery capacity is implemented.
+- `NameError` for `tom_coeff` in logs has been fixed by proper initialization.
+- **Approved.**
 
-## Znaika (Senior Architect/TS Specialist)
-I've cross-referenced this with `TECHNICAL_SPECIFICATION.md` sections 4.1.5, 4.1.6, and 6.1. The logic `min(M, U, P)` is now correctly implemented. The "House-Blind" rule from v11.6.325 is restored. The morning window (04:00-10:00) correctly drops to the liberal threshold as per section 6.1.4, but the primary user limit (23%) is now respected during the night as intended. The removal of `buy_debug` and detailed `power_decision` reasons meet the latest requirements.
-
-### Final Verdict: APPROVED
-The consolidated code for v11.7.9 is ready.
+## Znaika (Senior Architect / TS Specialist)
+The solution matches the technical specification and restores the "Trust-the-Forecast" logic as requested by the USER.
+- The 07:00-10:00 morning sell window will now be correctly budgeted based on tomorrow's full solar forecast.
+- Indentation and structure are consistent with v11.6 base.
+- **Approved.**
