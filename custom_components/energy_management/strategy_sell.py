@@ -333,6 +333,9 @@ class StrategySell(StrategyEngine):
                     ignore_blended=True
                 )
                 
+                # v11.7.54: Raw Log Dump
+                _LOGGER.warning(f"[SimLogDump] Hour {cur_hour}: {sim_log.get('00:59', 'N/A')}")
+                
                 # Check end-of-sale SOC
                 last_h_key = f"{last_sell_h%24:02d}:59" + (" (Завтра)" if last_sell_h >= 24 else "")
                 end_of_sale_soc = self._get_soc_from_log(sim_log, last_h_key, b_soc)
