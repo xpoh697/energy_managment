@@ -2195,12 +2195,10 @@ class StrategyEngine:
                     else:
                         min_soc_val = base_target
                     
-                    # Adaptive buffer: If Min SOC is high (e.g. 70%), we don't need a huge additional buffer.
-                    soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 15.0))
-                    soc_buffer_full = 3.0 if min_soc_val > 25.0 else soc_buffer_val
-                    soc_buffer_val = 3.0 if min_soc_val > 25.0 else soc_buffer_val
-                    
-                    soc_buffer_val = 3.0 if min_soc_val > 25.0 else soc_buffer_val
+                    # v11.6.572: Strict TZ Compliance (Section 6.1 Sunrise Guard)
+                    # Use the user's buffer setting (e.g. 5%) without adaptive overrides.
+                    soc_buffer_val = float(man.get_setting(CONF_SOC_BUFFER, 8.0))
+                    soc_buffer_full = soc_buffer_val
                     
                     # v11.4.30: Early Detection for Morning Liberalization
                     # We need solar context to decide if we relax the buffer
@@ -2214,7 +2212,7 @@ class StrategyEngine:
                     cur_pv = float(man.avg_gen_kw or 0.0)
                     is_morning_solar_v2 = (4 <= cur_hour <= 12) and (total_solar_to_sunrise > 0.05 or cur_h_gen_prof > 0.05 or rem_solar_today > 0.05 or cur_pv > 0.5)
                     if is_morning_solar_v2:
-                         soc_buffer_val = 3.0 # Standard morning relaxation
+                         soc_buffer_val = 2.0 # TZ Rule: Morning relaxation = min_soc_bat + 2.0%
                     
                     _is_morning_liberal = False
                     active_buffer = soc_buffer_val
@@ -3146,7 +3144,7 @@ class StrategyEngine:
                     limit_label = f"Лимит пользователя ({min_soc_val:.0f}%)"
                     if base_target > min_soc_val + 0.5:
                         _disp_goal = (min_soc_bat_val + 2.0) if 4 <= (cur_hour % 24) <= 12 else (min_soc_bat_val + soc_buffer_full)
-                        limit_label = f"Защита дома (Цель {_disp_goal:.0f}% к утру)"
+                        limit_label = f"Защита дома (Порог {base_target:.0f}% для {_disp_goal:.0f}% к утру)"
                     
                     sell_diagnosis = limit_label
                     if _is_p_limited:
