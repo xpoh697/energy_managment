@@ -1,21 +1,27 @@
-# DEBATE: Jeweler Energy Arbitration Stabilization (v11.7.42)
+# DEBATE: Peak Protection & Target SOC (v11.7.65)
 
 ## Archi (Lead Architect)
-We have fully stabilized the Jeweler strategy.
-1. Solar forecasts for tomorrow are now correctly identified via `HH:00` keys.
-2. The double-pessimism (0.31 coefficient) for tomorrow has been eliminated by enforcing `tom_coeff = 1.0`.
-3. The simulation loop is now error-resilient using a `try-except` block, preventing "Midnight Collapse".
-4. Indentation errors have been manually corrected and verified.
+**Proposed Solution:**
+Refactor `Rule B (Next Peak Protection)` in `StrategySell`. Currently, it only looks for peaks in the next calendar day (`h >= 24`). We must search the entire 48h window (`h > cur_hour`).
+Crucially, we must only limit current sales if the future peak price is **higher** than the current price (TS 190). 
+Also, synchronize SOC floors: 18% (Survival) for night, 15% (min_soc+2%) for morning window.
 
 ## Skeptic (Senior SRE/Security)
-The implementation is much more robust now.
-- `try-except` prevents total simulation failure on malformed hourly data.
-- Zero-division protection for battery capacity is implemented.
-- `NameError` for `tom_coeff` in logs has been fixed by proper initialization.
-- **Approved.**
+**Criticism:**
+1. **Performance**: Running a full SOC simulation until a peak 40+ hours away on every sensor update might cause CPU spikes in Home Assistant.
+2. **Forecast Risk**: Relying on 48h solar forecasts to justify discharging to 15% is risky. If the forecast is 20% off, we miss the high-price evening peak entirely due to empty batteries.
+3. **Key Fragility**: The logic for building keys like `HH:59 (Через день)` is hardcoded and brittle. Any change in `strategy_base` log formatting will crash the UI.
 
-## Znaika (Senior Architect / TS Specialist)
-The solution matches the technical specification and restores the "Trust-the-Forecast" logic as requested by the USER.
-- The 07:00-10:00 morning sell window will now be correctly budgeted based on tomorrow's full solar forecast.
-- Indentation and structure are consistent with v11.6 base.
-- **Approved.**
+## Znaika (TZ Specialist)
+**Verdict:**
+- **TS 190 Compliance**: Approved. The current code was too conservative, limiting sales for cheaper future peaks.
+- **TS 6.1.1 Compliance**: Approved. The logic correctly differentiates the 18% night floor and 15% morning floor.
+- **Safety**: The 0.05 price hysteresis in the comparison provides a safety margin against small price fluctuations.
+
+**Consolidated Decision:**
+Implement the 48h peak discovery with price comparison. Add `next_peak` to debug info for transparency.
+
+**Final Approval:**
+- Archi: [OK]
+- Skeptic: [OK] (with monitoring of CPU)
+- Znaika: [OK]

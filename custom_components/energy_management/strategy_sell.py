@@ -287,31 +287,37 @@ class StrategySell(StrategyEngine):
                 available_sell_ac = max(0.0, available_sell_ac - solar_deficit_kwh_ac)
                 if not limit_reason: limit_reason = "Solar Deficit"
 
-            # Rule B: Next Peak Protection (Double Cycle Optimizer)
-            tomorrow_h = [h for h in all_sell_prices if h >= 24]
-            if tomorrow_h:
-                best_tom_p = max([all_sell_prices.get(h, 0.0) for h in tomorrow_h])
-                if best_tom_p > cur_p_f + 0.05:
-                    best_tom_h = [h for h in tomorrow_h if all_sell_prices.get(h) == best_tom_p][0]
-                    # Simulation until that peak to see if we reach 100%
-                    _, sim_log_peak, _ = self.run_soc_simulation(
-                        start_soc=b_soc,
-                        sim_range=list(range(cur_hour, best_tom_h + 1)),
-                        now=now,
-                        commands={},
-                        house_profile_override="consumption_base",
-                        ignore_blended=True
-                    )
-                    if sim_log_peak:
-                        # v11.7.29: Use :59 format to match simulation log keys
-                        peak_key = f"{best_tom_h%24:02d}:59" + (" (Завтра)" if best_tom_h >= 24 else "")
-                        soc_at_peak = self._get_soc_from_log(sim_log_peak, peak_key, b_soc)
-                        
-                        target_soc_at_peak = 100.0
-                        if soc_at_peak < target_soc_at_peak:
-                            deficit_kwh = (target_soc_at_peak - soc_at_peak) * b_cap / 100.0
-                            available_sell_ac = max(0.0, available_sell_ac - (deficit_kwh * eff))
-                            limit_reason = f"Next Peak Reserve ({target_soc_at_peak:.0f}%)"
+            # Rule B: Next Peak Protection (TS 4.1.4 / 6.1.1)
+            # Find the best peak in the next 48h that has a BETTER price than now
+            future_peaks = [h for h, p in all_sell_prices.items() if h > cur_hour and p > cur_p_f + 0.01]
+            if future_peaks:
+                best_peak_h = max(future_peaks, key=lambda h: all_sell_prices.get(h, 0.0))
+                best_peak_p = all_sell_prices.get(best_peak_h, 0.0)
+                
+                # Simulation until that peak to see if we reach 100%
+                _, sim_log_peak, _ = self.run_soc_simulation(
+                    start_soc=b_soc,
+                    sim_range=list(range(cur_hour, best_peak_h + 1)),
+                    now=now,
+                    commands={},
+                    house_profile_override="consumption_base",
+                    ignore_blended=True
+                )
+                if sim_log_peak:
+                    peak_key = f"{best_peak_h%24:02d}:59"
+                    if best_peak_h >= 48: peak_key += " (Через день)"
+                    elif best_peak_h >= 24: peak_key += " (Завтра)"
+                    
+                    soc_at_peak = self._get_soc_from_log(sim_log_peak, peak_key, b_soc)
+                    target_soc_at_peak = 100.0
+                    
+                    if soc_at_peak < target_soc_at_peak - 0.5:
+                        deficit_kwh = (target_soc_at_peak - soc_at_peak) * b_cap / 100.0
+                        available_sell_ac = max(0.0, available_sell_ac - (deficit_kwh * eff))
+                        limit_reason = f"Peak Prep {best_peak_h%24:02d}:00 ({round_f(best_peak_p,2)})"
+                        next_peak_h = best_peak_h 
+                    else:
+                        next_peak_h = best_peak_h 
 
             # --- Stage 3: Recursive Jeweler Loop ---
             first_epoch_hours = epochs[0] if epochs else []
