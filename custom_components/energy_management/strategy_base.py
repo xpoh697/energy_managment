@@ -896,7 +896,7 @@ class StrategyEngine:
                 
                 # 1. Generation Forecast for this hour
                 if is_tom:
-                    h_key = f"{real_h:02d}:00"
+                    h_key = str(real_h)
                     # v11.7.40: Ignore blended_coeff for tomorrow's forecast to prevent double-pessimism
                     tom_coeff = 1.0 
                     if dist_tom:
