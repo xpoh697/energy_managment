@@ -11,5 +11,5 @@
   "integration_type": "device",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "v11.6.550"
+  "version": "v11.7.0"
 }
