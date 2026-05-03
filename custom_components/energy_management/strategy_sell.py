@@ -109,6 +109,8 @@ class StrategySell(StrategyEngine):
                     break
             res["sunrise_hour"] = sunrise_h
 
+            target_hours = []
+            epochs = []
             all_sell_prices = {}
             for h, p in today_prices.items(): all_sell_prices[int(h)] = float(normalize_float(p))
             for h, p in tomorrow_prices.items(): all_sell_prices[int(h) + 24] = float(normalize_float(p))
