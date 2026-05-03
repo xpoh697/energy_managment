@@ -421,20 +421,29 @@ class StrategyEngine:
             if hist_gen_so_far > 0.5:
                 today_coeff = float(max(0.2, min(actual_today / hist_gen_so_far, 2.0)))
             
-            # --- Curtailment Correction (v4.2) ---
-            # The inverter only chokes PV panels in 'stop_sale' mode if there is "no room for energy"
-            # (i.e., battery is full or nearly full).
-            is_stop_sale = getattr(man, "current_inverter_mode", "") == "stop_sale"
-            if is_stop_sale and today_coeff < 1.0:
-                # Check if battery is full enough to cause curtailment
-                b_soc_cur, _, _ = man.get_battery_state()
-                if b_soc_cur > 90:
-                    # We suspect curtailment because export is forbidden AND battery is full.
-                    # In this case, frozen high-water performance (or at least 1.0/history) is used.
-                    old_today = today_coeff
-                    today_coeff = max(today_coeff, hist_coeff, 1.0)
-                    if abs(today_coeff - old_today) > 0.01:
-                        _LOGGER.debug(f"[Strategy] Curtailment detected (mode=stop_sale, SOC={b_soc_cur}%). Corrected today_coeff: {old_today:.2f} -> {today_coeff:.2f}")
+            # --- Curtailment Correction (v4.2/v11.7.47) ---
+            # Generation is throttled if:
+            # 1. Mode is 'stop_sale' AND battery is full (>90%).
+            # 2. Mode is 'no_pv_sale_no_bat' or 'sale_pv_no_bat' (waiting for negative prices).
+            # 3. Current price is negative (we don't want PV to charge battery or export).
+            cur_mode = getattr(man, "current_inverter_mode", "")
+            is_no_pv_mode = cur_mode in ["no_pv_sale_no_bat", "sale_pv_no_bat"]
+            
+            # Get current buy price
+            cur_price = 0.0
+            try:
+                cur_price = float(man.get_price("buy", now.strftime("%Y-%m-%d"), now.hour))
+            except Exception: pass
+            
+            is_negative_price = bool(cur_price <= 0.01)
+            is_stop_sale_curtail = bool(cur_mode == "stop_sale" and man.get_sensor_float(man.battery_soc_sensor, 0.0) > 90)
+
+            if (is_no_pv_mode or is_negative_price or is_stop_sale_curtail) and today_coeff < 1.0:
+                # We suspect curtailment. Use historical accuracy or 1.0 instead of zeroed-out performance.
+                old_today = today_coeff
+                today_coeff = max(today_coeff, hist_coeff, 1.0)
+                if abs(today_coeff - old_today) > 0.01:
+                    _LOGGER.warning(f"[Strategy] Curtailment detected (mode={cur_mode}, price={cur_price}, SOC={man.get_sensor_float(man.battery_soc_sensor, 0.0)}%). Corrected today_coeff: {old_today:.2f} -> {today_coeff:.2f}")
 
             # C. Blended Coeff: Weighted average of Today vs 1.0 (Baseline)
             # v11.3.64: Using fraction_so_far as the stable progress measure.
