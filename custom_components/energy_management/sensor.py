@@ -3452,11 +3452,11 @@ class MarketStrategySensor(SensorEntity):
             "target_price": round_f(float(res.get("target_price", 0.0) or 0.0), 3),
             "limit_used": round_f(float(res.get("limit_used", 0.0) or 0.0), 3),
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
+            "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
             "planned_power": {h: f"{d['power']} (Target SOC: {d['soc']}%)" if isinstance(d, dict) else d for h, d in res.get("planned_power_per_h", {}).items()},
             "power_decision": res.get("power_decision", "Ожидание"),
-            "buy_debug": res.get("buy_debug", "Нет данных"),
             "sell_debug": res.get("arbitrage_sell_debug", "Нет данных")
         }
 

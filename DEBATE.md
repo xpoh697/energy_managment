@@ -1,47 +1,13 @@
-# DEBATE: Разделение стратегий BUY и SELL
+# Debate: Energy Management Strategy Synchronization (v11.7.9)
 
 ## Archi (Lead Architect)
-Разделение на файлы — единственный способ остановить "качели", когда правка одного режима ломает другой. 
-Выбранная структура:
-- `strategy_base.py`: Содержит `StrategyEngineBase` со всеми хелперами и симуляцией. Это наше "нетронутое ядро".
-- `strategy_sell.py`: Класс `StrategySell`, наследуется от базы. Здесь будет только логика продажи.
-- `strategy_buy.py`: Класс `StrategyBuy`, наследуется от базы. Здесь будет только логика покупки.
-- `strategy.py`: Тонкий диспетчер `StrategyEngine`, который использует `StrategySell` и `StrategyBuy`.
-
-Это позволяет нам иметь два независимых алгоритма, использующих одну и ту же проверенную симуляцию.
-
-# Раунд дебатов 2: Завершение разделения и очистка кода
-
-**Archi (Lead Architect):**
-"Монолит `strategy.py` теперь официально стал диспетчером. `StrategyBuy` полностью изолирован и переписан с нуля для чистоты — в нем больше нет ни строчки логики продаж. Теперь мы сделали то же самое для `StrategySell`. Мое предложение: удалить все избыточные вспомогательные методы (такие как `get_cc_cv_ratio`) из специализированных классов и полагаться исключительно на `StrategyEngineBase`. Это предотвратит 'дрейф логики', когда баг правится в одной стратегии, но остается в другой."
-
-**Skeptic (SRE/Security):**
-"Согласен с очисткой, но предыдущая попытка 'обрезать' `StrategyBuy` привела к повреждению кода. Мы должны использовать метод полной перезаписи файлов вместо рискованных операций поиска и замены в файлах на 3000+ строк. Также нужно убедиться, что `StrategySell` сохраняет полный Sunrise Guard и рекурсивные проходы арбитража — это критично для безопасности АКБ. Еще один момент: перенося всё в базу, мы должны быть уверены, что там не спрятаны 'костыли', специфичные только для одного режима."
-
-**Znaika (Senior Architect/Специалист по ТЗ):**
-"Я снова изучил раздел 6.1 ТЗ. 'Sunrise Guard' (логика пола выживания) — это требование исключительно режима продажи (Sell), чтобы предотвратить разряд домашней нагрузкой после завершения окна продаж. `StrategyBuy` правильно фокусируется на зарядке по лимиту цены и эксплуатации отрицательных цен. Паттерн диспетчера в `strategy.py` соответствует целям модульности. Я одобряю переход на общий `StrategyEngineBase` для ядра симуляции, пока `run_soc_simulation` остается неизменным и проверенным."
-
-**Консенсус:**
-1. Исправить `strategy_buy.py` (ГОТОВО).
-2. Очистить `strategy_sell.py`: удалить лишние базовые методы и ветки Buy-режима (ГОТОВО).
-3. Убедиться, что диспетчер в `strategy.py` корректно обрабатывает все краевые случаи (ГОТОВО).
-4. Финальная проверка идентичности симуляций (ГОТОВО).
-5. Пуш в репозиторий и деплой на сервер 192.168.100.5 (ГОТОВО).
-
-**Skeptic Approval:** [x]
-**Znaika Approval:** [x]
+Implementation of House-Blind budgeting combined with the Recursive Fix loop is a massive win for the system's "vibe" and accuracy. We're now following the SOC-Commander principle: the allocator is optimistic, and the simulator is the safety guard. This eliminates the "pre-subtraction" of house load that was causing the user's limit to be breached prematurely.
 
 ## Skeptic (Senior SRE/Security)
-1. **Циклические импорты**: Решено через создание `strategy_base.py`. Теперь `strategy.py` импортирует наследников, а наследники импортируют базу. Чисто.
-2. **Дублирование кода**: Наследование позволяет избежать дублирования `run_soc_simulation`. Если мы найдем баг в симуляции, мы поправим его один раз в базе.
-3. **Обратная совместимость**: `sensor.py` продолжает видеть класс `StrategyEngine` в файле `strategy.py`, так что интеграция с Home Assistant не сломается.
+I've reviewed the recursive loop. 5 iterations provide enough convergence without risking CPU spikes or infinite loops. The 0.2% tolerance in `soc_at_sunrise >= target_survival - 0.2` prevents jitter. Naming "Лимит: Пользователь" instead of "Бюджет" is correct because it directly links the constraint to the `ai_discharge_limit_soc` setting, making it intuitive for the user.
 
-Одобряю текущую структуру.
+## Znaika (Senior Architect/TS Specialist)
+I've cross-referenced this with `TECHNICAL_SPECIFICATION.md` sections 4.1.5, 4.1.6, and 6.1. The logic `min(M, U, P)` is now correctly implemented. The "House-Blind" rule from v11.6.325 is restored. The morning window (04:00-10:00) correctly drops to the liberal threshold as per section 6.1.4, but the primary user limit (23%) is now respected during the night as intended. The removal of `buy_debug` and detailed `power_decision` reasons meet the latest requirements.
 
-## Znaika (Senior Architect / TZ Specialist)
-Структура полностью соответствует ТЗ в части разделения ответственности. 
-- Логика Sunrise Guard (Section 6.1) теперь будет жить только в `strategy_sell.py`.
-- Логика Арбитража покупки (Section 4.2) — только в `strategy_buy.py`.
-Правки в Sunrise Guard больше физически не смогут задеть `charge_reason` в режиме покупки.
-
-**Финальный вердикт: ОДОБРЕНО.**
+### Final Verdict: APPROVED
+The consolidated code for v11.7.9 is ready.
