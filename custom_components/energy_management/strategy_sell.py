@@ -249,6 +249,8 @@ class StrategySell(StrategyEngine):
             soc_after = self._get_soc_from_log(sim_log, f"{max(target_hours)%24:02d}:59" if target_hours else f"{cur_hour%24:02d}:59", b_soc)
             soc_morning = self._get_soc_from_log(sim_log, key_sunrise, b_soc)
             
+            # 5. UI Diagnostics
+            active_h = [h for h, p in sell_commands.items() if p > 0.05]
             res["sell_simulation"] = {
                 "projected_soc_at_start_pct": b_soc,
                 "projected_soc_after_sale_pct": round_f(soc_after, 1),
@@ -259,8 +261,26 @@ class StrategySell(StrategyEngine):
             res["recommended_power_kw"] = sell_commands.get(cur_hour, 0.0)
             res["limit_used"] = base_target
             res["target_price"] = target_price
-            res["active_hours"] = [h for h, p in sell_commands.items() if p > 0.05]
+            res["strategy_candidates"] = [f"{h%24:02d}:00" for h in target_hours]
+            res["active_hours"] = active_h
+            res["planned_power_per_h"] = {f"{h%24:02d}:00": p for h, p in sell_commands.items()}
             
+            if active_h:
+                start_h = min(active_h)
+                end_h = max(active_h)
+                res["analyzed_window"] = f"До {end_h%24:02d}:59"
+                res["active_periods"] = f"{start_h%24:02d}:00 - {end_h%24:02d}:59"
+            
+            # recommended_amps (if voltage is available)
+            v_val = 52.0 # Default fallback
+            if man.battery_voltage_sensor:
+                v_val = float(man.get_sensor_float(man.battery_voltage_sensor) or 52.0)
+            res["recommended_amps"] = round_f((sell_commands.get(cur_hour, 0.0) * 1000.0) / v_val, 1) if v_val > 0 else 0.0
+            
+            res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
+            res["power_decision"] = "Активно" if cur_hour in active_h else "Ожидание"
+            res["arbitrage_sell_debug"] = f"Бюджет AC: {available_sell_ac:.2f}кВтч | Доступно DC: {available_sell_dc:.2f}кВтч"
+
             if sell_commands.get(cur_hour, 0.0) > 0.05:
                 res["state"] = "active"
                 res["current_mode_text"] = "Активная продажа"

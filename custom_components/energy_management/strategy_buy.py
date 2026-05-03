@@ -228,6 +228,18 @@ class StrategyBuy(StrategyEngine):
                 }
                 res["charge_commands"] = charge_commands
                 res["recommended_power_kw"] = charge_commands.get(cur_hour, 0.0)
+                
+                # recommended_amps
+                v_val = 52.0
+                if man.battery_voltage_sensor:
+                    v_val = float(man.get_sensor_float(man.battery_voltage_sensor) or 52.0)
+                res["recommended_amps"] = round_f((charge_commands.get(cur_hour, 0.0) * 1000.0) / v_val, 1) if v_val > 0 else 0.0
+                
+                res["planned_power_per_h"] = {f"{h%24:02d}:00": p for h, p in charge_commands.items()}
+                res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
+                res["active_periods"] = f"{min(target_hours)%24:02d}:00 - {max(target_hours)%24:02d}:59"
+                res["buy_debug"] = f"Бюджет DC: {needed_kwh_dc:.2f}кВтч | Причина: {res['charge_reason']}"
+                
                 if charge_commands.get(cur_hour, 0.0) > 0.05: res["state"] = "active"
 
             # Mode text
