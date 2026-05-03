@@ -53,6 +53,18 @@ class StrategySell(StrategyEngine):
         deg_cost = float(self.get_battery_degradation_cost())
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
         target_price = 0.0
+        limit_reason = "None"
+        next_peak_h = -1
+        soc_at_peak = 0.0
+        sim_log = {}
+        target_hours = []
+        sell_commands = {}
+        current_budget_ac = 0.0
+        prof_cons_debug = ""
+        house_kwh_until_sunrise = 0.0
+        f_today = 0.0
+        f_tom = 0.0
+        cur_hour = now.hour
 
         res = {
             "strategy_version": VERSION,
