@@ -258,6 +258,8 @@ class StrategySell(StrategyEngine):
             
             survival_floor = min_soc_val + (house_kwh_global / b_cap * 100.0)
             morning_reserve = min_soc_val + soc_buffer # 18.0%
+            
+            # v11.7.118: Strictest limit wins (TS 6.1)
             base_target = max(user_limit, survival_floor, morning_reserve)
             gatekeeper_floor = survival_floor
 
@@ -307,9 +309,11 @@ class StrategySell(StrategyEngine):
                 
                 sell_commands = temp_cmd
                 # v11.6.325: Jeweler simulation is House-Blind during sale hours (TS 4.1.6)
+                # v11.7.116: Respect the floor during simulation (house won't drop it below target)
                 res_soc, sim_log, _ = self.run_soc_simulation(
                     start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 48)),
                     now=now, commands={h: -p for h, p in sell_commands.items()}, 
+                    b_min_soc=base_target,
                     house_profile_override="consumption_base", ignore_blended=True, attempt=attempt,
                     ignore_house_in_hours=target_hours
                 )
@@ -323,8 +327,9 @@ class StrategySell(StrategyEngine):
                 d_end = target_at_end - soc_end
                 d_morn = survival_floor - soc_morning
                 
-                total_def = max(d_end, d_morn)
-                _LOGGER.warning(f"[JewelerDebug] Attempt {attempt}: Budget {current_budget_ac:.2f}kWh -> SOC End:{soc_end:.1f}% Morn:{soc_morning:.1f}% Def:{total_def:.2f}")
+                # v11.7.118: Strictest limit evaluation (including Sunrise Guard d_morn)
+                total_def = max(d_end, d_morn) 
+                _LOGGER.warning(f"[JewelerDebug] Attempt {attempt}: Budget {current_budget_ac:.2f}kWh -> SOC End:{soc_end:.1f}% Target:{target_at_end:.1f}% Morn:{soc_morning:.1f}% Def:{total_def:.2f}")
                 
                 if total_def > 0.1:
                     current_budget_ac = max(0.0, current_budget_ac - (total_def * b_cap / 100.0 * eff))
