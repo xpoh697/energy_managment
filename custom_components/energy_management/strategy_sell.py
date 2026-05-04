@@ -264,17 +264,21 @@ class StrategySell(StrategyEngine):
             # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
             soc_at_start = b_soc
             if first_target_h > cur_hour:
-                # Find projected SOC at the exact start of the sale window
-                sale_start_key = f"{first_target_h%24:02d}:00" + (" (Завтра)" if first_target_h >= 24 else "")
+                # Find projected SOC at the exact start of the sale window (End of the hour BEFORE)
+                prev_h = first_target_h - 1
+                sale_start_key = f"{prev_h%24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                
                 # We use the baseline simulation (no commands) to see where we'll be
                 _, sim_log_base, _ = self.run_soc_simulation(
-                    start_soc=b_soc, sim_range=list(range(cur_hour, first_target_h + 1)),
+                    start_soc=b_soc, sim_range=list(range(cur_hour, first_target_h)),
                     now=now, commands={}, house_profile_override="consumption_base", ignore_blended=True
                 )
                 soc_at_start = self._get_soc_from_log(sim_log_base, sale_start_key, b_soc)
 
             available_sell_dc = max(0.0, (soc_at_start - base_target) * b_cap / 100.0)
             available_sell_ac = available_sell_dc * eff
+            
+            _LOGGER.warning(f"[BudgetDebug] Start:{soc_at_start:.1f}% Target:{base_target:.1f}% AvailableAC:{available_sell_ac:.2f}kWh (House-Blind)")
 
             f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
             tom_h_need = sum(float(normalize_float(prof_cons_tom.get(str(h % 24), 0.0))) for h in range(morning_h + 24, morning_h + 48))
@@ -320,6 +324,8 @@ class StrategySell(StrategyEngine):
                 d_morn = survival_floor - soc_morning
                 
                 total_def = max(d_end, d_morn)
+                _LOGGER.warning(f"[JewelerDebug] Attempt {attempt}: Budget {current_budget_ac:.2f}kWh -> SOC End:{soc_end:.1f}% Morn:{soc_morning:.1f}% Def:{total_def:.2f}")
+                
                 if total_def > 0.1:
                     current_budget_ac = max(0.0, current_budget_ac - (total_def * b_cap / 100.0 * eff))
                     if d_morn > d_end: limit_reason = f"Защита рассвета ({round_f(survival_floor, 1)}%)"
