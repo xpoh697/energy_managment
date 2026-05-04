@@ -21,14 +21,13 @@ BOILER_DEADLINES = [7, 8, 19, 20, 21] # Target hours for 100% heat
 
 BATTERY_POWER_STEP = 0.1  # kW resolution
 BATTERY_SOC_STEP = 1.0    # % resolution
-BOILER_SOC_STEP = 20.0    # % resolution
+BOILER_SOC_STEP = 1.0     # % resolution (Ultra precision requested)
 
 INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Advanced DP Planner with armored data parsing and zero-division protection.
-    Fixes: division by zero (Battery Capacity).
+    Ultra-High Precision DP Planner (1% steps for both Battery and Boiler).
     """
     
     def __init__(self, manager):
@@ -46,7 +45,6 @@ class DPPlanner:
             if not prices_buy or not prices_sell:
                 return {"error": "Missing price data"}
 
-            # Determine Horizon
             available_hours = sorted([int(h) for h in prices_buy.keys()])
             if not available_hours: return {"error": "No price indices found"}
             
@@ -54,39 +52,39 @@ class DPPlanner:
             horizon = max_abs_h - cur_hour + 1
             if horizon <= 0: horizon = 24 
             
-            # 2. Battery & Inverter Specs (Safety First)
+            # 2. Specs
             max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             _, b_cap_raw, _ = self.manager.get_battery_state()
             b_cap = float(b_cap_raw or 10.0)
-            if b_cap <= 0.1: b_cap = 10.0 # Emergency fallback to avoid division by zero
+            if b_cap <= 0.1: b_cap = 10.0 
             
             deg_cost = self._get_deg_cost(b_cap)
             min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
             
-            # 3. Gather Smart Forecasts
+            # 3. Forecasts
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
-            
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
 
-            # 4. Discretization
-            steps_soc = [round(i * BATTERY_SOC_STEP, 1) for i in range(int(100/BATTERY_SOC_STEP) + 1)]
-            steps_boiler = [round(i * BOILER_SOC_STEP, 1) for i in range(int(100/BOILER_SOC_STEP) + 1)]
+            # 4. Ultra-Fine Grid
+            # Optimization: use integer keys for faster lookup
+            steps_soc = range(0, 101, int(BATTERY_SOC_STEP))
+            steps_boiler = range(0, 101, int(BOILER_SOC_STEP))
             actions_bat = [round(-max_p + i * BATTERY_POWER_STEP, 1) for i in range(int(2 * max_p / BATTERY_POWER_STEP) + 1)]
             
             dp_table = {} 
 
-            # 5. Final State
+            # 5. Final State Penalty
             dp_table[horizon] = {}
             for s in steps_soc:
                 for b in steps_boiler:
                     penalty = 0.0
                     if s < min_soc: penalty += 5000.0
-                    if b < 50: penalty += 1000.0
+                    if b < 50: penalty += 2000.0
                     dp_table[horizon][(s, b)] = (penalty, None)
 
-            # 6. Backward Pass
+            # 6. Backward Pass (Warning: Computationally heavy)
             for h in range(horizon - 1, -1, -1):
                 dp_table[h] = {}
                 abs_h = cur_hour + h
@@ -101,35 +99,40 @@ class DPPlanner:
                 
                 is_deadline = h_rel in BOILER_DEADLINES
                 
+                # Pre-calculate constants for this hour to speed up inner loop
+                eff_gen_cons = cons - gen
+                
                 for s in steps_soc:
+                    # Inner battery loop optimization: only check actions that lead to valid SOC
+                    # s_next = s - (b_p / b_cap * 100) => b_p = (s - s_next) * b_cap / 100
+                    # This could be vectorized, but we'll stick to readable Python for now.
+                    
                     for b in steps_boiler:
                         best_val = float('inf')
                         best_act = None
                         
                         for b_p in actions_bat:
-                            # Battery Transition (b_cap guaranteed > 0 here)
                             s_next_raw = s - (b_p / b_cap * 100.0)
-                            if s_next_raw < -0.01 or s_next_raw > 100.01: continue
-                            s_next_raw = max(0.0, min(100.0, s_next_raw))
+                            if s_next_raw < 0 or s_next_raw > 100: continue
                             
+                            # Nearest SOC index
+                            s_next_idx = int(s_next_raw + 0.5)
+                            
+                            # Boiler logic (only 2 choices)
                             for b_on in [True, False]:
                                 b_cons = BOILER_POWER if b_on else 0.0
                                 b_next_raw = b - (BOILER_LOSS_RATE * 100.0) + (b_cons / BOILER_CAPACITY * 100.0)
-                                b_next_raw = max(0, min(100, b_next_raw))
+                                b_next_raw = max(0.0, min(100.0, b_next_raw))
+                                b_next_idx = int(b_next_raw + 0.5)
                                 
                                 p_inv = b_p * (INVERTER_EFFICIENCY if b_p > 0 else 1.0/INVERTER_EFFICIENCY)
-                                grid_net = cons + b_cons - gen - p_inv
+                                grid_net = eff_gen_cons + b_cons - p_inv
                                 
-                                cost = 0.0
-                                if grid_net > 0: cost += grid_net * p_buy
-                                else: cost += grid_net * p_sell 
-                                
+                                cost = (grid_net * p_buy) if grid_net > 0 else (grid_net * p_sell)
                                 cost += abs(b_p) * deg_cost
-                                if b_on and b >= 98: cost += 5.0 
-                                if is_deadline and b_next_raw < 80: cost += 1000.0
                                 
-                                s_next_idx = round(min(steps_soc, key=lambda x: abs(x - s_next_raw)), 1)
-                                b_next_idx = round(min(steps_boiler, key=lambda x: abs(x - b_next_raw)), 1)
+                                if b_on and b >= 98: cost += 10.0
+                                if is_deadline and b_next_raw < 80: cost += 3000.0
                                 
                                 total_v = cost + dp_table[h+1][(s_next_idx, b_next_idx)][0]
                                 
@@ -141,8 +144,8 @@ class DPPlanner:
 
             # 7. Reconstruct Path
             curr_s_raw, _, _ = self.manager.get_battery_state()
-            s_ptr = round(min(steps_soc, key=lambda x: abs(x - float(curr_s_raw or 50))), 1)
-            b_ptr = 60.0 
+            s_ptr = int(float(curr_s_raw or 50) + 0.5)
+            b_ptr = 40 # Start at 40%
             
             plan = {}
             for h in range(horizon):
@@ -166,11 +169,11 @@ class DPPlanner:
                 }
                 
                 s_next_exact = s_ptr - (b_p / b_cap * 100.0)
-                s_ptr = round(min(steps_soc, key=lambda x: abs(x - s_next_exact)), 1)
+                s_ptr = int(max(0, min(100, s_next_exact + 0.5)))
                 
                 b_cons = BOILER_POWER if b_on else 0.0
                 b_next_exact = b_ptr - (BOILER_LOSS_RATE * 100.0) + (b_cons / BOILER_CAPACITY * 100.0)
-                b_ptr = round(min(steps_boiler, key=lambda x: abs(x - b_next_exact)), 1)
+                b_ptr = int(max(0, min(100, b_next_exact + 0.5)))
 
             return plan
 
