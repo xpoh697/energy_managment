@@ -308,12 +308,16 @@ class StrategySell(StrategyEngine):
                     rem_ac = max(0.0, rem_ac - (p_alloc * h_f))
                 
                 sell_commands = temp_cmd
-                # v11.6.325: Jeweler simulation is House-Blind during sale hours (TS 4.1.6)
-                # v11.7.116: Respect the floor during simulation (house won't drop it below target)
+                # v11.7.119: Dynamic Floors for simulation (TS 6.1 + 4.1.6)
+                # During sale: Floor = base_target. After sale: Floor = min_soc.
+                d_floors = {h: base_target for h in target_hours}
+                for h in range(last_sell_h + 1, cur_hour + 48):
+                    d_floors[h] = min_soc_val
+                
                 res_soc, sim_log, _ = self.run_soc_simulation(
                     start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 48)),
                     now=now, commands={h: -p for h, p in sell_commands.items()}, 
-                    b_min_soc=base_target,
+                    dynamic_floors=d_floors,
                     house_profile_override="consumption_base", ignore_blended=True, attempt=attempt,
                     ignore_house_in_hours=target_hours
                 )

@@ -1043,8 +1043,9 @@ class StrategyEngine:
                     sim_eff = float(max(0.85, eff_coeff))
                     actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
                     if b_cap_f > 0.1:
-                        # v11.7.116: Respect the floor (b_min_soc) in simulation
-                        simulated_soc = float(max(b_min_soc, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
+                        # v11.7.119: Respect the dynamic floor (or b_min_soc if no specific floor)
+                        h_floor = dynamic_floors.get(int(h_abs), b_min_soc) if dynamic_floors else b_min_soc
+                        simulated_soc = float(max(h_floor, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
                     else:
                         simulated_soc = 0.0
                 
