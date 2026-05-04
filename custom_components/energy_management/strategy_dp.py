@@ -27,8 +27,8 @@ INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Advanced DP Planner with armored data parsing.
-    Fixes: String to float conversion error in forecast processing.
+    Advanced DP Planner with armored data parsing and zero-division protection.
+    Fixes: division by zero (Battery Capacity).
     """
     
     def __init__(self, manager):
@@ -54,26 +54,30 @@ class DPPlanner:
             horizon = max_abs_h - cur_hour + 1
             if horizon <= 0: horizon = 24 
             
-            # 2. Gather Smart Forecasts
+            # 2. Battery & Inverter Specs (Safety First)
+            max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
+            _, b_cap_raw, _ = self.manager.get_battery_state()
+            b_cap = float(b_cap_raw or 10.0)
+            if b_cap <= 0.1: b_cap = 10.0 # Emergency fallback to avoid division by zero
+            
+            deg_cost = self._get_deg_cost(b_cap)
+            min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
+            
+            # 3. Gather Smart Forecasts
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
             
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
 
-            # 3. Specs
-            max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
-            _, b_cap, _ = self.manager.get_battery_state()
-            deg_cost = self._get_deg_cost(b_cap)
-            min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
-            
+            # 4. Discretization
             steps_soc = [round(i * BATTERY_SOC_STEP, 1) for i in range(int(100/BATTERY_SOC_STEP) + 1)]
             steps_boiler = [round(i * BOILER_SOC_STEP, 1) for i in range(int(100/BOILER_SOC_STEP) + 1)]
             actions_bat = [round(-max_p + i * BATTERY_POWER_STEP, 1) for i in range(int(2 * max_p / BATTERY_POWER_STEP) + 1)]
             
             dp_table = {} 
 
-            # 4. Final State
+            # 5. Final State
             dp_table[horizon] = {}
             for s in steps_soc:
                 for b in steps_boiler:
@@ -82,7 +86,7 @@ class DPPlanner:
                     if b < 50: penalty += 1000.0
                     dp_table[horizon][(s, b)] = (penalty, None)
 
-            # 5. Backward Pass
+            # 6. Backward Pass
             for h in range(horizon - 1, -1, -1):
                 dp_table[h] = {}
                 abs_h = cur_hour + h
@@ -103,8 +107,10 @@ class DPPlanner:
                         best_act = None
                         
                         for b_p in actions_bat:
+                            # Battery Transition (b_cap guaranteed > 0 here)
                             s_next_raw = s - (b_p / b_cap * 100.0)
-                            if s_next_raw < 0 or s_next_raw > 100: continue
+                            if s_next_raw < -0.01 or s_next_raw > 100.01: continue
+                            s_next_raw = max(0.0, min(100.0, s_next_raw))
                             
                             for b_on in [True, False]:
                                 b_cons = BOILER_POWER if b_on else 0.0
@@ -133,9 +139,9 @@ class DPPlanner:
                         
                         dp_table[h][(s, b)] = (best_val, best_act)
 
-            # 6. Reconstruct Path
-            curr_s, _, _ = self.manager.get_battery_state()
-            s_ptr = round(min(steps_soc, key=lambda x: abs(x - float(curr_s or 50))), 1)
+            # 7. Reconstruct Path
+            curr_s_raw, _, _ = self.manager.get_battery_state()
+            s_ptr = round(min(steps_soc, key=lambda x: abs(x - float(curr_s_raw or 50))), 1)
             b_ptr = 60.0 
             
             plan = {}
@@ -146,7 +152,6 @@ class DPPlanner:
                 
                 b_p, b_on, g_net = act
                 h_rel = abs_h % 24
-                # Safety: use h_rel for price lookup if abs_h fails
                 cur_p_buy = float(normalize_float(prices_buy.get(str(abs_h), prices_buy.get(str(h_rel), 10.0))))
                 
                 mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), cur_p_buy)
@@ -175,46 +180,31 @@ class DPPlanner:
 
     def _get_smart_gen_forecast(self, blended_coeff: float, horizon: int) -> Dict[str, float]:
         now = datetime.now()
-        
-        # Use manager's distribution helper
         today_s = getattr(self.manager, "forecast_today_hourly_sensor", None)
         tomorrow_s = getattr(self.manager, "forecast_tomorrow_sensor", None)
-        
         today_dist = self._ensure_dict(self.manager.get_forecast_hourly_distribution(today_s)) if today_s else {}
-        
         tomorrow_date = (now + timedelta(days=1)).strftime("%Y-%m-%d")
         tomorrow_dist = self._ensure_dict(self.manager.get_forecast_hourly_distribution(tomorrow_s, tomorrow_date)) if tomorrow_s else {}
-        
         combined_raw = {}
         for h, v in today_dist.items(): combined_raw[str(h)] = v
         for h, v in tomorrow_dist.items(): combined_raw[str(int(h) + 24)] = v
-        
         if not combined_raw:
             prof_today = self._ensure_dict(self.manager.get_average_profile("generation", 7, now.weekday()))
             prof_tomorrow = self._ensure_dict(self.manager.get_average_profile("generation", 7, (now.weekday() + 1) % 7))
             for h, v in prof_today.items(): combined_raw[str(h)] = v
             for h, v in prof_tomorrow.items(): combined_raw[str(int(h) + 24)] = v
-
         corrected = {}
         for abs_h_str, val in combined_raw.items():
             try:
-                # Armored float conversion: skip if it's a sensor name string
-                if isinstance(val, str) and (val.startswith("sensor.") or "_" in val):
-                    _LOGGER.warning(f"DP Planner: Skipping invalid forecast value string: {val}")
-                    continue
-                    
+                if isinstance(val, str) and (val.startswith("sensor.") or "_" in val): continue
                 abs_h = int(abs_h_str)
                 h_acc, _ = self.manager.strategy_engine.get_hourly_accuracy_coeff(abs_h % 24)
                 corrected[str(abs_h)] = float(normalize_float(val)) * h_acc * blended_coeff
-            except (ValueError, TypeError):
-                continue
-            
+            except (ValueError, TypeError): continue
         return corrected
 
     def _ensure_dict(self, data: Any) -> Dict[str, Any]:
-        """Strict conversion to dict, ignores sensor ID strings."""
-        if isinstance(data, str) and (data.startswith("sensor.") or "forecast" in data):
-            return {}
+        if isinstance(data, str) and (data.startswith("sensor.") or "forecast" in data): return {}
         if isinstance(data, dict): return data
         if isinstance(data, list):
             new_dict = {}
@@ -223,8 +213,7 @@ class DPPlanner:
                     hour = item.get("hour", item.get("h", i))
                     val = item.get("value", item.get("v", item.get("p", 0.0)))
                     new_dict[str(hour)] = val
-                else:
-                    new_dict[str(i)] = item
+                else: new_dict[str(i)] = item
             return new_dict
         return {}
 
@@ -249,7 +238,7 @@ class DPPlanner:
         return "sale_pv"
 
     def _get_deg_cost(self, cap: float) -> float:
-        batt_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
-        cycles = self.manager.get_setting(CONF_BATTERY_RATED_CYCLES, 6000)
-        if cap <= 1.0 or cycles <= 0 or batt_cost <= 0: return 0.04
+        batt_cost = float(self.manager.get_setting(CONF_BATTERY_COST, 0.0))
+        cycles = float(self.manager.get_setting(CONF_BATTERY_RATED_CYCLES, 6000))
+        if cap <= 0.1 or cycles <= 0 or batt_cost <= 0: return 0.04
         return round_f(batt_cost / (cycles * cap), 4)
