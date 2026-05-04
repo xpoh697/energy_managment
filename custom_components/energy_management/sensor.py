@@ -4173,14 +4173,13 @@ class EnergyDPAdviceSensor(SensorEntity):
     @property
     def native_value(self):
         now_h = f"{datetime.now().hour:02d}:00"
-        return self._advice.get(now_h, {}).get("mode", "Idle")
+        return self._advice.get("plan", {}).get(now_h, {}).get("mode", "Idle")
 
     @property
     def extra_state_attributes(self):
         return {
-            "hourly_plan": self._advice,
-            "boiler_power_kw": 2.5,
-            "battery_step_kw": 0.1,
+            "hourly_plan": self._advice.get("plan", {}),
+            "calculation_debug": self._advice.get("debug", {}),
             "last_update": datetime.now().strftime("%H:%M:%S")
         }
 

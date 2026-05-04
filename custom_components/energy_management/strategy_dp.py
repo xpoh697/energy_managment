@@ -21,13 +21,13 @@ BOILER_DEADLINES = [7, 8, 19, 20, 21] # Target hours for 100% heat
 
 BATTERY_POWER_STEP = 0.1  # kW resolution
 BATTERY_SOC_STEP = 1.0    # % resolution
-BOILER_SOC_STEP = 1.0     # % resolution (Ultra precision requested)
+BOILER_SOC_STEP = 1.0     # % resolution
 
 INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Ultra-High Precision DP Planner (1% steps for both Battery and Boiler).
+    Ultra-High Precision DP Planner with Debug Metadata output.
     """
     
     def __init__(self, manager):
@@ -54,7 +54,7 @@ class DPPlanner:
             
             # 2. Specs
             max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
-            _, b_cap_raw, _ = self.manager.get_battery_state()
+            curr_s_raw, b_cap_raw, _ = self.manager.get_battery_state()
             b_cap = float(b_cap_raw or 10.0)
             if b_cap <= 0.1: b_cap = 10.0 
             
@@ -64,18 +64,22 @@ class DPPlanner:
             # 3. Forecasts
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
+            
+            # Summary for debug
+            gen_today = sum(v for h, v in forecast_gen.items() if int(h) < 24)
+            gen_tomorrow = sum(v for h, v in forecast_gen.items() if int(h) >= 24)
+            
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
 
-            # 4. Ultra-Fine Grid
-            # Optimization: use integer keys for faster lookup
+            # 4. Grid
             steps_soc = range(0, 101, int(BATTERY_SOC_STEP))
             steps_boiler = range(0, 101, int(BOILER_SOC_STEP))
             actions_bat = [round(-max_p + i * BATTERY_POWER_STEP, 1) for i in range(int(2 * max_p / BATTERY_POWER_STEP) + 1)]
             
             dp_table = {} 
 
-            # 5. Final State Penalty
+            # 5. Final State
             dp_table[horizon] = {}
             for s in steps_soc:
                 for b in steps_boiler:
@@ -84,7 +88,7 @@ class DPPlanner:
                     if b < 50: penalty += 2000.0
                     dp_table[horizon][(s, b)] = (penalty, None)
 
-            # 6. Backward Pass (Warning: Computationally heavy)
+            # 6. Backward Pass
             for h in range(horizon - 1, -1, -1):
                 dp_table[h] = {}
                 abs_h = cur_hour + h
@@ -96,17 +100,10 @@ class DPPlanner:
                 
                 active_cons = avg_cons if abs_h < 24 else tomorrow_cons
                 cons = float(normalize_float(active_cons.get(str(h_rel), 0.4)))
-                
                 is_deadline = h_rel in BOILER_DEADLINES
-                
-                # Pre-calculate constants for this hour to speed up inner loop
                 eff_gen_cons = cons - gen
                 
                 for s in steps_soc:
-                    # Inner battery loop optimization: only check actions that lead to valid SOC
-                    # s_next = s - (b_p / b_cap * 100) => b_p = (s - s_next) * b_cap / 100
-                    # This could be vectorized, but we'll stick to readable Python for now.
-                    
                     for b in steps_boiler:
                         best_val = float('inf')
                         best_act = None
@@ -114,11 +111,8 @@ class DPPlanner:
                         for b_p in actions_bat:
                             s_next_raw = s - (b_p / b_cap * 100.0)
                             if s_next_raw < 0 or s_next_raw > 100: continue
-                            
-                            # Nearest SOC index
                             s_next_idx = int(s_next_raw + 0.5)
                             
-                            # Boiler logic (only 2 choices)
                             for b_on in [True, False]:
                                 b_cons = BOILER_POWER if b_on else 0.0
                                 b_next_raw = b - (BOILER_LOSS_RATE * 100.0) + (b_cons / BOILER_CAPACITY * 100.0)
@@ -142,10 +136,9 @@ class DPPlanner:
                         
                         dp_table[h][(s, b)] = (best_val, best_act)
 
-            # 7. Reconstruct Path
-            curr_s_raw, _, _ = self.manager.get_battery_state()
+            # 7. Reconstruct
             s_ptr = int(float(curr_s_raw or 50) + 0.5)
-            b_ptr = 40 # Start at 40%
+            b_ptr = 40 
             
             plan = {}
             for h in range(horizon):
@@ -156,7 +149,6 @@ class DPPlanner:
                 b_p, b_on, g_net = act
                 h_rel = abs_h % 24
                 cur_p_buy = float(normalize_float(prices_buy.get(str(abs_h), prices_buy.get(str(h_rel), 10.0))))
-                
                 mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), cur_p_buy)
                 
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
@@ -170,12 +162,29 @@ class DPPlanner:
                 
                 s_next_exact = s_ptr - (b_p / b_cap * 100.0)
                 s_ptr = int(max(0, min(100, s_next_exact + 0.5)))
-                
                 b_cons = BOILER_POWER if b_on else 0.0
                 b_next_exact = b_ptr - (BOILER_LOSS_RATE * 100.0) + (b_cons / BOILER_CAPACITY * 100.0)
                 b_ptr = int(max(0, min(100, b_next_exact + 0.5)))
 
-            return plan
+            # 8. Return plan + debug metadata
+            return {
+                "plan": plan,
+                "debug": {
+                    "battery_capacity_kwh": round_f(b_cap, 2),
+                    "current_soc_pct": round_f(float(curr_s_raw or 0), 1),
+                    "degradation_cost_per_kwh": round_f(deg_cost, 4),
+                    "inverter_efficiency": INVERTER_EFFICIENCY,
+                    "blended_coeff": round_f(blended_coeff, 3),
+                    "total_forecast_today_kwh": round_f(gen_today, 2),
+                    "total_forecast_tomorrow_kwh": round_f(gen_tomorrow, 2),
+                    "boiler_config": {
+                        "power_kw": BOILER_POWER,
+                        "capacity_kwh": BOILER_CAPACITY,
+                        "loss_rate_hour": BOILER_LOSS_RATE
+                    },
+                    "horizon_hours": horizon
+                }
+            }
 
         except Exception as e:
             _LOGGER.error(f"DP Advice Error: {e}", exc_info=True)
