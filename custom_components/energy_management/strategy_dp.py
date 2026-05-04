@@ -7,9 +7,7 @@ from .const import (
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
     CONF_MIN_SOC_BAT,
-    CONF_SOC_BUFFER,
-    CONF_FORECAST_TODAY_HOURLY,
-    CONF_FORECAST_TOMORROW
+    CONF_SOC_BUFFER
 )
 from .utils import normalize_float, round_f
 
@@ -29,8 +27,8 @@ INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Advanced DP Planner with robust data type handling.
-    Fixes: 'list' object has no attribute 'items' errors.
+    Advanced DP Planner with robust data type handling and smart forecasts.
+    Fixes: String to float conversion error (Sensor ID usage).
     """
     
     def __init__(self, manager):
@@ -56,11 +54,11 @@ class DPPlanner:
             horizon = max_abs_h - cur_hour + 1
             if horizon <= 0: horizon = 24 
             
-            # 2. Gather Smart Forecasts
+            # 2. Gather Smart Forecasts using Manager helpers
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
             
-            # Consumption profiles (usually dicts from get_average_profile)
+            # Consumption profiles
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
 
@@ -175,13 +173,18 @@ class DPPlanner:
 
     def _get_smart_gen_forecast(self, blended_coeff: float, horizon: int) -> Dict[str, float]:
         now = datetime.now()
-        today_f = self._ensure_dict(self.manager.get_setting(CONF_FORECAST_TODAY_HOURLY, {}))
-        tomorrow_f = self._ensure_dict(self.manager.get_setting(CONF_FORECAST_TOMORROW, {}))
+        
+        # Use manager's sophisticated distribution helper instead of raw settings
+        today_dist = self._ensure_dict(self.manager.get_forecast_hourly_distribution(self.manager.forecast_today_hourly_sensor))
+        
+        tomorrow_date = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        tomorrow_dist = self._ensure_dict(self.manager.get_forecast_hourly_distribution(self.manager.forecast_tomorrow_sensor, tomorrow_date))
         
         combined_raw = {}
-        for h, v in today_f.items(): combined_raw[str(h)] = v
-        for h, v in tomorrow_f.items(): combined_raw[str(int(h) + 24)] = v
+        for h, v in today_dist.items(): combined_raw[str(h)] = v
+        for h, v in tomorrow_dist.items(): combined_raw[str(int(h) + 24)] = v
         
+        # Fallback to profiles
         if not combined_raw:
             prof_today = self._ensure_dict(self.manager.get_average_profile("generation", 7, now.weekday()))
             prof_tomorrow = self._ensure_dict(self.manager.get_average_profile("generation", 7, (now.weekday() + 1) % 7))
@@ -197,15 +200,11 @@ class DPPlanner:
         return corrected
 
     def _ensure_dict(self, data: Any) -> Dict[str, Any]:
-        """Convert list of dicts or other formats into a standard hour-indexed dict."""
-        if isinstance(data, dict):
-            return data
+        if isinstance(data, dict): return data
         if isinstance(data, list):
-            # Try to convert list to dict if it contains dicts with 'hour' or similar
             new_dict = {}
             for i, item in enumerate(data):
                 if isinstance(item, dict):
-                    # Assume index is the hour if no specific key
                     hour = item.get("hour", item.get("h", i))
                     val = item.get("value", item.get("v", item.get("p", 0.0)))
                     new_dict[str(hour)] = val
@@ -217,19 +216,13 @@ class DPPlanner:
     def _get_prices(self, key: str) -> Dict[str, Any]:
         prices_store = self.manager.data.get(key, {})
         if not isinstance(prices_store, dict): return {}
-        
         today_str = datetime.now().strftime("%Y-%m-%d")
         tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        
         combined = {}
-        # Handle Today
         t_data = self._ensure_dict(prices_store.get(today_str, {}))
         for h, p in t_data.items(): combined[str(h)] = p
-        
-        # Handle Tomorrow
         tm_data = self._ensure_dict(prices_store.get(tomorrow_str, {}))
         for h, p in tm_data.items(): combined[str(int(h) + 24)] = p
-            
         return combined
 
     def _map_mode(self, b_p, b_on, g_net, gen, price) -> str:
