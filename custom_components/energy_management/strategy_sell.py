@@ -417,17 +417,18 @@ class StrategySell(StrategyEngine):
                 
                 h_base = max(h_sale_limit, h_gatekeeper, h_morn_projected)
                 
-                # Honest House-Blind Adjustment
+                # Honest Simulated Power (what will actually happen)
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
-                raw_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
-                h_rel = h % 24
-                h_p_prof = prof_cons_tom if h >= 24 else prof_cons_cur
-                h_load_val = float(normalize_float(h_p_prof.get(f"{h_rel:02d}") or h_p_prof.get(str(h_rel)) or 0.4))
+                sim_entry = sim_log.get(h_sim_key, {})
+                # p_bat is discharge (+ is discharge in sim_log)
+                real_p = float(sim_entry.get("p_bat", p if h in target_hours else 0.0))
                 
                 # Target = Raw SOC (including house)
+                raw_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
                 h_target = max(h_base, raw_soc)
+                
                 planned_results[f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")] = {
-                    "power": round_f(p, 3),
+                    "power": round_f(real_p, 3),
                     "soc": round_f(h_target, 1)
                 }
 
