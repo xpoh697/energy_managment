@@ -29,7 +29,8 @@ INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Advanced DP Planner with Dynamic Horizon (based on available price data).
+    Advanced DP Planner with robust data type handling.
+    Fixes: 'list' object has no attribute 'items' errors.
     """
     
     def __init__(self, manager):
@@ -40,30 +41,30 @@ class DPPlanner:
             now = datetime.now()
             cur_hour = now.hour
             
-            # 1. Fetch Price Data to determine Horizon
+            # 1. Fetch Price Data
             prices_buy = self._get_prices("prices_buy")
             prices_sell = self._get_prices("prices_sell")
             
             if not prices_buy or not prices_sell:
                 return {"error": "Missing price data"}
 
-            # Horizon is the number of hours for which we have prices (max 48)
+            # Determine Horizon
             available_hours = sorted([int(h) for h in prices_buy.keys()])
             if not available_hours: return {"error": "No price indices found"}
             
-            # We plan from cur_hour to the end of available prices
             max_abs_h = max(available_hours)
             horizon = max_abs_h - cur_hour + 1
-            if horizon <= 0: horizon = 24 # Fallback
+            if horizon <= 0: horizon = 24 
             
             # 2. Gather Smart Forecasts
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
-            avg_cons = self.manager.get_average_profile("consumption_base", 7, now.weekday())
-            # For tomorrow's consumption, we use the same profile but adjusted for next day weekday
-            tomorrow_cons = self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7)
+            
+            # Consumption profiles (usually dicts from get_average_profile)
+            avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
+            tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
 
-            # 3. Specs & Grid Discretization
+            # 3. Specs & Discretization
             max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             _, b_cap, _ = self.manager.get_battery_state()
             deg_cost = self._get_deg_cost(b_cap)
@@ -75,12 +76,12 @@ class DPPlanner:
             
             dp_table = {} 
 
-            # 4. Final State (End of Horizon)
+            # 4. Final State
             dp_table[horizon] = {}
             for s in steps_soc:
                 for b in steps_boiler:
                     penalty = 0.0
-                    if s < min_soc: penalty += 5000.0 # Stricter penalty for long horizon
+                    if s < min_soc: penalty += 5000.0
                     if b < 50: penalty += 1000.0
                     dp_table[horizon][(s, b)] = (penalty, None)
 
@@ -90,11 +91,10 @@ class DPPlanner:
                 abs_h = cur_hour + h
                 h_rel = abs_h % 24
                 
-                p_buy = float(normalize_float(prices_buy.get(str(abs_h), prices_buy.get(str(h_rel), 0.0))))
-                p_sell = float(normalize_float(prices_sell.get(str(abs_h), prices_sell.get(str(h_rel), 0.0))))
+                p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.0)))
+                p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.0)))
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
                 
-                # Cons profile selection
                 active_cons = avg_cons if abs_h < 24 else tomorrow_cons
                 cons = float(normalize_float(active_cons.get(str(h_rel), 0.4)))
                 
@@ -122,11 +122,9 @@ class DPPlanner:
                                 else: cost += grid_net * p_sell 
                                 
                                 cost += abs(b_p) * deg_cost
-                                
                                 if b_on and b >= 98: cost += 5.0 
-                                if is_deadline and b_next_raw < 80: cost += 1000.0 # Higher priority for boiler in long runs
+                                if is_deadline and b_next_raw < 80: cost += 1000.0
                                 
-                                # Rounding for grid lookup
                                 s_next_idx = round(min(steps_soc, key=lambda x: abs(x - s_next_raw)), 1)
                                 b_next_idx = round(min(steps_boiler, key=lambda x: abs(x - b_next_raw)), 1)
                                 
@@ -138,7 +136,7 @@ class DPPlanner:
                         
                         dp_table[h][(s, b)] = (best_val, best_act)
 
-            # 6. Reconstruct Optimal Path
+            # 6. Reconstruct Path
             curr_s, _, _ = self.manager.get_battery_state()
             s_ptr = round(min(steps_soc, key=lambda x: abs(x - float(curr_s or 50))), 1)
             b_ptr = 60.0 
@@ -151,7 +149,7 @@ class DPPlanner:
                 
                 b_p, b_on, g_net = act
                 h_rel = abs_h % 24
-                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), prices_buy.get(str(abs_h), 10))
+                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), p_buy)
                 
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 plan[h_key] = {
@@ -176,32 +174,63 @@ class DPPlanner:
             return {"error": str(e)}
 
     def _get_smart_gen_forecast(self, blended_coeff: float, horizon: int) -> Dict[str, float]:
-        """Fetches and corrects generation forecast for the full planning horizon."""
         now = datetime.now()
-        today_f = self.manager.get_setting(CONF_FORECAST_TODAY_HOURLY, {})
-        tomorrow_f = self.manager.get_setting(CONF_FORECAST_TOMORROW, {})
+        today_f = self._ensure_dict(self.manager.get_setting(CONF_FORECAST_TODAY_HOURLY, {}))
+        tomorrow_f = self._ensure_dict(self.manager.get_setting(CONF_FORECAST_TOMORROW, {}))
         
-        # Merge into absolute hour index
         combined_raw = {}
         for h, v in today_f.items(): combined_raw[str(h)] = v
         for h, v in tomorrow_f.items(): combined_raw[str(int(h) + 24)] = v
         
-        # Fallback to profiles if sensors are empty
         if not combined_raw:
-            prof_today = self.manager.get_average_profile("generation", 7, now.weekday())
-            prof_tomorrow = self.manager.get_average_profile("generation", 7, (now.weekday() + 1) % 7)
+            prof_today = self._ensure_dict(self.manager.get_average_profile("generation", 7, now.weekday()))
+            prof_tomorrow = self._ensure_dict(self.manager.get_average_profile("generation", 7, (now.weekday() + 1) % 7))
             for h, v in prof_today.items(): combined_raw[str(h)] = v
             for h, v in prof_tomorrow.items(): combined_raw[str(int(h) + 24)] = v
 
         corrected = {}
         for abs_h_str, val in combined_raw.items():
             abs_h = int(abs_h_str)
-            # Apply accuracy based on relative hour of day
             h_acc, _ = self.manager.strategy_engine.get_hourly_accuracy_coeff(abs_h % 24)
-            # Blended coeff applies mostly to near future, but here we apply to all as a trend
             corrected[str(abs_h)] = float(val) * h_acc * blended_coeff
             
         return corrected
+
+    def _ensure_dict(self, data: Any) -> Dict[str, Any]:
+        """Convert list of dicts or other formats into a standard hour-indexed dict."""
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            # Try to convert list to dict if it contains dicts with 'hour' or similar
+            new_dict = {}
+            for i, item in enumerate(data):
+                if isinstance(item, dict):
+                    # Assume index is the hour if no specific key
+                    hour = item.get("hour", item.get("h", i))
+                    val = item.get("value", item.get("v", item.get("p", 0.0)))
+                    new_dict[str(hour)] = val
+                else:
+                    new_dict[str(i)] = item
+            return new_dict
+        return {}
+
+    def _get_prices(self, key: str) -> Dict[str, Any]:
+        prices_store = self.manager.data.get(key, {})
+        if not isinstance(prices_store, dict): return {}
+        
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        combined = {}
+        # Handle Today
+        t_data = self._ensure_dict(prices_store.get(today_str, {}))
+        for h, p in t_data.items(): combined[str(h)] = p
+        
+        # Handle Tomorrow
+        tm_data = self._ensure_dict(prices_store.get(tomorrow_str, {}))
+        for h, p in tm_data.items(): combined[str(int(h) + 24)] = p
+            
+        return combined
 
     def _map_mode(self, b_p, b_on, g_net, gen, price) -> str:
         if b_p < -0.1 and g_net > 0.1: return "buy"
@@ -210,21 +239,6 @@ class DPPlanner:
         if g_net >= -0.05 and b_p < -0.1 and float(normalize_float(gen)) > 0.1: return "stop_sale"
         if abs(b_p) < 0.1 and float(normalize_float(price)) < 0: return "no_pv_sale_no_bat"
         return "sale_pv"
-
-    def _get_prices(self, key: str) -> Dict[str, Any]:
-        prices = self.manager.data.get(key, {})
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        combined = {}
-        # Today
-        for h, p in prices.get(today_str, {}).items():
-            combined[str(h)] = p
-        # Tomorrow
-        for h, p in prices.get(tomorrow_str, {}).items():
-            combined[str(int(h) + 24)] = p
-            
-        return combined
 
     def _get_deg_cost(self, cap: float) -> float:
         batt_cost = self.manager.get_setting(CONF_BATTERY_COST, 0.0)
