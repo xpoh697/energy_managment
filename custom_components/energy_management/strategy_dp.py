@@ -27,8 +27,8 @@ INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Advanced DP Planner with robust data type handling and smart forecasts.
-    Fixes: String to float conversion error (Sensor ID usage).
+    Advanced DP Planner with armored data parsing.
+    Fixes: String to float conversion error in forecast processing.
     """
     
     def __init__(self, manager):
@@ -54,15 +54,14 @@ class DPPlanner:
             horizon = max_abs_h - cur_hour + 1
             if horizon <= 0: horizon = 24 
             
-            # 2. Gather Smart Forecasts using Manager helpers
+            # 2. Gather Smart Forecasts
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
             
-            # Consumption profiles
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
 
-            # 3. Specs & Discretization
+            # 3. Specs
             max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             _, b_cap, _ = self.manager.get_battery_state()
             deg_cost = self._get_deg_cost(b_cap)
@@ -147,7 +146,10 @@ class DPPlanner:
                 
                 b_p, b_on, g_net = act
                 h_rel = abs_h % 24
-                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), p_buy)
+                # Safety: use h_rel for price lookup if abs_h fails
+                cur_p_buy = float(normalize_float(prices_buy.get(str(abs_h), prices_buy.get(str(h_rel), 10.0))))
+                
+                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), cur_p_buy)
                 
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 plan[h_key] = {
@@ -174,17 +176,19 @@ class DPPlanner:
     def _get_smart_gen_forecast(self, blended_coeff: float, horizon: int) -> Dict[str, float]:
         now = datetime.now()
         
-        # Use manager's sophisticated distribution helper instead of raw settings
-        today_dist = self._ensure_dict(self.manager.get_forecast_hourly_distribution(self.manager.forecast_today_hourly_sensor))
+        # Use manager's distribution helper
+        today_s = getattr(self.manager, "forecast_today_hourly_sensor", None)
+        tomorrow_s = getattr(self.manager, "forecast_tomorrow_sensor", None)
+        
+        today_dist = self._ensure_dict(self.manager.get_forecast_hourly_distribution(today_s)) if today_s else {}
         
         tomorrow_date = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-        tomorrow_dist = self._ensure_dict(self.manager.get_forecast_hourly_distribution(self.manager.forecast_tomorrow_sensor, tomorrow_date))
+        tomorrow_dist = self._ensure_dict(self.manager.get_forecast_hourly_distribution(tomorrow_s, tomorrow_date)) if tomorrow_s else {}
         
         combined_raw = {}
         for h, v in today_dist.items(): combined_raw[str(h)] = v
         for h, v in tomorrow_dist.items(): combined_raw[str(int(h) + 24)] = v
         
-        # Fallback to profiles
         if not combined_raw:
             prof_today = self._ensure_dict(self.manager.get_average_profile("generation", 7, now.weekday()))
             prof_tomorrow = self._ensure_dict(self.manager.get_average_profile("generation", 7, (now.weekday() + 1) % 7))
@@ -193,13 +197,24 @@ class DPPlanner:
 
         corrected = {}
         for abs_h_str, val in combined_raw.items():
-            abs_h = int(abs_h_str)
-            h_acc, _ = self.manager.strategy_engine.get_hourly_accuracy_coeff(abs_h % 24)
-            corrected[str(abs_h)] = float(val) * h_acc * blended_coeff
+            try:
+                # Armored float conversion: skip if it's a sensor name string
+                if isinstance(val, str) and (val.startswith("sensor.") or "_" in val):
+                    _LOGGER.warning(f"DP Planner: Skipping invalid forecast value string: {val}")
+                    continue
+                    
+                abs_h = int(abs_h_str)
+                h_acc, _ = self.manager.strategy_engine.get_hourly_accuracy_coeff(abs_h % 24)
+                corrected[str(abs_h)] = float(normalize_float(val)) * h_acc * blended_coeff
+            except (ValueError, TypeError):
+                continue
             
         return corrected
 
     def _ensure_dict(self, data: Any) -> Dict[str, Any]:
+        """Strict conversion to dict, ignores sensor ID strings."""
+        if isinstance(data, str) and (data.startswith("sensor.") or "forecast" in data):
+            return {}
         if isinstance(data, dict): return data
         if isinstance(data, list):
             new_dict = {}
