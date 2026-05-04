@@ -325,21 +325,18 @@ class StrategySell(StrategyEngine):
                         h_s_load = p_s_prof.get(f"{h_s_rel:02d}") or p_s_prof.get(str(h_s_rel))
                         house_rem += float(normalize_float(h_s_load if h_s_load is not None else 0.4))
                     
-                    s_floor = min_soc_val + (house_rem / b_cap * 100.0)
+                    # 1. Morning Targets (Projected to sunrise)
+                    # We need to reach sunrise with at least min_soc + buffer (or + 2% if in morning window)
+                    morning_safety_at_sunrise = (min_soc_val + 2.0) if (4 <= h_rel < 10) else (min_soc_val + soc_buffer)
+                    s_floor_projected = morning_safety_at_sunrise + (house_rem / b_cap * 100.0)
                     
-                    # 2. Morning Reserve (TS 6.1.181) - Time-based safety buffer
-                    # a) 10:00 to 04:00 - min_soc + buffer
-                    # b) 04:00 to 10:00 - min_soc + 2%
-                    if 4 <= h_rel < 10:
-                        m_reserve = min_soc_val + 2.0
-                    else:
-                        m_reserve = min_soc_val + soc_buffer
-                    
-                    # 3. Strategic limit (only during sale)
-                    strat_limit = user_limit if h_abs in target_hours else 0.0
+                    # 2. Sale-End Targets (Applied directly during sale)
+                    # For morning sales (04:00-10:00), the limit is min_soc + 2% (TS 6.1.184)
+                    sale_limit = (min_soc_val + 2.0) if (4 <= h_rel < 10) else user_limit
+                    strat_limit = sale_limit if h_abs in target_hours else 0.0
                     
                     # Strictest wins (TS 6.1.183)
-                    d_floors[h_abs] = max(strat_limit, s_floor, m_reserve, min_soc_val)
+                    d_floors[h_abs] = max(strat_limit, s_floor_projected, min_soc_val)
                 
                 res_soc, sim_log, _ = self.run_soc_simulation(
                     start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 48)),
