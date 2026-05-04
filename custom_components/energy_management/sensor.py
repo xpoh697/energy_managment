@@ -58,6 +58,7 @@ from .const import (
 )
 from .const import CONF_BATTERY_VOLTAGE
 from .strategy import StrategyEngine
+from .strategy_dp import DPPlanner
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
 
 # Legacy aliases for safety during refactoring synchronization
@@ -138,6 +139,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     if config_data.get(CONF_TOTAL_SYSTEM_COST):
         entities.append(PaybackSensor(manager, "Окупаемость системы (ROI)"))
+
+    # DP Advisor (Shadow Mode)
+    entities.append(EnergyDPAdviceSensor(manager, "DP Advice"))
 
     if config_data.get(CONF_BATTERY_COST):
         entities.append(BatteryDegradationSensor(manager, "Стоимость износа батареи"))
@@ -3498,8 +3502,7 @@ class MarketStrategySensor(SensorEntity):
             attrs.update({
                 "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
                 "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
-                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
-                "simulation_log": res.get("buy_simulation", {}).get("log", {})
+                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0)
             })
 
         return attrs
@@ -4145,3 +4148,56 @@ class PotentialExportTodaySensor(SensorEntity):
     async def async_will_remove_from_hass(self):
         if self.async_write_ha_state in self.manager.update_listeners:
             self.manager.update_listeners.remove(self.async_write_ha_state)
+
+
+
+class EnergyDPAdviceSensor(SensorEntity):
+    """Hourly advice sensor based on Dynamic Programming optimization."""
+    def __init__(self, manager, name):
+        self.manager = manager
+        self.planner = DPPlanner(manager)
+        self._attr_name = name
+        self._attr_unique_id = f"{manager.entry.entry_id}_dp_advice"
+        self._attr_icon = "mdi:brain"
+        self.entity_id = f"{DOMAIN}.energy_dp_advice"
+        self._state = "Calculating..."
+        self._advice = {}
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, str(manager.entry.entry_id))},
+            name=manager.entry.data.get("name", "Energy Management"),
+            manufacturer="Antigravity AI",
+            model="DP Optimizer Advisor",
+        )
+
+    @property
+    def native_value(self):
+        now_h = f"{datetime.now().hour:02d}:00"
+        return self._advice.get(now_h, {}).get("mode", "Idle")
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "hourly_plan": self._advice,
+            "boiler_power_kw": 2.5,
+            "battery_step_kw": 0.1,
+            "last_update": datetime.now().strftime("%H:%M:%S")
+        }
+
+    async def async_added_to_hass(self):
+        self.manager.update_listeners.append(self._update_advice)
+        await self._update_advice()
+
+    async def async_will_remove_from_hass(self):
+        if self._update_advice in self.manager.update_listeners:
+            self.manager.update_listeners.remove(self._update_advice)
+
+    async def _update_advice(self):
+        """Runs the DP planner in a thread to avoid blocking HASS."""
+        try:
+            self._advice = await self.manager.hass.async_add_executor_job(
+                self.planner.get_dp_advice
+            )
+            self.async_write_ha_state()
+        except Exception as e:
+            _LOGGER.error(f"DP Advice update failed: {e}")

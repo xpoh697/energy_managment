@@ -1,21 +1,21 @@
-# Debate: Cleaning Diagnostics and Adding charge_reason (v12.2.7)
+# Debate: Removing simulation_log Altogether (v12.2.9)
 
 ## Archi (Lead Architect)
-The user wants to add `survival_target` as a top-level attribute next to `gatekeeper_floor`. This is a great addition for transparency, as it shows the "pessimistic" target the system is aiming for before arbitrage or negative prices.
+The user wants the `simulation_log` attribute removed completely. We previously removed it from the nested `buy_debug`, but it is still present as a top-level attribute in `Market Strategy` and potentially other sensors like `PredictionTargetSensor`.
 
 **Proposed Changes:**
-- In `sensor.py`: Add `survival_target` to the main attributes dictionary of the `Market Strategy` sensor.
+- In `sensor.py`: Remove `"simulation_log"` from `Market Strategy` and `PredictionTargetSensor` attributes.
+- In `strategy_buy.py`: Stop including the full `log` in the `buy_simulation` result dictionary to save memory and avoid accidental re-exposure.
 
 ## Skeptic (Security/SRE)
-1. **Redundancy**: It's already in `buy_debug`, but since we are moving towards top-level attributes, it's fine.
-2. **Naming**: We should ensure it doesn't conflict with `target_soc`. `survival_target` is specifically the floor for bridge charging.
+- Good. This will drastically reduce the state size and prevent history database bloat.
+- We should ensure that if the user ever needs it for debugging, they can still check the logs in the file system (if we log it there) or we can re-enable it easily. But for now, removal is the right call.
 
 ## Znaika (Technical Specialist)
-- This follows the logic of providing detailed diagnostics to the user. `survival_target` is the calculated energy needed to survive until dawn (plus buffer).
-- No architectural issues.
+- Confirmed. The `simulation_log` is a large dictionary that is not intended for regular UI usage according to the latest user feedback.
 
 **Consensus:**
-Add `survival_target` attribute to `sensor.py`.
+Remove `simulation_log` from all sensors.
 
 ## Final Approval
 - Skeptic: Approved.
