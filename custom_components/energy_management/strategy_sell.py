@@ -263,12 +263,12 @@ class StrategySell(StrategyEngine):
 
             # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
             soc_at_start = b_soc
-            if first_sale_h > cur_hour:
+            if first_target_h > cur_hour:
                 # Find projected SOC at the exact start of the sale window
-                sale_start_key = f"{first_sale_h%24:02d}:00" + (" (Завтра)" if first_sale_h >= 24 else "")
+                sale_start_key = f"{first_target_h%24:02d}:00" + (" (Завтра)" if first_target_h >= 24 else "")
                 # We use the baseline simulation (no commands) to see where we'll be
                 _, sim_log_base, _ = self.run_soc_simulation(
-                    start_soc=b_soc, sim_range=list(range(cur_hour, first_sale_h + 1)),
+                    start_soc=b_soc, sim_range=list(range(cur_hour, first_target_h + 1)),
                     now=now, commands={}, house_profile_override="consumption_base", ignore_blended=True
                 )
                 soc_at_start = self._get_soc_from_log(sim_log_base, sale_start_key, b_soc)
