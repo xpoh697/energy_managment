@@ -327,14 +327,19 @@ class StrategySell(StrategyEngine):
                     
                     s_floor = min_soc_val + (house_rem / b_cap * 100.0)
                     
-                    # 2. Morning Guard (04:00 - 10:00)
-                    m_guard = (min_soc_val + 2.0) if (4 <= h_rel < 10) else 0.0
+                    # 2. Morning Reserve (TS 6.1.181) - Time-based safety buffer
+                    # a) 10:00 to 04:00 - min_soc + buffer
+                    # b) 04:00 to 10:00 - min_soc + 2%
+                    if 4 <= h_rel < 10:
+                        m_reserve = min_soc_val + 2.0
+                    else:
+                        m_reserve = min_soc_val + soc_buffer
                     
                     # 3. Strategic limit (only during sale)
-                    strat_limit = base_target if h_abs in target_hours else 0.0
+                    strat_limit = user_limit if h_abs in target_hours else 0.0
                     
-                    # Strictest wins
-                    d_floors[h_abs] = max(strat_limit, s_floor, m_guard, min_soc_val)
+                    # Strictest wins (TS 6.1.183)
+                    d_floors[h_abs] = max(strat_limit, s_floor, m_reserve, min_soc_val)
                 
                 res_soc, sim_log, _ = self.run_soc_simulation(
                     start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 48)),
