@@ -2797,7 +2797,7 @@ class InverterOperationModeSensor(SensorEntity):
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
-                chg_reason = "wait_for_negative"
+                chg_reason = "Ожидание отрицательных цен"
                 c_amps_fixed = 0.0
             elif mode == "sale_pv_bat":
                 # For sale_pv_bat, we ALSO use the fixed anchor if available
@@ -2826,11 +2826,12 @@ class InverterOperationModeSensor(SensorEntity):
                     t_soc = float(round_f(batt_soc, 1))
 
             # Extract diagnostic info
-            if not chg_reason:
-                if mode == "buy":
-                    chg_reason = buy_strategy.get("charge_reason", "")
+            if not chg_reason or chg_reason == "Нет":
+                b_reason = buy_strategy.get("charge_reason", "Нет")
+                if b_reason != "Нет":
+                    chg_reason = b_reason
                 elif "sale" in mode and sell_strategy.get("state") == "active":
-                    chg_reason = sell_strategy.get("charge_reason", "")
+                    chg_reason = sell_strategy.get("charge_reason", "Нет")
 
             attrs["power"] = p_val
             attrs["target_soc"] = t_soc
@@ -3464,11 +3465,11 @@ class MarketStrategySensor(SensorEntity):
             "limit_used": round_f(float(res.get("limit_used", 0.0) or 0.0), 3),
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
+            "survival_target": res.get("survival_target", 0.0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
             "planned_power": {h: f"{d['power']} (Target SOC: {d['soc']}%)" if isinstance(d, dict) else d for h, d in res.get("planned_power_per_h", {}).items()},
-            "power_decision": res.get("power_decision", "Ожидание"),
-            "sell_debug": res.get("arbitrage_sell_debug", "Нет данных")
+            "power_decision": res.get("power_decision", "Ожидание")
         }
 
         # v7.2 - Hide detailed projections if nothing is planned for today
@@ -3478,6 +3479,7 @@ class MarketStrategySensor(SensorEntity):
         show_extra = is_active or has_planned
 
         if self.mode == "sell":
+            attrs["sell_debug"] = res.get("arbitrage_sell_debug", "Нет данных")
             attrs.update({
                 "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_sale_start_pct", 0.0),
                 "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
@@ -3492,10 +3494,12 @@ class MarketStrategySensor(SensorEntity):
                 "arbitrage_gatekeeper_floor": res.get("gatekeeper_floor", 0.0)
             })
         else: # buy
+            attrs["buy_debug"] = res.get("buy_debug", "Нет данных")
             attrs.update({
                 "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
                 "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
                 "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
+                "simulation_log": res.get("buy_simulation", {}).get("log", {})
             })
 
         return attrs

@@ -1,38 +1,22 @@
-# DEBATE: Коррекция расчета бюджета (Projected SOC и House-Blind)
+# Debate: Cleaning Diagnostics and Adding charge_reason (v12.2.7)
 
-## Участники
-- **Archi**: Lead Architect.
-- **Skeptic**: Senior SRE/Security.
-- **Znaika**: Senior Architect.
+## Archi (Lead Architect)
+The user wants to add `survival_target` as a top-level attribute next to `gatekeeper_floor`. This is a great addition for transparency, as it shows the "pessimistic" target the system is aiming for before arbitrage or negative prices.
 
----
+**Proposed Changes:**
+- In `sensor.py`: Add `survival_target` to the main attributes dictionary of the `Market Strategy` sensor.
 
-### Archi:
-"Пользователь абсолютно прав. Мы считаем бюджет от текущего SOC (15:00), хотя продажа начнется в 19:00. Это создает ложный избыток энергии, который дом успеет съесть до начала работы инвертора. 
-Нужно:
-1. Спрогнозировать SOC на момент первого часа продажи (`soc_at_start`).
-2. Считать `available_sell_dc` именно от этого значения.
-3. Во время часов продажи в симуляции игнорировать нагрузку дома, чтобы бюджет был 'чисто стратегическим'."
+## Skeptic (Security/SRE)
+1. **Redundancy**: It's already in `buy_debug`, but since we are moving towards top-level attributes, it's fine.
+2. **Naming**: We should ensure it doesn't conflict with `target_soc`. `survival_target` is specifically the floor for bridge charging.
 
-### Skeptic:
-"1. **Точность**: Прогноз SOC до начала продажи должен быть консервативным (лучше недооценить, чем переоценить).
-2. **Стабильность**: Если мы уберем нагрузку дома из симуляции во время продажи, `Target SOC` будет показывать только результат продажи. Это и есть 'Honest House-Blind'.
-3. **Риск**: Нужно убедиться, что `first_sale_h` определяется корректно, даже если продажа начинается прямо сейчас."
+## Znaika (Technical Specialist)
+- This follows the logic of providing detailed diagnostics to the user. `survival_target` is the calculated energy needed to survive until dawn (plus buffer).
+- No architectural issues.
 
-### Znaika:
-"ТЗ 4.1.6 говорит прямо: 'Из бюджета продажи НЕ вычитается прогнозируемое потребление дома'. 
-Это касается именно часов работы стратегии. 
-А вот до начала стратегии мы обязаны учитывать расход, иначе мы пытаемся продать энергию, которой уже не будет в батарее.
+**Consensus:**
+Add `survival_target` attribute to `sensor.py`.
 
-**Вердикт**: 
-1. Внедрить расчет `soc_at_start` через предварительную мини-симуляцию от `now` до `first_sale_h`.
-2. Считать `available_sell_dc = (soc_at_start - base_target) * Capacity / 100`.
-3. В циклах симуляции (Jeweler и Final Plan) обнулять `h_load` для часов, входящих в `target_hours`.
-
-Это уберет разницу в 5% и сделает планирование точным."
-
----
-
-## Финальное одобрение
-- **Skeptic**: Одобрено.
-- **Znaika**: Одобрено (соответствует ТЗ 4.1.6 и 6.1.1).
+## Final Approval
+- Skeptic: Approved.
+- Znaika: Approved.

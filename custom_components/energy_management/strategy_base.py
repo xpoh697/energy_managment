@@ -1023,6 +1023,7 @@ class StrategyEngine:
                         total_net_kw = rem_gen - rem_cons + cmd_p
 
             
+                sim_eff = float(max(0.85, eff_coeff))
                 if total_net_kw > 0.001: 
                     # v11.1.62 - bat_emergency recovery
                     acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))
@@ -1032,6 +1033,9 @@ class StrategyEngine:
                     if b_cap_f > 0.1:
                         simulated_soc = float(min(100.0, simulated_soc + (actual_charge_kw * step_duration / b_cap_f * 100.0)))
                     
+                    # v11.7.133: Record actual AC power stored (after all losses/limits)
+                    sim_p_bat = -actual_charge_kw / max(0.1, eff_coeff) # - is charge in UI view
+                    
                     # v11.0.6 - Track overflow energy (AC kWh)
                     actual_stored_kwh_ac = 0.0
                     if b_cap_f > 0.1:
@@ -1040,14 +1044,28 @@ class StrategyEngine:
                     overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
                     overflow_kwh += overflow_h
                 elif total_net_kw < -0.001 and allow_discharge: 
-                    sim_eff = float(max(0.85, eff_coeff))
                     actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
+                    
+                    old_soc = simulated_soc
                     if b_cap_f > 0.1:
-                        # v11.7.119: Respect the dynamic floor (or b_min_soc if no specific floor)
+                        # v11.7.140: Correct Floor Enforcement.
+                        # We only allow discharge DOWN TO the floor. 
+                        # If we are ALREADY below the floor, we don't 'fake' a charge (no max(h_floor, ...)).
+                        # We just don't allow ANY further discharge.
                         h_floor = dynamic_floors.get(int(h_abs), b_min_soc) if dynamic_floors else b_min_soc
-                        simulated_soc = float(max(h_floor, simulated_soc - (actual_discharge_kw * step_duration / b_cap_f * 100.0)))
+                        
+                        max_discharge_soc = max(0.0, simulated_soc - h_floor)
+                        requested_discharge_soc = (actual_discharge_kw * step_duration / b_cap_f * 100.0)
+                        
+                        simulated_soc = float(simulated_soc - min(requested_discharge_soc, max_discharge_soc))
                     else:
                         simulated_soc = 0.0
+                        
+                    # v11.7.133: Re-calculate actual discharge AC power after floor capping
+                    soc_drop = old_soc - simulated_soc
+                    sim_p_bat = (soc_drop / 100.0 * b_cap_f) / step_duration * sim_eff
+                else:
+                    sim_p_bat = 0.0
                 
                 # v11.7.50: Midnight Jump Hunter
                 if real_h == 23 or real_h == 0 or real_h == 1:
@@ -1074,6 +1092,8 @@ class StrategyEngine:
                     "soc": round_f(float(simulated_soc), 1),
                     "gen_kw": round_f(float(expected_gen_kw), 2),
                     "load_kw": round_f(float(expected_cons_kw), 2),
+                    "p_bat": round_f(float(sim_p_bat), 3),
+                    "p_grid": round_f(float(sim_p_bat + rem_gen - rem_cons), 2),
                     "trust": round_f(float(tom_coeff if is_tom else blended_coeff), 2)
                 }
             except Exception as e:

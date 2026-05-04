@@ -69,7 +69,7 @@ class StrategyBuy(StrategyEngine):
             "profit_threshold": prof_thresh,
             "buy_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_at_end_pct": b_soc, "projected_soc_morning_pct": b_soc},
             "arbitrage_decision": "Нет данных",
-            "charge_reason": "none",
+            "charge_reason": "Нет",
             "strategy_candidates": [],
             "raw_commands": {}
         }
@@ -145,7 +145,7 @@ class StrategyBuy(StrategyEngine):
             target_hours = []
             if negative_hours:
                 target_hours = negative_hours
-                res["charge_reason"] = "negative"
+                res["charge_reason"] = "Отрицательная цена"
                 res["arbitrage_decision"] = f"Отрицательная цена ({cur_p_f:.2f})"
             else:
                 dynamic_buy = bool(man.get_setting(CONF_DYNAMIC_SOC_BUY, True))
@@ -158,10 +158,10 @@ class StrategyBuy(StrategyEngine):
                     # Select cheapest windows (peaks)
                     min_p = min(all_buy_prices[h] for h in candidates)
                     target_hours = [h for h in candidates if all_buy_prices[h] <= min_p + 0.05]
-                    res["charge_reason"] = "cheap" if not any(is_buy_profitable_arb(all_buy_prices[h], h) for h in target_hours) else "arbitrage"
+                    res["charge_reason"] = "Дешево" if not any(is_buy_profitable_arb(all_buy_prices[h], h) for h in target_hours) else "Арбитраж"
                     res["arbitrage_decision"] = f"Ценовое окно ({cur_p_f:.2f})" if cur_hour in target_hours else "Ожидание окна"
                 else:
-                    res["charge_reason"] = "none"
+                    res["charge_reason"] = "Нет"
                     res["state"] = "price_limit_not_met"
 
             # Survival Bridge Logic
@@ -178,6 +178,7 @@ class StrategyBuy(StrategyEngine):
                         h_key = f"{h_step % 24:02d}:59" + (" (Завтра)" if h_step >= 24 else "")
                         soc_h = self._get_soc_from_log(log, h_key, 100.0)
                         if soc_h < min_soc:
+                            res["survival_violation_hour"] = h_step
                             # Add cheapest hour before violation
                             search = [sh for sh in range(cur_hour, h_step + 1) if sh not in survival_hours and sh in all_buy_prices]
                             if search:
@@ -188,15 +189,46 @@ class StrategyBuy(StrategyEngine):
                     if not added: break
                 target_hours = sorted(list(survival_hours))
                 if any(h not in (negative_hours or candidates if 'candidates' in locals() else []) for h in target_hours):
-                    if cur_hour in target_hours and res["charge_reason"] == "none":
-                        res["charge_reason"] = "survival"
+                    res["charge_reason"] = "Выживание"
 
             # Power Allocation
             charge_commands = {}
             target_soc = b_soc
             if target_hours:
+                # v12.1.0: Gatekeeper Floor Calculation (House load until sunrise)
+                # This ensures we account for what the house WILL eat after the buy window
+                morning_h = man.get_sunrise_hour() or 8
+                morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
+                
+                prof_cons_cur = dict(man.get_average_profile("consumption_base", 7, now.weekday()))
+                prof_cons_tom = dict(man.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
+                
+                house_kwh_until_sunrise = 0.0
+                last_h = max(target_hours) if target_hours else cur_hour
+                for h_abs in range(last_h + 1, morning_h_abs):
+                    h_rel = h_abs % 24
+                    p_prof = prof_cons_tom if h_abs >= 24 else prof_cons_cur
+                    h_load = p_prof.get(f"{h_rel:02d}") or p_prof.get(str(h_rel))
+                    # Fallback to 0.4 kWh/h if profile is missing
+                    house_kwh_until_sunrise += float(normalize_float(h_load if h_load is not None else 0.4))
+
+                # v12.2.0: Optimized Survival Target (TS 4.2.3)
+                # Don't charge to 100% if price is high and we only need to survive
                 base_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
-                target_soc = 100.0 if res["charge_reason"] in ["negative", "arbitrage"] else base_limit
+                house_load_pct = (house_kwh_until_sunrise / b_cap * 100.0) if b_cap > 0 else 0
+                soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 5.0))
+                survival_target = min_soc + house_load_pct + soc_buffer
+                
+                if res["charge_reason"] in ["Отрицательная цена", "Арбитраж"]:
+                    target_soc = 100.0
+                elif res["charge_reason"] == "Выживание":
+                    target_soc = min(base_limit, survival_target)
+                else:
+                    target_soc = base_limit
+                
+                res["survival_target"] = round_f(survival_target, 1)
+                res["soc_buffer"] = soc_buffer
+                res["target_soc"] = round_f(target_soc, 1)
                 
                 # Pre-sim to find SOC at start of window
                 first_h = min(target_hours)
@@ -207,8 +239,14 @@ class StrategyBuy(StrategyEngine):
                 for h in sorted(target_hours):
                     if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0: break
                     h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
+                    
+                    # v12.2.1: Throttle power to reach exactly target_soc
+                    remaining_kwh_needed = max(0.0, (needed_kwh_dc - accum_kwh_dc))
+                    p_needed = remaining_kwh_needed / (h_factor * eff) if h_factor > 0 else 0
+                    
                     cc_cv = self.get_cc_cv_ratio(soc_at_start_plan + (accum_kwh_dc/b_cap*100.0))
-                    p_charge = min(max_p, max_p * cc_cv)
+                    p_charge = min(max_p, max_p * cc_cv, p_needed)
+                    
                     charge_commands[h] = round_f(p_charge, 3)
                     accum_kwh_dc += (p_charge * h_factor * eff)
                 
@@ -217,10 +255,11 @@ class StrategyBuy(StrategyEngine):
                 _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=False)
                 
                 soc_end = self._get_soc_from_log(sim_log, f"{max(target_hours)%24:02d}:59" if target_hours else f"{cur_hour%24:02d}:59", b_soc)
-                key_morning = f"{(sunrise_h-1)%24:02d}:59 (Завтра)"
-                soc_morning = self._get_soc_from_log(sim_log, key_morning, soc_end)
                 
-                res["gatekeeper_floor"] = min_soc
+                gatekeeper_floor = min_soc + (house_kwh_until_sunrise / b_cap * 100.0)
+                res["gatekeeper_floor"] = round_f(gatekeeper_floor, 1)
+                res["house_kwh_until_sunrise"] = round_f(house_kwh_until_sunrise, 2)
+                soc_morning = self._get_soc_from_log(sim_log, f"{(morning_h-1)%24:02d}:59 (Завтра)", soc_end)
                 res["buy_simulation"] = {
                     "projected_soc_at_start_pct": round_f(soc_at_start_plan, 1),
                     "projected_soc_at_end_pct": round_f(soc_end, 1),
@@ -262,20 +301,66 @@ class StrategyBuy(StrategyEngine):
                 res["target_soc"] = planned_results.get(f"{cur_hour%24:02d}:00", {}).get("soc", round_f(b_soc, 1))
                 res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
                 res["active_periods"] = group_h(target_hours)
-                res["buy_debug"] = f"Бюджет DC: {needed_kwh_dc:.2f}кВтч | Порог SOC: {min_soc}%"
                 res["limit_used"] = buy_limit
-                
-                if charge_commands.get(cur_hour, 0.0) > 0.05: res["state"] = "active"
+
+                # v12.0.1: Synchronize with Inverter Mode Command sensor
+                res["active_hours"] = [int(h) for h, v in charge_commands.items() if v > 0.05]
+                if negative_hours:
+                    res["first_negative_hour"] = min(negative_hours)
+                    # v12.0.2: Always allow waiting if negative prices are coming
+                    res["can_wait_for_negative"] = True
+
+                if charge_commands.get(cur_hour, 0.0) > 0.05: 
+                    res["state"] = "active"
+                    res["power"] = charge_commands[cur_hour]
+
+            # v12.0.3: Detailed diagnostics for UI (as per Section 4.2.5 of TZ)
+            # Moved outside if-block to ensure visibility even when not buying
+            _neg_tag = "[Отрицательная цена]" if cur_hour in negative_hours else ""
+            if not _neg_tag and negative_hours:
+                _neg_tag = "Ожидание отрицательных цен"
+            
+            # Calculate arbitrage diagnostics for debug
+            future_sell = {hs: ps for hs, ps in all_sell_prices.items() if hs > cur_hour}
+            _best_s = max(future_sell.values()) if future_sell else 0.0
+            _gain = float(_best_s * eff - cur_p_f - deg_cost) if _best_s > 0 else 0.0
+            _is_arb = bool(_gain >= threshold)
+            
+            future_buy = {hb: pb for hb, pb in all_buy_prices.items() if hb > cur_hour}
+            _best_b = min(future_buy.values()) if future_buy else 0.0
+
+            res["buy_debug"] = {
+                "summary": f"{_neg_tag} | Цена: {cur_p_f:.2f} | Цель: {target_soc:.1f}%".strip(" | "),
+                "current_price": cur_p_f,
+                "target_soc": round_f(target_soc, 1),
+                "base_limit_soc": round_f(base_limit if 'base_limit' in locals() else b_soc, 1),
+                "needed_kwh_dc": round_f(needed_kwh_dc if 'needed_kwh_dc' in locals() else 0.0, 2),
+                "is_arbitrage_profitable": _is_arb,
+                "best_sell_later": round_f(_best_s, 2),
+                "best_buy_later": round_f(_best_b, 2),
+                "arbitrage_gain": round_f(_gain, 3),
+                "profit_threshold": round_f(threshold, 3),
+                "negative_prices_upcoming": bool(negative_hours),
+                "can_wait": res.get("can_wait_for_negative", False),
+                    "charge_reason": res.get("charge_reason", "Нет"),
+                    "target_soc": res.get("target_soc", 0.0),
+                    "survival_target": res.get("survival_target", 0.0),
+                    "soc_buffer": res.get("soc_buffer", 0.0),
+                    "survival_violation_hour": res.get("survival_violation_hour"),
+                    "house_kwh_until_sunrise": res.get("house_kwh_until_sunrise", 0.0),
+                    "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
+                    "commands": {f"{h}h": p for h, p in charge_commands.items() if p > 0}
+                }
 
             # Mode text
             txt = "Ожидание"
             if res["state"] == "active":
                 reason = res.get("charge_reason", "")
-                if reason == "negative": txt = "Зарядка (Отриц. цена)"
-                elif reason == "arbitrage": txt = "Зарядка (Арбитраж)"
-                elif reason == "survival": txt = "Зарядка (Выживание)"
+                if reason == "Отрицательная цена": txt = "Зарядка (Отриц. цена)"
+                elif reason == "Арбитраж": txt = "Зарядка (Арбитраж)"
+                elif reason == "Выживание": txt = "Зарядка (Выживание)"
                 else: txt = "Зарядка (Дешево)"
-            elif res["charge_reason"] == "none":
+            elif res["charge_reason"] == "Нет":
                 txt = "В покупке нет необходимости"
             res["current_mode_text"] = txt
             res["raw_commands"] = charge_commands
