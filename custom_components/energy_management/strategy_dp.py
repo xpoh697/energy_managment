@@ -27,7 +27,8 @@ INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Ultra-High Precision DP Planner with Debug Metadata output.
+    Advanced DP Planner with Emergency Reserve Awareness.
+    Fixes: Added 'bat_emergency' mode mapping and strict floor enforcement.
     """
     
     def __init__(self, manager):
@@ -60,17 +61,19 @@ class DPPlanner:
             
             deg_cost = self._get_deg_cost(b_cap)
             min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
+            soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 2.0))
+            
+            # Emergency Line is min_soc
+            emergency_floor = min_soc 
             
             # 3. Forecasts
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
-            
-            # Summary for debug
-            gen_today = sum(v for h, v in forecast_gen.items() if int(h) < 24)
-            gen_tomorrow = sum(v for h, v in forecast_gen.items() if int(h) >= 24)
-            
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
+
+            gen_today = sum(v for h, v in forecast_gen.items() if int(h) < 24)
+            gen_tomorrow = sum(v for h, v in forecast_gen.items() if int(h) >= 24)
 
             # 4. Grid
             steps_soc = range(0, 101, int(BATTERY_SOC_STEP))
@@ -79,13 +82,13 @@ class DPPlanner:
             
             dp_table = {} 
 
-            # 5. Final State
+            # 5. Final State Penalty
             dp_table[horizon] = {}
             for s in steps_soc:
                 for b in steps_boiler:
                     penalty = 0.0
-                    if s < min_soc: penalty += 5000.0
-                    if b < 50: penalty += 2000.0
+                    if s < emergency_floor: penalty += 20000.0 # Absolute forbidden
+                    if b < 40: penalty += 2000.0
                     dp_table[horizon][(s, b)] = (penalty, None)
 
             # 6. Backward Pass
@@ -125,8 +128,16 @@ class DPPlanner:
                                 cost = (grid_net * p_buy) if grid_net > 0 else (grid_net * p_sell)
                                 cost += abs(b_p) * deg_cost
                                 
+                                # EMERGENCY CONSTRAINTS
+                                if s_next_raw < emergency_floor: 
+                                    cost += 5000.0 # Extreme penalty for dropping below reserve
+                                
+                                # Self-consumption priority (discourage discharge-to-export)
+                                if b_p > 0.1 and grid_net < -0.1:
+                                    cost += abs(grid_net) * 0.3
+                                
                                 if b_on and b >= 98: cost += 10.0
-                                if is_deadline and b_next_raw < 80: cost += 3000.0
+                                if is_deadline and b_next_raw < 80: cost += 5000.0
                                 
                                 total_v = cost + dp_table[h+1][(s_next_idx, b_next_idx)][0]
                                 
@@ -149,7 +160,9 @@ class DPPlanner:
                 b_p, b_on, g_net = act
                 h_rel = abs_h % 24
                 cur_p_buy = float(normalize_float(prices_buy.get(str(abs_h), prices_buy.get(str(h_rel), 10.0))))
-                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), cur_p_buy)
+                
+                # Mode mapping with Emergency awareness
+                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), cur_p_buy, s_ptr, emergency_floor)
                 
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 plan[h_key] = {
@@ -166,22 +179,15 @@ class DPPlanner:
                 b_next_exact = b_ptr - (BOILER_LOSS_RATE * 100.0) + (b_cons / BOILER_CAPACITY * 100.0)
                 b_ptr = int(max(0, min(100, b_next_exact + 0.5)))
 
-            # 8. Return plan + debug metadata
             return {
                 "plan": plan,
                 "debug": {
                     "battery_capacity_kwh": round_f(b_cap, 2),
                     "current_soc_pct": round_f(float(curr_s_raw or 0), 1),
+                    "emergency_reserve_pct": emergency_floor,
                     "degradation_cost_per_kwh": round_f(deg_cost, 4),
-                    "inverter_efficiency": INVERTER_EFFICIENCY,
-                    "blended_coeff": round_f(blended_coeff, 3),
                     "total_forecast_today_kwh": round_f(gen_today, 2),
                     "total_forecast_tomorrow_kwh": round_f(gen_tomorrow, 2),
-                    "boiler_config": {
-                        "power_kw": BOILER_POWER,
-                        "capacity_kwh": BOILER_CAPACITY,
-                        "loss_rate_hour": BOILER_LOSS_RATE
-                    },
                     "horizon_hours": horizon
                 }
             }
@@ -241,7 +247,12 @@ class DPPlanner:
         for h, p in tm_data.items(): combined[str(int(h) + 24)] = p
         return combined
 
-    def _map_mode(self, b_p, b_on, g_net, gen, price) -> str:
+    def _map_mode(self, b_p, b_on, g_net, gen, price, soc, floor) -> str:
+        # 1. Emergency Check
+        if soc <= floor + 0.5 and b_p >= -0.1:
+            return "bat_emergency"
+            
+        # 2. Standard Mapping
         if b_p < -0.1 and g_net > 0.1: return "buy"
         if b_p > 0.1 and g_net < -0.1: return "sale_pv_bat"
         if abs(b_p) < 0.1 and g_net < -0.1 and float(normalize_float(gen)) > 0.1: return "sale_pv_no_bat"
