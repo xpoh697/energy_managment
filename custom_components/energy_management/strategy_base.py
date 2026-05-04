@@ -833,7 +833,7 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else default
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -969,9 +969,12 @@ class StrategyEngine:
                 occ_coeff = float(occ_coeff)
                 expected_cons_kw = float(normalize_float(p_cons.get(h_str, 0.0))) * occ_coeff
                 
-                # v11.6.556: Simulation Sanity Cap. 
                 if (real_h >= 22 or real_h <= 6) and expected_cons_kw > 3.0:
                     expected_cons_kw = 0.5
+    
+                # v11.6.325: House-Blind strategy override
+                if ignore_house_in_hours is not None and int(h_abs) in ignore_house_in_hours:
+                    expected_cons_kw = 0.0
     
                 # v11.1.15 - Blended Anchor
                 if i == 0:

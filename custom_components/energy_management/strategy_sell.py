@@ -261,13 +261,19 @@ class StrategySell(StrategyEngine):
             base_target = max(user_limit, survival_floor, morning_reserve)
             gatekeeper_floor = survival_floor
 
-            # --- Stage 2: Budget Reductions ---
-            _, sim_log_base, _ = self.run_soc_simulation(
-                start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 24)),
-                now=now, commands={}, house_profile_override="consumption_base", ignore_blended=True
-            )
-            max_proj_soc = max([v.get("soc", 0.0) for v in sim_log_base.values()]) if sim_log_base else b_soc
-            available_sell_dc = max(0.0, (max_proj_soc - base_target) * b_cap / 100.0)
+            # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
+            soc_at_start = b_soc
+            if first_sale_h > cur_hour:
+                # Find projected SOC at the exact start of the sale window
+                sale_start_key = f"{first_sale_h%24:02d}:00" + (" (Завтра)" if first_sale_h >= 24 else "")
+                # We use the baseline simulation (no commands) to see where we'll be
+                _, sim_log_base, _ = self.run_soc_simulation(
+                    start_soc=b_soc, sim_range=list(range(cur_hour, first_sale_h + 1)),
+                    now=now, commands={}, house_profile_override="consumption_base", ignore_blended=True
+                )
+                soc_at_start = self._get_soc_from_log(sim_log_base, sale_start_key, b_soc)
+
+            available_sell_dc = max(0.0, (soc_at_start - base_target) * b_cap / 100.0)
             available_sell_ac = available_sell_dc * eff
 
             f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
@@ -296,10 +302,12 @@ class StrategySell(StrategyEngine):
                     rem_ac = max(0.0, rem_ac - (p_alloc * h_f))
                 
                 sell_commands = temp_cmd
+                # v11.6.325: Jeweler simulation is House-Blind during sale hours (TS 4.1.6)
                 res_soc, sim_log, _ = self.run_soc_simulation(
                     start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 48)),
                     now=now, commands={h: -p for h, p in sell_commands.items()}, 
-                    house_profile_override="consumption_base", ignore_blended=True, attempt=attempt
+                    house_profile_override="consumption_base", ignore_blended=True, attempt=attempt,
+                    ignore_house_in_hours=target_hours
                 )
                 
                 last_h_key = f"{last_sell_h%24:02d}:59" + (" (Завтра)" if last_sell_h >= 24 else "")
