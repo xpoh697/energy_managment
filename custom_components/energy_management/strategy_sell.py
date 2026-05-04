@@ -297,6 +297,14 @@ class StrategySell(StrategyEngine):
             current_budget_ac = available_sell_ac
             sell_commands = {}
             sim_log = {}
+            # v11.7.128: Pre-calculate total house load until sunrise for Gatekeeper logic
+            house_rem_total = 0.0
+            for h_s in range(cur_hour + 1, (morning_h_abs if 'morning_h_abs' in locals() else cur_hour + 12)):
+                h_s_rel = h_s % 24
+                p_s_prof = prof_cons_tom if h_s >= 24 else prof_cons_cur
+                h_s_load = p_s_prof.get(f"{h_s_rel:02d}") or p_s_prof.get(str(h_s_rel))
+                house_rem_total += float(normalize_float(h_s_load if h_s_load is not None else 0.4))
+
             for attempt in range(5):
                 temp_cmd = {}
                 rem_ac = current_budget_ac
@@ -355,10 +363,10 @@ class StrategySell(StrategyEngine):
                 morning_key = f"{morning_h%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
                 soc_morning = self._get_soc_from_log(sim_log, morning_key, b_soc)
                 
-                # v11.7.126: Bidirectional adjustment (TS 6.1.187 - "в обе стороны")
+                # v11.7.125: Precise status reporting based on TS 6.1 terms
                 target_morning = (min_soc_val + 2.0) if (4 <= (morning_h % 24) < 10) else (min_soc_val + soc_buffer)
                 # Gatekeeper at end of sale: min_soc + house load until sunrise
-                gatekeeper_val = min_soc_val + (house_rem_global / b_cap * 100.0)
+                gatekeeper_val = min_soc_val + (house_rem_total / b_cap * 100.0)
                 
                 d_gate = gatekeeper_val - soc_end
                 d_morn = target_morning - soc_morning
