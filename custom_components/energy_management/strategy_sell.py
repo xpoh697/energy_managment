@@ -487,33 +487,31 @@ class StrategySell(StrategyEngine):
             
             res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
             
-            # v11.7.70 Deep Limit Diagnostics
-            overall_limit = limit_reason
-            if not overall_limit:
-                p_now = sell_commands.get(cur_hour, 0.0)
-                if p_now < max_p - 0.05:
-                    if gatekeeper_val > active_floor + 0.1:
-                        overall_limit = f"Gatekeeper ({round_f(gatekeeper_val, 1)}%)"
-                    elif is_morning_window:
-                        overall_limit = f"Morning Floor ({round_f(min_soc_val + 2.0, 1)}%)"
-                    else:
-                        overall_limit = f"Morning Reserve ({round_f(target_morning, 1)}%)"
+            # v11.7.131: Strictest limit identification for UI
+            overall_limit = ""
+            if not sell_commands:
+                overall_limit = "Цена"
+            else:
+                # Which floor actually won the max() in Stage 1?
+                if user_limit >= max(gatekeeper_floor, morning_reserve_floor):
+                    overall_limit = "Лимит пользователя"
+                elif gatekeeper_floor >= morning_reserve_floor:
+                    overall_limit = "Gatekeeper"
+                else:
+                    overall_limit = "Утренний лимит"
             
-            # v11.7.70 Hotfix: If limit was None (Will hit 100%), but we are at floor, append it
-            if limit_reason == "None (Will hit 100% anyway)" and overall_limit != limit_reason:
-                overall_limit = f"Full Recharge OK | {overall_limit}"
-
-            # v11.7.130: Human-readable statuses
+            # v11.7.131: Final status building
             if cur_hour in active_h:
                 p_now = sell_commands.get(cur_hour, 0.0)
+                # 1. Inverter priority
                 if p_now >= max_p - 0.1:
                     res["power_decision"] = "Лимит: Инвертор"
-                elif overall_limit:
-                    res["power_decision"] = f"Лимит: {overall_limit}"
                 else:
-                    res["power_decision"] = "Активно"
+                    res["power_decision"] = f"Лимит: {overall_limit}"
             else:
-                res["power_decision"] = f"Лимит: {overall_limit}" if overall_limit else "Ожидание пика"
+                res["power_decision"] = "Ожидание пика"
+                if overall_limit != "Цена":
+                    res["power_decision"] += f" ({overall_limit})"
             
             # Restore old sell_debug structure
             f_today = round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1)
