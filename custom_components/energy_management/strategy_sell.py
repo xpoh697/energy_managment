@@ -355,19 +355,44 @@ class StrategySell(StrategyEngine):
                 morning_key = f"{morning_h%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
                 soc_morning = self._get_soc_from_log(sim_log, morning_key, b_soc)
                 
-                target_at_end = (min_soc_val + 2.0) if (4 <= (last_sell_h % 24) < 10) else base_target
-                d_end = target_at_end - soc_end
-                d_morn = survival_floor - soc_morning
+                # v11.7.126: Bidirectional adjustment (TS 6.1.187 - "в обе стороны")
+                target_morning = (min_soc_val + 2.0) if (4 <= (morning_h % 24) < 10) else (min_soc_val + soc_buffer)
+                # Gatekeeper at end of sale: min_soc + house load until sunrise
+                gatekeeper_val = min_soc_val + (house_rem_global / b_cap * 100.0)
                 
-                # v11.7.118: Strictest limit evaluation (including Sunrise Guard d_morn)
-                total_def = max(d_end, d_morn) 
-                _LOGGER.warning(f"[JewelerDebug] Attempt {attempt}: Budget {current_budget_ac:.2f}kWh -> SOC End:{soc_end:.1f}% Target:{target_at_end:.1f}% Morn:{soc_morning:.1f}% Def:{total_def:.2f}")
+                d_gate = gatekeeper_val - soc_end
+                d_morn = target_morning - soc_morning
+                total_def = max(d_gate, d_morn)
                 
-                if total_def > 0.1:
-                    current_budget_ac = max(0.0, current_budget_ac - (total_def * b_cap / 100.0 * eff))
-                    if d_morn > d_end: limit_reason = f"Защита рассвета ({round_f(survival_floor, 1)}%)"
-                    else: limit_reason = f"Лимит ({round_f(target_at_end, 1)}%)"
-                else: break
+                _LOGGER.warning(f"[JewelerDebug] Attempt {attempt}: Budget {current_budget_ac:.2f}kWh -> SOC End:{soc_end:.1f}% Gatekeeper:{gatekeeper_val:.1f}% Morn:{soc_morning:.1f}% Def:{total_def:.2f}")
+                
+                if abs(total_def) > 0.1:
+                    # Adjustment step: total_def > 0 (deficit) -> reduce budget
+                    # total_def < 0 (surplus) -> increase budget
+                    adjustment_kwh = (total_def * b_cap / 100.0 * eff)
+                    current_budget_ac = max(0.0, current_budget_ac - adjustment_kwh)
+                    
+                    if total_def > 0.1:
+                        if d_morn > d_gate: limit_reason = f"Утренний резерв ({round_f(target_morning, 1)}%)"
+                        else: limit_reason = f"Gatekeeper ({round_f(gatekeeper_val, 1)}%)"
+                    else:
+                        limit_reason = "Оптимизация под лимит"
+                else: 
+                    break
+
+            # v11.7.126: Final labels
+            if not sell_commands:
+                limit_reason = "Цена ниже порога"
+            elif abs(total_def) <= 0.1:
+                limit_reason = "Активная продажа (Оптимально)"
+                
+            self._attr_extra_state_attributes.update({
+                "limit_reason": limit_reason,
+                "target_morning": round_f(target_morning, 1),
+                "gatekeeper_after_sale": round_f(gatekeeper_val, 1),
+                "projected_soc_morning": round_f(soc_morning, 1),
+                "projected_soc_after_sale": round_f(soc_end, 1)
+            })
 
             # --- Stage 4: Build Plan (TS 177 Dynamic Floor & House-Blind) ---
             planned_results = {}
@@ -384,8 +409,14 @@ class StrategySell(StrategyEngine):
                     r_load = r_prof.get(f"{r_rel:02d}") or r_prof.get(str(r_rel))
                     h_house_kwh += float(normalize_float(r_load if r_load is not None else 0.4))
                 
-                h_survival = min_soc_val + (h_house_kwh / b_cap * 100.0)
-                h_base = max(user_limit, h_survival, morning_reserve)
+                h_gatekeeper = min_soc_val + (h_house_kwh / b_cap * 100.0)
+                h_morn_reserve = (min_soc_val + 2.0) if (4 <= (h % 24) < 10) else (min_soc_val + soc_buffer)
+                h_morn_projected = h_morn_reserve + (h_house_kwh / b_cap * 100.0)
+                
+                # Sale limit (End of sale)
+                h_sale_limit = (min_soc_val + 2.0) if (4 <= (h % 24) < 10) else user_limit
+                
+                h_base = max(h_sale_limit, h_gatekeeper, h_morn_projected)
                 
                 # Honest House-Blind Adjustment
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
