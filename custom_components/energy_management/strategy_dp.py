@@ -7,7 +7,9 @@ from .const import (
     CONF_BATTERY_COST,
     CONF_BATTERY_RATED_CYCLES,
     CONF_MIN_SOC_BAT,
-    CONF_SOC_BUFFER
+    CONF_SOC_BUFFER,
+    CONF_FORECAST_TODAY_HOURLY,
+    CONF_FORECAST_TOMORROW
 )
 from .utils import normalize_float, round_f
 
@@ -19,17 +21,15 @@ BOILER_CAPACITY = 6.0     # kWh
 BOILER_LOSS_RATE = 0.02   # 2% energy loss per hour
 BOILER_DEADLINES = [7, 8, 19, 20, 21] # Target hours for 100% heat
 
-BATTERY_POWER_STEP = 0.1  # kW (Requested by user)
-BATTERY_SOC_STEP = 1.0    # % (Fine-grained for high precision)
-BOILER_SOC_STEP = 20.0    # %
+BATTERY_POWER_STEP = 0.1  # kW resolution
+BATTERY_SOC_STEP = 1.0    # % resolution
+BOILER_SOC_STEP = 20.0    # % resolution
 
-HORIZON_HOURS = 24
 INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Advanced DP Planner with 0.1kW resolution and Boiler integration.
-    Standard Python implementation for maximum compatibility.
+    Advanced DP Planner with Dynamic Horizon (based on available price data).
     """
     
     def __init__(self, manager):
@@ -40,50 +40,63 @@ class DPPlanner:
             now = datetime.now()
             cur_hour = now.hour
             
-            # 1. Gather environmental data
+            # 1. Fetch Price Data to determine Horizon
             prices_buy = self._get_prices("prices_buy")
             prices_sell = self._get_prices("prices_sell")
-            forecast_gen = self.manager.get_average_profile("generation", 7, now.weekday())
-            avg_cons = self.manager.get_average_profile("consumption_base", 7, now.weekday())
             
             if not prices_buy or not prices_sell:
                 return {"error": "Missing price data"}
 
-            # 2. Battery & Inverter Specs
+            # Horizon is the number of hours for which we have prices (max 48)
+            available_hours = sorted([int(h) for h in prices_buy.keys()])
+            if not available_hours: return {"error": "No price indices found"}
+            
+            # We plan from cur_hour to the end of available prices
+            max_abs_h = max(available_hours)
+            horizon = max_abs_h - cur_hour + 1
+            if horizon <= 0: horizon = 24 # Fallback
+            
+            # 2. Gather Smart Forecasts
+            blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
+            forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
+            avg_cons = self.manager.get_average_profile("consumption_base", 7, now.weekday())
+            # For tomorrow's consumption, we use the same profile but adjusted for next day weekday
+            tomorrow_cons = self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7)
+
+            # 3. Specs & Grid Discretization
             max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             _, b_cap, _ = self.manager.get_battery_state()
             deg_cost = self._get_deg_cost(b_cap)
             min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
             
-            # 3. Discretization
-            # steps_soc = [0.0, 1.0, 2.0 ... 100.0]
             steps_soc = [round(i * BATTERY_SOC_STEP, 1) for i in range(int(100/BATTERY_SOC_STEP) + 1)]
             steps_boiler = [round(i * BOILER_SOC_STEP, 1) for i in range(int(100/BOILER_SOC_STEP) + 1)]
-            # actions_bat = [-5.0, -4.9 ... 5.0]
             actions_bat = [round(-max_p + i * BATTERY_POWER_STEP, 1) for i in range(int(2 * max_p / BATTERY_POWER_STEP) + 1)]
             
-            # 4. Initialization
             dp_table = {} 
 
-            # Boundary Condition (Final hour)
-            dp_table[HORIZON_HOURS] = {}
+            # 4. Final State (End of Horizon)
+            dp_table[horizon] = {}
             for s in steps_soc:
                 for b in steps_boiler:
                     penalty = 0.0
-                    if s < min_soc: penalty += 2000.0
+                    if s < min_soc: penalty += 5000.0 # Stricter penalty for long horizon
                     if b < 50: penalty += 1000.0
-                    dp_table[HORIZON_HOURS][(s, b)] = (penalty, None)
+                    dp_table[horizon][(s, b)] = (penalty, None)
 
             # 5. Backward Pass
-            for h in range(HORIZON_HOURS - 1, -1, -1):
+            for h in range(horizon - 1, -1, -1):
                 dp_table[h] = {}
-                abs_h = (cur_hour + h) % 48
+                abs_h = cur_hour + h
                 h_rel = abs_h % 24
                 
-                p_buy = float(normalize_float(prices_buy.get(str(h_rel), 0.0)))
-                p_sell = float(normalize_float(prices_sell.get(str(h_rel), 0.0)))
-                gen = float(normalize_float(forecast_gen.get(str(h_rel), 0.0)))
-                cons = float(normalize_float(avg_cons.get(str(h_rel), 0.4)))
+                p_buy = float(normalize_float(prices_buy.get(str(abs_h), prices_buy.get(str(h_rel), 0.0))))
+                p_sell = float(normalize_float(prices_sell.get(str(abs_h), prices_sell.get(str(h_rel), 0.0))))
+                gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
+                
+                # Cons profile selection
+                active_cons = avg_cons if abs_h < 24 else tomorrow_cons
+                cons = float(normalize_float(active_cons.get(str(h_rel), 0.4)))
                 
                 is_deadline = h_rel in BOILER_DEADLINES
                 
@@ -93,17 +106,14 @@ class DPPlanner:
                         best_act = None
                         
                         for b_p in actions_bat:
-                            # 1. Battery Transition
                             s_next_raw = s - (b_p / b_cap * 100.0)
                             if s_next_raw < 0 or s_next_raw > 100: continue
                             
                             for b_on in [True, False]:
-                                # 2. Boiler Transition
                                 b_cons = BOILER_POWER if b_on else 0.0
                                 b_next_raw = b - (BOILER_LOSS_RATE * 100.0) + (b_cons / BOILER_CAPACITY * 100.0)
                                 b_next_raw = max(0, min(100, b_next_raw))
                                 
-                                # 3. Instant Cost
                                 p_inv = b_p * (INVERTER_EFFICIENCY if b_p > 0 else 1.0/INVERTER_EFFICIENCY)
                                 grid_net = cons + b_cons - gen - p_inv
                                 
@@ -114,9 +124,9 @@ class DPPlanner:
                                 cost += abs(b_p) * deg_cost
                                 
                                 if b_on and b >= 98: cost += 5.0 
-                                if is_deadline and b_next_raw < 80: cost += 500.0 
+                                if is_deadline and b_next_raw < 80: cost += 1000.0 # Higher priority for boiler in long runs
                                 
-                                # 4. Recursive Step (Nearest Neighbor)
+                                # Rounding for grid lookup
                                 s_next_idx = round(min(steps_soc, key=lambda x: abs(x - s_next_raw)), 1)
                                 b_next_idx = round(min(steps_boiler, key=lambda x: abs(x - b_next_raw)), 1)
                                 
@@ -128,21 +138,22 @@ class DPPlanner:
                         
                         dp_table[h][(s, b)] = (best_val, best_act)
 
-            # 6. Path Reconstruction
+            # 6. Reconstruct Optimal Path
             curr_s, _, _ = self.manager.get_battery_state()
             s_ptr = round(min(steps_soc, key=lambda x: abs(x - float(curr_s or 50))), 1)
             b_ptr = 60.0 
             
             plan = {}
-            for h in range(HORIZON_HOURS):
-                abs_h = (cur_hour + h) % 48
+            for h in range(horizon):
+                abs_h = cur_hour + h
                 _, act = dp_table[h][(s_ptr, b_ptr)]
                 if not act: break
                 
                 b_p, b_on, g_net = act
-                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h%24), 0), prices_buy.get(str(abs_h%24), 10))
+                h_rel = abs_h % 24
+                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), prices_buy.get(str(abs_h), 10))
                 
-                h_key = f"{abs_h%24:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
+                h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 plan[h_key] = {
                     "mode": mode,
                     "power_kw": b_p,
@@ -151,7 +162,6 @@ class DPPlanner:
                     "grid_net": g_net
                 }
                 
-                # Update pointers
                 s_next_exact = s_ptr - (b_p / b_cap * 100.0)
                 s_ptr = round(min(steps_soc, key=lambda x: abs(x - s_next_exact)), 1)
                 
@@ -165,6 +175,34 @@ class DPPlanner:
             _LOGGER.error(f"DP Advice Error: {e}", exc_info=True)
             return {"error": str(e)}
 
+    def _get_smart_gen_forecast(self, blended_coeff: float, horizon: int) -> Dict[str, float]:
+        """Fetches and corrects generation forecast for the full planning horizon."""
+        now = datetime.now()
+        today_f = self.manager.get_setting(CONF_FORECAST_TODAY_HOURLY, {})
+        tomorrow_f = self.manager.get_setting(CONF_FORECAST_TOMORROW, {})
+        
+        # Merge into absolute hour index
+        combined_raw = {}
+        for h, v in today_f.items(): combined_raw[str(h)] = v
+        for h, v in tomorrow_f.items(): combined_raw[str(int(h) + 24)] = v
+        
+        # Fallback to profiles if sensors are empty
+        if not combined_raw:
+            prof_today = self.manager.get_average_profile("generation", 7, now.weekday())
+            prof_tomorrow = self.manager.get_average_profile("generation", 7, (now.weekday() + 1) % 7)
+            for h, v in prof_today.items(): combined_raw[str(h)] = v
+            for h, v in prof_tomorrow.items(): combined_raw[str(int(h) + 24)] = v
+
+        corrected = {}
+        for abs_h_str, val in combined_raw.items():
+            abs_h = int(abs_h_str)
+            # Apply accuracy based on relative hour of day
+            h_acc, _ = self.manager.strategy_engine.get_hourly_accuracy_coeff(abs_h % 24)
+            # Blended coeff applies mostly to near future, but here we apply to all as a trend
+            corrected[str(abs_h)] = float(val) * h_acc * blended_coeff
+            
+        return corrected
+
     def _map_mode(self, b_p, b_on, g_net, gen, price) -> str:
         if b_p < -0.1 and g_net > 0.1: return "buy"
         if b_p > 0.1 and g_net < -0.1: return "sale_pv_bat"
@@ -177,9 +215,15 @@ class DPPlanner:
         prices = self.manager.data.get(key, {})
         today_str = datetime.now().strftime("%Y-%m-%d")
         tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        combined = dict(prices.get(today_str, {}))
+        
+        combined = {}
+        # Today
+        for h, p in prices.get(today_str, {}).items():
+            combined[str(h)] = p
+        # Tomorrow
         for h, p in prices.get(tomorrow_str, {}).items():
-            combined[str(h)] = p 
+            combined[str(int(h) + 24)] = p
+            
         return combined
 
     def _get_deg_cost(self, cap: float) -> float:
