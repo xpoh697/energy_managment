@@ -308,11 +308,33 @@ class StrategySell(StrategyEngine):
                     rem_ac = max(0.0, rem_ac - (p_alloc * h_f))
                 
                 sell_commands = temp_cmd
-                # v11.7.119: Dynamic Floors for simulation (TS 6.1 + 4.1.6)
-                # During sale: Floor = base_target. After sale: Floor = min_soc.
-                d_floors = {h: base_target for h in target_hours}
-                for h in range(last_sell_h + 1, cur_hour + 48):
-                    d_floors[h] = min_soc_val
+                # v11.7.120: Dynamic Floors strictly following TS 6.1 (Strictest limit wins)
+                d_floors = {}
+                morning_h = man.get_sunrise_hour() or 8
+                
+                for h_abs in range(cur_hour, cur_hour + 48):
+                    h_rel = h_abs % 24
+                    
+                    # 1. Survival Floor (Gatekeeper) - Remaining house load until sunrise
+                    house_rem = 0.0
+                    # Dynamic morning target depends on hour
+                    h_morning_abs = morning_h + (24 if h_abs < morning_h + 24 else 48)
+                    for h_step in range(h_abs + 1, h_morning_abs):
+                        h_s_rel = h_step % 24
+                        p_s_prof = prof_cons_tom if h_step >= 24 else prof_cons_cur
+                        h_s_load = p_s_prof.get(f"{h_s_rel:02d}") or p_s_prof.get(str(h_s_rel))
+                        house_rem += float(normalize_float(h_s_load if h_s_load is not None else 0.4))
+                    
+                    s_floor = min_soc_val + (house_rem / b_cap * 100.0)
+                    
+                    # 2. Morning Guard (04:00 - 10:00)
+                    m_guard = (min_soc_val + 2.0) if (4 <= h_rel < 10) else 0.0
+                    
+                    # 3. Strategic limit (only during sale)
+                    strat_limit = base_target if h_abs in target_hours else 0.0
+                    
+                    # Strictest wins
+                    d_floors[h_abs] = max(strat_limit, s_floor, m_guard, min_soc_val)
                 
                 res_soc, sim_log, _ = self.run_soc_simulation(
                     start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 48)),
