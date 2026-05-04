@@ -249,19 +249,23 @@ class StrategySell(StrategyEngine):
             occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
             occ_coeff = float(occ_coeff)
 
-            house_kwh_global = 0.0
+            # v11.7.129: Stage 1 - Base Safety Floors (TS 6.1)
+            # 1. Gatekeeper (Survival): min_soc + house load until sunrise (Applied at end of sale)
+            house_kwh_until_sunrise = 0.0
             for h_abs in range(last_sell_planned_h + 1, morning_h_abs):
                 h_rel = h_abs % 24
                 p_prof = prof_cons_tom if h_abs >= 24 else prof_cons_cur
                 h_load = p_prof.get(f"{h_rel:02d}") or p_prof.get(str(h_rel))
-                house_kwh_global += float(normalize_float(h_load if h_load is not None else 0.4))
+                house_kwh_until_sunrise += float(normalize_float(h_load if h_load is not None else 0.4))
             
-            survival_floor = min_soc_val + (house_kwh_global / b_cap * 100.0)
-            morning_reserve = min_soc_val + soc_buffer # 18.0%
+            gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
             
-            # v11.7.118: Strictest limit wins (TS 6.1)
-            base_target = max(user_limit, survival_floor, morning_reserve)
-            gatekeeper_floor = survival_floor
+            # 2. Morning Reserve: min_soc + buffer at sunrise (Projected to end of sale)
+            morning_reserve_at_sunrise = min_soc_val + soc_buffer
+            morning_reserve_floor = morning_reserve_at_sunrise + (house_kwh_until_sunrise / b_cap * 100.0)
+            
+            # Strictest limit wins
+            active_safety_floor = max(user_limit, gatekeeper_floor, morning_reserve_floor)
 
             # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
             soc_at_start = b_soc
@@ -277,10 +281,10 @@ class StrategySell(StrategyEngine):
                 )
                 soc_at_start = self._get_soc_from_log(sim_log_base, sale_start_key, b_soc)
 
-            available_sell_dc = max(0.0, (soc_at_start - base_target) * b_cap / 100.0)
+            available_sell_dc = max(0.0, (soc_at_start - active_safety_floor) * b_cap / 100.0)
             available_sell_ac = available_sell_dc * eff
             
-            _LOGGER.warning(f"[BudgetDebug] Start:{soc_at_start:.1f}% Target:{base_target:.1f}% AvailableAC:{available_sell_ac:.2f}kWh (House-Blind)")
+            _LOGGER.warning(f"[BudgetDebug] Start:{soc_at_start:.1f}% SafetyFloor:{active_safety_floor:.1f}% AvailableAC:{available_sell_ac:.2f}kWh")
 
             f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
             tom_h_need = sum(float(normalize_float(prof_cons_tom.get(str(h % 24), 0.0))) for h in range(morning_h + 24, morning_h + 48))
@@ -298,12 +302,7 @@ class StrategySell(StrategyEngine):
             sell_commands = {}
             sim_log = {}
             # v11.7.128: Pre-calculate total house load until sunrise for Gatekeeper logic
-            house_rem_total = 0.0
-            for h_s in range(cur_hour + 1, (morning_h_abs if 'morning_h_abs' in locals() else cur_hour + 12)):
-                h_s_rel = h_s % 24
-                p_s_prof = prof_cons_tom if h_s >= 24 else prof_cons_cur
-                h_s_load = p_s_prof.get(f"{h_s_rel:02d}") or p_s_prof.get(str(h_s_rel))
-                house_rem_total += float(normalize_float(h_s_load if h_s_load is not None else 0.4))
+            house_rem_total = house_kwh_until_sunrise
 
             for attempt in range(5):
                 temp_cmd = {}
@@ -388,19 +387,11 @@ class StrategySell(StrategyEngine):
                 else: 
                     break
 
-            # v11.7.126: Final labels
+            # v11.7.129: Diagnostic strings
             if not sell_commands:
                 limit_reason = "Цена ниже порога"
             elif abs(total_def) <= 0.1:
                 limit_reason = "Активная продажа (Оптимально)"
-                
-            self._attr_extra_state_attributes.update({
-                "limit_reason": limit_reason,
-                "target_morning": round_f(target_morning, 1),
-                "gatekeeper_after_sale": round_f(gatekeeper_val, 1),
-                "projected_soc_morning": round_f(soc_morning, 1),
-                "projected_soc_after_sale": round_f(soc_end, 1)
-            })
 
             # --- Stage 4: Build Plan (TS 177 Dynamic Floor & House-Blind) ---
             planned_results = {}
@@ -439,15 +430,21 @@ class StrategySell(StrategyEngine):
                     "power": round_f(p, 3),
                     "soc": round_f(h_target, 1)
                 }
-                gatekeeper_floor = h_survival
 
             # 5. UI Diagnostics
-            res["planned_power_per_h"] = planned_results
-            res["target_soc"] = round_f(active_floor, 1)
-            res["recommended_power_kw"] = sell_commands.get(cur_hour, 0.0)
-            res["limit_used"] = sell_limit
-            res["target_price"] = target_price
-            res["gatekeeper_floor"] = round_f(gatekeeper_floor, 1) if not is_morning_window else 15.0
+            res.update({
+                "planned_power_per_h": planned_results,
+                "target_soc": round_f(active_safety_floor, 1),
+                "recommended_power_kw": sell_commands.get(cur_hour, 0.0),
+                "limit_used": user_limit,
+                "target_price": target_price,
+                "limit_reason": limit_reason,
+                "target_morning": round_f(target_morning, 1),
+                "gatekeeper_after_sale": round_f(gatekeeper_val, 1),
+                "projected_soc_morning": round_f(soc_morning, 1),
+                "projected_soc_after_sale": round_f(soc_end, 1)
+            })
+            
             res["strategy_candidates"] = [f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "") for h in target_hours]
             active_h = [h for h, p in sell_commands.items() if p > 0.05]
             res["active_hours"] = active_h
@@ -494,16 +491,13 @@ class StrategySell(StrategyEngine):
             overall_limit = limit_reason
             if not overall_limit:
                 p_now = sell_commands.get(cur_hour, 0.0)
-                # If we are selling LESS than inverter can handle, find out why
                 if p_now < max_p - 0.05:
-                    if gatekeeper_floor > active_floor + 0.1:
-                        overall_limit = f"Gatekeeper ({round_f(gatekeeper_floor,1)}%)"
+                    if gatekeeper_val > active_floor + 0.1:
+                        overall_limit = f"Gatekeeper ({round_f(gatekeeper_val, 1)}%)"
                     elif is_morning_window:
                         overall_limit = f"Morning Floor ({round_f(min_soc_val + 2.0, 1)}%)"
-                    elif active_floor > min_soc_val + soc_buffer + 0.1:
-                        overall_limit = f"User Limit ({round_f(user_limit, 1)}%)"
                     else:
-                        overall_limit = f"Survival Floor ({round_f(min_soc_val + soc_buffer, 1)}%)"
+                        overall_limit = f"Morning Reserve ({round_f(target_morning, 1)}%)"
             
             # v11.7.70 Hotfix: If limit was None (Will hit 100%), but we are at floor, append it
             if limit_reason == "None (Will hit 100% anyway)" and overall_limit != limit_reason:
@@ -553,12 +547,12 @@ class StrategySell(StrategyEngine):
 
             res["arbitrage_sell_debug"] = {
                 "start_soc": b_soc,
-                "base_target": round_f(base_target, 1),
+                "gatekeeper_after_sale": round_f(gatekeeper_val, 1),
                 "available_ac": round_f(current_budget_ac, 2),
                 "limit_reason": limit_reason or "None",
                 "next_peak": f"{next_peak_h % 24:02d}:00" if next_peak_h >= 0 else "None",
                 "soc_at_peak": f"{soc_at_peak:.1f}%" if 'soc_at_peak' in locals() else "N/A",
-                "house_until_sunrise": round_f(house_kwh_until_sunrise, 2),
+                "house_until_sunrise": round_f(house_rem_total, 2),
                 "house_h": prof_cons_debug,
                 "sim_gen": round_f(sum(float(v.get('gen', 0)) for v in sim_log.values()), 1),
                 "sim_log": " | ".join(debug_log_parts),
