@@ -3033,8 +3033,7 @@ class InverterOperationModeSensor(SensorEntity):
         fixed_sell = self.manager.fixed_strategy_data["sell"]
         
         # Pre-calculate common conditions
-        # We use 5-minute averages for the mode selection to be more responsive as requested
-        # For forecasts, we use predicted values from the simulation log if provided
+        # v11.7.72: Re-synced with user preference (5m averages)
         avg_load = self.manager.avg_load_5m_kw if not is_forecast else (avg_load_override if avg_load_override is not None else 0.5)
         avg_gen = self.manager.avg_gen_5m_kw if not is_forecast else (avg_gen_override if avg_gen_override is not None else 0.0)
         has_surplus = bool(avg_gen > (avg_load + 0.05))
@@ -3135,20 +3134,25 @@ class InverterOperationModeSensor(SensorEntity):
             target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
             is_low_for_morning = bool(morning_soc_proj < target_morning)
             
-            # v11.7.71: Strategic override for sale_pv_no_bat
+            # v11.7.72: Strategic override for sale_pv_no_bat
             # If simulation confirms we will hit 100% SOC before the next peak, 
             # then we are NOT "low for evening" and can sell surplus PV now.
             hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
             is_energy_low_for_evening = bool((is_preparing_for_peak or is_low_for_morning) and not hit_full_before)
             
             # Smart Deficit Throttling Awareness
-            is_throttled = bool(sell_strategy.get("recommended_power_kw", 0.0) < 0.01 and rel_h in sell_strategy.get("active_hours", []))
+            # v11.7.78: Throttling only applies to the CURRENT hour. 
+            # For forecast hours, we don't apply AI throttling logic here as it causes false positives.
+            is_throttled = False
+            if not is_forecast:
+                is_throttled = bool(sell_strategy.get("recommended_power_kw", 0.0) < 0.01 and dt_now.hour in sell_strategy.get("active_hours", []))
             
             if is_throttled or is_energy_low_for_evening:
                 is_preparing_for_peak = True
 
-            # v11.1.91 - Priority check: price must be > 0 at least
-            if is_before_limit_hour and has_surplus and not (is_throttled or is_energy_low_for_evening) and cur_price > 0:
+            # v11.7.77 - Priority check: price must be > 0 at least
+            # We allow sale_pv_no_bat even if throttled by AI, as long as there is surplus PV to sell
+            if is_before_limit_hour and has_surplus and not is_energy_low_for_evening and cur_price > 0:
                 mode = "sale_pv_no_bat"
                 reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f}), утро, есть излишек и запас энергии"
             elif cur_price < price_stop_sell:
@@ -3160,17 +3164,22 @@ class InverterOperationModeSensor(SensorEntity):
                 mode = "sale_pv"
                 if is_throttled or is_energy_low_for_evening:
                     if is_throttled:
-                         reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_abs)} (мало солнца)"
+                         mode = "sale_pv"
+                         reason = "Продажа АКБ ограничена AI"
+                    elif is_low_for_morning:
+                         mode = "sale_pv"
+                         reason = f"Защита лимита: Завтра {morning_soc_proj:.1f}% < {target_morning:.1f}%"
                     elif is_energy_low_for_evening and sell_strategy.get("morning_autopilot_active"):
+                         mode = "sale_pv"
                          prefix = "Продажа" if mode == "sale_pv_bat" else "Питание дома"
-                         sun_note = " (мало солнца)" if not has_surplus else ""
+                         sun_note = " (мало солнца)" if not hit_full_before else ""
                          reason = f"{prefix} до {sell_strategy.get('morning_autopilot_floor')}% (защита утра{sun_note})"
                     elif peak_start_abs is not None and peak_start_abs < 48:
-                        reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_abs)}"
-                    elif is_low_for_morning:
-                        reason = f"Резерв на утро (SOC {morning_soc_proj:.0f}%)"
+                         mode = "sale_pv"
+                         reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_abs)}"
                     else:
-                        reason = "Коплю заряд"
+                         mode = "sale_pv"
+                         reason = "Экономия заряда (дефицит)"
                 elif not is_before_limit_hour:
                     reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f})"
                 elif not has_surplus:

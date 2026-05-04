@@ -25,7 +25,7 @@
           "grid_import_sensors": "Сенсоры Импорта из сети (кВт·ч, суммарные)",
           "grid_export_sensors": "Сенсоры Экспорта в сеть (кВт·ч, суммарные)",
           "ai_charge_limit_soc": "Лимит заряда (Max SOC)",
-          "ai_discharge_limit_soc": "Лимит разряда (Min SOC)",
+          "ai_discharge_limit_soc": "Лимит пользователя (Min SOC)",
           "grid_power": "Сенсор моментальной мощности сети (+ импорт, - экспорт)",
           "battery_voltage": "Сенсор напряжения батареи (Вольты)"
         }
@@ -89,7 +89,7 @@
           "grid_import_sensors": "Сенсоры Импорта из сети (кВт·ч, суммарные)",
           "grid_export_sensors": "Сенсоры Экспорта в сеть (кВт·ч, суммарные)",
           "ai_charge_limit_soc": "Лимит заряда (Max SOC)",
-          "ai_discharge_limit_soc": "Лимит разряда (Min SOC)",
+          "ai_discharge_limit_soc": "Лимит пользователя (Min SOC)",
           "grid_power": "Сенсор моментальной мощности сети (+ импорт, - экспорт)",
           "battery_voltage": "Сенсор напряжения батареи (Вольты)"
         }
@@ -255,7 +255,7 @@
       "price_sell_tolerance": { "name": "Допуск цены продажи" },
       "battery_max_power": { "name": "Макс. мощность АКБ" },
       "ai_charge_limit_soc": { "name": "Лимит заряда (Max SOC)" },
-      "ai_discharge_limit_soc": { "name": "Лимит разряда (Min SOC)" },
+      "ai_discharge_limit_soc": { "name": "Лимит пользователя (Min SOC)" },
       "min_soc_buy": { "name": "Минимальный уровень SOC" },
       "sale_pv_no_bat_max_hour": { "name": "Макс. час для продажи только PV" },
       "arbitrage_profit_threshold": { "name": "Минимальная прибыль арбитража" },

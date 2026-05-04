@@ -235,197 +235,121 @@ class StrategySell(StrategyEngine):
             available_sell_dc = max(0.0, (b_soc - floor_for_budget) * b_cap / 100.0)
             available_sell_ac = max(0.0, available_sell_dc * eff)
             limit_reason = ""
-
-                    
-
-            # --- Stage 1: Strategic Thresholds (TS 6.1.1) ---
-            # Gatekeeper = Emergency Reserve (18%) + House load kWh until sunrise
-            survival_reserve = min_soc_val + soc_buffer # 18.0%
-            # v11.7.71: Fixed Morning Horizon. 
-            # If we are in the morning (e.g. 7 AM), the next survival point is tomorrow morning (8 AM + 24).
+            
+            # --- Stage 1: Dynamic Gatekeeper (TS 6.1.1 / 183) ---
+            # Global floor for budget calculation (from end of sale to sunrise)
+            last_sell_planned_h = max(target_hours) if target_hours else cur_hour
             morning_h = man.get_sunrise_hour() or 8
             morning_h_abs = morning_h
-            if cur_hour >= 4: # If we already entered the "Today's survival window", look at "Tomorrow"
-                morning_h_abs += 24
+            if cur_hour >= 4: morning_h_abs += 24
             
-            morning_key = f"{morning_h%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
-            
-            # Sum up kWh from consumption_base profile
+            # v11.7.111: Re-init profiles with safety
             prof_cons_cur = dict(man.get_average_profile("consumption_base", 7, now.weekday()))
             prof_cons_tom = dict(man.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
-            
-            # --- TS 6.1.1 Gatekeeper Window Logic ---
-            is_morning_window = (4 <= (cur_hour % 24) < 10)
-            
-            if is_morning_window:
-                # Morning: Hard Floor 15% (min_soc + 2%), NO Gatekeeper
-                base_target = min_soc_val + 2.0
-                limit_reason = "Morning Floor"
-            else:
-                # v11.7.35: Extended range to 10:00 AM to cover the whole morning window
-                occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
-                occ_coeff = float(occ_coeff)
-                morning_window_end_abs = (10 + 24) if cur_hour >= 18 else 10
-                
-                # Calculate house load until sunrise (for survival) but plan until end of window
-                house_kwh_until_sunrise = 0.0
-                for h_abs in range(cur_hour, morning_window_end_abs):
-                    h_rel = str(h_abs % 24)
-                    p_cons = prof_cons_tom if h_abs >= 24 else prof_cons_cur
-                    h_load = float(normalize_float(p_cons.get(h_rel, 0.4))) * occ_coeff
-                    
-                    step = 1.0
-                    if h_abs == cur_hour:
-                        step = 1.0 - (now.minute / 60.0)
-                    
-                    # Only count towards survival reserve until actual sunrise
-                    if h_abs < morning_h_abs:
-                        house_kwh_until_sunrise += h_load * step
-                  
-                gatekeeper_floor = survival_reserve + (house_kwh_until_sunrise / b_cap * 100.0)
-                base_target = max(active_floor, gatekeeper_floor)
+            occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
+            occ_coeff = float(occ_coeff)
 
-            # --- Stage 2: Budget Reductions (Solar Deficit & Next Peak) ---
-            # Rule A: Solar Deficit (Protection for weak Day 2 generation)
+            house_kwh_global = 0.0
+            for h_abs in range(last_sell_planned_h + 1, morning_h_abs):
+                h_rel = h_abs % 24
+                p_prof = prof_cons_tom if h_abs >= 24 else prof_cons_cur
+                h_load = p_prof.get(f"{h_rel:02d}") or p_prof.get(str(h_rel))
+                house_kwh_global += float(normalize_float(h_load if h_load is not None else 0.4))
+            
+            survival_floor = min_soc_val + (house_kwh_global / b_cap * 100.0)
+            morning_reserve = min_soc_val + soc_buffer # 18.0%
+            base_target = max(user_limit, survival_floor, morning_reserve)
+            gatekeeper_floor = survival_floor
+
+            # --- Stage 2: Budget Reductions ---
+            _, sim_log_base, _ = self.run_soc_simulation(
+                start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 24)),
+                now=now, commands={}, house_profile_override="consumption_base", ignore_blended=True
+            )
+            max_proj_soc = max([v.get("soc", 0.0) for v in sim_log_base.values()]) if sim_log_base else b_soc
+            available_sell_dc = max(0.0, (max_proj_soc - base_target) * b_cap / 100.0)
+            available_sell_ac = available_sell_dc * eff
+
             f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
-            tomorrow_morning_h = morning_h + 24
-            next_morning_h = morning_h + 48
-            # Total house need tomorrow until Day 3 morning
-            tomorrow_house_need_kwh = sum(float(normalize_float(prof_cons_tom.get(str(h % 24), 0.0))) for h in range(tomorrow_morning_h, next_morning_h))
-            
-            solar_deficit_kwh_ac = max(0.0, tomorrow_house_need_kwh - f_tom)
-            if solar_deficit_kwh_ac > 0.1:
-                available_sell_ac = max(0.0, available_sell_ac - solar_deficit_kwh_ac)
-                if not limit_reason: limit_reason = "Solar Deficit"
+            tom_h_need = sum(float(normalize_float(prof_cons_tom.get(str(h % 24), 0.0))) for h in range(morning_h + 24, morning_h + 48))
+            solar_deficit = max(0.0, tom_h_need - f_tom)
+            if solar_deficit > 0.1:
+                available_sell_ac = max(0.0, available_sell_ac - (solar_deficit / eff))
+                if not limit_reason or limit_reason == "None": limit_reason = "Дефицит солнца завтра"
 
-            # Rule B: Next Peak Protection (TS 4.1.4 / 6.1.1)
-            # Find the best peak in the next 48h that has a BETTER price than now
-            future_peaks = [h for h, p in all_sell_prices.items() if h > cur_hour and p > cur_p_f + 0.01]
-            if future_peaks:
-                best_peak_h = max(future_peaks, key=lambda h: all_sell_prices.get(h, 0.0))
-                best_peak_p = all_sell_prices.get(best_peak_h, 0.0)
-                
-                # Simulation until that peak to see if we reach 100%
-                _, sim_log_peak, _ = self.run_soc_simulation(
-                    start_soc=b_soc,
-                    sim_range=list(range(cur_hour, best_peak_h + 1)),
-                    now=now,
-                    commands={},
-                    house_profile_override="consumption_base",
-                    ignore_blended=True
-                )
-                if sim_log_peak:
-                    peak_key = f"{best_peak_h%24:02d}:59"
-                    if best_peak_h >= 48: peak_key += " (Через день)"
-                    elif best_peak_h >= 24: peak_key += " (Завтра)"
-                    
-                    soc_at_peak = self._get_soc_from_log(sim_log_peak, peak_key, b_soc)
-                    
-                    # NEW v11.7.67: Check if we hit 100% ANYTIME before the peak
-                    hit_full_before = False
-                    for k, v in sim_log_peak.items():
-                        if isinstance(v, dict) and v.get("soc", 0.0) >= 99.9:
-                            hit_full_before = True
-                            break
-                    
-                    target_soc_at_peak = 100.0
-                    if soc_at_peak < target_soc_at_peak - 0.5 and not hit_full_before:
-                        deficit_kwh = (target_soc_at_peak - soc_at_peak) * b_cap / 100.0
-                        available_sell_ac = max(0.0, available_sell_ac - (deficit_kwh * eff))
-                        limit_reason = f"Peak Prep {best_peak_h%24:02d}:00 ({round_f(best_peak_p,2)})"
-                        next_peak_h = best_peak_h 
-                    else:
-                        next_peak_h = best_peak_h 
-                        if hit_full_before:
-                            limit_reason = "None (Will hit 100% anyway)"
-
-            # --- Stage 3: Recursive Jeweler Loop ---
-            first_epoch_hours = epochs[0] if epochs else []
-            target_hours_by_price = sorted(first_epoch_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
-            last_sell_h = max(first_epoch_hours) if first_epoch_hours else cur_hour
+            # --- Stage 3: Recursive Optimizer (Jeweler Loop) ---
+            first_epoch = epochs[0] if epochs else []
+            h_by_price = sorted(first_epoch, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
+            last_sell_h = max(first_epoch) if first_epoch else cur_hour
             
             current_budget_ac = available_sell_ac
             sell_commands = {}
-            sim_log = {} # Fresh log for this calculation
-            
+            sim_log = {}
             for attempt in range(5):
-                temp_commands = {}
+                temp_cmd = {}
                 rem_ac = current_budget_ac
-                for h in target_hours_by_price:
+                for h in h_by_price:
                     if rem_ac <= 0.01: break
                     h_f = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
                     p_alloc = min(max_p, rem_ac / h_f)
-                    temp_commands[h] = round_f(p_alloc, 3)
+                    temp_cmd[h] = round_f(p_alloc, 3)
                     rem_ac = max(0.0, rem_ac - (p_alloc * h_f))
                 
-                sell_commands = temp_commands
-                sim_commands_neg = {h: -p for h, p in sell_commands.items()}
-                sim_range = list(range(cur_hour, morning_window_end_abs + 1))
-                
+                sell_commands = temp_cmd
                 res_soc, sim_log, _ = self.run_soc_simulation(
-                    start_soc=b_soc,
-                    sim_range=list(range(cur_hour, cur_hour + 48)),
-                    now=now,
-                    commands=sim_commands_neg,
-                    house_profile_override="consumption_base",
-                    ignore_blended=True,
-                    attempt=attempt # v11.7.56
+                    start_soc=b_soc, sim_range=list(range(cur_hour, cur_hour + 48)),
+                    now=now, commands={h: -p for h, p in sell_commands.items()}, 
+                    house_profile_override="consumption_base", ignore_blended=True, attempt=attempt
                 )
                 
-                # v11.7.54: Raw Log Dump
-                _LOGGER.warning(f"[SimLogDump] Hour {cur_hour}: {sim_log.get('00:59', 'N/A')}")
-                
-                # Check end-of-sale SOC
                 last_h_key = f"{last_sell_h%24:02d}:59" + (" (Завтра)" if last_sell_h >= 24 else "")
-                end_of_sale_soc = self._get_soc_from_log(sim_log, last_h_key, b_soc)
+                soc_end = self._get_soc_from_log(sim_log, last_h_key, b_soc)
+                morning_key = f"{morning_h%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
+                soc_morning = self._get_soc_from_log(sim_log, morning_key, b_soc)
                 
-                # Check Sunrise SOC
-                sunrise_soc = self._get_soc_from_log(sim_log, morning_key, b_soc)
+                target_at_end = (min_soc_val + 2.0) if (4 <= (last_sell_h % 24) < 10) else base_target
+                d_end = target_at_end - soc_end
+                d_morn = survival_floor - soc_morning
                 
-                # Dynamic targets
-                is_last_h_morning = (4 <= (last_sell_h % 24) < 10)
-                target_at_end = (min_soc_val + 2.0) if is_last_h_morning else base_target
-                
-                # Deficit: Must satisfy both end-of-sale target AND sunrise survival
-                d_end = target_at_end - end_of_sale_soc
-                d_morning = survival_reserve - sunrise_soc
-                
-                # v11.7.27: Anti-clamping penalty. If we hit 0%, assume we need more reduction.
-                if sunrise_soc < 0.1: d_morning += 5.0 
-                if end_of_sale_soc < 0.1: d_end += 5.0
-                
-                total_deficit_soc = max(d_end, d_morning)
-                
-                if total_deficit_soc > 0.1:
-                    reduction_ac = (total_deficit_soc * b_cap / 100.0) * eff
-                    current_budget_ac = max(0.0, current_budget_ac - reduction_ac)
-                    if not limit_reason: 
-                        limit_reason = "Gatekeeper" if d_morning > d_end else "User"
-                else:
-                    break
+                total_def = max(d_end, d_morn)
+                if total_def > 0.1:
+                    current_budget_ac = max(0.0, current_budget_ac - (total_def * b_cap / 100.0 * eff))
+                    if d_morn > d_end: limit_reason = f"Защита рассвета ({round_f(survival_floor, 1)}%)"
+                    else: limit_reason = f"Лимит ({round_f(target_at_end, 1)}%)"
+                else: break
 
-            # 4. Build the hourly plan (Honest Simulation)
+            # --- Stage 4: Build Plan (TS 177 Dynamic Floor & House-Blind) ---
             planned_results = {}
-            sorted_h_keys = sorted(sell_commands.keys())
-            for h in sorted_h_keys:
+            sorted_h = sorted(sell_commands.keys())
+            for h in sorted_h:
                 p = sell_commands[h]
-                if p <= 0: continue
-                h_fmt = f"{h%24:02d}:00"
-                if h >= 24: h_fmt += " (Завтра)"
+                if p <= 0.05: continue
                 
+                # Dynamic survival floor for THIS hour
+                h_house_kwh = 0.0
+                for h_rem in range(h + 1, morning_h_abs):
+                    r_rel = h_rem % 24
+                    r_prof = prof_cons_tom if h_rem >= 24 else prof_cons_cur
+                    r_load = r_prof.get(f"{r_rel:02d}") or r_prof.get(str(r_rel))
+                    h_house_kwh += float(normalize_float(r_load if r_load is not None else 0.4))
+                
+                h_survival = min_soc_val + (h_house_kwh / b_cap * 100.0)
+                h_base = max(user_limit, h_survival, morning_reserve)
+                
+                # Honest House-Blind Adjustment
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
-                h_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
-                
-                # v11.7.69: Dynamic Target SOC Floor per hour (TS 183/185)
+                raw_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
                 h_rel = h % 24
-                h_floor = (min_soc_val + 2.0) if (4 <= h_rel < 10) else (min_soc_val + soc_buffer)
+                h_p_prof = prof_cons_tom if h >= 24 else prof_cons_cur
+                h_load_val = float(normalize_float(h_p_prof.get(f"{h_rel:02d}") or h_p_prof.get(str(h_rel)) or 0.4))
                 
-                # If we are in the window, force target to floor to prevent inverter stop
-                # unless we are already below it.
-                planned_results[h_fmt] = {
+                # Target = Raw SOC (including house)
+                h_target = max(h_base, raw_soc)
+                planned_results[f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")] = {
                     "power": round_f(p, 3),
-                    "soc": round_f(h_floor, 1)
+                    "soc": round_f(h_target, 1)
                 }
+                gatekeeper_floor = h_survival
 
             # 5. UI Diagnostics
             res["planned_power_per_h"] = planned_results
@@ -566,3 +490,25 @@ class StrategySell(StrategyEngine):
             return res
         finally:
             self._calculating_strategy = old_calc
+
+    # --- Support Methods ---
+    def _group_contiguous(self, hours):
+        if not hours: return []
+        hours = sorted(list(set(hours)))
+        periods = []
+        if not hours: return periods
+        curr = [hours[0]]
+        for i in range(1, len(hours)):
+            if hours[i] == hours[i-1] + 1:
+                curr.append(hours[i])
+            else:
+                periods.append(curr)
+                curr = [hours[i]]
+        periods.append(curr)
+        return periods
+
+    def _get_soc_from_log(self, log, key, default):
+        entry = log.get(key)
+        if isinstance(entry, dict):
+            return float(entry.get("soc", default))
+        return float(default)

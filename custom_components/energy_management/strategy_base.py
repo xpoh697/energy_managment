@@ -682,12 +682,16 @@ class StrategyEngine:
                 elif initial_power_kw > 0.5 and available_power_kw < 0:
                     power_bottleneck = True
 
-                # v11.1.97 - Block managed loads during active selling modes
+                # v11.1.97 - Block managed loads during active selling or emergency modes
                 inverter_mode = getattr(man, "current_inverter_mode", "")
+                is_emergency = inverter_mode == "bat_emergency"
                 is_selling_mode = inverter_mode in ("sale_pv_no_bat", "sale_pv_bat")
 
                 price_suffix = " (Беспл. цена)" if is_free_price else ""
-                if is_selling_mode and not is_free_price:
+                if is_emergency:
+                    permissions[s_id_s] = False
+                    permissions_reasons[s_id_s] = "Запрет: Аварийный стоп АКБ"
+                elif is_selling_mode and not is_free_price:
                     permissions[s_id_s] = False
                     # v11.4.46: dict lookup avoids else-trap that labelled ANY unknown mode as "PV+АКБ"
                     _mode_labels = {
@@ -1060,11 +1064,11 @@ class StrategyEngine:
                     
                 log_key_str = f"{real_h:02d}:59{day_suffix}"
                 
-                # v11.6.392: Unified EN string keys for HA UI and programmatic access
+                # v11.7.73: Unified keys with sensor.py (gen_kw / load_kw)
                 history_log[log_key_str] = {
                     "soc": round_f(float(simulated_soc), 1),
-                    "gen": round_f(float(expected_gen_kw), 2),
-                    "load": round_f(float(expected_cons_kw), 2),
+                    "gen_kw": round_f(float(expected_gen_kw), 2),
+                    "load_kw": round_f(float(expected_cons_kw), 2),
                     "trust": round_f(float(tom_coeff if is_tom else blended_coeff), 2)
                 }
             except Exception as e:

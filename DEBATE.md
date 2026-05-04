@@ -1,25 +1,36 @@
-# DEBATE: Solar Bypass & Morning Target SOC (v11.7.68)
+# DEBATE: Ошибка логики "House-Blind" Target SOC
 
-## Archi (Lead Architect)
-**Proposed Solution:**
-1. **Simulation Fix**: In `run_soc_simulation`, if `cmd_p < 0` (Sell mode), do not subtract solar generation from the battery discharge rate. The battery must discharge at the full commanded rate because solar bypasses the battery during sale.
-2. **Command Fix**: In `StrategySell`, for the morning window (04:00-10:00), force the reported `Target SOC` for each hour to be the Floor (15.0%) instead of the projected end-of-hour SOC. This prevents the inverter from stopping the discharge prematurely.
+## Участники
+- **Archi**: Lead Architect.
+- **Skeptic**: Senior SRE/Security.
+- **Znaika**: Senior Architect.
 
-## Skeptic (Senior SRE/Security)
-**Criticism:**
-1. **Over-discharge Risk**: By locking the target to 15.0% and ignoring solar help in simulation, we will hit the 15% floor much faster. We must ensure this 15% is a hard-safe limit.
-2. **Inverter Specificity**: This "Solar Bypass" behavior is specific to certain inverters/settings. If a user has an inverter that DOES charge battery from solar during sale, our simulation will now be wrong for them.
-3. **Budget Overflow**: If we command full power (6.6kW) and lock SOC to 15%, we might hit 15% in 20 minutes and then sit idle until solar kicks in.
+---
 
-## Znaika (TZ Specialist)
-**Verdict:**
-- **TS 185 Compliance**: The morning limit is exactly 15.0%. Locking the target to this value is the correct way to allow the inverter to perform as intended.
-- **Accuracy**: Matching the user's physical reality (Solar Bypass) is mandatory for simulation fidelity. 
+### Archi:
+"Я вижу проблему на скриншоте пользователя. `Target SOC` завышен (96.3% при продаже 1кВт), а на следующий час планируется огромный сброс 6.6кВт до 56.8%. 
+Ошибка в строке 347: `h_target = max(h_base, raw_soc + (h_load_val / b_cap * 100.0))`.
+Мы прибавляем нагрузку дома к `raw_soc`. Это делает цель для инвертора 'выше', и он прекращает продажу слишком рано. 
+`raw_soc` из симуляции уже учитывает расход дома. Инвертор должен просто стремиться к этому значению."
 
-**Consolidated Decision:**
-Implement Solar Bypass in base simulation and lock morning Target SOC to 15.0%.
+### Skeptic:
+"1. **Дребезг**: Если мы уберем прибавку, не начнет ли инвертор 'дергаться', пытаясь поймать SOC? 
+2. **Безопасность**: Убедись, что `raw_soc` не опускается ниже `h_base`. Хотя `max(h_base, ...)` это страхует.
+3. **Мощность**: Почему в плане 6.6кВт? Это выше стандартного лимита инвертора (обычно 5-6кВт). Нужно проверить, не переливает ли бюджет в один час."
 
-**Final Approval:**
-- Archi: [OK]
-- Skeptic: [OK]
-- Znaika: [OK]
+### Znaika:
+"ТЗ 6.1.1 требует 'Honest House-Blind'. 
+Суть: в `Planned power` (UI) пользователь должен видеть SOC, который будет реально в конце часа. 
+Если симуляция говорит, что после продажи И работы дома будет 50%, то таргет должен быть 50%. 
+Прибавляя `h_load_val`, мы обманываем инвертор, заставляя его думать, что у него больше запаса, чем есть на самом деле.
+
+**Вердикт**: 
+1. Убрать прибавку `h_load_val` в расчете `h_target`. 
+2. Использовать `raw_soc` напрямую.
+3. Проверить распределение мощности (Jeweler), чтобы не было 'свечек' по 6.6кВт, если инвертор их не тянет."
+
+---
+
+## Финальное одобрение
+- **Skeptic**: Одобрено (упрощение логики снизит риск ошибок).
+- **Znaika**: Одобрено (соответствует принципу House-Blind из ТЗ).
