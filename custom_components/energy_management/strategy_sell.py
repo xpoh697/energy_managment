@@ -383,7 +383,7 @@ class StrategySell(StrategyEngine):
                         if d_morn > d_gate: limit_reason = f"Утренний резерв ({round_f(target_morning, 1)}%)"
                         else: limit_reason = f"Gatekeeper ({round_f(gatekeeper_val, 1)}%)"
                     else:
-                        limit_reason = "Оптимизация под лимит"
+                        limit_reason = "" # Optimized/Optimal
                 else: 
                     break
 
@@ -503,18 +503,17 @@ class StrategySell(StrategyEngine):
             if limit_reason == "None (Will hit 100% anyway)" and overall_limit != limit_reason:
                 overall_limit = f"Full Recharge OK | {overall_limit}"
 
+            # v11.7.130: Human-readable statuses
             if cur_hour in active_h:
                 p_now = sell_commands.get(cur_hour, 0.0)
-                if overall_limit:
-                    res["power_decision"] = f"Лимит: {overall_limit}"
-                    if p_now >= max_p - 0.05:
-                        res["power_decision"] += " (Инвертор)"
-                elif p_now >= max_p - 0.05:
+                if p_now >= max_p - 0.1:
                     res["power_decision"] = "Лимит: Инвертор"
+                elif overall_limit:
+                    res["power_decision"] = f"Лимит: {overall_limit}"
                 else:
                     res["power_decision"] = "Активно"
             else:
-                res["power_decision"] = f"Ожидание пика ({overall_limit})" if overall_limit else "Ожидание пика"
+                res["power_decision"] = f"Лимит: {overall_limit}" if overall_limit else "Ожидание пика"
             
             # Restore old sell_debug structure
             f_today = round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1)
