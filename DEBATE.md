@@ -14,3 +14,25 @@
 - **Verdict**: The solution is safe to merge. It resolves the 'boiler power in 1 hour' issue by allowing the DP engine to see the full 8.5kWh capacity and plan accordingly."
 
 **Final Consensus**: All experts approve. v11.8.411 is ready for deployment.
+
+---
+
+# Consolidated Decisions & Universal Rules (The Constitution)
+
+## 1. Discharge & Survival Limits
+- **Gatekeeper (Survival)**: `MinSOC + House_Load_Until_Sunrise`. Must be recalculated hourly.
+- **Morning Reserve (Timing)**: 
+    - 10:00 - 04:00: `MinSOC + soc_buffer` (Safety).
+    - 04:00 - 10:00: `MinSOC + 2%` (Liberal/Presale).
+- **User Limit**: Always respect `ai_discharge_limit_soc`.
+- **Arbitration**: Final limit = `max(Gatekeeper, Morning_Reserve, User_Limit)`.
+- **Price Guard**: Export discharge is BLOCKED if Price < `price_stop_sell`.
+
+## 2. Strategic Rules
+- **Saturation Bypass**: The `hit_full_before` override is restricted to **04:00 - 11:00** only.
+- **Dual-Floor Simulation**: Use **Anchored** floors for strategy planning (prevents buffer erosion) and **Sliding** floors for UI projection (realistic charts).
+- **Load Fallback**: Never use 0.0 for house load in simulations. Fallback to hourly profiles if manager data is missing.
+
+## 3. Operations
+- Git push after every deployment.
+- Clear `__pycache__` on the server after every sync.
