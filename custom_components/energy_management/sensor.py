@@ -4184,19 +4184,21 @@ class EnergyDPAdviceSensor(SensorEntity):
         }
 
     async def async_added_to_hass(self):
-        self.manager.update_listeners.append(self._update_advice)
-        await self._update_advice()
+        if self.manager:
+            self.manager.update_listeners.append(self._update_advice_threaded)
+            self.hass.async_add_executor_job(self._update_advice_threaded)
 
     async def async_will_remove_from_hass(self):
-        if self._update_advice in self.manager.update_listeners:
-            self.manager.update_listeners.remove(self._update_advice)
+        if self.manager and self._update_advice_threaded in self.manager.update_listeners:
+            self.manager.update_listeners.remove(self._update_advice_threaded)
 
-    async def _update_advice(self):
-        """Runs the DP planner in a thread to avoid blocking HASS."""
+    def _update_advice_threaded(self):
+        """Threaded DP computation to avoid blocking HA loop."""
         try:
-            self._advice = await self.manager.hass.async_add_executor_job(
-                self.planner.get_dp_advice
-            )
-            self.async_write_ha_state()
+            planner = DPPlanner(self.manager)
+            res = planner.get_dp_advice()
+            self._advice = res
+            if self.hass:
+                self.hass.add_job(self.async_write_ha_state)
         except Exception as e:
-            _LOGGER.error(f"DP Advice update failed: {e}")
+            _LOGGER.error(f"DP Update error: {e}")
