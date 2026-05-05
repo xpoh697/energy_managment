@@ -1,6 +1,6 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.8.439)
+## Current Status (v11.8.442)
 - [x] Fix "Zero House Load" simulation bug (fallback to profile)
 - [x] Restricted "saturation-based" discharge to 04:00-11:00 only
 - [x] Implemented Dual-Floor logic (Anchored for Strategy, Sliding for Projection)

@@ -597,6 +597,9 @@ class StrategySell(StrategyEngine):
             
             res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
             
+            res["gatekeeper_floor"] = round_f(gatekeeper_floor, 1)
+            res["survival_target"] = round_f(morning_reserve_floor, 1)
+            
             # v11.7.131: Strictest limit identification for UI
             overall_limit = ""
             if not sell_commands:
