@@ -101,8 +101,10 @@ class DPPlanner:
                 is_deadline = h_rel in BOILER_DEADLINES
                 
                 is_morning_surplus = (4 <= h_rel < 13) and is_solar_surplus
-                h_min_soc = (min_soc + 2.0) if is_morning_surplus else min_soc
                 is_evening_deadline = (h_rel == 18)
+                # v11.7.360: Correction - Relax buffer ONLY when we have surplus. 
+                # Normal days keep +2.0% safety buffer.
+                h_min_soc = min_soc if is_morning_surplus else (min_soc + 2.0)
                 
                 for s in steps_soc:
                     for b in steps_boiler:
