@@ -36,6 +36,11 @@ from .strategy_base import StrategyEngine
 
 class StrategySell(StrategyEngine):
     """Specialized engine for SELL-mode energy management strategies."""
+
+    def get_strategy_epochs(self, target_hours, prices_today, prices_tomorrow):
+        """Groups target hours into contiguous windows (epochs)."""
+        if not target_hours: return []
+        return self._group_contiguous(target_hours)
     
     def get_market_strategy(self, mode="sell"):
         now = dt_util.now()
