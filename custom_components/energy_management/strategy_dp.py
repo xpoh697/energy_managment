@@ -81,6 +81,11 @@ class DPPlanner:
                     if b < 40: val += 1000.0
                     dp_table[horizon][(s, b)] = (val, None)
 
+            # v11.7.300: Solar Surplus Awareness for DP
+            f_today = float(self.manager.get_sensor_float(self.manager.forecast_today_sensor) or 0.0)
+            energy_to_full = (100.0 - (curr_s_raw or 0.0)) * b_cap / 100.0
+            is_solar_surplus = (f_today > energy_to_full + 5.0)
+            
             # Backward induction
             for h in range(horizon - 1, -1, -1):
                 dp_table[h] = {}
@@ -93,6 +98,10 @@ class DPPlanner:
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
                 eff_gen_cons = cons - gen
                 is_deadline = h_rel in BOILER_DEADLINES
+                
+                # v11.7.300: Relax floors during solar surplus morning
+                is_morning_surplus = (4 <= h_rel < 13) and is_solar_surplus
+                h_min_soc = (min_soc + 2.0) if is_morning_surplus else min_soc
                 
                 for s in steps_soc:
                     for b in steps_boiler:
@@ -117,7 +126,10 @@ class DPPlanner:
                                 cost += abs(b_p) * deg_cost
                                 
                                 # Constraints
-                                if s_next_raw < (min_soc - 0.5): cost += 2000.0
+                                if s_next_raw < (h_min_soc - 0.5): cost += 2000.0
+                                # v11.7.300: Reduce "Low SOC" panic if we have surplus coming
+                                if is_morning_surplus and s_next_raw < 30: cost += (30 - s_next_raw) * 0.1
+                                
                                 if b_p > 0.1 and grid_net < -0.1: cost += abs(grid_net) * 0.1
                                 if is_deadline and b_next_raw < 80: cost += 3000.0
                                 
