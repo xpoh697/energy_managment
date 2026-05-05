@@ -2791,45 +2791,59 @@ class InverterOperationModeSensor(SensorEntity):
             c_amps_fixed = 0.0
             
             if mode == "buy":
-                # Priority: use fixed hourly value if available
-                if fixed_buy.get("hour_key", "").startswith(hour_str):
-                    p_val = fixed_buy["power"]
-                    t_soc = fixed_buy["target_soc"]
-                    c_amps_fixed = fixed_buy.get("charge_amps", 0.0)
+                hour_key = f"{now.hour:02d}:00"
+                plan = buy_strategy.get("planned_power_per_h", {})
+                h_plan = plan.get(hour_key)
+                
+                if isinstance(h_plan, dict):
+                    p_val = h_plan.get("power", 0.0)
+                    t_soc = h_plan.get("soc", 0.0)
                 else:
                     p_val = buy_strategy.get("recommended_power_kw", 0.0)
                     t_soc = buy_strategy.get("target_soc", 0.0)
-                    c_amps_fixed = None
+                c_amps_fixed = None
+                
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
                 chg_reason = "Ожидание отрицательных цен"
                 c_amps_fixed = 0.0
             elif mode == "sale_pv_bat":
-                # For sale_pv_bat, we ALSO use the fixed anchor if available
-                if fixed_sell.get("hour_key", "").startswith(hour_str):
-                    p_val = fixed_sell["power"]
-                    t_soc = fixed_sell["target_soc"]
-                    c_amps_fixed = fixed_sell.get("charge_amps", 0.0)
+                hour_key = f"{now.hour:02d}:00"
+                plan = sell_strategy.get("planned_power_per_h", {})
+                h_plan = plan.get(hour_key)
+                
+                if isinstance(h_plan, dict):
+                    p_val = h_plan.get("power", 0.0)
+                    t_soc = h_plan.get("soc", 0.0)
                 else:
                     p_val = sell_strategy.get("recommended_power_kw", 0.0)
                     t_soc = sell_strategy.get("target_soc", 0.0)
-                    c_amps_fixed = None
+                c_amps_fixed = None
             else:
-                # v11.7.2: If either strategy is active for the current hour, pull its targets
-                # even if the mode is not 'buy' or 'sale_pv_bat' (e.g. dynamic arbitrage)
                 p_val = 0.0
-                t_soc = 0.0
+                t_soc = float(round_f(batt_soc, 1))
                 c_amps_fixed = 0.0
                 
+                hour_key = f"{now.hour:02d}:00"
                 if sell_strategy.get("state") == "active":
-                    p_val = sell_strategy.get("recommended_power_kw", 0.0)
-                    t_soc = sell_strategy.get("target_soc", 0.0)
+                    plan = sell_strategy.get("planned_power_per_h", {})
+                    h_plan = plan.get(hour_key)
+                    if isinstance(h_plan, dict):
+                        p_val = h_plan.get("power", 0.0)
+                        t_soc = h_plan.get("soc", 0.0)
+                    else:
+                        p_val = sell_strategy.get("recommended_power_kw", 0.0)
+                        t_soc = sell_strategy.get("target_soc", 0.0)
                 elif buy_strategy.get("state") == "active":
-                    p_val = buy_strategy.get("recommended_power_kw", 0.0)
-                    t_soc = buy_strategy.get("target_soc", 0.0)
-                else:
-                    t_soc = float(round_f(batt_soc, 1))
+                    plan = buy_strategy.get("planned_power_per_h", {})
+                    h_plan = plan.get(hour_key)
+                    if isinstance(h_plan, dict):
+                        p_val = h_plan.get("power", 0.0)
+                        t_soc = h_plan.get("soc", 0.0)
+                    else:
+                        p_val = buy_strategy.get("recommended_power_kw", 0.0)
+                        t_soc = buy_strategy.get("target_soc", 0.0)
 
             # Extract diagnostic info
             if not chg_reason or chg_reason == "Нет":
