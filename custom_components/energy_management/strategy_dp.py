@@ -164,9 +164,20 @@ class DPPlanner:
                 b_next = b_ptr - (BOILER_LOSS_RATE * 100.0) + ((BOILER_POWER if b_on else 0.0) / BOILER_CAPACITY * 100.0)
                 b_ptr = float(max(0, min(100, round(b_next / BOILER_SOC_STEP) * BOILER_SOC_STEP)))
 
-            _LOGGER.info(f"DP Advice computed in {time.time()-t0:.2f}s")
-            return {"plan": plan, "debug": {"calc_time_sec": round(time.time()-t0, 2), "horizon": horizon}}
-
+            return {
+                "plan": plan, 
+                "debug": {
+                    "calc_time_sec": round(time.time()-t0, 2), 
+                    "horizon": horizon,
+                    "f_today": round(f_today, 1),
+                    "energy_to_full": round(energy_to_full, 1),
+                    "is_solar_surplus": is_solar_surplus,
+                    "min_soc": min_soc,
+                    "deg_cost": deg_cost,
+                    "avg_p_buy": round(avg_p_buy, 3),
+                    "blended_coeff": round(blended_coeff, 2)
+                }
+            }
         except Exception as e:
             _LOGGER.error(f"DP Advice Error: {e}", exc_info=True)
             return {"error": str(e)}
