@@ -199,11 +199,22 @@ class StrategySell(StrategyEngine):
                 
                 # Filter by profitability or surplus
                 surplus_dc = max(0.0, (b_soc - float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))) * b_cap / 100.0)
+                
+                # v11.7.270: Solar Saturation Awareness (TS 198)
+                f_today_val = float(man.get_sensor_float(man.forecast_today_sensor) or 0.0)
+                energy_to_full = (100.0 - b_soc) * b_cap / 100.0
+                is_solar_surplus = (f_today_val > energy_to_full + 5.0) # 5kWh buffer
+                
                 safe_peaks = []
                 for h, p in tech_peaks:
                     if h < cur_hour: continue
                     is_ok, _ = is_profitable(p, h)
-                    if p >= sell_limit or is_ok or surplus_dc > 0.1:
+                    
+                    # If we have huge solar surplus today, we don't need to hoard for evening arbitrage
+                    is_morning = (h < 13)
+                    if is_morning and is_solar_surplus and p >= sell_limit:
+                        safe_peaks.append(h)
+                    elif p >= sell_limit or is_ok or surplus_dc > 0.1:
                         safe_peaks.append(h)
             target_hours = sorted([h for h in safe_peaks if h >= cur_hour])
             if not target_hours:
@@ -299,17 +310,19 @@ class StrategySell(StrategyEngine):
                 available_sell_ac = max(0.0, available_sell_ac - (solar_deficit / eff))
                 if not limit_reason or limit_reason == "None": limit_reason = "Дефицит солнца завтра"
 
-            # --- Stage 3: Recursive Optimizer (Jeweler Loop) ---
-            first_epoch = epochs[0] if epochs else []
-            h_by_price = sorted(first_epoch, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
-            last_sell_h = max(first_epoch) if first_epoch else cur_hour
-            
             # --- Stage 3: Greedy Priority Allocator (v11.7.136) ---
             sell_commands = {}
-            sim_log = {}
+            
+            # v11.7.275: Pre-populate sim_log with Baseline (Solar-Aware)
+            sim_range = list(range(cur_hour, cur_hour + 48))
+            _, sim_log, _ = self.run_soc_simulation(
+                b_soc, sim_range, now, 
+                commands={}, 
+                b_min_soc=min_soc_val, 
+                ignore_blended=True, house_profile_override="consumption_base"
+            )
             
             # 1. Pre-calculate sliding safety floors (Gatekeeper/Morning Reserve)
-            sim_range = list(range(cur_hour, cur_hour + 48))
             floors = {}
             _sim_cons_profile = dict(man.get_predicted_profile("consumption_total"))
             for h_sim in sim_range:
