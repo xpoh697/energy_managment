@@ -358,30 +358,46 @@ class StrategySell(StrategyEngine):
                 floors[h_sim] = float(h_floor)
 
             # 2. Greedy Fill in Price-Descending order
-            h_by_priority = sorted(first_epoch, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
+            # v11.7.297: If solar surplus is huge, we don't care about the DC budget limit
+            effective_budget_ac = 99.0 if is_solar_surplus else available_sell_ac
+            h_by_priority = sorted(target_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
             
             for h_target in h_by_priority:
+                if effective_budget_ac <= 0.05: break
+                
                 test_p = max_p
-                for step in range(6):
-                    trial_commands = {**sell_commands, h_target: test_p}
+                if not is_solar_surplus:
+                    test_p = min(max_p, effective_budget_ac)
+                
+                while test_p > 0.05:
+                    test_commands = dict(sell_commands)
+                    test_commands[h_target] = test_p
+                    
                     _, trial_log, _ = self.run_soc_simulation(
                         b_soc, sim_range, now, 
-                        commands={h: -p for h, p in trial_commands.items()}, 
+                        commands={h: -p for h, p in test_commands.items()}, 
                         b_min_soc=min_soc_val, dynamic_floors=floors,
                         ignore_blended=True, house_profile_override="consumption_base"
                     )
                     
-                    is_ok = True
-                    for h_check in sim_range:
-                        h_key = f"{h_check%24:02d}:59" + (" (Завтра)" if h_check >= 24 else "")
-                        soc_val = trial_log.get(h_key, {}).get("soc", 100.0)
-                        if soc_val < floors.get(h_check, 0.0) - 0.01:
-                            is_ok = False
-                            break
+                    h_key = f"{h_target%24:02d}:59" + (" (Завтра)" if h_target >= 24 else "")
+                    real_p = trial_log.get(h_key, {}).get("p_bat", 0.0)
+                    
+                    # Check if simulation accepted the power
+                    is_ok = (real_p >= test_p - 0.1)
+                    
+                    if not is_ok and real_p > 0.1:
+                        if is_solar_surplus:
+                            # In solar surplus, always accept whatever we can discharge
+                            is_ok = True
+                            test_p = real_p 
+                        else:
+                            # Try one more time with exactly what the simulation allowed
+                            test_p = real_p
+                            continue
                     
                     if is_ok:
-                        # v11.7.138: Saturation Check. 
-                        # If adding this hour REDUCES the output of a more expensive hour, it's not OK.
+                        # v11.7.138: Saturation Check
                         for h_prev in sell_commands:
                             if sell_commands[h_prev] > 0.05:
                                 h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
@@ -391,20 +407,21 @@ class StrategySell(StrategyEngine):
                                     break
                     
                     if is_ok:
-                        # Double Cycle Optimizer (TS 92-95)
-                        # If price in second pool is higher (min 0.05), block sale in first pool 
-                        # unless we have a solar surplus (TS 198)
+                        # Double Cycle Optimizer
                         if len(epochs) > 1 and not is_solar_surplus:
                             p1 = max([all_sell_prices.get(h, 0.0) for h in epochs[0]])
                             p2 = max([all_sell_prices.get(h, 0.0) for h in epochs[1]])
                             if p2 > p1 + 0.05:
-                                available_sell_ac = 0
-                                if not limit_reason: limit_reason = "Ожидание пика"
-                                is_ok = False
-                    
+                                # If this hour is in the first epoch, and second epoch is better, block it
+                                if h_target in epochs[0]:
+                                    is_ok = False
+                                    if not limit_reason: limit_reason = "Ожидание пика"
+
                     if is_ok:
                         sell_commands[h_target] = test_p
                         sim_log = trial_log
+                        if not is_solar_surplus:
+                            effective_budget_ac -= test_p
                         break
                     else:
                         test_p = max(0.0, test_p - (max_p / 6.0))
@@ -412,7 +429,6 @@ class StrategySell(StrategyEngine):
                 if test_p <= 0.05:
                     sell_commands[h_target] = 0.0
 
-            
             house_rem_total = house_kwh_until_sunrise
 
 
