@@ -1,7 +1,8 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.8.445)
-- [x] Relaxed Stage 1 safety floor to prevent morning reserve from blocking evening sales
+## Current Status (v11.8.451)
+- [x] EMERGENCY ROLLBACK TO v11.8.439. Stabilizing market strategy after failed allocation precision attempts.
+- [x] House-load aware budgeting removed. (Rollbacked)
 - [x] Fix "Zero House Load" simulation bug (fallback to profile)
 - [x] Restricted "saturation-based" discharge to 04:00-11:00 only
 - [x] Implemented Dual-Floor logic (Anchored for Strategy, Sliding for Projection)

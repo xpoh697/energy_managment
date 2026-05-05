@@ -322,16 +322,8 @@ class StrategySell(StrategyEngine):
                     house_kwh_until_sunrise += float(normalize_float(h_load if h_load is not None else 0.4))
                 
                 gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
-                morning_reserve_floor = min_soc_val + soc_buffer + (house_kwh_until_sunrise / b_cap * 100.0)
-                
-                # v11.8.445: The active_safety_floor should be the absolute minimum we can drop to NOW.
-                # Since house load is already in gatekeeper/morning floors, we just take max.
+                morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
                 active_safety_floor = max(user_limit, gatekeeper_floor, morning_reserve_floor)
-                
-                # Optimization: if we have a lot of energy, don't let morning reserve block early evening sales too much
-                # as the simulation in Stage 3 will handle the real survival check.
-                if b_soc > active_safety_floor + 10.0:
-                    active_safety_floor = max(user_limit, min_soc_val + 5.0)
 
             # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
             soc_at_start = b_soc
@@ -346,9 +338,7 @@ class StrategySell(StrategyEngine):
                     now=now, commands={}, house_profile_override="consumption_base", ignore_blended=True
                 )
                 soc_at_start = self._get_soc_from_log(sim_log_base, sale_start_key, b_soc)
-            
-            # v11.8.447: BACK TO CONSTITUTION (House-Blind Principle, TS 104)
-            # "From the selling budget, the predicted house consumption IS NOT subtracted."
+
             available_sell_dc = max(0.0, (soc_at_start - active_safety_floor) * b_cap / 100.0)
             available_sell_ac = available_sell_dc * eff
             
@@ -411,51 +401,95 @@ class StrategySell(StrategyEngine):
                 else:
                     h_floor = min_soc_val + 2.0
                 
-                # v11.8.448: Tech Spec 187 - User Limit applies ONLY to End of Sale.
-                # After last sale hour, the floor should drop to Gatekeeper (Survival).
-                last_sale_h = max(target_hours) if target_hours else cur_hour
-                
-                if h_sim <= last_sale_h:
-                    h_floor = max(h_floor, user_limit)
-                
-                floors_anchored[h_sim] = float(h_floor)
-                last_h_floor = h_floor
+                h_floor = max(h_floor, user_limit, min_soc_val)
                 
                 # Sliding floor for simulation
                 floors_sliding[h_sim] = float(h_floor)
                 
-            # 2. Elementary Allocator (v11.8.449: Back to Basics, TS 90, 102)
-            # Budget is the ONLY thing that matters. Sort by price, fill until budget is gone.
+                # Anchored floor for strategy (prevents selling survival buffers)
+                is_night = bool(h_sim_norm >= 16 or h_sim_norm < sunrise_h)
+                if is_night:
+                    h_floor = max(h_floor, last_h_floor)
+                
+                floors_anchored[h_sim] = float(h_floor)
+                last_h_floor = h_floor
+
+            # 2. Greedy Fill in Price-Descending order
+            # v11.7.297: If solar surplus is huge, we don't care about the DC budget limit
+            effective_budget_ac = 99.0 if is_solar_surplus else available_sell_ac
             h_by_priority = sorted(target_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
             
-            # Convert budget to kWh DC for calculation (avoid efficiency confusion in loop)
-            remaining_budget_dc = (soc_at_start - active_safety_floor) * b_cap / 100.0
-            
             for h_target in h_by_priority:
-                if remaining_budget_dc <= 0.01:
-                    sell_commands[h_target] = 0.0
-                    continue
+                if effective_budget_ac <= 0.05: break
                 
-                # Max energy we can take in 1 hour (limited by inverter AC power converted to DC)
-                max_energy_h_dc = (max_p / eff) * 1.0 # 1 hour
+                test_p = max_p
+                if not is_solar_surplus:
+                    test_p = min(max_p, effective_budget_ac)
                 
-                # Take what we can
-                take_dc = min(remaining_budget_dc, max_energy_h_dc)
-                
-                # Convert back to AC for the command
-                sell_commands[h_target] = round_f(take_dc * eff, 3)
-                remaining_budget_dc -= take_dc
-                active_h.append(h_target)
+                while test_p > 0.05:
+                    test_commands = dict(sell_commands)
+                    test_commands[h_target] = test_p
+                    
+                    _, trial_log, _ = self.run_soc_simulation(
+                        b_soc, sim_range, now, 
+                        commands={h: -p for h, p in test_commands.items()}, 
+                        b_min_soc=min_soc_val, dynamic_floors=floors_anchored,
+                        ignore_blended=True, house_profile_override="consumption_base"
+                    )
+                    
+                    h_key = f"{h_target%24:02d}:59" + (" (Завтра)" if h_target >= 24 else "")
+                    real_p = trial_log.get(h_key, {}).get("p_bat", 0.0)
+                    
+                    # Check if simulation accepted the power
+                    is_ok = (real_p >= test_p - 0.1)
+                    
+                    if not is_ok and real_p > 0.1:
+                        if is_solar_surplus:
+                            # In solar surplus, always accept whatever we can discharge
+                            is_ok = True
+                            test_p = real_p 
+                        else:
+                            # Try one more time with exactly what the simulation allowed
+                            test_p = real_p
+                            continue
+                    
+                    if is_ok:
+                        # v11.7.138: Saturation Check
+                        for h_prev in sell_commands:
+                            if sell_commands[h_prev] > 0.05:
+                                h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
+                                prev_real_p = trial_log.get(h_prev_key, {}).get("p_bat", 0.0)
+                                if prev_real_p < sell_commands[h_prev] - 0.1:
+                                    is_ok = False
+                                    break
+                    
+                    if is_ok:
+                        # Double Cycle Optimizer
+                        if len(epochs) > 1 and not is_solar_surplus:
+                            p1 = max([all_sell_prices.get(h, 0.0) for h in epochs[0]])
+                            p2 = max([all_sell_prices.get(h, 0.0) for h in epochs[1]])
+                            if p2 > p1 + 0.05:
+                                # If this hour is in the first epoch, and second epoch is better, block it
+                                if h_target in epochs[0]:
+                                    is_ok = False
+                                    if not limit_reason: limit_reason = "Ожидание пика"
 
-            # v11.8.449: Final validation simulation (Projection only)
-            sim_range_full = list(range(cur_hour, cur_hour + 48))
-            _, sim_log, _ = self.run_soc_simulation(
-                b_soc, sim_range_full, now, 
-                commands={h: -p for h, p in sell_commands.items()}, 
-                b_min_soc=min_soc_val, dynamic_floors=floors_sliding,
-                ignore_blended=True, house_profile_override="consumption_base"
-            )
-            
+                    if is_ok:
+                        sell_commands[h_target] = test_p
+                        sim_log = trial_log
+                        if not is_solar_surplus:
+                            effective_budget_ac -= test_p
+                        break
+                    else:
+                        test_p = max(0.0, test_p - (max_p / 6.0))
+                
+                if test_p <= 0.05:
+                    sell_commands[h_target] = 0.0
+
+            house_rem_total = house_kwh_until_sunrise
+
+
+
             # --- Stage 4: Build Plan ---
             planned_results = {}
             sorted_h = sorted(sell_commands.keys())
@@ -473,9 +507,10 @@ class StrategySell(StrategyEngine):
                 
                 # Diagnostics: Determine why we aren't selling at max_p
                 if real_p < p - 0.1:
+                    h_floor = floors.get(h, min_soc_val + soc_buffer)
                     if abs(sim_soc - user_limit) < 0.2:
                         limit_reason = "Лимит пользователя"
-                    elif sim_soc < b_min_soc + soc_buffer + 1.0:
+                    elif h_floor > min_soc_val + soc_buffer + 0.5:
                         limit_reason = "Gatekeeper"
                     else:
                         limit_reason = "Утренний лимит"
@@ -496,7 +531,7 @@ class StrategySell(StrategyEngine):
             
             target_morning = (min_soc_val + 2.0) if (4 <= (morning_h % 24) < 10) else (min_soc_val + soc_buffer)
             # Gatekeeper: min_soc + house load until sunrise
-            gatekeeper_val = floors_anchored.get(cur_hour, min_soc_val + soc_buffer)
+            gatekeeper_val = floors.get(cur_hour, min_soc_val + soc_buffer)
 
             res.update({
                 "planned_power_per_h": planned_results,
@@ -562,9 +597,6 @@ class StrategySell(StrategyEngine):
             
             res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
             
-            res["gatekeeper_floor"] = round_f(gatekeeper_floor, 1)
-            res["survival_target"] = round_f(morning_reserve_floor, 1)
-            
             # v11.7.131: Strictest limit identification for UI
             overall_limit = ""
             if not sell_commands:
@@ -621,12 +653,11 @@ class StrategySell(StrategyEngine):
 
             # v11.7.397: Saturation Awareness for UI
             morning_h_abs = sunrise_h if cur_hour < sunrise_h else (sunrise_h + 24)
-            # v11.8.441: Unified sell_simulation dictionary (no more overwrites)
-            res["sell_simulation"].update({
+            res["sell_simulation"] = {
                 "hit_full_before": hit_full_before,
                 "projected_soc_morning_pct": round_f(self._get_soc_from_log(sim_log, f"{morning_h_abs%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else ""), b_soc), 1),
                 "log": sim_log
-            })
+            }
 
             res["arbitrage_sell_debug"] = {
                 "start_soc": b_soc,
