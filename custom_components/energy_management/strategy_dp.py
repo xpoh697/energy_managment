@@ -27,8 +27,8 @@ INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Advanced DP Planner with Emergency Reserve Awareness.
-    Fixes: Added 'bat_emergency' mode mapping and strict floor enforcement.
+    Advanced DP Planner with Arbitrage Optimization.
+    Fixes: Prioritize morning peak sales over charging when future prices are lower.
     """
     
     def __init__(self, manager):
@@ -61,19 +61,12 @@ class DPPlanner:
             
             deg_cost = self._get_deg_cost(b_cap)
             min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
-            soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 2.0))
-            
-            # Emergency Line is min_soc
-            emergency_floor = min_soc 
             
             # 3. Forecasts
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
-
-            gen_today = sum(v for h, v in forecast_gen.items() if int(h) < 24)
-            gen_tomorrow = sum(v for h, v in forecast_gen.items() if int(h) >= 24)
 
             # 4. Grid
             steps_soc = range(0, 101, int(BATTERY_SOC_STEP))
@@ -82,14 +75,19 @@ class DPPlanner:
             
             dp_table = {} 
 
-            # 5. Final State Penalty
+            # 5. Final State Penalty & Reward
+            # We add a small reward for SOC at the end to encourage charging when cheap
+            avg_p_buy = sum(prices_buy.values()) / len(prices_buy) if prices_buy else 0.5
+            
             dp_table[horizon] = {}
             for s in steps_soc:
                 for b in steps_boiler:
-                    penalty = 0.0
-                    if s < emergency_floor: penalty += 20000.0 # Absolute forbidden
-                    if b < 40: penalty += 2000.0
-                    dp_table[horizon][(s, b)] = (penalty, None)
+                    val = 0.0
+                    if s < min_soc: val += 20000.0 # Absolute floor
+                    # Reward SOC: energy in battery is worth its average buy price
+                    val -= s * (b_cap / 100.0) * avg_p_buy * 0.5 
+                    if b < 40: val += 2000.0
+                    dp_table[horizon][(s, b)] = (val, None)
 
             # 6. Backward Pass
             for h in range(horizon - 1, -1, -1):
@@ -128,13 +126,14 @@ class DPPlanner:
                                 cost = (grid_net * p_buy) if grid_net > 0 else (grid_net * p_sell)
                                 cost += abs(b_p) * deg_cost
                                 
-                                # EMERGENCY CONSTRAINTS
-                                if s_next_raw < emergency_floor: 
-                                    cost += 5000.0 # Extreme penalty for dropping below reserve
+                                # ARBITRAGE ENHANCEMENTS
+                                # 1. SOC Floor with 0.5% tolerance to avoid panic charging
+                                if s_next_raw < (min_soc - 0.5): 
+                                    cost += 5000.0 
                                 
-                                # Self-consumption priority (discourage discharge-to-export)
+                                # 2. Encourage self-consumption/export logic
                                 if b_p > 0.1 and grid_net < -0.1:
-                                    cost += abs(grid_net) * 0.3
+                                    cost += abs(grid_net) * 0.2
                                 
                                 if b_on and b >= 98: cost += 10.0
                                 if is_deadline and b_next_raw < 80: cost += 5000.0
@@ -160,9 +159,9 @@ class DPPlanner:
                 b_p, b_on, g_net = act
                 h_rel = abs_h % 24
                 cur_p_buy = float(normalize_float(prices_buy.get(str(abs_h), prices_buy.get(str(h_rel), 10.0))))
+                cur_p_sell = float(normalize_float(prices_sell.get(str(abs_h), prices_sell.get(str(h_rel), 0.0))))
                 
-                # Mode mapping with Emergency awareness
-                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), cur_p_buy, s_ptr, emergency_floor)
+                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), cur_p_buy, cur_p_sell, s_ptr, min_soc)
                 
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 plan[h_key] = {
@@ -184,10 +183,8 @@ class DPPlanner:
                 "debug": {
                     "battery_capacity_kwh": round_f(b_cap, 2),
                     "current_soc_pct": round_f(float(curr_s_raw or 0), 1),
-                    "emergency_reserve_pct": emergency_floor,
+                    "emergency_reserve_pct": min_soc,
                     "degradation_cost_per_kwh": round_f(deg_cost, 4),
-                    "total_forecast_today_kwh": round_f(gen_today, 2),
-                    "total_forecast_tomorrow_kwh": round_f(gen_tomorrow, 2),
                     "horizon_hours": horizon
                 }
             }
@@ -247,17 +244,29 @@ class DPPlanner:
         for h, p in tm_data.items(): combined[str(int(h) + 24)] = p
         return combined
 
-    def _map_mode(self, b_p, b_on, g_net, gen, price, soc, floor) -> str:
+    def _map_mode(self, b_p, b_on, g_net, gen, p_buy, p_sell, soc, floor) -> str:
         # 1. Emergency Check
-        if soc <= floor + 0.5 and b_p >= -0.1:
+        if soc <= floor + 0.2 and b_p >= -0.1:
             return "bat_emergency"
             
-        # 2. Standard Mapping
-        if b_p < -0.1 and g_net > 0.1: return "buy"
-        if b_p > 0.1 and g_net < -0.1: return "sale_pv_bat"
-        if abs(b_p) < 0.1 and g_net < -0.1 and float(normalize_float(gen)) > 0.1: return "sale_pv_no_bat"
-        if g_net >= -0.05 and b_p < -0.1 and float(normalize_float(gen)) > 0.1: return "stop_sale"
-        if abs(b_p) < 0.1 and float(normalize_float(price)) < 0: return "no_pv_sale_no_bat"
+        # 2. Standard Logic
+        if b_p < -0.1:
+            # If we are charging from grid
+            if g_net > 0.1: return "buy"
+            # Charging from PV
+            return "charge_pv"
+            
+        if b_p > 0.1:
+            return "sale_pv_bat"
+            
+        # 3. Battery Idle
+        if abs(b_p) <= 0.1:
+            # Negative price
+            if float(normalize_float(p_sell)) < 0: return "no_pv_sale_no_bat"
+            # Solar export (High price wait logic handled by DP optimizer choice of b_p=0)
+            if g_net < -0.1 and float(normalize_float(gen)) > 0.1:
+                return "sale_pv_no_bat"
+            
         return "sale_pv"
 
     def _get_deg_cost(self, cap: float) -> float:
