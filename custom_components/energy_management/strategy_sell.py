@@ -412,21 +412,25 @@ class StrategySell(StrategyEngine):
                     h_floor = max(h_floor, last_h_floor)
                 
                 floors_anchored[h_sim] = float(h_floor)
-                last_h_floor = h_floor
-
-            # 2. Greedy Fill in Price-Descending order
-            # v11.7.297: If solar surplus is huge, we don't care about the DC budget limit
+                   # 2. Greedy Fill in Price-Descending order (v11.8.443: Precise Binary Search)
             effective_budget_ac = 99.0 if is_solar_surplus else available_sell_ac
             h_by_priority = sorted(target_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
             
             for h_target in h_by_priority:
-                if effective_budget_ac <= 0.05: break
+                if effective_budget_ac <= 0.01: break
                 
-                test_p = max_p
-                if not is_solar_surplus:
-                    test_p = min(max_p, effective_budget_ac)
+                # Binary Search for the maximum safe power in this hour
+                low_p = 0.0
+                high_p = min(max_p, effective_budget_ac) if not is_solar_surplus else max_p
+                best_p = 0.0
+                best_trial_log = sim_log
                 
-                while test_p > 0.05:
+                # 5 iterations of binary search gives ~0.2kW precision for a 6.5kW range
+                # 7 iterations gives ~0.05kW precision.
+                for _ in range(7):
+                    test_p = (low_p + high_p) / 2.0
+                    if test_p < 0.05: break
+                    
                     test_commands = dict(sell_commands)
                     test_commands[h_target] = test_p
                     
@@ -440,21 +444,9 @@ class StrategySell(StrategyEngine):
                     h_key = f"{h_target%24:02d}:59" + (" (Завтра)" if h_target >= 24 else "")
                     real_p = trial_log.get(h_key, {}).get("p_bat", 0.0)
                     
-                    # Check if simulation accepted the power
+                    # Check if simulation accepted the power AND didn't break PREVIOUSLY planned peaks
                     is_ok = (real_p >= test_p - 0.1)
-                    
-                    if not is_ok and real_p > 0.1:
-                        if is_solar_surplus:
-                            # In solar surplus, always accept whatever we can discharge
-                            is_ok = True
-                            test_p = real_p 
-                        else:
-                            # Try one more time with exactly what the simulation allowed
-                            test_p = real_p
-                            continue
-                    
                     if is_ok:
-                        # v11.7.138: Saturation Check
                         for h_prev in sell_commands:
                             if sell_commands[h_prev] > 0.05:
                                 h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
@@ -464,28 +456,26 @@ class StrategySell(StrategyEngine):
                                     break
                     
                     if is_ok:
-                        # Double Cycle Optimizer
+                        # v11.8.443: Double Cycle Optimizer (Price Protection)
                         if len(epochs) > 1 and not is_solar_surplus:
                             p1 = max([all_sell_prices.get(h, 0.0) for h in epochs[0]])
                             p2 = max([all_sell_prices.get(h, 0.0) for h in epochs[1]])
-                            if p2 > p1 + 0.05:
-                                # If this hour is in the first epoch, and second epoch is better, block it
-                                if h_target in epochs[0]:
-                                    is_ok = False
-                                    if not limit_reason: limit_reason = "Ожидание пика"
-
+                            if p2 > p1 + 0.05 and h_target in epochs[0]:
+                                is_ok = False # Keep energy for P2
+                        
                     if is_ok:
-                        sell_commands[h_target] = test_p
-                        sim_log = trial_log
-                        if not is_solar_surplus:
-                            effective_budget_ac -= test_p
-                        break
+                        best_p = test_p
+                        best_trial_log = trial_log
+                        low_p = test_p
                     else:
-                        test_p = max(0.0, test_p - (max_p / 6.0))
-                
-                if test_p <= 0.05:
-                    sell_commands[h_target] = 0.0
+                        high_p = test_p
 
+                if best_p > 0.05:
+                    sell_commands[h_target] = best_p
+                    sim_log = best_trial_log
+                    if not is_solar_surplus:
+                        effective_budget_ac -= best_p
+                        
             house_rem_total = house_kwh_until_sunrise
 
 
