@@ -401,7 +401,9 @@ class StrategySell(StrategyEngine):
                 else:
                     h_floor = min_soc_val + 2.0
                 
-                h_floor = max(h_floor, user_limit, min_soc_val)
+                last_sale_h = max(target_hours) if target_hours else cur_hour
+                if h_sim <= last_sale_h:
+                    h_floor = max(h_floor, user_limit)
                 
                 # Sliding floor for simulation
                 floors_sliding[h_sim] = float(h_floor)
