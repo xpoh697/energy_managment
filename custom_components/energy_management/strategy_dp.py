@@ -15,10 +15,11 @@ from .utils import normalize_float, round_f
 _LOGGER = logging.getLogger(__name__)
 
 # --- DP CONFIGURATION (SAFE GRID) ---
+# Boiler Configuration v11.7.350
 BOILER_POWER = 2.5        # kW
 BOILER_CAPACITY = 6.0     # kWh
 BOILER_LOSS_RATE = 0.02   # 2% energy loss per hour
-BOILER_DEADLINES = [7, 8, 19, 20, 21] 
+BOILER_DEADLINES = [18]   # Target 18:00
 
 # Increased steps for performance (from 1% to 5%/10%)
 BATTERY_POWER_STEP = 0.5  # kW (Faster than 0.1)
@@ -99,9 +100,9 @@ class DPPlanner:
                 eff_gen_cons = cons - gen
                 is_deadline = h_rel in BOILER_DEADLINES
                 
-                # v11.7.300: Relax floors during solar surplus morning
                 is_morning_surplus = (4 <= h_rel < 13) and is_solar_surplus
                 h_min_soc = (min_soc + 2.0) if is_morning_surplus else min_soc
+                is_evening_deadline = (h_rel == 18)
                 
                 for s in steps_soc:
                     for b in steps_boiler:
@@ -127,11 +128,20 @@ class DPPlanner:
                                 
                                 # Constraints
                                 if s_next_raw < (h_min_soc - 0.5): cost += 2000.0
-                                # v11.7.300: Reduce "Low SOC" panic if we have surplus coming
                                 if is_morning_surplus and s_next_raw < 30: cost += (30 - s_next_raw) * 0.1
                                 
-                                if b_p > 0.1 and grid_net < -0.1: cost += abs(grid_net) * 0.1
+                                # v11.7.340: Battery Deadline at 18:00 (Target 90%)
+                                if is_evening_deadline and s_next_raw < 90:
+                                    cost += (90 - s_next_raw) * 10.0
+                                
+                                # Boiler Penalty
                                 if is_deadline and b_next_raw < 80: cost += 3000.0
+                                
+                                # v11.7.330: Penalty for expensive grid buy
+                                if grid_net > 0.1 and p_buy > avg_p_buy * 1.2:
+                                    cost += grid_net * p_buy * 2.0
+                                
+                                if b_p > 0.1 and grid_net < -0.1: cost += abs(grid_net) * 0.1
                                 
                                 total_v = cost + dp_table[h+1][(s_next_idx, b_next_idx)][0]
                                 if total_v < best_val:
