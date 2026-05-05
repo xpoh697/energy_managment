@@ -648,8 +648,13 @@ class StrategySell(StrategyEngine):
 
             # v11.7.397: Saturation Awareness for UI
             morning_h_abs = sunrise_h if cur_hour < sunrise_h else (sunrise_h + 24)
+            first_sell_h = min(active_h) if active_h else cur_hour
+            last_sell_h = max(active_h) if active_h else cur_hour
+            
             res["sell_simulation"] = {
                 "hit_full_before": hit_full_before,
+                "projected_soc_at_sale_start_pct": round_f(self._get_soc_from_log(sim_log, f"{(first_sell_h-1)%24:02d}:59" + (" (Завтра)" if (first_sell_h-1) >= 24 else ""), b_soc), 1),
+                "projected_soc_after_sale_pct": round_f(self._get_soc_from_log(sim_log, f"{last_sell_h%24:02d}:59" + (" (Завтра)" if last_sell_h >= 24 else ""), b_soc), 1),
                 "projected_soc_morning_pct": round_f(self._get_soc_from_log(sim_log, f"{morning_h_abs%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else ""), b_soc), 1),
                 "log": sim_log
             }
