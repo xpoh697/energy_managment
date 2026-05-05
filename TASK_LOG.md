@@ -1,7 +1,7 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.8.444)
-- [x] Zero-tolerance Saturation Check for true Greedy Price Priority
+## Current Status (v11.8.445)
+- [x] Relaxed Stage 1 safety floor to prevent morning reserve from blocking evening sales
 - [x] Fix "Zero House Load" simulation bug (fallback to profile)
 - [x] Restricted "saturation-based" discharge to 04:00-11:00 only
 - [x] Implemented Dual-Floor logic (Anchored for Strategy, Sliding for Projection)

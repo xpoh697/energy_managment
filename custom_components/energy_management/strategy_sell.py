@@ -322,8 +322,16 @@ class StrategySell(StrategyEngine):
                     house_kwh_until_sunrise += float(normalize_float(h_load if h_load is not None else 0.4))
                 
                 gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
-                morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
+                morning_reserve_floor = min_soc_val + soc_buffer + (house_kwh_until_sunrise / b_cap * 100.0)
+                
+                # v11.8.445: The active_safety_floor should be the absolute minimum we can drop to NOW.
+                # Since house load is already in gatekeeper/morning floors, we just take max.
                 active_safety_floor = max(user_limit, gatekeeper_floor, morning_reserve_floor)
+                
+                # Optimization: if we have a lot of energy, don't let morning reserve block early evening sales too much
+                # as the simulation in Stage 3 will handle the real survival check.
+                if b_soc > active_safety_floor + 10.0:
+                    active_safety_floor = max(user_limit, min_soc_val + 5.0)
 
             # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
             soc_at_start = b_soc
