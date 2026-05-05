@@ -407,12 +407,7 @@ class StrategySell(StrategyEngine):
                 floors_sliding[h_sim] = float(h_floor)
                 
                 # Anchored floor for strategy (prevents selling survival buffers)
-                is_night = bool(h_sim_norm >= 16 or h_sim_norm < sunrise_h)
-                if is_night:
-                    h_floor = max(h_floor, last_h_floor)
-                
                 floors_anchored[h_sim] = float(h_floor)
-                last_h_floor = h_floor
 
             # 2. Greedy Fill in Price-Descending order
             # v11.7.297: If solar surplus is huge, we don't care about the DC budget limit
@@ -531,7 +526,7 @@ class StrategySell(StrategyEngine):
             
             target_morning = (min_soc_val + 2.0) if (4 <= (morning_h % 24) < 10) else (min_soc_val + soc_buffer)
             # Gatekeeper: min_soc + house load until sunrise
-            gatekeeper_val = floors.get(cur_hour, min_soc_val + soc_buffer)
+            gatekeeper_val = floors_anchored.get(cur_hour, min_soc_val + soc_buffer)
 
             res.update({
                 "planned_power_per_h": planned_results,
