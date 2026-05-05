@@ -254,22 +254,20 @@ class StrategySell(StrategyEngine):
             # v11.7.129: Stage 1 - Base Safety Floors (TS 6.1)
             # 1. Gatekeeper (Survival): min_soc + house load until sunrise
             house_kwh_until_sunrise = 0.0
-            range_start = cur_hour + 1 if is_morning_window else (last_sell_planned_h + 1)
-            for h_abs in range(range_start, morning_h_abs):
-                h_rel = h_abs % 24
-                p_prof = prof_cons_tom if h_abs >= 24 else prof_cons_cur
-                h_load = p_prof.get(f"{h_rel:02d}") or p_prof.get(str(h_rel))
-                house_kwh_until_sunrise += float(normalize_float(h_load if h_load is not None else 0.4))
-            
-            gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
-            
-            # 2. Morning Reserve: min_soc + buffer (Projected to end of sale)
-            morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
-            
-            # v11.7.135: TS 185 - Liberal morning threshold (15%)
             if is_morning_window:
+                # In morning window, we don't care about the long bridge to tomorrow
                 active_safety_floor = min_soc_val + 2.0
+                house_kwh_until_sunrise = 0.0
             else:
+                range_start = last_sell_planned_h + 1
+                for h_abs in range(range_start, morning_h_abs):
+                    h_rel = h_abs % 24
+                    p_prof = prof_cons_tom if h_abs >= 24 else prof_cons_cur
+                    h_load = p_prof.get(f"{h_rel:02d}") or p_prof.get(str(h_rel))
+                    house_kwh_until_sunrise += float(normalize_float(h_load if h_load is not None else 0.4))
+                
+                gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
+                morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
                 active_safety_floor = max(user_limit, gatekeeper_floor, morning_reserve_floor)
 
             # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
@@ -313,8 +311,16 @@ class StrategySell(StrategyEngine):
             _sim_cons_profile = dict(man.get_predicted_profile("consumption_total"))
             for h_sim in sim_range:
                 h_sim_norm = h_sim % 24
-                h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, sunrise_h if h_sim < sunrise_h else sunrise_h + 24))
-                h_floor = max(min_soc_val + (h_rem_kwh / b_cap * 100.0), (min_soc_val + 2.0) if (4 <= h_sim_norm < 12) else (min_soc_val + soc_buffer))
+                # v11.7.135: Refined Survival Bridge. 
+                # Only look until the NEXT sunrise, and if already in morning window, use 15%
+                if 4 <= h_sim_norm < 10:
+                    h_floor = min_soc_val + 2.0
+                else:
+                    # Bridge until next sunrise
+                    target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
+                    h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
+                    h_floor = max(min_soc_val + (h_rem_kwh / b_cap * 100.0), min_soc_val + soc_buffer)
+                
                 floors[h_sim] = float(h_floor)
 
             # 2. Greedy Fill in Price-Descending order
