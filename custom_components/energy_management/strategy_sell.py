@@ -531,7 +531,7 @@ class StrategySell(StrategyEngine):
             
             target_morning = (min_soc_val + 2.0) if (4 <= (morning_h % 24) < 10) else (min_soc_val + soc_buffer)
             # Gatekeeper: min_soc + house load until sunrise
-            gatekeeper_val = floors.get(cur_hour, min_soc_val + soc_buffer)
+            gatekeeper_val = floors_anchored.get(cur_hour, min_soc_val + soc_buffer)
 
             res.update({
                 "planned_power_per_h": planned_results,
