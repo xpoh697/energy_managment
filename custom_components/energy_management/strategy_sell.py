@@ -322,6 +322,10 @@ class StrategySell(StrategyEngine):
                 ignore_blended=True, house_profile_override="consumption_base"
             )
             
+            # v11.7.280: Restore epochs for the allocator
+            epochs = self.get_strategy_epochs(target_hours, man.prices_today, man.prices_tomorrow)
+            first_epoch = epochs[0] if epochs else []
+            
             # 1. Pre-calculate sliding safety floors (Gatekeeper/Morning Reserve)
             floors = {}
             _sim_cons_profile = dict(man.get_predicted_profile("consumption_total"))
