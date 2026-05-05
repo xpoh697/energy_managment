@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple
 
@@ -13,33 +14,34 @@ from .utils import normalize_float, round_f
 
 _LOGGER = logging.getLogger(__name__)
 
-# --- DP CONFIGURATION CONSTANTS ---
+# --- DP CONFIGURATION (SAFE GRID) ---
 BOILER_POWER = 2.5        # kW
 BOILER_CAPACITY = 6.0     # kWh
 BOILER_LOSS_RATE = 0.02   # 2% energy loss per hour
-BOILER_DEADLINES = [7, 8, 19, 20, 21] # Target hours for 100% heat
+BOILER_DEADLINES = [7, 8, 19, 20, 21] 
 
-BATTERY_POWER_STEP = 0.1  # kW resolution
-BATTERY_SOC_STEP = 1.0    # % resolution
-BOILER_SOC_STEP = 1.0     # % resolution
+# Increased steps for performance (from 1% to 5%/10%)
+BATTERY_POWER_STEP = 0.5  # kW (Faster than 0.1)
+BATTERY_SOC_STEP = 5.0    # % (Faster than 1.0)
+BOILER_SOC_STEP = 10.0    # % (Faster than 1.0)
 
 INVERTER_EFFICIENCY = 0.92
 
 class DPPlanner:
     """
-    Advanced DP Planner with Arbitrage Optimization.
-    Fixes: Prioritize morning peak sales over charging when future prices are lower.
+    Performance-optimized DP Planner.
+    Reduces state space to prevent CPU exhaustion.
     """
     
     def __init__(self, manager):
         self.manager = manager
         
     def get_dp_advice(self) -> Dict[str, Any]:
+        t0 = time.time()
         try:
             now = datetime.now()
             cur_hour = now.hour
             
-            # 1. Fetch Price Data
             prices_buy = self._get_prices("prices_buy")
             prices_sell = self._get_prices("prices_sell")
             
@@ -47,62 +49,50 @@ class DPPlanner:
                 return {"error": "Missing price data"}
 
             available_hours = sorted([int(h) for h in prices_buy.keys()])
-            if not available_hours: return {"error": "No price indices found"}
+            max_abs_h = max(available_hours) if available_hours else cur_hour + 23
+            horizon = min(48, max_abs_h - cur_hour + 1)
             
-            max_abs_h = max(available_hours)
-            horizon = max_abs_h - cur_hour + 1
-            if horizon <= 0: horizon = 24 
-            
-            # 2. Specs
             max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             curr_s_raw, b_cap_raw, _ = self.manager.get_battery_state()
             b_cap = float(b_cap_raw or 10.0)
-            if b_cap <= 0.1: b_cap = 10.0 
-            
             deg_cost = self._get_deg_cost(b_cap)
             min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
             
-            # 3. Forecasts
             blended_coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             forecast_gen = self._get_smart_gen_forecast(blended_coeff, horizon)
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
 
-            # 4. Grid
-            steps_soc = range(0, 101, int(BATTERY_SOC_STEP))
-            steps_boiler = range(0, 101, int(BOILER_SOC_STEP))
+            # Grids
+            steps_soc = [float(x) for x in range(0, 101, int(BATTERY_SOC_STEP))]
+            steps_boiler = [float(x) for x in range(0, 101, int(BOILER_SOC_STEP))]
             actions_bat = [round(-max_p + i * BATTERY_POWER_STEP, 1) for i in range(int(2 * max_p / BATTERY_POWER_STEP) + 1)]
             
+            avg_p_buy = sum(prices_buy.values()) / len(prices_buy) if prices_buy else 0.5
             dp_table = {} 
 
-            # 5. Final State Penalty & Reward
-            # We add a small reward for SOC at the end to encourage charging when cheap
-            avg_p_buy = sum(prices_buy.values()) / len(prices_buy) if prices_buy else 0.5
-            
+            # Final state
             dp_table[horizon] = {}
             for s in steps_soc:
                 for b in steps_boiler:
                     val = 0.0
-                    if s < min_soc: val += 20000.0 # Absolute floor
-                    # Reward SOC: energy in battery is worth its average buy price
-                    val -= s * (b_cap / 100.0) * avg_p_buy * 0.5 
-                    if b < 40: val += 2000.0
+                    if s < min_soc: val += 10000.0
+                    val -= s * (b_cap / 100.0) * avg_p_buy * 0.4 # Reward for SOC
+                    if b < 40: val += 1000.0
                     dp_table[horizon][(s, b)] = (val, None)
 
-            # 6. Backward Pass
+            # Backward induction
             for h in range(horizon - 1, -1, -1):
                 dp_table[h] = {}
                 abs_h = cur_hour + h
                 h_rel = abs_h % 24
                 
-                p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.0)))
-                p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.0)))
+                p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
+                p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
-                
-                active_cons = avg_cons if abs_h < 24 else tomorrow_cons
-                cons = float(normalize_float(active_cons.get(str(h_rel), 0.4)))
-                is_deadline = h_rel in BOILER_DEADLINES
+                cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
                 eff_gen_cons = cons - gen
+                is_deadline = h_rel in BOILER_DEADLINES
                 
                 for s in steps_soc:
                     for b in steps_boiler:
@@ -112,13 +102,13 @@ class DPPlanner:
                         for b_p in actions_bat:
                             s_next_raw = s - (b_p / b_cap * 100.0)
                             if s_next_raw < 0 or s_next_raw > 100: continue
-                            s_next_idx = int(s_next_raw + 0.5)
+                            s_next_idx = float(round(s_next_raw / BATTERY_SOC_STEP) * BATTERY_SOC_STEP)
                             
                             for b_on in [True, False]:
                                 b_cons = BOILER_POWER if b_on else 0.0
                                 b_next_raw = b - (BOILER_LOSS_RATE * 100.0) + (b_cons / BOILER_CAPACITY * 100.0)
                                 b_next_raw = max(0.0, min(100.0, b_next_raw))
-                                b_next_idx = int(b_next_raw + 0.5)
+                                b_next_idx = float(round(b_next_raw / BOILER_SOC_STEP) * BOILER_SOC_STEP)
                                 
                                 p_inv = b_p * (INVERTER_EFFICIENCY if b_p > 0 else 1.0/INVERTER_EFFICIENCY)
                                 grid_net = eff_gen_cons + b_cons - p_inv
@@ -126,68 +116,43 @@ class DPPlanner:
                                 cost = (grid_net * p_buy) if grid_net > 0 else (grid_net * p_sell)
                                 cost += abs(b_p) * deg_cost
                                 
-                                # ARBITRAGE ENHANCEMENTS
-                                # 1. SOC Floor with 0.5% tolerance to avoid panic charging
-                                if s_next_raw < (min_soc - 0.5): 
-                                    cost += 5000.0 
-                                
-                                # 2. Encourage self-consumption/export logic
-                                if b_p > 0.1 and grid_net < -0.1:
-                                    cost += abs(grid_net) * 0.2
-                                
-                                if b_on and b >= 98: cost += 10.0
-                                if is_deadline and b_next_raw < 80: cost += 5000.0
+                                # Constraints
+                                if s_next_raw < (min_soc - 0.5): cost += 2000.0
+                                if b_p > 0.1 and grid_net < -0.1: cost += abs(grid_net) * 0.1
+                                if is_deadline and b_next_raw < 80: cost += 3000.0
                                 
                                 total_v = cost + dp_table[h+1][(s_next_idx, b_next_idx)][0]
-                                
                                 if total_v < best_val:
                                     best_val = total_v
                                     best_act = (b_p, b_on, round(grid_net, 2))
                         
                         dp_table[h][(s, b)] = (best_val, best_act)
 
-            # 7. Reconstruct
-            s_ptr = int(float(curr_s_raw or 50) + 0.5)
-            b_ptr = 40 
-            
+            # Forward path
+            s_ptr = float(round((float(curr_s_raw or 50)) / BATTERY_SOC_STEP) * BATTERY_SOC_STEP)
+            b_ptr = 40.0
             plan = {}
             for h in range(horizon):
                 abs_h = cur_hour + h
-                _, act = dp_table[h][(s_ptr, b_ptr)]
+                _, act = dp_table[h].get((s_ptr, b_ptr), (0, None))
                 if not act: break
-                
                 b_p, b_on, g_net = act
                 h_rel = abs_h % 24
-                cur_p_buy = float(normalize_float(prices_buy.get(str(abs_h), prices_buy.get(str(h_rel), 10.0))))
-                cur_p_sell = float(normalize_float(prices_sell.get(str(abs_h), prices_sell.get(str(h_rel), 0.0))))
+                p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
+                p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
+                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), p_buy, p_sell, s_ptr, min_soc)
                 
-                mode = self._map_mode(b_p, b_on, g_net, forecast_gen.get(str(abs_h), 0), cur_p_buy, cur_p_sell, s_ptr, min_soc)
-                
-                h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
-                plan[h_key] = {
-                    "mode": mode,
-                    "power_kw": b_p,
-                    "boiler": "ON" if b_on else "OFF",
-                    "target_soc": s_ptr,
-                    "grid_net": g_net
+                plan[f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")] = {
+                    "mode": mode, "power_kw": b_p, "boiler": "ON" if b_on else "OFF",
+                    "target_soc": int(s_ptr), "grid_net": g_net
                 }
-                
-                s_next_exact = s_ptr - (b_p / b_cap * 100.0)
-                s_ptr = int(max(0, min(100, s_next_exact + 0.5)))
-                b_cons = BOILER_POWER if b_on else 0.0
-                b_next_exact = b_ptr - (BOILER_LOSS_RATE * 100.0) + (b_cons / BOILER_CAPACITY * 100.0)
-                b_ptr = int(max(0, min(100, b_next_exact + 0.5)))
+                s_next = s_ptr - (b_p / b_cap * 100.0)
+                s_ptr = float(max(0, min(100, round(s_next / BATTERY_SOC_STEP) * BATTERY_SOC_STEP)))
+                b_next = b_ptr - (BOILER_LOSS_RATE * 100.0) + ((BOILER_POWER if b_on else 0.0) / BOILER_CAPACITY * 100.0)
+                b_ptr = float(max(0, min(100, round(b_next / BOILER_SOC_STEP) * BOILER_SOC_STEP)))
 
-            return {
-                "plan": plan,
-                "debug": {
-                    "battery_capacity_kwh": round_f(b_cap, 2),
-                    "current_soc_pct": round_f(float(curr_s_raw or 0), 1),
-                    "emergency_reserve_pct": min_soc,
-                    "degradation_cost_per_kwh": round_f(deg_cost, 4),
-                    "horizon_hours": horizon
-                }
-            }
+            _LOGGER.info(f"DP Advice computed in {time.time()-t0:.2f}s")
+            return {"plan": plan, "debug": {"calc_time_sec": round(time.time()-t0, 2), "horizon": horizon}}
 
         except Exception as e:
             _LOGGER.error(f"DP Advice Error: {e}", exc_info=True)
@@ -245,28 +210,12 @@ class DPPlanner:
         return combined
 
     def _map_mode(self, b_p, b_on, g_net, gen, p_buy, p_sell, soc, floor) -> str:
-        # 1. Emergency Check
-        if soc <= floor + 0.2 and b_p >= -0.1:
-            return "bat_emergency"
-            
-        # 2. Standard Logic
-        if b_p < -0.1:
-            # If we are charging from grid
-            if g_net > 0.1: return "buy"
-            # Charging from PV
-            return "charge_pv"
-            
-        if b_p > 0.1:
-            return "sale_pv_bat"
-            
-        # 3. Battery Idle
+        if soc <= floor + 0.2 and b_p >= -0.1: return "bat_emergency"
+        if b_p < -0.1: return "buy" if g_net > 0.1 else "charge_pv"
+        if b_p > 0.1: return "sale_pv_bat"
         if abs(b_p) <= 0.1:
-            # Negative price
             if float(normalize_float(p_sell)) < 0: return "no_pv_sale_no_bat"
-            # Solar export (High price wait logic handled by DP optimizer choice of b_p=0)
-            if g_net < -0.1 and float(normalize_float(gen)) > 0.1:
-                return "sale_pv_no_bat"
-            
+            if g_net < -0.1 and float(normalize_float(gen)) > 0.1: return "sale_pv_no_bat"
         return "sale_pv"
 
     def _get_deg_cost(self, cap: float) -> float:
