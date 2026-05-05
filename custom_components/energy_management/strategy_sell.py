@@ -264,11 +264,12 @@ class StrategySell(StrategyEngine):
             gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
             
             # 2. Morning Reserve: min_soc + buffer (Projected to end of sale)
+            morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
+            
             # v11.7.135: TS 185 - Liberal morning threshold (15%)
             if is_morning_window:
                 active_safety_floor = min_soc_val + 2.0
             else:
-                morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
                 active_safety_floor = max(user_limit, gatekeeper_floor, morning_reserve_floor)
 
             # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
