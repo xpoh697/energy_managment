@@ -345,15 +345,22 @@ class StrategySell(StrategyEngine):
             _sim_cons_profile = dict(man.get_predicted_profile("consumption_total"))
             for h_sim in sim_range:
                 h_sim_norm = h_sim % 24
-                # v11.7.135: Refined Survival Bridge. 
-                # Only look until the NEXT sunrise, and if already in morning window, use 15%
-                if 4 <= h_sim_norm < 10:
+                # v11.7.380: Relax safety floors during solar surplus mornings
+                if 4 <= h_sim_norm < 13 and is_solar_surplus:
+                    h_floor = min_soc_val
+                elif 4 <= h_sim_norm < 10:
                     h_floor = min_soc_val + 2.0
                 else:
                     # Bridge until next sunrise
                     target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
                     h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
-                    h_floor = max(min_soc_val + (h_rem_kwh / b_cap * 100.0), min_soc_val + soc_buffer)
+                    
+                    # v11.7.380: If surplus is coming, we don't need a deep bridge during the day
+                    bridge_val = (h_rem_kwh / b_cap * 100.0)
+                    if is_solar_surplus and h_sim_norm < 15:
+                        bridge_val *= 0.5 # Discount the bridge
+                        
+                    h_floor = max(min_soc_val + bridge_val, min_soc_val + soc_buffer)
                 
                 floors[h_sim] = float(h_floor)
 
