@@ -2702,6 +2702,8 @@ class InverterOperationModeSensor(SensorEntity):
         try:
             now = dt_util.now()
             batt_soc, _, _ = self.manager.get_battery_state(soc_default=100.0)
+            man = self.manager # Shorthand
+            min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
             
             # Current state calculation
             mode, reason, bms_debug, peak_start_abs = self._get_mode_at(now, batt_soc)
@@ -2854,7 +2856,7 @@ class InverterOperationModeSensor(SensorEntity):
             
             attrs["is_preparing_for_peak"] = (peak_start_abs is not None)
             attrs["next_peak_start_hour"] = self.manager.strategy_engine._format_h(peak_start_abs)
-            attrs["morning_soc_target"] = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
+            attrs["morning_soc_target"] = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", (min_soc + 5.0))
             attrs["morning_soc_projected"] = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
             attrs["buy_debug"] = buy_strategy.get("buy_debug", "Нет данных")
             
@@ -3135,13 +3137,12 @@ class InverterOperationModeSensor(SensorEntity):
             # v7.9 - Morning Survival Guard
             # We don't just check for "Preparing for Peak Today", we also check 
             # if we have enough energy to reach tomorrow morning (Sunrise).
+            man = self.manager
+            min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
             morning_soc_proj = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
-            target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", 25.0)
+            target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", (min_soc + 5.0))
             is_low_for_morning = bool(morning_soc_proj < target_morning)
             
-            # v11.7.72: Strategic override for sale_pv_no_bat
-            # If simulation confirms we will hit 100% SOC before the next peak, 
-            # then we are NOT "low for evening" and can sell surplus PV now.
             hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
             is_energy_low_for_evening = bool((is_preparing_for_peak or is_low_for_morning) and not hit_full_before)
             

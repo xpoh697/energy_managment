@@ -1048,22 +1048,29 @@ class StrategyEngine:
                     
                     old_soc = simulated_soc
                     if b_cap_f > 0.1:
-                        # v11.7.140: Correct Floor Enforcement.
-                        # We only allow discharge DOWN TO the floor. 
-                        # If we are ALREADY below the floor, we don't 'fake' a charge (no max(h_floor, ...)).
-                        # We just don't allow ANY further discharge.
-                        h_floor = dynamic_floors.get(int(h_abs), b_min_soc) if dynamic_floors else b_min_soc
+                        # v11.8.431: Bulletproof Floor Enforcement.
+                        # We resolve the floor for this specific absolute hour.
+                        h_idx_int = int(h_abs)
+                        h_floor = b_min_soc
+                        if dynamic_floors and h_idx_int in dynamic_floors:
+                            h_floor = float(dynamic_floors[h_idx_int])
                         
-                        max_discharge_soc = max(0.0, simulated_soc - h_floor)
-                        requested_discharge_soc = (actual_discharge_kw * step_duration / b_cap_f * 100.0)
+                        # Calculate how much SOC we ARE ALLOWED to drop
+                        max_drop_soc = max(0.0, simulated_soc - h_floor)
+                        # Calculate how much SOC we WANT to drop
+                        requested_drop_soc = (actual_discharge_kw * step_duration / b_cap_f * 100.0)
                         
-                        simulated_soc = float(simulated_soc - min(requested_discharge_soc, max_discharge_soc))
+                        # Apply the cap
+                        actual_drop_soc = min(requested_drop_soc, max_drop_soc)
+                        simulated_soc = float(simulated_soc - actual_drop_soc)
+                        
+                        # v11.8.431: Important - if we capped the drop, we must reflect 
+                        # the REAL AC power that the battery actually provided.
+                        soc_delta = old_soc - simulated_soc
+                        sim_p_bat = (soc_delta / 100.0 * b_cap_f) / step_duration * sim_eff
                     else:
                         simulated_soc = 0.0
-                        
-                    # v11.7.133: Re-calculate actual discharge AC power after floor capping
-                    soc_drop = old_soc - simulated_soc
-                    sim_p_bat = (soc_drop / 100.0 * b_cap_f) / step_duration * sim_eff
+                        sim_p_bat = 0.0
                 else:
                     sim_p_bat = 0.0
                 
@@ -1085,7 +1092,7 @@ class StrategyEngine:
                 elif h_abs >= 24:
                     day_suffix = " (Завтра)"
                     
-                log_key_str = f"{real_h:02d}:59{day_suffix}"
+                log_key_str = f"{real_h_log:02d}:59{day_suffix}"
                 
                 # v11.7.73: Unified keys with sensor.py (gen_kw / load_kw)
                 history_log[log_key_str] = {
@@ -2176,7 +2183,7 @@ class StrategyEngine:
                     # v11.6.366: Get forecast early for base_target decisions
                     f_tom_raw = man.get_forecast_value(man.forecast_tomorrow_sensor)
                     f_tom = float(f_tom_raw) if f_tom_raw is not None else 0.0
-                    solar_is_plentiful = bool(f_tom > 25.0)
+                    solar_is_plentiful = bool(f_tom > (b_cap * 0.8) or f_tom > 20.0)
 
                     occ_coeff, _, _, _, _, _, _ = man.get_occupancy_coefficient()
                     occ_coeff = float(occ_coeff)
@@ -2211,10 +2218,11 @@ class StrategyEngine:
                     # v11.6.547: Profile Diagnostic String
                     _prof_debug = f"Keys:{len(avg_prof_cons or {})} Sum:{sum(float(normalize_float(v)) for v in (avg_prof_cons or {}).values()):.1f} Occ:{occ_coeff:.2f} SurpDC:{early_surplus_dc:.1f} Targets:{target_hours_sorted}"
                     
-                    # Global Discharge Floor: max(User_Limit, Survival_Target + Night_Consumption)
-                    # v11.6.367: Calculated Target for end-of-sale
-                    _survival_floor = _m_survival_target + night_cons_pct
-                    base_target = max(user_limit, _survival_floor)
+                    # v11.7.390: Relax survival floor during solar surplus
+                    if solar_is_plentiful:
+                        base_target = user_limit
+                    else:
+                        base_target = max(user_limit, _survival_floor)
                     
                     user_discharge_limit = base_target 
                     min_soc_val = user_limit
@@ -2327,24 +2335,29 @@ class StrategyEngine:
                                     f"[Sell v11.6.55] Morning < Evening ({cur_p_s:.2f} < {evening_max_p:.2f}): "
                                     f"Raising base_target to {base_target:.1f}% to ensure evening charge (sim_max={_lib_max_soc:.1f}%)"
                                 )
-                            else:
-                                # Morning is better or equal -> Sell down to 15% survival floor
-                                base_target = min_soc_val + 2.0
-                                soc_buffer_val = 2.0
-                                active_buffer = 2.0
+                                # Morning is better or equal -> Sell down to survival floor
+                                # v11.7.390: No buffer needed if solar is plentiful
+                                if solar_is_plentiful:
+                                    base_target = min_soc_val
+                                    soc_buffer_val = 0.0
+                                    active_buffer = 0.0
+                                else:
+                                    base_target = min_soc_val + 2.0
+                                    soc_buffer_val = 2.0
+                                    active_buffer = 2.0
                                 _LOGGER.debug(
-                                    f"[Sell v11.6.55] Morning >= Evening ({cur_p_s:.2f} >= {evening_max_p:.2f}): "
+                                    f"[Sell v11.7.390] Morning >= Evening ({cur_p_s:.2f} >= {evening_max_p:.2f}): "
                                     f"Survival mode active, base_target={base_target:.1f}%"
                                 )
                     
                     # v11.6.169: Priority Correction (min(M, U, P))
-                    has_morning_sale = any((sunrise_h <= (h % 24) <= 12) for h in target_hours_sorted) if target_hours_sorted else False
-                    # 1. Home Protection Floor (M_floor): Reserve + Buffer
-                    _m_floor = min_soc_bat_val + (2.0 if has_morning_sale else soc_buffer_full)
+                    # v11.7.395: Strict TZ Compliance (Section 6.1)
+                    # 1. Morning Protection (Sunrise Guard)
+                    # Target at sunrise: 15% (Liberal) or 18% (Strict)
+                    morning_target_base = (min_soc_bat_val + 2.0) if solar_is_plentiful else (min_soc_bat_val + soc_buffer_full)
                     
-                    # 2. Final Sunrise Target: max(User Limit, Home Protection)
-                    # If User=70 and Home=25, Target=70.
-                    target_morning_soc = max(min_soc_val, _m_floor)
+                    # Current target including consumption bridge
+                    target_morning_soc = max(min_soc_val, morning_target_base)
                     # Dynamic floor for NOW (can be adaptive 0% buffer)
                     active_floor_soc = min_soc_val + active_buffer
                     
@@ -2551,8 +2564,8 @@ class StrategyEngine:
                                 avg_p1 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[0]) / len(epochs_eval[0])
                                 avg_p2 = sum(float(prices_all.get(h, 0.0)) for h in epochs_eval[1]) / len(epochs_eval[1])
                                 
-                                # v11.6.355: Disable deficit throttling if tomorrow's forecast is massive (42kWh means no deficit possible)
-                                solar_is_plentiful = bool(f_tom > 25.0)
+                                # v11.7.396: Dynamic Solar Awareness (80% of battery capacity)
+                                solar_is_plentiful = bool(f_tom > (b_cap * 0.8) or f_tom > 20.0)
                                 if max_recharge_soc < 99.0 and avg_p2 > (avg_p1 + 0.05) and not solar_is_plentiful:
                                     deficit_pct = 100.0 - max_recharge_soc
                                     base_target = min(100.0, base_target + deficit_pct)
@@ -2570,10 +2583,10 @@ class StrategyEngine:
                         # Energy drain between end of sale and sunrise (in SOC %)
                         night_drain_pct = max(0.0, natural_soc_after_sale - natural_morning_soc)
                         
-                        # v11.6.192: Emergency Base for Survival Floor (M)
-                        # We only need to ensure the house stays above (Reserve + Buffer) BY MORNING.
-                        # As per TS Round 231: Limits NEVER sum with house consumption in labels/floors.
-                        _m_emergency_base = min_soc_bat_val + soc_buffer_full
+                        # v11.7.396: Strict TZ Compliance (Section 6.1)
+                        # Liberal (Sunny/Saturated): min_soc + 2.0%
+                        # Strict (Cloudy/Night): min_soc + soc_buffer
+                        _m_emergency_base = min_soc_bat_val + (2.0 if solar_is_plentiful else soc_buffer_full)
                         
                         # Final base target is the HIGHEST of User Limit (Min SOC) or Survival Floor (Reserve+Buffer)
                         base_target = max(min_soc_val, _m_emergency_base)

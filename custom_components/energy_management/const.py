@@ -1,5 +1,6 @@
 DOMAIN = "energy_management"
-VERSION = "v11.7.380"
+VERSION = "v11.8.439"
+VERSION_CODE = 1108411
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"
@@ -55,3 +56,13 @@ CONF_ACTIVE_SENSOR = "active_sensor"
 CONF_GRID_POWER = "grid_power"
 CONF_PRIORITY = "priority"
 CONF_BATTERY_VOLTAGE = "battery_voltage"
+
+# Boiler Optimizer settings
+CONF_BOILER_ENABLE = "boiler_enable"
+CONF_BOILER_POWER = "boiler_power"
+CONF_BOILER_CAPACITY = "boiler_capacity"
+CONF_BOILER_TEMP_SENSOR = "boiler_temp_sensor"
+CONF_BOILER_DEADLINE = "boiler_deadline"
+CONF_BOILER_MIN_TEMP = "boiler_min_temp"
+CONF_BOILER_TARGET_TEMP = "boiler_target_temp"
+CONF_MIN_SELL_POWER = "min_sell_power"

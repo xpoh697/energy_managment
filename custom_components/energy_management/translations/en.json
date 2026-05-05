@@ -55,7 +55,17 @@
     "step": {
       "init": {
         "title": "Energy Management Settings",
-        "description": "Select the sensors to form your energy management profile. If you add new controllable loads, you will be prompted to configure them on the next step.",
+        "description": "Select a category to configure.",
+        "menu_options": {
+          "main_settings": "Main Settings (Sensors, Prices, Battery)",
+          "deduct_settings_init": "Managed Loads (Deduct)",
+          "boiler_settings": "Boiler Optimizer",
+          "investment_settings": "Investment & ROI Settings"
+        }
+      },
+      "main_settings": {
+        "title": "Main Settings",
+        "description": "Configure sensors, prices, and battery parameters.",
         "data": {
           "consumption_sensors": "Total Consumption Sensors",
           "generation_sensors": "Solar Generation Sensors",
@@ -70,7 +80,25 @@
           "ai_charge_limit_soc": "Charge Limit (Max SOC)",
           "ai_discharge_limit_soc": "Discharge Limit (Min SOC)",
           "grid_power": "Real-time Grid Power (signed: + import, - export)",
-          "battery_voltage": "Battery Voltage Sensor (Volts)"
+          "battery_voltage": "Battery Voltage Sensor (Volts)",
+          "battery_soc": "Battery SOC Sensor",
+          "battery_capacity": "Battery Capacity Sensor",
+          "battery_power": "Battery Power Sensor",
+          "price_buy": "Energy Buy Price Sensor",
+          "price_sell": "Energy Sell Price Sensor",
+          "inverter_losses_sensor": "Inverter Losses Sensor",
+          "custom_period": "Custom ROI Period (Days)"
+        }
+      },
+      "boiler_settings": {
+        "title": "Boiler Optimizer Settings",
+        "description": "Configure how the Dynamic Programming engine manages your boiler.",
+        "data": {
+          "boiler_enable": "Enable Boiler Optimization",
+          "boiler_power": "Boiler Power (kW)",
+          "boiler_capacity": "Boiler Energy Capacity (kWh)",
+          "boiler_temp_sensor": "Boiler Temperature Sensor (Optional)",
+          "boiler_deadline": "Heating Deadline Hour (Target 100% full)"
         }
       },
       "deduct_settings": {

@@ -95,6 +95,19 @@ class StrategySell(StrategyEngine):
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
         
+        # v11.8.437: Initialize all attributes to 0 to avoid stale data or missing keys
+        gatekeeper_floor = 0.0
+        active_safety_floor = 0.0
+        morning_reserve_floor = 0.0
+        h_prof_debug = {}
+        
+        # v11.8.435: Retrieve settings early to avoid UnboundLocalError
+        min_soc_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+        soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 5.0))
+        user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+        
+        last_h_floor = min_soc_val + soc_buffer
+        
         try:
             cur_hour = int(now.hour)
             today_str = now.strftime("%Y-%m-%d")
@@ -208,7 +221,7 @@ class StrategySell(StrategyEngine):
                 # v11.7.270: Solar Saturation Awareness (TS 198)
                 f_today_val = float(man.get_sensor_float(man.forecast_today_sensor) or 0.0)
                 energy_to_full = (100.0 - b_soc) * b_cap / 100.0
-                is_solar_surplus = (f_today_val > energy_to_full + 5.0) # 5kWh buffer
+                is_solar_surplus = (f_today_val > energy_to_full + 2.0) # 2kWh buffer
                 
                 safe_peaks = []
                 # v11.7.296: Floodgate Mode - if surplus is huge, include all hours above limit
@@ -281,12 +294,28 @@ class StrategySell(StrategyEngine):
             morning_reserve_floor = min_soc_val + soc_buffer
             
             if is_morning_window:
-                # In morning window, we don't care about the long bridge to tomorrow
-                active_safety_floor = min_soc_val + 2.0
+                # v11.7.390: Relax buffer during solar surplus mornings
+                if is_solar_surplus:
+                    active_safety_floor = min_soc_val
+                else:
+                    active_safety_floor = min_soc_val + 2.0
                 house_kwh_until_sunrise = 0.0
             else:
-                range_start = last_sell_planned_h + 1
-                for h_abs in range(range_start, morning_h_abs):
+                # v11.8.430: Find the END of the current or near-term sell block
+                # instead of the absolute last hour of the 48h plan.
+                next_sunrise_abs = morning_h_abs
+                
+                # We care about the house load until the FIRST sunrise after our current selling activity
+                current_epoch_end = cur_hour
+                if target_hours:
+                    for h in target_hours:
+                        if h < next_sunrise_abs:
+                            current_epoch_end = h
+                        else:
+                            break
+                
+                range_start = current_epoch_end + 1
+                for h_abs in range(range_start, next_sunrise_abs):
                     h_rel = h_abs % 24
                     p_prof = prof_cons_tom if h_abs >= 24 else prof_cons_cur
                     h_load = p_prof.get(f"{h_rel:02d}") or p_prof.get(str(h_rel))
@@ -334,35 +363,56 @@ class StrategySell(StrategyEngine):
                 ignore_blended=True, house_profile_override="consumption_base"
             )
             
+            # v11.7.397: Saturation Awareness (hit_full_before)
+            # Check if any hour today reaches 99% SOC in the baseline simulation
+            hit_full_before = any(v.get("soc", 0.0) >= 99.0 for h, v in sim_log.items() if ":" in h and "Завтра" not in h)
+            is_solar_surplus = is_solar_surplus or hit_full_before
+
             # v11.7.280: Restore epochs for the allocator
             p_today = man.data.get("prices_sell", {})
             p_tomorrow = man.data.get("prices_sell_tomorrow", {})
             epochs = self.get_strategy_epochs(target_hours, p_today, p_tomorrow)
             first_epoch = epochs[0] if epochs else []
-            
-            # 1. Pre-calculate sliding safety floors (Gatekeeper/Morning Reserve)
-            floors = {}
+
+            # 1. Pre-calculate safety floors
+            floors_sliding = {}
+            floors_anchored = {}
             _sim_cons_profile = dict(man.get_predicted_profile("consumption_total"))
+            
+            morning_strict = min_soc_val + soc_buffer
+            last_h_floor = morning_strict
+            
+            for hx in range(24):
+                h_prof_debug[hx] = round_f(float(normalize_float(_sim_cons_profile.get(str(hx), 0.0))), 2)
+
             for h_sim in sim_range:
                 h_sim_norm = h_sim % 24
-                # v11.7.380: Relax safety floors during solar surplus mornings
-                if 4 <= h_sim_norm < 13 and is_solar_surplus:
-                    h_floor = min_soc_val
-                elif 4 <= h_sim_norm < 10:
-                    h_floor = min_soc_val + 2.0
-                else:
-                    # Bridge until next sunrise
+                h_floor = min_soc_val
+                
+                is_morning_presale = bool(4 <= h_sim_norm < 11)
+                can_bypass_floor = bool(is_morning_presale and (hit_full_before or is_solar_surplus))
+                
+                if not can_bypass_floor:
                     target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
                     h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
                     
-                    # v11.7.380: If surplus is coming, we don't need a deep bridge during the day
                     bridge_val = (h_rem_kwh / b_cap * 100.0)
-                    if is_solar_surplus and h_sim_norm < 15:
-                        bridge_val *= 0.5 # Discount the bridge
-                        
-                    h_floor = max(min_soc_val + bridge_val, min_soc_val + soc_buffer)
+                    h_floor = max(min_soc_val + bridge_val, morning_strict)
+                else:
+                    h_floor = min_soc_val + 2.0
                 
-                floors[h_sim] = float(h_floor)
+                h_floor = max(h_floor, user_limit, min_soc_val)
+                
+                # Sliding floor for simulation
+                floors_sliding[h_sim] = float(h_floor)
+                
+                # Anchored floor for strategy (prevents selling survival buffers)
+                is_night = bool(h_sim_norm >= 16 or h_sim_norm < sunrise_h)
+                if is_night:
+                    h_floor = max(h_floor, last_h_floor)
+                
+                floors_anchored[h_sim] = float(h_floor)
+                last_h_floor = h_floor
 
             # 2. Greedy Fill in Price-Descending order
             # v11.7.297: If solar surplus is huge, we don't care about the DC budget limit
@@ -383,7 +433,7 @@ class StrategySell(StrategyEngine):
                     _, trial_log, _ = self.run_soc_simulation(
                         b_soc, sim_range, now, 
                         commands={h: -p for h, p in test_commands.items()}, 
-                        b_min_soc=min_soc_val, dynamic_floors=floors,
+                        b_min_soc=min_soc_val, dynamic_floors=floors_anchored,
                         ignore_blended=True, house_profile_override="consumption_base"
                     )
                     
@@ -496,6 +546,16 @@ class StrategySell(StrategyEngine):
                 "projected_soc_after_sale": round_f(soc_end, 1)
             })
             
+            # --- Stage 4: Final Simulation for UI (Projection) ---
+            # v11.8.438: Run simulation with ALL commands and SLIDING floors for realistic UI charts
+            _, sim_log_final, _ = self.run_soc_simulation(
+                b_soc, sim_range, now, 
+                commands={h: -p for h, p in sell_commands.items()}, 
+                b_min_soc=min_soc_val, dynamic_floors=floors_sliding,
+                ignore_blended=True, house_profile_override="consumption_base"
+            )
+            sim_log = sim_log_final # Use this for all UI displays below
+
             res["strategy_candidates"] = [f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "") for h in target_hours]
             res["active_hours"] = active_h
             
@@ -591,22 +651,33 @@ class StrategySell(StrategyEngine):
                 else:
                     debug_log_parts.append(f"{h_rel}: ---")
 
+            # v11.7.397: Saturation Awareness for UI
+            morning_h_abs = sunrise_h if cur_hour < sunrise_h else (sunrise_h + 24)
+            res["sell_simulation"] = {
+                "hit_full_before": hit_full_before,
+                "projected_soc_morning_pct": round_f(self._get_soc_from_log(sim_log, f"{morning_h_abs%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else ""), b_soc), 1),
+                "log": sim_log
+            }
+
             res["arbitrage_sell_debug"] = {
                 "start_soc": b_soc,
-                "gatekeeper_after_sale": round_f(gatekeeper_val, 1),
-                "available_ac": round_f(current_budget_ac, 2),
+                "gatekeeper_floor": round_f(gatekeeper_floor, 1),
+                "active_safety_floor": round_f(active_safety_floor, 1),
+                "survival_target": round_f(morning_reserve_floor, 1),
+                "available_ac": round_f(available_sell_ac, 2),
                 "limit_reason": limit_reason or "None",
-                "next_peak": f"{next_peak_h % 24:02d}:00" if next_peak_h >= 0 else "None",
-                "soc_at_peak": f"{soc_at_peak:.1f}%" if 'soc_at_peak' in locals() else "N/A",
-                "house_until_sunrise": round_f(house_rem_total, 2),
+                "next_peak": f"{target_hours[0] % 24:02d}:00" if target_hours else "None",
+                "soc_at_peak": f"{b_soc:.1f}%", 
+                "house_until_sunrise": round_f(house_kwh_until_sunrise, 2),
                 "house_h": prof_cons_debug,
                 "sim_gen": round_f(sum(float(v.get('gen', 0)) for v in sim_log.values()), 1),
                 "sim_log": " | ".join(debug_log_parts),
                 "final_targets": str(target_hours),
                 "f_today": f_today,
                 "f_tom": f_tom_val,
-                "target_price": round_f(target_price, 3) if current_budget_ac > 0.01 else 0.0,
+                "target_price": round_f(target_price, 3),
                 "cur_p": cur_p_f,
+                "house_profile_debug": h_prof_debug,
                 "commands": {f"{h}h": p for h, p in sell_commands.items()}
             }
 
