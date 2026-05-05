@@ -254,6 +254,9 @@ class StrategySell(StrategyEngine):
             # v11.7.129: Stage 1 - Base Safety Floors (TS 6.1)
             # 1. Gatekeeper (Survival): min_soc + house load until sunrise
             house_kwh_until_sunrise = 0.0
+            gatekeeper_floor = min_soc_val
+            morning_reserve_floor = min_soc_val + soc_buffer
+            
             if is_morning_window:
                 # In morning window, we don't care about the long bridge to tomorrow
                 active_safety_floor = min_soc_val + 2.0
