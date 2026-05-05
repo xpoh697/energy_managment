@@ -445,13 +445,14 @@ class StrategySell(StrategyEngine):
                     real_p = trial_log.get(h_key, {}).get("p_bat", 0.0)
                     
                     # Check if simulation accepted the power AND didn't break PREVIOUSLY planned peaks
-                    is_ok = (real_p >= test_p - 0.1)
+                    is_ok = (real_p >= test_p - 0.01) # v11.8.444: Strict epsilon
                     if is_ok:
                         for h_prev in sell_commands:
                             if sell_commands[h_prev] > 0.05:
                                 h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
                                 prev_real_p = trial_log.get(h_prev_key, {}).get("p_bat", 0.0)
-                                if prev_real_p < sell_commands[h_prev] - 0.1:
+                                # ZERO tolerance for stealing from expensive hours
+                                if prev_real_p < sell_commands[h_prev] - 0.001:
                                     is_ok = False
                                     break
                     
