@@ -328,7 +328,9 @@ class StrategySell(StrategyEngine):
             )
             
             # v11.7.280: Restore epochs for the allocator
-            epochs = self.get_strategy_epochs(target_hours, man.prices_today, man.prices_tomorrow)
+            p_today = man.data.get("prices_sell", {})
+            p_tomorrow = man.data.get("prices_sell_tomorrow", {})
+            epochs = self.get_strategy_epochs(target_hours, p_today, p_tomorrow)
             first_epoch = epochs[0] if epochs else []
             
             # 1. Pre-calculate sliding safety floors (Gatekeeper/Morning Reserve)
