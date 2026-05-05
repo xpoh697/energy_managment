@@ -653,11 +653,12 @@ class StrategySell(StrategyEngine):
 
             # v11.7.397: Saturation Awareness for UI
             morning_h_abs = sunrise_h if cur_hour < sunrise_h else (sunrise_h + 24)
-            res["sell_simulation"] = {
+            # v11.8.441: Unified sell_simulation dictionary (no more overwrites)
+            res["sell_simulation"].update({
                 "hit_full_before": hit_full_before,
                 "projected_soc_morning_pct": round_f(self._get_soc_from_log(sim_log, f"{morning_h_abs%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else ""), b_soc), 1),
                 "log": sim_log
-            }
+            })
 
             res["arbitrage_sell_debug"] = {
                 "start_soc": b_soc,
