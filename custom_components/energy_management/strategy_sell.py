@@ -659,6 +659,15 @@ class StrategySell(StrategyEngine):
                 "log": sim_log
             }
 
+            res.update({
+                "gatekeeper_floor": round_f(gatekeeper_floor, 1),
+                "survival_target": round_f(morning_reserve_floor, 1),
+                "target_price": round_f(target_price, 3),
+                "limit_used": user_limit,
+                "active_hours": active_h,
+                "raw_commands": sell_commands
+            })
+
             res["arbitrage_sell_debug"] = {
                 "start_soc": b_soc,
                 "gatekeeper_floor": round_f(gatekeeper_floor, 1),
