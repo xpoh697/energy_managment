@@ -156,7 +156,8 @@ class DPPlanner:
                 
                 plan[f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")] = {
                     "mode": mode, "power_kw": b_p, "boiler": "ON" if b_on else "OFF",
-                    "target_soc": int(s_ptr), "grid_net": g_net
+                    "target_soc": int(s_ptr), "grid_net": g_net,
+                    "price_buy": round(p_buy, 3), "price_sell": round(p_sell, 3)
                 }
                 s_next = s_ptr - (b_p / b_cap * 100.0)
                 s_ptr = float(max(0, min(100, round(s_next / BATTERY_SOC_STEP) * BATTERY_SOC_STEP)))
