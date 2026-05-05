@@ -211,16 +211,23 @@ class StrategySell(StrategyEngine):
                 is_solar_surplus = (f_today_val > energy_to_full + 5.0) # 5kWh buffer
                 
                 safe_peaks = []
+                # v11.7.296: Floodgate Mode - if surplus is huge, include all hours above limit
+                if is_solar_surplus:
+                    for h in range(cur_hour, cur_hour + 12):
+                        p = all_sell_prices.get(h, 0.0)
+                        if p >= sell_limit:
+                            safe_peaks.append((h, p))
+                
                 for h, p in tech_peaks:
                     if h < cur_hour: continue
-                    is_ok, _ = is_profitable(p, h)
+                    if any(x[0] == h for x in safe_peaks): continue
                     
-                    # If we have huge solar surplus today, we don't need to hoard for evening arbitrage
-                    is_morning = (h < 13)
-                    if is_morning and is_solar_surplus and p >= sell_limit:
-                        safe_peaks.append(h)
-                    elif p >= sell_limit or is_ok or surplus_dc > 0.1:
-                        safe_peaks.append(h)
+                    is_ok, _ = is_profitable(p, h)
+                    if p >= sell_limit or is_ok or surplus_dc > 0.1:
+                        safe_peaks.append((h, p))
+                
+                # Convert back to just hours for target_hours
+                safe_peaks = [x[0] for x in safe_peaks]
             target_hours = sorted([h for h in safe_peaks if h >= cur_hour])
             if not target_hours:
                 res["state"] = "price_limit_not_met"
@@ -382,6 +389,18 @@ class StrategySell(StrategyEngine):
                                 if prev_real_p < sell_commands[h_prev] - 0.1:
                                     is_ok = False
                                     break
+                    
+                    if is_ok:
+                        # Double Cycle Optimizer (TS 92-95)
+                        # If price in second pool is higher (min 0.05), block sale in first pool 
+                        # unless we have a solar surplus (TS 198)
+                        if len(epochs) > 1 and not is_solar_surplus:
+                            p1 = max([all_sell_prices.get(h, 0.0) for h in epochs[0]])
+                            p2 = max([all_sell_prices.get(h, 0.0) for h in epochs[1]])
+                            if p2 > p1 + 0.05:
+                                available_sell_ac = 0
+                                if not limit_reason: limit_reason = "Ожидание пика"
+                                is_ok = False
                     
                     if is_ok:
                         sell_commands[h_target] = test_p
