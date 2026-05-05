@@ -27,6 +27,9 @@
 - **No Zero Load**: If manager base load is 0, ALWAYS fallback to hourly consumption profile.
 - **Efficiency**: Use dynamic `eff_coeff` (default 0.95) for all SOC projections.
 
-### 4. Workflow
-- **Git First**: Push to repository after every deployment.
-- **Pycache**: Always clear `__pycache__` on the server after sync.
+### 4. Workflow (MANDATORY)
+1. **Bump Version**: Update `VERSION` in `const.py` AND `version` in `manifest.json` BEFORE any deploy.
+2. **Sync**: Use `robocopy` to `\\192.168.100.5\config\custom_components\energy_management`.
+3. **Pycache**: Delete `__pycache__` folder on the server immediately after sync.
+4. **Git Push**: Commit and push to GitHub after every successful sync.
+5. **Restart**: Trigger Home Assistant restart to apply changes.
