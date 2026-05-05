@@ -401,9 +401,18 @@ class StrategySell(StrategyEngine):
                 else:
                     h_floor = min_soc_val + 2.0
                 
-                last_sale_h = max(target_hours) if target_hours else cur_hour
-                if h_sim <= last_sale_h:
+                # TS 187: User Limit applies only during active sale blocks.
+                # If the current hour h_sim is NOT in target_hours and there are no 
+                # future sales in the IMMEDIATE night pool, the floor should drop.
+                
+                is_sale_planned = bool(h_sim in target_hours)
+                
+                # Check if there's any sale planned for the REST of this night (until sunrise)
+                future_sales_this_night = [th for th in target_hours if h_sim < th <= morning_h_abs]
+                
+                if is_sale_planned or future_sales_this_night:
                     h_floor = max(h_floor, user_limit)
+                
                 
                 # Sliding floor for simulation
                 floors_sliding[h_sim] = float(h_floor)
