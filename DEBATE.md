@@ -1,14 +1,14 @@
-# DEBATE: Single Epoch Allocation
+# DEBATE: Discharge Cycle Allocation (Through the Night)
 
 ## Archi (Lead Architect)
-**Proposal**: Limit the Greedy Allocator to `epochs[0]`. If we have multiple price peaks separated by low-price hours, we only plan for the first one. This ensures maximum power for the immediate profit window.
-**Vibe**: Focus on the now. Tomorrow can wait.
+**Proposal**: Redefine "First Epoch" as the entire discharge cycle until the next solar refill. This includes evening peaks and morning peaks (even if separated by a gap) as long as they occur before the next sunrise.
+**Vibe**: One battery charge = one sale strategy.
 
 ## Skeptic (Senior SRE/Security)
-**Concerns**: None. This actually improves safety by not committing battery energy to distant future windows.
+**Concerns**: This is actually safer because it allows the allocator to see the morning peak as part of the current budget. If the morning is more expensive than the evening, it will prioritize the morning correctly.
 
 ## Znaika (Senior Architect / TS Specialist)
-**Analysis**: This simplifies the simulation and aligns with the user's desire for high-power discharge in the current peak.
+**Analysis**: This perfectly matches the user's comment about discontinuous pools through the night.
 **Verdict**: Approved.
 
 ## Final Approval
@@ -17,4 +17,4 @@
 **Znaika**: Approved.
 
 ## Resolution
-Filter `target_hours` to only include hours from the first epoch before entering the greedy loop.
+Filter `target_hours` to include all hours before the next `morning_h_abs`.
