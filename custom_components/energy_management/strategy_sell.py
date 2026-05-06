@@ -382,8 +382,12 @@ class StrategySell(StrategyEngine):
             morning_strict = min_soc_val + soc_buffer
             last_h_floor = morning_strict
             
-            # 2. Greedy Fill in Price-Descending order (v11.8.483: Single Epoch Priority)
-            effective_budget_ac = 99.0 if is_solar_surplus else available_sell_ac
+            # 2. Greedy Fill in Price-Descending order (v11.8.492: Selective Budget)
+            # v11.8.492: Budget is what we have above min_soc + solar forecast
+            f_today_val = float(man.get_sensor_float(man.forecast_today_sensor) or 0.0)
+            available_sell_dc = max(0.0, (b_soc - min_soc_val) * b_cap / 100.0) + f_today_val
+            effective_budget_ac = available_sell_dc * eff
+            if is_solar_surplus: effective_budget_ac = 99.0
             
             # v11.8.490: First Non-Empty Discharge Cycle
             # Group target hours into 24h clusters ending at 10:00 AM.
@@ -404,7 +408,9 @@ class StrategySell(StrategyEngine):
             sim_log = {}
             
             for h_target in h_by_priority:
-                if effective_budget_ac <= 0.05: break
+                # v11.8.492: Top peaks ignore budget. Budget only throttles secondary hours.
+                is_top_peak = (all_sell_prices.get(h_target, 0.0) >= target_price * 0.95)
+                if not is_top_peak and effective_budget_ac <= 0.05: break
                 
                 # RE-CALCULATE FLOORS for THIS target hour (Night vs Morning context)
                 is_morning_window = bool(4 <= (h_target % 24) < 11)
@@ -415,20 +421,17 @@ class StrategySell(StrategyEngine):
                     target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
                     h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
                     bridge_soc = (h_rem_kwh / b_cap * 100.0)
-                    
                     h_floor = eff_morning_strict + bridge_soc
                     
                     is_h_sim_planned = bool(h_sim in target_hours)
                     future_sales = [th for th in target_hours if h_sim < th <= target_sunrise]
-                    
                     if is_h_sim_planned or future_sales:
                         curr_floors[h_sim] = max(h_floor, user_limit)
                     else:
                         curr_floors[h_sim] = h_floor
 
-                # v11.8.482: Try max power (or budget) once. 
-                # We don't throttle to protect cheaper hours.
-                test_p = max_p if is_solar_surplus else min(max_p, effective_budget_ac)
+                # v11.8.492: Top peak ignores budget trial. 
+                test_p = max_p if (is_solar_surplus or is_top_peak) else min(max_p, effective_budget_ac)
                 trial_commands = sell_commands.copy()
                 trial_commands[h_target] = test_p
                 

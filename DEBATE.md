@@ -1,15 +1,17 @@
-# DEBATE: First Non-Empty Discharge Cycle
+# DEBATE: Targeted "Budget Ignorance" during Sales
 
 ## Archi (Lead Architect)
-**Issue**: The hard cutoff at 10:00 AM caused empty plans if the current morning was not profitable.
-**Proposal**: Instead of a hard cutoff based on the current time, we should group target hours into "Discharge Cycles" (10:00 to 10:00) and pick the **first non-empty cycle**.
-If today's morning is empty, the allocator automatically moves to today's evening + tomorrow's morning as the "First Epoch".
+**Issue**: The budget calculation was too paranoid (Survival Bridge was blocking sales when SOC was 18% and floor 13%).
+**Proposal**: 
+1. Redefine `available_ac` to include `f_today` solar forecast. Even if `f_today` is 0 (sensor lag), we allow a "Daylight Grace" where we don't save energy for the next night until sunset.
+2. During the Greedy loop: if an hour is a high-price peak, we ignore the daily budget and only respect the 13% SOC floor.
 
 ## Skeptic (Senior SRE/Security)
-**Concerns**: None. This ensures the UI always shows the next actionable strategy.
+**Concerns**: If we ignore house load until sunrise during the night, we might go dark.
+**Response**: We only ignore it for "Sale" windows. The `gatekeeper_floor` (absolute minimum) still exists in the SOC simulation to prevent total blackout.
 
 ## Znaika (Senior Architect / TS Specialist)
-**Analysis**: This perfectly addresses the user's frustration and follows the "one cycle at a time" principle without being blind to the future.
+**Analysis**: This matches the user's "Don't f*** my brain for the whole day" feedback. We keep the protection but make it "Sale-Aware".
 **Verdict**: Approved.
 
 ## Final Approval
@@ -18,4 +20,4 @@ If today's morning is empty, the allocator automatically moves to today's evenin
 **Znaika**: Approved.
 
 ## Resolution
-Group `target_hours` into 24h cycles (cutoff at 10:00 AM). The allocator will process the first cycle that contains at least one target hour.
+Implement "Daylight Grace" for budget calculation and skip budget-throttling for top-tier price windows.
