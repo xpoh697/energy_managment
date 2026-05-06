@@ -413,7 +413,7 @@ class StrategySell(StrategyEngine):
                 if not is_top_peak and effective_budget_ac <= 0.05: break
                 
                 # RE-CALCULATE FLOORS for THIS target hour (Night vs Morning context)
-                is_morning_window = bool(4 <= (h_target % 24) < 11)
+                is_morning_window = bool(4 <= (h_target % 24) < 10)
                 eff_morning_strict = (min_soc_val + 2.0) if is_morning_window else morning_strict
                 
                 curr_floors = {}
@@ -421,7 +421,9 @@ class StrategySell(StrategyEngine):
                     target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
                     h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
                     bridge_soc = (h_rem_kwh / b_cap * 100.0)
-                    h_floor = eff_morning_strict + bridge_soc
+                    
+                    # v11.8.500: Limits NEVER sum up (TS Section 6.1). Choose strictest constraint.
+                    h_floor = max(eff_morning_strict, min_soc_val + bridge_soc)
                     
                     is_h_sim_planned = bool(h_sim in target_hours)
                     future_sales = [th for th in target_hours if h_sim < th <= target_sunrise]

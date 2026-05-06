@@ -1,18 +1,17 @@
-# DEBATE: Realistic Power Planning vs Aggressive Commands
+# DEBATE: Fixing Double-Counting in SOC Floors
 
 ## Archi (Lead Architect)
-**Issue**: UI shows 6.6kW even for hours where the battery is projected to be empty (simulation SOC hits floor).
-**Proposal**: Use `real_p` (from simulation log) for the `Planned power` display and for the final command calculation.
-This ensures that "Price Priority" naturally drains the battery on the BEST hours, and the LATER (less profitable) hours show 0kW or low power if the battery is depleted.
+**Issue**: The system is double-counting house consumption. It adds `bridge_soc` (predicted house load) to `morning_strict` (which already includes the user's `soc_buffer`).
+**Proposal**: Change the summation to `max()` as per TS Section 6.1. This ensures we stay at the highest of the limits, not their sum.
+**Vibe**: Precise and TS-compliant.
 
 ## Skeptic (Senior SRE/Security)
-**Concerns**: If we set command to 3.2kW (real_p) but solar suddenly spikes to 5kW, we limit the export.
-**Response**: We can set the inverter command to `max_p` but the UI display should show `real_p`. 
-Actually, the user wants "Distribution". If we have 5kWh, we shouldn't "promise" 6.6kW for 3 hours.
+**Concerns**: Will this deplete the battery too much?
+**Response**: No, the `soc_buffer` (13%) is specifically chosen by the user to cover house load. Adding more load on top is redundant and violates the "greedy" arbitrage principle.
 
 ## Znaika (Senior Architect / TS Specialist)
-**Analysis**: The user's "Top-Down" mandate means the best hour gets first dibs. If it takes everything, others get 0.
-**Verdict**: Use `real_p` for BOTH UI and commands to ensure the plan is physically possible.
+**Analysis**: TS Line 184 explicitly states: "Limits NEVER sum up. The system chooses the strictest (highest) constraint." The current implementation violates this.
+**Verdict**: Mandatory fix. Also, correct the morning window end from 11:00 to 10:00 as per TS Line 183.
 
 ## Final Approval
 **Archi**: Approved.
@@ -20,4 +19,4 @@ Actually, the user wants "Distribution". If we have 5kWh, we shouldn't "promise"
 **Znaika**: Approved.
 
 ## Resolution
-Update `sell_commands[h_target]` to `real_p` after each successful simulation step.
+Surgically edit `strategy_sell.py` to replace `+ bridge_soc` with `max()` logic and adjust the morning window timeframe.
