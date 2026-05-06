@@ -439,7 +439,7 @@ class StrategySell(StrategyEngine):
                             is_ok = True
                             test_p = real_p 
                         else:
-                            test_p = real_p
+                            test_p = real_p / eff
                             continue
                     
                     if is_ok:
@@ -447,7 +447,7 @@ class StrategySell(StrategyEngine):
                             if sell_commands[h_prev] > 0.05:
                                 h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
                                 prev_real_p = trial_log.get(h_prev_key, {}).get("p_bat", 0.0)
-                                if prev_real_p < sell_commands[h_prev] - 0.1:
+                                if prev_real_p < (sell_commands[h_prev] * eff) - 0.1:
                                     is_ok = False
                                     break
                     
