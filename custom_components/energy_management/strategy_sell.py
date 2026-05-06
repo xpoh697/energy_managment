@@ -389,17 +389,19 @@ class StrategySell(StrategyEngine):
                 h_sim_norm = h_sim % 24
                 h_floor = min_soc_val
                 
-                is_morning_presale = bool(4 <= h_sim_norm < 11)
-                can_bypass_floor = bool(is_morning_presale and (hit_full_before or is_solar_surplus))
+                # TS 181-194: Context-Aware Morning Reserve.
+                # If we are planning for a Night Sale (before 04:00), we target 48% at sunrise.
+                # If we are planning for a Morning Sale (04:00-10:00), we target 15% at sunrise.
                 
-                if not can_bypass_floor:
-                    target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
-                    h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
-                    
-                    bridge_val = (h_rem_kwh / b_cap * 100.0)
-                    h_floor = max(min_soc_val + bridge_val, morning_strict)
-                else:
-                    h_floor = min_soc_val + 2.0
+                is_morning_window = bool(4 <= (h_target % 24) < 11)
+                eff_morning_strict = (min_soc_val + 2.0) if is_morning_window else morning_strict
+                
+                target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
+                h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
+                bridge_soc = (h_rem_kwh / b_cap * 100.0)
+
+                # Floor = Target at Sunrise + Consumption Bridge
+                h_floor = eff_morning_strict + bridge_soc
                 
                 # TS 187: User Limit applies only during active sale blocks.
                 # If the current hour h_sim is NOT in target_hours and there are no 
