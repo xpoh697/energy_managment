@@ -147,6 +147,23 @@ class DPPlanner:
                                     if new_rev > dp[h+1][nsi][nbi][0]:
                                         dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_DIS, dis_kwh)
 
+                            # Action: SELF_CONSUME (battery to home only, no grid export)
+                            if si > 0 and (cons + b_use - gen) > 0.01:
+                                max_sc = min(max_p, cur_kwh, cons + b_use - gen)
+                                for steps in range(1, int(max_sc / ENERGY_STEP) + 1):
+                                    sc_kwh = steps * ENERGY_STEP
+                                    nsi = si - steps
+                                    p_ac = sc_kwh * eff
+                                    
+                                    remaining_deficit = max(0.0, cons + b_use - gen - p_ac)
+                                    # No cycle cost for shallow self-consume (as per dp_engine.py)
+                                    rev = -remaining_deficit * p_buy
+                                    if (nsi * ENERGY_STEP / b_cap * 100) < h_min_soc: rev -= 10.0
+                                    
+                                    new_rev = cur_rev + rev
+                                    if new_rev > dp[h+1][nsi][nbi][0]:
+                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_SELF_CONSUME, sc_kwh)
+
                             # Action: PV_CHARGE (from surplus)
                             if pv_surplus > 0.01 and si < energy_steps:
                                 max_chg = min(max_p, energy_steps * ENERGY_STEP - cur_kwh, pv_surplus / eff)
@@ -212,21 +229,39 @@ class DPPlanner:
                 h_rel = abs_h % 24
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 
-                mode = "Idle"
-                if act == ACT_SOL: mode = "sale_pv_no_bat" if forecast_gen.get(str(abs_h), 0) > 0.1 else "grid_only"
-                elif act == ACT_DIS: mode = "sale_bat"
-                elif act == ACT_PV_CHARGE: mode = "sale_pv"
-                elif act == ACT_GRID_CHARGE: mode = "buy"
-                
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
                 p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
+                gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
+                cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
+                
+                mode = "Idle"
+                b_on = (bi > 0) # Placeholder for actual transition logic
+                b_use = b_power if b_on else 0.0
+                p_ac = 0.0
+                
+                if act == ACT_SOL: mode = "sale_pv_no_bat" if gen > 0.1 else "grid_only"
+                elif act == ACT_DIS: 
+                    mode = "sale_bat"
+                    p_ac = amt * eff
+                elif act == ACT_SELF_CONSUME:
+                    mode = "bat_to_house"
+                    p_ac = amt * eff
+                elif act == ACT_PV_CHARGE: 
+                    mode = "sale_pv"
+                    p_ac = -amt # DC charge
+                elif act == ACT_GRID_CHARGE: 
+                    mode = "buy"
+                    p_ac = -amt # DC charge
+                
+                g_net = cons + b_use - gen - p_ac
+                profit = round((-g_net * p_sell if g_net < 0 else -g_net * p_buy) - (abs(amt) * deg_cost if act in [ACT_DIS, ACT_GRID_CHARGE] else 0), 2)
                 
                 soc = int(round((si * ENERGY_STEP) / b_cap * 100.0))
-                b_str = " | B: ON" if (bi > 0) else "" # Simplified boiler status
+                b_indicator = " | B: ON" if b_on else ""
                 
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 formatted_plan[h_key] = (
-                    f"{mode} | {round(amt, 2)}kW{b_str} | SOC: {soc}% | Pr: {round(p_buy, 2)}/{round(p_sell, 2)}"
+                    f"{mode} | {round(amt, 2)}kW{b_indicator} | SOC: {soc}% | Pr: {round(p_buy, 2)}/{round(p_sell, 2)} | G: {round(g_net, 2)} | Prf: {profit}"
                 )
 
             return {
