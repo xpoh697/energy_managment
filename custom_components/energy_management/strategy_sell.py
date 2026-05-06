@@ -342,7 +342,7 @@ class StrategySell(StrategyEngine):
             available_sell_dc = max(0.0, (soc_at_start - gatekeeper_floor) * b_cap / 100.0)
             available_sell_ac = available_sell_dc * eff
             
-            _LOGGER.warning(f"[BudgetDebug] Start:{soc_at_start:.1f}% SafetyFloor:{active_safety_floor:.1f}% AvailableAC:{available_sell_ac:.2f}kWh")
+            _LOGGER.warning(f"[BudgetDebug] v11.8.473: StartSOC:{soc_at_start:.1f}% Floor:{gatekeeper_floor:.1f}% BudgetAC:{available_sell_ac:.2f}kWh Surplus:{is_solar_surplus}")
 
             f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
             tom_h_need = sum(float(normalize_float(prof_cons_tom.get(str(h % 24), 0.0))) for h in range(morning_h + 24, morning_h + 48))
