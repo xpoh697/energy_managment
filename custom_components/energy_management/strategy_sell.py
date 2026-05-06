@@ -446,8 +446,11 @@ class StrategySell(StrategyEngine):
                     h_key = f"{h_target%24:02d}:59" + (" (Завтра)" if h_target >= 24 else "")
                     real_p = trial_log.get(h_key, {}).get("p_bat", 0.0)
                     
-                    # Check if simulation accepted the power
-                    is_ok = (real_p >= test_p - 0.1)
+                    # v11.8.460: Correct AC/DC comparison. 
+                    # real_p is AC (after efficiency), test_p is DC (battery side).
+                    # We accept it if real_p is within 0.1 of (test_p * efficiency)
+                    target_ac = test_p * eff_coeff
+                    is_ok = (real_p >= target_ac - 0.1)
                     
                     if not is_ok and real_p > 0.1:
                         if is_solar_surplus:
@@ -522,7 +525,7 @@ class StrategySell(StrategyEngine):
                         limit_reason = "Утренний лимит"
                 
                 planned_results[f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")] = {
-                    "power": round_f(real_p, 3),
+                    "power": round_f(sell_commands.get(h, 0.0), 3),
                     "soc": round_f(sim_soc, 1)
                 }
 
