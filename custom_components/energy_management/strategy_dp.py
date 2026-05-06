@@ -262,7 +262,7 @@ class DPPlanner:
                 profit = round((-g_net * p_sell if g_net < 0 else -g_net * p_buy) - (abs(amt) * deg_cost if act in [ACT_DIS, ACT_GRID_CHARGE] else 0), 2)
                 
                 soc = int(round((si * ENERGY_STEP) / b_cap * 100.0))
-                b_temp = 10 + bi
+                b_temp = 10 + (bi * 5)
                 b_indicator = f" | B: {'ON' if b_on else 'OFF'} ({b_temp}°C)"
                 
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
