@@ -24,7 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # --- DP Parameters ---
 ENERGY_STEP = 0.1          # 0.1 kWh precision
-BOILER_STEPS = 5           # 0 to 5 steps of boiler charge
+BOILER_STEPS = 50          # 1 step = 1 degree (10 to 60)
 INF = 1e9                 
 
 # Action types
@@ -65,9 +65,10 @@ class DPPlanner:
             
             energy_steps = int(round(b_cap / ENERGY_STEP))
             
-            b_enabled = bool(self.manager.get_setting(CONF_BOILER_ENABLE, False))
-            b_power = float(self.manager.get_setting(CONF_BOILER_POWER, 2.5)) if b_enabled else 0.0
+            b_power = float(self.manager.get_setting(CONF_BOILER_POWER, 2.5))
             b_capacity = float(self.manager.get_setting(CONF_BOILER_CAPACITY, 8.5))
+            temp_s = self.manager.get_setting(CONF_BOILER_TEMP_SENSOR)
+            b_enabled = bool(self.manager.get_setting(CONF_BOILER_ENABLE, False)) or bool(temp_s)
             
             forecast_gen = self._get_smart_gen_forecast(horizon)
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
@@ -82,8 +83,8 @@ class DPPlanner:
 
             # Initial state
             curr_si = min(energy_steps, max(0, int(round((curr_s_raw or 0.0) / 100.0 * b_cap / ENERGY_STEP))))
+            temp = 20.0
             if b_enabled:
-                temp_s = self.manager.get_setting(CONF_BOILER_TEMP_SENSOR)
                 temp = float(self.manager.get_sensor_float(temp_s) or 20.0) if temp_s else 30.0
                 curr_bi = int(round(max(0, min(50, temp-10))/50.0 * BOILER_STEPS))
             else: curr_bi = 0
@@ -112,7 +113,7 @@ class DPPlanner:
                         # Possible actions
                         for b_on in ([True, False] if b_enabled else [False]):
                             b_use = b_power if b_on else 0.0
-                            # Boiler state transition (heat + losses)
+                            # Boiler state transition (heat + losses 0.1kWh/h)
                             next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.1 + b_use))
                             nbi = int(round(next_boi_kwh / b_capacity * BOILER_STEPS)) if b_enabled else 0
                             
@@ -128,7 +129,7 @@ class DPPlanner:
                             if new_rev > dp[h+1][si][nbi][0]:
                                 dp[h+1][si][nbi] = (new_rev, si, bi, ACT_SOL, 0.0, b_on)
                             
-                                # Action: DISCHARGE (to home/grid)
+                            # Action: DISCHARGE (to home/grid)
                             if si > 0:
                                 max_dis = min(max_p, cur_kwh)
                                 min_dis_limit = float(self.manager.get_setting(CONF_MIN_SELL_POWER, 0.5))
@@ -270,7 +271,7 @@ class DPPlanner:
                 profit = round((-g_net * p_sell if g_net < 0 else -g_net * p_buy) - (abs(amt) * deg_cost if act in [ACT_DIS, ACT_GRID_CHARGE] else 0), 2)
                 
                 soc = int(round((si * ENERGY_STEP) / b_cap * 100.0))
-                b_temp = 10 + (bi * 10)
+                b_temp = 10 + bi
                 b_indicator = f" | B: {'ON' if b_on else 'OFF'} ({b_temp}°C)"
                 
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
