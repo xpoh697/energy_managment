@@ -438,7 +438,7 @@ class StrategySell(StrategyEngine):
                 _, trial_log, _ = self.run_soc_simulation(
                     b_soc, sim_range, now, commands=trial_commands, 
                     b_min_soc=min_soc_val, ignore_blended=True, 
-                    house_profile_override="consumption_base", floors_override=curr_floors
+                    house_profile_override="consumption_base", dynamic_floors=curr_floors
                 )
                 
                 # Check if this priority hour can actually discharge anything
