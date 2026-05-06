@@ -2801,7 +2801,7 @@ class InverterOperationModeSensor(SensorEntity):
                 else:
                     p_val = buy_strategy.get("recommended_power_kw", 0.0)
                     t_soc = buy_strategy.get("target_soc", 0.0)
-                c_amps_fixed = None
+                c_amps_fixed = buy_strategy.get("recommended_amps", 0.0)
                 
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
@@ -2819,7 +2819,7 @@ class InverterOperationModeSensor(SensorEntity):
                 else:
                     p_val = sell_strategy.get("recommended_power_kw", 0.0)
                     t_soc = sell_strategy.get("target_soc", 0.0)
-                c_amps_fixed = None
+                c_amps_fixed = sell_strategy.get("recommended_amps", 0.0)
             else:
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
@@ -2835,6 +2835,7 @@ class InverterOperationModeSensor(SensorEntity):
                     else:
                         p_val = sell_strategy.get("recommended_power_kw", 0.0)
                         t_soc = sell_strategy.get("target_soc", 0.0)
+                    c_amps_fixed = sell_strategy.get("recommended_amps", 0.0)
                 elif buy_strategy.get("state") == "active":
                     plan = buy_strategy.get("planned_power_per_h", {})
                     h_plan = plan.get(hour_key)
@@ -2844,6 +2845,7 @@ class InverterOperationModeSensor(SensorEntity):
                     else:
                         p_val = buy_strategy.get("recommended_power_kw", 0.0)
                         t_soc = buy_strategy.get("target_soc", 0.0)
+                    c_amps_fixed = buy_strategy.get("recommended_amps", 0.0)
 
             # Extract diagnostic info
             if not chg_reason or chg_reason == "Нет":
