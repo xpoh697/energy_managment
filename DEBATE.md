@@ -1,14 +1,14 @@
-# DEBATE: Discharge Cycle Allocation (Through the Night)
+# DEBATE: Extended Discharge Cycle (Until 10:00)
 
 ## Archi (Lead Architect)
-**Proposal**: Redefine "First Epoch" as the entire discharge cycle until the next solar refill. This includes evening peaks and morning peaks (even if separated by a gap) as long as they occur before the next sunrise.
-**Vibe**: One battery charge = one sale strategy.
+**Proposal**: Extend the "First Epoch" filter to 10:00 AM instead of 8:00 AM. This ensures the entire morning peak is captured in the current allocation cycle.
+**Vibe**: Grab all the high prices before the solar refill starts.
 
 ## Skeptic (Senior SRE/Security)
-**Concerns**: This is actually safer because it allows the allocator to see the morning peak as part of the current budget. If the morning is more expensive than the evening, it will prioritize the morning correctly.
+**Concerns**: None. 10:00 AM is a reasonable boundary for the end of the morning discharge.
 
 ## Znaika (Senior Architect / TS Specialist)
-**Analysis**: This perfectly matches the user's comment about discontinuous pools through the night.
+**Analysis**: Matches user request. 
 **Verdict**: Approved.
 
 ## Final Approval
@@ -17,4 +17,4 @@
 **Znaika**: Approved.
 
 ## Resolution
-Filter `target_hours` to include all hours before the next `morning_h_abs`.
+Modify `strategy_sell.py` to use 10:00 AM as the boundary for the current discharge cycle filtering.
