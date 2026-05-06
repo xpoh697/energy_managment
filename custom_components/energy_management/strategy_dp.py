@@ -105,8 +105,8 @@ class DPPlanner:
                         best_val = INF
                         best_next = (si, bi)
                         
-                        # v11.8.504: max_delta (DC) must be higher than max_p (AC) to cover efficiency
-                        max_delta = (max_p / eff_coeff) * 1.05 # 5% safety margin for stepping
+                        # v11.8.505: Battery Discharge Limit (DC) is max_p.
+                        max_delta = max_p * 1.05 # 5% safety margin for stepping
                         si_min = max(0, int((cur_kwh - max_delta) / ENERGY_STEP))
                         si_max = min(energy_steps, int((cur_kwh + max_delta) / ENERGY_STEP))
                         
@@ -188,7 +188,8 @@ class DPPlanner:
                 s_soc = (curr_si * ENERGY_STEP) / b_cap * 100.0
                 mode = self._map_mode(delta_kwh, g_net, gen, p_sell, s_soc, min_soc)
                 
-                # v11.8.502: Keep raw data for logic and provide formatted strings for UI
+                # v11.8.505: Show Battery Power (DC) in UI as requested
+                p_bat_kw = round(abs(delta_kwh), 2)
                 t_soc = int(round((next_si * ENERGY_STEP) / b_cap * 100.0))
                 profit = round((-g_net * p_sell if g_net < 0 else -g_net * p_buy) - (abs(delta_kwh) * deg_cost), 2)
                 b_str = " | B: ON" if b_on else ""
@@ -196,12 +197,12 @@ class DPPlanner:
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 
                 plan[h_key] = {
-                    "mode": mode, "power_kw": round(abs(p_ac), 2), "boiler": "ON" if b_on else "OFF",
+                    "mode": mode, "power_kw": p_bat_kw, "boiler": "ON" if b_on else "OFF",
                     "target_soc": t_soc, "grid_net": round(g_net, 2), "profit": profit
                 }
                 
                 formatted_plan[h_key] = (
-                    f"{mode} | {round(abs(p_ac), 2)}kW{b_str} | SOC: {t_soc}% | "
+                    f"{mode} | {p_bat_kw}kW{b_str} | SOC: {t_soc}% | "
                     f"Pr: {round(p_buy, 2)}/{round(p_sell, 2)} | G: {round(g_net, 2)} | Prf: {profit}"
                 )
                 curr_si, curr_bi = next_si, next_bi
