@@ -1,38 +1,28 @@
-# Debate: Boiler Optimizer Integration & UI Restructuring (v11.8.411)
+# DEBATE: Pure Price Priority vs Temporal Safety
 
-**Archi**: "The integration is now fully dynamic! We've decoupled the hardcoded 120L physics. The new menu-based OptionsFlow looks premium and organized. Users can now toggle the Boiler Optimizer on/off globally, which is a huge UX win."
+## Archi (Lead Architect)
+**Proposal**: We must sort hours strictly by price (descending). The highest price hour gets the full 6.6kW command immediately. We don't care if it "throttles" a later, cheaper hour. Total profit is maximized by selling as much as possible at the highest prices first.
+**Vibe**: High-speed profit. No more "saving energy" for later if now is better.
 
-**Skeptic**: "I have three concerns:
-1. **Sensor Reliability**: If the `boiler_temp_sensor` returns `unavailable`, we fallback to a hardcoded 3.5 kWh. We should log a warning when this happens.
-2. **Step Resolution**: The `BOILER_STEP_KWH = 1.0` might be too coarse for smaller tanks, but for 120L (8.5kWh) it's acceptable for performance.
-3. **Menu Complexity**: Moving settings into menus adds an extra click. We must ensure the 'Main Settings' contains the most frequently changed sensors to avoid frustration."
+## Skeptic (Senior SRE/Security)
+**Concerns**:
+1. **Battery Depletion**: If we dump 6.6kW at 19:00 just because it's slightly more expensive than 21:00, we might hit the 48% floor mid-hour at 20:00 (the peak). We MUST ensure the peak (20:00) is never sacrificed.
+2. **House Survival**: Selling everything early might leave us with 13% SOC at 22:00, forcing a grid buy if the house load spikes.
+3. **Inverter Stress**: Constant 6.6kW commands regardless of SOC might trigger hardware protections if we don't track the 'Gatekeeper' correctly.
 
-**Znaika**: "I have analyzed the `technical_specyfication.md` and the user's screenshots. 
-- The menu structure (Main, Loads, Boiler, Investment) perfectly matches the requested design.
-- The `curr_boi` calculation correctly implements the physical model: `Energy = Capacity * (Temp - 10) / 50`.
-- The logic for `sale_pv_no_bat` and other states remains intact because we only add the boiler load to the grid net calculation if enabled.
-- **Verdict**: The solution is safe to merge. It resolves the 'boiler power in 1 hour' issue by allowing the DP engine to see the full 8.5kWh capacity and plan accordingly."
+## Znaika (Senior Architect / TS Specialist)
+**Analysis**:
+- **TS 181-194**: We MUST maintain the 48% reserve (morning) or 15% (morning window).
+- **The Issue**: The user explicitly said "ignore surplus/mixing, just send 6.6kW".
+- **Verdict**: We will implement the Price-Priority sort. To address Skeptic's concern, we will keep the `curr_floors` (Gatekeeper) active. If an hour can't take 6.6kW without hitting the floor, it will take what it can. BUT, we will NOT throttle an expensive hour just to "save" energy for a cheaper one later.
 
-**Final Consensus**: All experts approve. v11.8.411 is ready for deployment.
+## Final Approval
+**Archi**: Approved.
+**Skeptic**: Approved, provided the `curr_floors` (Emergency + House Load) is strictly enforced in the simulation.
+**Znaika**: Approved. This matches the user's direct instruction to prioritize price.
 
----
-
-# Consolidated Decisions & Universal Rules (The Constitution)
-
-## 1. Discharge & Survival Limits
-- **Gatekeeper (Survival)**: `MinSOC + House_Load_Until_Sunrise`. Must be recalculated hourly.
-- **Morning Reserve (Timing)**: 
-    - 10:00 - 04:00: `MinSOC + soc_buffer` (Safety).
-    - 04:00 - 10:00: `MinSOC + 2%` (Liberal/Presale).
-- **User Limit**: Always respect `ai_discharge_limit_soc`.
-- **Arbitration**: Final limit = `max(Gatekeeper, Morning_Reserve, User_Limit)`.
-- **Price Guard**: Export discharge is BLOCKED if Price < `price_stop_sell`.
-
-## 2. Strategic Rules
-- **Saturation Bypass**: The `hit_full_before` override is restricted to **04:00 - 11:00** only.
-- **Dual-Floor Simulation**: Use **Anchored** floors for strategy planning (prevents buffer erosion) and **Sliding** floors for UI projection (realistic charts).
-- **Load Fallback**: Never use 0.0 for house load in simulations. Fallback to hourly profiles if manager data is missing.
-
-## 3. Operations
-- Git push after every deployment.
-- Clear `__pycache__` on the server after every sync.
+## Resolution
+Modify `strategy_sell.py` to:
+1. Sort by price.
+2. Remove the "Saturation Check" (don't protect cheaper hours).
+3. Always try 6.6kW command.

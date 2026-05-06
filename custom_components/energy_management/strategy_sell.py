@@ -382,11 +382,11 @@ class StrategySell(StrategyEngine):
             morning_strict = min_soc_val + soc_buffer
             last_h_floor = morning_strict
             
-            # 2. Greedy Fill in Price-Descending order
-            # v11.7.297: If solar surplus is huge, we don't care about the DC budget limit
+            # 2. Greedy Fill in Price-Descending order (v11.8.482: Pure Price Priority)
             effective_budget_ac = 99.0 if is_solar_surplus else available_sell_ac
             h_by_priority = sorted(target_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
             sell_commands = {}
+            sim_log = {}
             
             for h_target in h_by_priority:
                 if effective_budget_ac <= 0.05: break
@@ -411,72 +411,32 @@ class StrategySell(StrategyEngine):
                     else:
                         curr_floors[h_sim] = h_floor
 
-                test_p = max_p
+                # v11.8.482: Try max power (or budget) once. 
+                # We don't throttle to protect cheaper hours.
+                test_p = max_p if is_solar_surplus else min(max_p, effective_budget_ac)
+                trial_commands = sell_commands.copy()
+                trial_commands[h_target] = test_p
                 
-                test_p = max_p
-                if not is_solar_surplus:
-                    test_p = min(max_p, effective_budget_ac)
+                _, trial_log, _ = self.run_soc_simulation(
+                    b_soc, sim_range, now, commands=trial_commands, 
+                    b_min_soc=min_soc_val, ignore_blended=True, 
+                    house_profile_override="consumption_base", floors_override=curr_floors
+                )
                 
-                while test_p > 0.05:
-                    test_commands = dict(sell_commands)
-                    test_commands[h_target] = test_p
-                    
-                    _, trial_log, _ = self.run_soc_simulation(
-                        b_soc, sim_range, now, 
-                        commands={h: -p for h, p in test_commands.items()}, 
-                        b_min_soc=min_soc_val, dynamic_floors=curr_floors,
-                        ignore_blended=True, house_profile_override="consumption_base"
-                    )
-                    
-                    h_key = f"{h_target%24:02d}:59" + (" (Завтра)" if h_target >= 24 else "")
-                    real_p = trial_log.get(h_key, {}).get("p_bat", 0.0)
-                    
-                    target_ac = test_p * eff
-                    is_ok = (real_p >= target_ac - 0.1)
-                    
-                    if not is_ok and real_p > 0.1:
-                        # v11.8.475: Strictly preserve 6.6kW commands. 
-                        # We don't care about solar surplus or simulation throttling here.
-                        # The inverter will handle the physical mixing; our job is to send the command.
-                        if test_p >= max_p - 0.1:
-                            is_ok = True
-                        else:
-                            # Only throttle if it's a mid-range test that genuinely fails
-                            test_p = real_p / eff
-                            continue
-                    
-                    if is_ok:
-                        for h_prev in sell_commands:
-                            if sell_commands[h_prev] > 0.05:
-                                h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
-                                prev_real_p = trial_log.get(h_prev_key, {}).get("p_bat", 0.0)
-                                if prev_real_p < (sell_commands[h_prev] * eff) - 0.1:
-                                    is_ok = False
-                                    break
-                    
-                    if is_ok:
-                        if len(epochs) > 1 and not is_solar_surplus:
-                            p1 = max([all_sell_prices.get(h, 0.0) for h in epochs[0]])
-                            p2 = max([all_sell_prices.get(h, 0.0) for h in epochs[1]])
-                            if p2 > p1 + 0.05:
-                                if h_target in epochs[0]:
-                                    is_ok = False
-                                    if not limit_reason: limit_reason = "Ожидание пика"
-
-                    if is_ok:
-                        sell_commands[h_target] = test_p
-                        sim_log = trial_log
-                        if not is_solar_surplus:
-                            effective_budget_ac -= real_p
-                        
-                        # Update global floors for UI diagnostics
-                        floors_anchored = curr_floors
-                        floors_sliding = curr_floors
-                        break
-                    else:
-                        test_p = max(0.0, test_p - 0.5)
+                # Check if this priority hour can actually discharge anything
+                h_key = f"{h_target%24:02d}:59" + (" (Завтра)" if h_target >= 24 else "")
+                real_p = float(trial_log.get(h_key, {}).get("p_bat", 0.0))
                 
-                if test_p <= 0.05:
+                if real_p > 0.1:
+                    # Accept!
+                    sell_commands[h_target] = test_p
+                    sim_log = trial_log
+                    if not is_solar_surplus:
+                        effective_budget_ac -= real_p
+                    
+                    floors_anchored = curr_floors
+                    floors_sliding = curr_floors
+                else:
                     sell_commands[h_target] = 0.0
 
             house_rem_total = house_kwh_until_sunrise
