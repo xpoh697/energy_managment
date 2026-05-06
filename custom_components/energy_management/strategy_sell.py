@@ -382,8 +382,14 @@ class StrategySell(StrategyEngine):
             morning_strict = min_soc_val + soc_buffer
             last_h_floor = morning_strict
             
-            # 2. Greedy Fill in Price-Descending order (v11.8.482: Pure Price Priority)
+            # 2. Greedy Fill in Price-Descending order (v11.8.483: Single Epoch Priority)
             effective_budget_ac = 99.0 if is_solar_surplus else available_sell_ac
+            
+            # v11.8.483: Only distribute in the single closest epoch
+            epochs = self._group_contiguous(target_hours)
+            if epochs:
+                target_hours = epochs[0]
+                
             h_by_priority = sorted(target_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
             sell_commands = {}
             sim_log = {}
