@@ -446,8 +446,9 @@ class StrategySell(StrategyEngine):
                 real_p = float(trial_log.get(h_key, {}).get("p_bat", 0.0))
                 
                 if real_p > 0.1:
-                    # v11.8.495: Store REALISTIC power from simulation
-                    sell_commands[h_target] = real_p
+                    # v11.8.499: Use test_p for UI/Command if not SOC-limited (within 10% margin)
+                    # This restores "6.6" in UI instead of "6.494" due to efficiency losses
+                    sell_commands[h_target] = test_p if real_p > (test_p * 0.9) else real_p
                     sim_log = trial_log
                     # v11.8.492 logic: decrement budget for secondary peaks
                     if not is_top_peak:
