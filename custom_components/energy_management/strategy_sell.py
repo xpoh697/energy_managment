@@ -385,10 +385,11 @@ class StrategySell(StrategyEngine):
             # 2. Greedy Fill in Price-Descending order (v11.8.483: Single Epoch Priority)
             effective_budget_ac = 99.0 if is_solar_surplus else available_sell_ac
             
-            # v11.8.487: All hours in the CURRENT discharge cycle (until 10:00 AM)
-            # This ensures the morning peak is included even if it's separated by night.
+            # v11.8.489: Smart Discharge Cycle Cutoff
+            # If it's Day/Evening (after sunrise), we plan for the upcoming night cycle (ends Tomorrow 10:00).
+            # If it's Night/Early Morning (before sunrise), we finish the current cycle (ends Today 10:00).
             cutoff_h = 10
-            cutoff_abs = cutoff_h if cur_hour < cutoff_h else cutoff_h + 24
+            cutoff_abs = (cutoff_h + 24) if (cur_hour >= sunrise_h) else cutoff_h
             target_hours = [h for h in target_hours if h < cutoff_abs]
                 
             h_by_priority = sorted(target_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
