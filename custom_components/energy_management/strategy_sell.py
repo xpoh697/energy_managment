@@ -382,53 +382,36 @@ class StrategySell(StrategyEngine):
             morning_strict = min_soc_val + soc_buffer
             last_h_floor = morning_strict
             
-            for hx in range(24):
-                h_prof_debug[hx] = round_f(float(normalize_float(_sim_cons_profile.get(str(hx), 0.0))), 2)
-
-            for h_sim in sim_range:
-                h_sim_norm = h_sim % 24
-                h_floor = min_soc_val
-                
-                # TS 181-194: Context-Aware Morning Reserve.
-                # If we are planning for a Night Sale (before 04:00), we target 48% at sunrise.
-                # If we are planning for a Morning Sale (04:00-10:00), we target 15% at sunrise.
-                
-                is_morning_window = bool(4 <= (h_target % 24) < 11)
-                eff_morning_strict = (min_soc_val + 2.0) if is_morning_window else morning_strict
-                
-                target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
-                h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
-                bridge_soc = (h_rem_kwh / b_cap * 100.0)
-
-                # Floor = Target at Sunrise + Consumption Bridge
-                h_floor = eff_morning_strict + bridge_soc
-                
-                # TS 187: User Limit applies only during active sale blocks.
-                # If the current hour h_sim is NOT in target_hours and there are no 
-                # future sales in the IMMEDIATE night pool, the floor should drop.
-                
-                is_sale_planned = bool(h_sim in target_hours)
-                
-                # Check if there's any sale planned for the REST of this night (until sunrise)
-                future_sales_this_night = [th for th in target_hours if h_sim < th <= morning_h_abs]
-                
-                if is_sale_planned or future_sales_this_night:
-                    h_floor = max(h_floor, user_limit)
-                
-                
-                # Sliding floor for simulation
-                floors_sliding[h_sim] = float(h_floor)
-                
-                # Anchored floor for strategy (prevents selling survival buffers)
-                floors_anchored[h_sim] = float(h_floor)
-
             # 2. Greedy Fill in Price-Descending order
             # v11.7.297: If solar surplus is huge, we don't care about the DC budget limit
             effective_budget_ac = 99.0 if is_solar_surplus else available_sell_ac
             h_by_priority = sorted(target_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
+            sell_commands = {}
             
             for h_target in h_by_priority:
                 if effective_budget_ac <= 0.05: break
+                
+                # RE-CALCULATE FLOORS for THIS target hour (Night vs Morning context)
+                is_morning_window = bool(4 <= (h_target % 24) < 11)
+                eff_morning_strict = (min_soc_val + 2.0) if is_morning_window else morning_strict
+                
+                curr_floors = {}
+                for h_sim in sim_range:
+                    target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
+                    h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
+                    bridge_soc = (h_rem_kwh / b_cap * 100.0)
+                    
+                    h_floor = eff_morning_strict + bridge_soc
+                    
+                    is_h_sim_planned = bool(h_sim in target_hours)
+                    future_sales = [th for th in target_hours if h_sim < th <= target_sunrise]
+                    
+                    if is_h_sim_planned or future_sales:
+                        curr_floors[h_sim] = max(h_floor, user_limit)
+                    else:
+                        curr_floors[h_sim] = h_floor
+
+                test_p = max_p
                 
                 test_p = max_p
                 if not is_solar_surplus:
@@ -441,31 +424,25 @@ class StrategySell(StrategyEngine):
                     _, trial_log, _ = self.run_soc_simulation(
                         b_soc, sim_range, now, 
                         commands={h: -p for h, p in test_commands.items()}, 
-                        b_min_soc=min_soc_val, dynamic_floors=floors_anchored,
+                        b_min_soc=min_soc_val, dynamic_floors=curr_floors,
                         ignore_blended=True, house_profile_override="consumption_base"
                     )
                     
                     h_key = f"{h_target%24:02d}:59" + (" (Завтра)" if h_target >= 24 else "")
                     real_p = trial_log.get(h_key, {}).get("p_bat", 0.0)
                     
-                    # v11.8.460: Correct AC/DC comparison. 
-                    # real_p is AC (after efficiency), test_p is DC (battery side).
-                    # We accept it if real_p is within 0.1 of (test_p * efficiency)
                     target_ac = test_p * eff
                     is_ok = (real_p >= target_ac - 0.1)
                     
                     if not is_ok and real_p > 0.1:
                         if is_solar_surplus:
-                            # In solar surplus, always accept whatever we can discharge
                             is_ok = True
                             test_p = real_p 
                         else:
-                            # Try one more time with exactly what the simulation allowed
                             test_p = real_p
                             continue
                     
                     if is_ok:
-                        # v11.7.138: Saturation Check
                         for h_prev in sell_commands:
                             if sell_commands[h_prev] > 0.05:
                                 h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
@@ -475,12 +452,10 @@ class StrategySell(StrategyEngine):
                                     break
                     
                     if is_ok:
-                        # Double Cycle Optimizer
                         if len(epochs) > 1 and not is_solar_surplus:
                             p1 = max([all_sell_prices.get(h, 0.0) for h in epochs[0]])
                             p2 = max([all_sell_prices.get(h, 0.0) for h in epochs[1]])
                             if p2 > p1 + 0.05:
-                                # If this hour is in the first epoch, and second epoch is better, block it
                                 if h_target in epochs[0]:
                                     is_ok = False
                                     if not limit_reason: limit_reason = "Ожидание пика"
@@ -489,10 +464,14 @@ class StrategySell(StrategyEngine):
                         sell_commands[h_target] = test_p
                         sim_log = trial_log
                         if not is_solar_surplus:
-                            effective_budget_ac -= test_p
+                            effective_budget_ac -= (test_p * eff)
+                        
+                        # Update global floors for UI diagnostics
+                        floors_anchored = curr_floors
+                        floors_sliding = curr_floors
                         break
                     else:
-                        test_p = max(0.0, test_p - (max_p / 6.0))
+                        test_p = max(0.0, test_p - 0.5)
                 
                 if test_p <= 0.05:
                     sell_commands[h_target] = 0.0
