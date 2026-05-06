@@ -449,7 +449,7 @@ class StrategySell(StrategyEngine):
                     # v11.8.460: Correct AC/DC comparison. 
                     # real_p is AC (after efficiency), test_p is DC (battery side).
                     # We accept it if real_p is within 0.1 of (test_p * efficiency)
-                    target_ac = test_p * eff_coeff
+                    target_ac = test_p * eff
                     is_ok = (real_p >= target_ac - 0.1)
                     
                     if not is_ok and real_p > 0.1:
