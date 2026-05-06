@@ -183,12 +183,14 @@ class DPPlanner:
                 s_soc = (curr_si * ENERGY_STEP) / b_cap * 100.0
                 mode = self._map_mode(delta_kwh, g_net, gen, p_sell, s_soc, min_soc)
                 
-                plan[f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")] = {
-                    "mode": mode, "power_kw": round(abs(p_ac), 2), "boiler": "ON" if b_on else "OFF",
-                    "target_soc": int(round((next_si * ENERGY_STEP) / b_cap * 100.0)), "grid_net": round(g_net, 2),
-                    "price_buy": round(p_buy, 3), "price_sell": round(p_sell, 3),
-                    "profit": round((-g_net * p_sell if g_net < 0 else -g_net * p_buy) - (abs(delta_kwh) * deg_cost), 2)
-                }
+                # v11.8.501: UI-Friendly Formatting
+                b_str = " | B: ON" if b_on else ""
+                t_soc = int(round((next_si * ENERGY_STEP) / b_cap * 100.0))
+                profit = round((-g_net * p_sell if g_net < 0 else -g_net * p_buy) - (abs(delta_kwh) * deg_cost), 2)
+                
+                plan[f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")] = (
+                    f"{mode} | {round(abs(p_ac), 2)}kW{b_str} | SOC: {t_soc}% | G: {round(g_net, 2)} | Prf: {profit}"
+                )
                 curr_si, curr_bi = next_si, next_bi
 
             start_entry = dp_table[0].get((int(round((curr_s_raw or 0.0) / 100.0 * b_cap / ENERGY_STEP)), curr_bi))

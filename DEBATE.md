@@ -1,17 +1,18 @@
-# DEBATE: Fixing Double-Counting in SOC Floors
+# DEBATE: DP Advice Formatting
 
 ## Archi (Lead Architect)
-**Issue**: The system is double-counting house consumption. It adds `bridge_soc` (predicted house load) to `morning_strict` (which already includes the user's `soc_buffer`).
-**Proposal**: Change the summation to `max()` as per TS Section 6.1. This ensures we stay at the highest of the limits, not their sum.
-**Vibe**: Precise and TS-compliant.
+**Issue**: The DP Hourly Plan is currently a nested dictionary, which Home Assistant displays as a long, unreadable list of keys.
+**Proposal**: Convert the plan values into a single formatted string per hour. This will match the "clean" look of our main strategy sensors.
+**Format**: `Mode | Power | Boiler | SOC | Grid Net | Profit`
+**Vibe**: Professional and readable.
 
 ## Skeptic (Senior SRE/Security)
-**Concerns**: Will this deplete the battery too much?
-**Response**: No, the `soc_buffer` (13%) is specifically chosen by the user to cover house load. Adding more load on top is redundant and violates the "greedy" arbitrage principle.
+**Concerns**: Will we lose the raw data?
+**Response**: We can keep the raw data in a hidden debug attribute if needed, but for the UI sensor, the string is much better.
 
 ## Znaika (Senior Architect / TS Specialist)
-**Analysis**: TS Line 184 explicitly states: "Limits NEVER sum up. The system chooses the strictest (highest) constraint." The current implementation violates this.
-**Verdict**: Mandatory fix. Also, correct the morning window end from 11:00 to 10:00 as per TS Line 183.
+**Analysis**: The user explicitly asked for "readable to the eye". String formatting is the standard way to achieve this in HA attributes for complex plans.
+**Verdict**: Approved.
 
 ## Final Approval
 **Archi**: Approved.
@@ -19,4 +20,4 @@
 **Znaika**: Approved.
 
 ## Resolution
-Surgically edit `strategy_sell.py` to replace `+ bridge_soc` with `max()` logic and adjust the morning window timeframe.
+Surgically modify `strategy_dp.py` to return a formatted string for each hour in the `plan` dictionary.
