@@ -1,17 +1,15 @@
-# DEBATE: Correct Cycle Boundary Logic
+# DEBATE: First Non-Empty Discharge Cycle
 
 ## Archi (Lead Architect)
-**Issue**: The previous 10:00 AM cutoff was too static. At 09:11 AM, it looked at 10:00 AM Today, found nothing, and deleted the evening peak.
-**Proposal**: The boundary must be the 10:00 AM that follows the **next** sunset. 
-- If Day/Evening (now > sunrise): Cutoff = Tomorrow 10:00 AM.
-- If Night/Early Morning (now < sunrise): Cutoff = Today 10:00 AM.
-This keeps the evening peak visible and planned during the day.
+**Issue**: The hard cutoff at 10:00 AM caused empty plans if the current morning was not profitable.
+**Proposal**: Instead of a hard cutoff based on the current time, we should group target hours into "Discharge Cycles" (10:00 to 10:00) and pick the **first non-empty cycle**.
+If today's morning is empty, the allocator automatically moves to today's evening + tomorrow's morning as the "First Epoch".
 
 ## Skeptic (Senior SRE/Security)
-**Concerns**: None. This ensures the allocator always has a full discharge window to work with.
+**Concerns**: None. This ensures the UI always shows the next actionable strategy.
 
 ## Znaika (Senior Architect / TS Specialist)
-**Analysis**: This fixes the "disappearing windows" bug while respecting the "one discharge cycle" rule.
+**Analysis**: This perfectly addresses the user's frustration and follows the "one cycle at a time" principle without being blind to the future.
 **Verdict**: Approved.
 
 ## Final Approval
@@ -20,4 +18,4 @@ This keeps the evening peak visible and planned during the day.
 **Znaika**: Approved.
 
 ## Resolution
-Update `strategy_sell.py` with dynamic `cutoff_abs` based on sunrise.
+Group `target_hours` into 24h cycles (cutoff at 10:00 AM). The allocator will process the first cycle that contains at least one target hour.
