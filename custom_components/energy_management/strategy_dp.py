@@ -24,7 +24,6 @@ _LOGGER = logging.getLogger(__name__)
 # --- DP Parameters ---
 ENERGY_STEP = 0.1          # 0.1 kWh precision (same as dp_engine.py)
 BOILER_STEPS = 5          
-INVERTER_EFFICIENCY = 0.94
 INF = 1e9                 
 
 class DPPlanner:
@@ -83,8 +82,12 @@ class DPPlanner:
                 for bi in range((BOILER_STEPS + 1) if b_enabled else 1):
                     dp_table[horizon][(si, bi)] = (-energy_kwh * terminal_peak, 0, 0)
 
-            # Backward Induction
+            # v11.8.504: Use dynamic efficiency from manager
+            eff_coeff = getattr(self.manager, "last_eff_coeff", 0.96)
+            
+            # Forward Induction with proper efficiency-aware delta
             for h in range(horizon - 1, -1, -1):
+                # ... (rest of h-loop setup)
                 abs_h = cur_hour + h
                 h_rel = abs_h % 24
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
@@ -102,14 +105,15 @@ class DPPlanner:
                         best_val = INF
                         best_next = (si, bi)
                         
-                        max_delta = max_p * 1.0
+                        # v11.8.504: max_delta (DC) must be higher than max_p (AC) to cover efficiency
+                        max_delta = (max_p / eff_coeff) * 1.05 # 5% safety margin for stepping
                         si_min = max(0, int((cur_kwh - max_delta) / ENERGY_STEP))
                         si_max = min(energy_steps, int((cur_kwh + max_delta) / ENERGY_STEP))
                         
                         for next_si in range(si_min, si_max + 1):
                             next_kwh = next_si * ENERGY_STEP
                             delta_bat = cur_kwh - next_kwh
-                            p_ac = delta_bat * INVERTER_EFFICIENCY if delta_bat >= 0 else delta_bat / INVERTER_EFFICIENCY
+                            p_ac = delta_bat * eff_coeff if delta_bat >= 0 else delta_bat / eff_coeff
                             
                             for b_on in ([True, False] if b_enabled else [False]):
                                 b_use = b_power if b_on else 0.0
@@ -172,7 +176,7 @@ class DPPlanner:
                 cur_kwh = curr_si * ENERGY_STEP
                 next_kwh = next_si * ENERGY_STEP
                 delta_kwh = cur_kwh - next_kwh
-                p_ac = delta_kwh * INVERTER_EFFICIENCY if delta_kwh >= 0 else delta_kwh / INVERTER_EFFICIENCY
+                p_ac = delta_kwh * eff_coeff if delta_kwh >= 0 else delta_kwh / eff_coeff
                 b_on = (next_bi > curr_bi) if b_enabled else False
                 
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
