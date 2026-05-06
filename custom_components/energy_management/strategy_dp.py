@@ -284,7 +284,8 @@ class DPPlanner:
                 "debug": {
                     "calc_time": round(time.time()-t0, 2), 
                     "horizon": horizon,
-                    "best_val": round(best_val, 2)
+                    "best_val": round(best_val, 2),
+                    "seen_temp": round(temp, 1) if b_enabled else "N/A"
                 }
             }
             
