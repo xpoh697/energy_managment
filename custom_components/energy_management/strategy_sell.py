@@ -436,7 +436,7 @@ class StrategySell(StrategyEngine):
                 trial_commands[h_target] = test_p
                 
                 _, trial_log, _ = self.run_soc_simulation(
-                    b_soc, sim_range, now, commands=trial_commands, 
+                    b_soc, sim_range, now, commands={h: -p for h, p in trial_commands.items()}, 
                     b_min_soc=min_soc_val, ignore_blended=True, 
                     house_profile_override="consumption_base", dynamic_floors=curr_floors
                 )
