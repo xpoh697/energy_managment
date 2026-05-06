@@ -74,11 +74,11 @@ class DPPlanner:
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
             
             # DP Tables: [hour][energy_idx][boiler_idx]
-            # We store (max_revenue, prev_si, prev_bi, action_type, amount)
+            # We store (max_revenue, prev_si, prev_bi, action_type, amount, boiler_on)
             dp = [[None] * (energy_steps + 1) for _ in range(horizon + 1)]
             for h in range(horizon + 1):
                 for si in range(energy_steps + 1):
-                    dp[h][si] = [(-INF, -1, -1, 0, 0.0)] * (BOILER_STEPS + 1)
+                    dp[h][si] = [(-INF, -1, -1, 0, 0.0, False)] * (BOILER_STEPS + 1)
 
             # Initial state
             curr_si = min(energy_steps, max(0, int(round((curr_s_raw or 0.0) / 100.0 * b_cap / ENERGY_STEP))))
@@ -88,7 +88,7 @@ class DPPlanner:
                 curr_bi = int(round(max(0, min(50, temp-10))/50.0 * BOILER_STEPS))
             else: curr_bi = 0
             
-            dp[0][curr_si][curr_bi] = (0.0, -1, -1, 0, 0.0)
+            dp[0][curr_si][curr_bi] = (0.0, -1, -1, 0, 0.0, False)
 
             # --- Forward Induction ---
             for h in range(horizon):
@@ -103,7 +103,7 @@ class DPPlanner:
 
                 for si in range(energy_steps + 1):
                     for bi in range(BOILER_STEPS + 1):
-                        cur_rev, _, _, _, _ = dp[h][si][bi]
+                        cur_rev, _, _, _, _, _ = dp[h][si][bi]
                         if cur_rev <= -INF + 100: continue
                         
                         cur_kwh = si * ENERGY_STEP
@@ -126,12 +126,15 @@ class DPPlanner:
                             
                             new_rev = cur_rev + rev
                             if new_rev > dp[h+1][si][nbi][0]:
-                                dp[h+1][si][nbi] = (new_rev, si, bi, ACT_SOL, 0.0)
+                                dp[h+1][si][nbi] = (new_rev, si, bi, ACT_SOL, 0.0, b_on)
                             
-                            # Action: DISCHARGE (to home/grid)
+                                # Action: DISCHARGE (to home/grid)
                             if si > 0:
                                 max_dis = min(max_p, cur_kwh)
-                                for steps in range(1, int(max_dis / ENERGY_STEP) + 1):
+                                min_dis_limit = float(self.manager.get_setting(CONF_MIN_SELL_POWER, 0.5))
+                                start_step = int(min_dis_limit / ENERGY_STEP)
+                                
+                                for steps in range(start_step, int(max_dis / ENERGY_STEP) + 1):
                                     dis_kwh = steps * ENERGY_STEP
                                     nsi = si - steps
                                     p_ac = dis_kwh * eff
@@ -145,7 +148,7 @@ class DPPlanner:
                                     
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
-                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_DIS, dis_kwh)
+                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_DIS, dis_kwh, b_on)
 
                             # Action: SELF_CONSUME (battery to home only, no grid export)
                             if si > 0 and (cons + b_use - gen) > 0.01:
@@ -162,7 +165,7 @@ class DPPlanner:
                                     
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
-                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_SELF_CONSUME, sc_kwh)
+                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_SELF_CONSUME, sc_kwh, b_on)
 
                             # Action: PV_CHARGE (from surplus)
                             if pv_surplus > 0.01 and si < energy_steps:
@@ -179,7 +182,7 @@ class DPPlanner:
                                     
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
-                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_PV_CHARGE, chg_kwh)
+                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_PV_CHARGE, chg_kwh, b_on)
 
                             # Action: GRID_CHARGE (buy from grid)
                             if si < energy_steps:
@@ -194,14 +197,14 @@ class DPPlanner:
                                     
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
-                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_GRID_CHARGE, chg_kwh)
+                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_GRID_CHARGE, chg_kwh, b_on)
 
             # --- Find Best End State ---
             best_val = -INF
             best_state = (curr_si, curr_bi)
             for si in range(energy_steps + 1):
                 for bi in range(BOILER_STEPS + 1):
-                    val, _, _, _, _ = dp[horizon][si][bi]
+                    val, _, _, _, _, _ = dp[horizon][si][bi]
                     # Terminal value: remaining energy value
                     # We value remaining energy at average sell price (rough estimate)
                     val += (si * ENERGY_STEP) * 0.4 
@@ -218,13 +221,13 @@ class DPPlanner:
             for h in range(horizon, 0, -1):
                 si, bi = curr_h_state
                 entry = dp[h][si][bi]
-                _, psi, pbi, act, amt = entry
-                results.append((h-1, act, amt, si, bi))
+                _, psi, pbi, act, amt, b_on = entry
+                results.append((h-1, act, amt, si, bi, b_on))
                 curr_h_state = (psi, pbi)
             
             results.reverse()
             
-            for h_idx, act, amt, si, bi in results:
+            for h_idx, act, amt, si, bi, b_on in results:
                 abs_h = cur_hour + h_idx
                 h_rel = abs_h % 24
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
@@ -235,7 +238,6 @@ class DPPlanner:
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
                 
                 mode = "Idle"
-                b_on = (bi > 0) # Placeholder for actual transition logic
                 b_use = b_power if b_on else 0.0
                 p_ac = 0.0
                 
@@ -257,7 +259,8 @@ class DPPlanner:
                 profit = round((-g_net * p_sell if g_net < 0 else -g_net * p_buy) - (abs(amt) * deg_cost if act in [ACT_DIS, ACT_GRID_CHARGE] else 0), 2)
                 
                 soc = int(round((si * ENERGY_STEP) / b_cap * 100.0))
-                b_indicator = " | B: ON" if b_on else ""
+                b_soc = int(round(bi / float(BOILER_STEPS) * 100.0))
+                b_indicator = f" | B: {'ON' if b_on else 'OFF'} ({b_soc}%)"
                 
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 formatted_plan[h_key] = (
