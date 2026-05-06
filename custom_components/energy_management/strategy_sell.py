@@ -422,8 +422,9 @@ class StrategySell(StrategyEngine):
                     h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
                     bridge_soc = (h_rem_kwh / b_cap * 100.0)
                     
-                    # v11.8.500: Limits NEVER sum up (TS Section 6.1). Choose strictest constraint.
-                    h_floor = max(eff_morning_strict, min_soc_val + bridge_soc)
+                    # v11.8.517: Survival floor must be (Reserve + Buffer) + Consumption
+                    # to ensure we have the full safety margin left AT sunrise.
+                    h_floor = max(eff_morning_strict, (min_soc_val + soc_buffer) + bridge_soc)
                     
                     is_h_sim_planned = bool(h_sim in target_hours)
                     future_sales = [th for th in target_hours if h_sim < th <= target_sunrise]
