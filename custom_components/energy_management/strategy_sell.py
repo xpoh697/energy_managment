@@ -435,14 +435,13 @@ class StrategySell(StrategyEngine):
                     is_ok = (real_p >= target_ac - 0.1)
                     
                     if not is_ok and real_p > 0.1:
-                        # v11.8.474: Keep max power even in solar surplus or floor hit.
-                        # We only throttle test_p if it's a mid-range command that genuinely fails.
+                        # v11.8.475: Strictly preserve 6.6kW commands. 
+                        # We don't care about solar surplus or simulation throttling here.
+                        # The inverter will handle the physical mixing; our job is to send the command.
                         if test_p >= max_p - 0.1:
                             is_ok = True
-                        elif is_solar_surplus:
-                            is_ok = True
-                            test_p = real_p 
                         else:
+                            # Only throttle if it's a mid-range test that genuinely fails
                             test_p = real_p / eff
                             continue
                     
