@@ -1,17 +1,17 @@
-# DEBATE: Removing DP Opportunity Cost Heuristics
+# DEBATE: Refactoring DP Strategy based on dp_engine.py
 
 ## Archi (Lead Architect)
-**Issue**: The DP algorithm is refusing to sell at 100% SOC during a price peak (0.89) because of a hardcoded "Opportunity Cost" penalty.
-**Proposal**: Remove the heuristic penalty for selling (lines 134-139). A DP with a 48-hour horizon doesn't need artificial fear; it already calculates if it can refill from the sun.
-**Vibe**: Trust the math, remove the "crutches".
+**Issue**: The current `strategy_dp.py` has become cluttered with heuristics and doesn't match the clean, reliable logic of the reference `dp_engine.py`.
+**Proposal**: Perform a complete refactor of `strategy_dp.py`. Use the architecture of `dp_engine.py` (Action-based transitions, explicit backtracking tables) but integrate our smart forecast data and boiler control.
+**Vibe**: Clean start, high performance, reference-grade logic.
 
 ## Skeptic (Senior SRE/Security)
-**Concerns**: Won't it become too aggressive and leave the house empty for a morning spike?
-**Response**: No, we still have `h_min_soc` (survival floor) and the DP sees the house load. It will only sell if it's truly optimal over the 48h window.
+**Concerns**: Will the boiler logic slow down the DP?
+**Response**: With 5 boiler steps and 170 energy steps, the state space is manageable. We will ensure the loops are optimized.
 
 ## Znaika (Senior Architect / TS Specialist)
-**Analysis**: The user's screenshot clearly shows sub-optimal behavior (100% SOC, good price, zero sale). The heuristic is contradicting the core purpose of DP.
-**Verdict**: Approved for removal.
+**Analysis**: The user wants the DP to be "blindly" optimal based on our profiles. By using the `dp_engine.py` core, we ensure that the optimization is mathematically sound without artificial "fear" penalties.
+**Verdict**: Approved. This is the right move for stabilization.
 
 ## Final Approval
 **Archi**: Approved.
@@ -19,4 +19,4 @@
 **Znaika**: Approved.
 
 ## Resolution
-Surgically remove the "Opportunity Cost" and "Micro-movement penalty" blocks from `strategy_dp.py`.
+Rewrite `strategy_dp.py` using `dp_engine.py` as the architectural baseline. Integrate HA-specific sensors and boiler state into the new engine.

@@ -23,9 +23,16 @@ from .utils import normalize_float, round_f
 _LOGGER = logging.getLogger(__name__)
 
 # --- DP Parameters ---
-ENERGY_STEP = 0.1          # 0.1 kWh precision (same as dp_engine.py)
-BOILER_STEPS = 5          
+ENERGY_STEP = 0.1          # 0.1 kWh precision
+BOILER_STEPS = 5           # 0 to 5 steps of boiler charge
 INF = 1e9                 
+
+# Action types
+ACT_SOL = 0
+ACT_DIS = 1
+ACT_PV_CHARGE = 2
+ACT_GRID_CHARGE = 3
+ACT_SELF_CONSUME = 4
 
 class DPPlanner:
     def __init__(self, manager):
@@ -47,22 +54,14 @@ class DPPlanner:
             max_abs_h = max(available_hours) if available_hours else cur_hour + 23
             horizon = min(48, max_abs_h - cur_hour + 1)
             
-            # --- Future Peak Analysis ---
-            max_future_buy = {}
-            current_max = 0.0
-            for h in range(horizon, -1, -1):
-                abs_h = cur_hour + h
-                p_b = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
-                current_max = max(current_max, p_b)
-                max_future_buy[h] = current_max
-
             # --- Params ---
             max_p = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             curr_s_raw, b_cap_raw, _ = self.manager.get_battery_state()
             b_cap = float(b_cap_raw or 17.0)
             deg_cost = self._get_deg_cost(b_cap)
             min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
-            min_sell_p = float(self.manager.get_setting(CONF_MIN_SELL_POWER, 0.5))
+            soc_buff = float(self.manager.get_setting(CONF_SOC_BUFFER, 13.0))
+            eff = getattr(self.manager, "last_eff_coeff", 0.96)
             
             energy_steps = int(round(b_cap / ENERGY_STEP))
             
@@ -74,160 +73,175 @@ class DPPlanner:
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
             
-            dp_table = [{} for _ in range(horizon + 1)]
-
-            # Terminal Value
-            terminal_peak = max_future_buy[horizon]
-            for si in range(energy_steps + 1):
-                energy_kwh = si * ENERGY_STEP
-                for bi in range((BOILER_STEPS + 1) if b_enabled else 1):
-                    dp_table[horizon][(si, bi)] = (-energy_kwh * terminal_peak, 0, 0)
-
-            # v11.8.504: Use dynamic efficiency from manager
-            eff_coeff = getattr(self.manager, "last_eff_coeff", 0.96)
-            
-            # Forward Induction with proper efficiency-aware delta
-            for h in range(horizon - 1, -1, -1):
-                # ... (rest of h-loop setup)
-                abs_h = cur_hour + h
-                h_rel = abs_h % 24
-                p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
-                p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
-                gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
-                cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
-                
-                h_min_soc = (min_soc + 10.0) if (21 <= h_rel or h_rel <= 6) else min_soc
-                future_peak = max_future_buy[h+1]
-
+            # DP Tables: [hour][energy_idx][boiler_idx]
+            # We store (max_revenue, prev_si, prev_bi, action_type, amount)
+            dp = [[None] * (energy_steps + 1) for _ in range(horizon + 1)]
+            for h in range(horizon + 1):
                 for si in range(energy_steps + 1):
-                    cur_kwh = si * ENERGY_STEP
-                    for bi in range((BOILER_STEPS + 1) if b_enabled else 1):
-                        cur_boi_kwh = (bi / float(BOILER_STEPS)) * b_capacity if b_enabled else 0.0
-                        best_val = INF
-                        best_next = (si, bi)
-                        
-                        # v11.8.506: Strict Battery Discharge Limit (DC). No margins.
-                        max_delta = max_p * 1.0
-                        si_min = max(0, int(math.ceil((cur_kwh - max_delta) / ENERGY_STEP)))
-                        si_max = min(energy_steps, int(math.floor((cur_kwh + max_delta) / ENERGY_STEP)))
-                        
-                        for next_si in range(si_min, si_max + 1):
-                            next_kwh = next_si * ENERGY_STEP
-                            delta_bat = cur_kwh - next_kwh
-                            p_ac = delta_bat * eff_coeff if delta_bat >= 0 else delta_bat / eff_coeff
-                            
-                            for b_on in ([True, False] if b_enabled else [False]):
-                                b_use = b_power if b_on else 0.0
-                                next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.1 + b_use))
-                                next_bi = int(round(next_boi_kwh / b_capacity * BOILER_STEPS)) if b_enabled else 0
-                                
-                                grid = cons + b_use - gen - p_ac
-                                if grid > 0:
-                                    cost = grid * p_buy
-                                else:
-                                    if p_ac < -0.05:
-                                        solar_avail = max(0, gen - cons - b_use)
-                                        p_charge = abs(p_ac)
-                                        if solar_avail >= p_charge:
-                                            cost = (grid + p_charge) * p_sell - (p_charge * 2.0)
-                                        else:
-                                            cost = (p_charge - solar_avail) * p_buy
-                                    else:
-                                        cost = grid * p_sell
-                                
-                                # v11.8.507: Trust the DP math. No artificial penalties for selling or moving.
-                                cost += abs(delta_bat) * (deg_cost + 0.02)
-                                if (next_kwh / b_cap * 100) < h_min_soc: cost += 2000.0
-                                
-                                total = cost + dp_table[h+1].get((next_si, next_bi), (INF, 0, 0))[0]
-                                if total < best_val:
-                                    best_val = total
-                                    best_next = (next_si, next_bi)
-                        
-                        dp_table[h][(si, bi)] = (best_val, best_next[0], best_next[1])
+                    dp[h][si] = [(-INF, -1, -1, 0, 0.0)] * (BOILER_STEPS + 1)
 
-            # Forward Path
-            curr_si = int(round((curr_s_raw or 0.0) / 100.0 * b_cap / ENERGY_STEP))
+            # Initial state
+            curr_si = min(energy_steps, max(0, int(round((curr_s_raw or 0.0) / 100.0 * b_cap / ENERGY_STEP))))
             if b_enabled:
                 temp_s = self.manager.get_setting(CONF_BOILER_TEMP_SENSOR)
                 temp = float(self.manager.get_sensor_float(temp_s) or 20.0) if temp_s else 30.0
                 curr_bi = int(round(max(0, min(50, temp-10))/50.0 * BOILER_STEPS))
             else: curr_bi = 0
+            
+            dp[0][curr_si][curr_bi] = (0.0, -1, -1, 0, 0.0)
 
-            plan = {}
-            formatted_plan = {}
+            # --- Forward Induction ---
             for h in range(horizon):
                 abs_h = cur_hour + h
                 h_rel = abs_h % 24
-                entry = dp_table[h].get((curr_si, curr_bi))
-                if not entry: break
-                _, next_si, next_bi = entry
-                
-                cur_kwh = curr_si * ENERGY_STEP
-                next_kwh = next_si * ENERGY_STEP
-                delta_kwh = cur_kwh - next_kwh
-                p_ac = delta_kwh * eff_coeff if delta_kwh >= 0 else delta_kwh / eff_coeff
-                b_on = (next_bi > curr_bi) if b_enabled else False
-                
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
                 p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
-                g_net = cons + (b_power if b_on else 0.0) - gen - p_ac
                 
-                s_soc = (curr_si * ENERGY_STEP) / b_cap * 100.0
-                mode = self._map_mode(delta_kwh, g_net, gen, p_sell, s_soc, min_soc)
-                
-                # v11.8.505: Show Battery Power (DC) in UI as requested
-                p_bat_kw = round(abs(delta_kwh), 2)
-                t_soc = int(round((next_si * ENERGY_STEP) / b_cap * 100.0))
-                profit = round((-g_net * p_sell if g_net < 0 else -g_net * p_buy) - (abs(delta_kwh) * deg_cost), 2)
-                b_str = " | B: ON" if b_on else ""
-                
+                h_min_soc = (min_soc + soc_buff) if (21 <= h_rel or h_rel <= 6) else min_soc
+
+                for si in range(energy_steps + 1):
+                    for bi in range(BOILER_STEPS + 1):
+                        cur_rev, _, _, _, _ = dp[h][si][bi]
+                        if cur_rev <= -INF + 100: continue
+                        
+                        cur_kwh = si * ENERGY_STEP
+                        cur_boi_kwh = (bi / float(BOILER_STEPS)) * b_capacity if b_enabled else 0.0
+                        
+                        # Possible actions
+                        for b_on in ([True, False] if b_enabled else [False]):
+                            b_use = b_power if b_on else 0.0
+                            # Boiler state transition (heat + losses)
+                            next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.1 + b_use))
+                            nbi = int(round(next_boi_kwh / b_capacity * BOILER_STEPS)) if b_enabled else 0
+                            
+                            # Action: SOL (Battery Idle)
+                            pv_surplus = max(0.0, gen - cons - b_use)
+                            pv_deficit = max(0.0, cons + b_use - gen)
+                            rev = pv_surplus * p_sell - pv_deficit * p_buy
+                            
+                            # Penalize SOC below limit
+                            if (cur_kwh / b_cap * 100) < h_min_soc: rev -= 10.0 
+                            
+                            new_rev = cur_rev + rev
+                            if new_rev > dp[h+1][si][nbi][0]:
+                                dp[h+1][si][nbi] = (new_rev, si, bi, ACT_SOL, 0.0)
+                            
+                            # Action: DISCHARGE (to home/grid)
+                            if si > 0:
+                                max_dis = min(max_p, cur_kwh)
+                                for steps in range(1, int(max_dis / ENERGY_STEP) + 1):
+                                    dis_kwh = steps * ENERGY_STEP
+                                    nsi = si - steps
+                                    p_ac = dis_kwh * eff
+                                    
+                                    to_grid = max(0.0, p_ac + gen - cons - b_use)
+                                    from_grid = max(0.0, cons + b_use - p_ac - gen)
+                                    
+                                    # Revenue: Sell energy - Cycle cost - Buying remaining deficit
+                                    rev = to_grid * p_sell - from_grid * p_buy - (dis_kwh * deg_cost)
+                                    if (nsi * ENERGY_STEP / b_cap * 100) < h_min_soc: rev -= 10.0
+                                    
+                                    new_rev = cur_rev + rev
+                                    if new_rev > dp[h+1][nsi][nbi][0]:
+                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_DIS, dis_kwh)
+
+                            # Action: PV_CHARGE (from surplus)
+                            if pv_surplus > 0.01 and si < energy_steps:
+                                max_chg = min(max_p, energy_steps * ENERGY_STEP - cur_kwh, pv_surplus / eff)
+                                for steps in range(1, int(max_chg / ENERGY_STEP) + 1):
+                                    chg_kwh = steps * ENERGY_STEP
+                                    nsi = si + steps
+                                    used_pv = chg_kwh / eff
+                                    
+                                    # Revenue: Sell remaining surplus - buying deficit (if any)
+                                    rev = max(0.0, pv_surplus - used_pv) * p_sell - pv_deficit * p_buy
+                                    # Bonus for storing PV energy (tie-breaker)
+                                    rev += 0.001 * chg_kwh
+                                    
+                                    new_rev = cur_rev + rev
+                                    if new_rev > dp[h+1][nsi][nbi][0]:
+                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_PV_CHARGE, chg_kwh)
+
+                            # Action: GRID_CHARGE (buy from grid)
+                            if si < energy_steps:
+                                max_gc = min(max_p, energy_steps * ENERGY_STEP - cur_kwh)
+                                for steps in range(1, int(max_gc / ENERGY_STEP) + 1):
+                                    chg_kwh = steps * ENERGY_STEP
+                                    nsi = si + steps
+                                    grid_buy = chg_kwh / eff
+                                    
+                                    # Revenue: Sell PV (if any) - Buy energy - Cycle cost - Buy home deficit
+                                    rev = pv_surplus * p_sell - (grid_buy + pv_deficit) * p_buy - (chg_kwh * deg_cost)
+                                    
+                                    new_rev = cur_rev + rev
+                                    if new_rev > dp[h+1][nsi][nbi][0]:
+                                        dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_GRID_CHARGE, chg_kwh)
+
+            # --- Find Best End State ---
+            best_val = -INF
+            best_state = (curr_si, curr_bi)
+            for si in range(energy_steps + 1):
+                for bi in range(BOILER_STEPS + 1):
+                    val, _, _, _, _ = dp[horizon][si][bi]
+                    # Terminal value: remaining energy value
+                    # We value remaining energy at average sell price (rough estimate)
+                    val += (si * ENERGY_STEP) * 0.4 
+                    if val > best_val:
+                        best_val = val
+                        best_state = (si, bi)
+
+            # --- Backtrack ---
+            plan = {}
+            formatted_plan = {}
+            curr_h_state = best_state
+            
+            results = []
+            for h in range(horizon, 0, -1):
+                si, bi = curr_h_state
+                entry = dp[h][si][bi]
+                _, psi, pbi, act, amt = entry
+                results.append((h-1, act, amt, si, bi))
+                curr_h_state = (psi, pbi)
+            
+            results.reverse()
+            
+            for h_idx, act, amt, si, bi in results:
+                abs_h = cur_hour + h_idx
+                h_rel = abs_h % 24
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 
-                plan[h_key] = {
-                    "mode": mode, "power_kw": p_bat_kw, "boiler": "ON" if b_on else "OFF",
-                    "target_soc": t_soc, "grid_net": round(g_net, 2), "profit": profit
-                }
+                mode = "Idle"
+                if act == ACT_SOL: mode = "sale_pv_no_bat" if forecast_gen.get(str(abs_h), 0) > 0.1 else "grid_only"
+                elif act == ACT_DIS: mode = "sale_bat"
+                elif act == ACT_PV_CHARGE: mode = "sale_pv"
+                elif act == ACT_GRID_CHARGE: mode = "buy"
                 
+                p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
+                p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
+                
+                soc = int(round((si * ENERGY_STEP) / b_cap * 100.0))
+                b_str = " | B: ON" if (bi > 0) else "" # Simplified boiler status
+                
+                plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 formatted_plan[h_key] = (
-                    f"{mode} | {p_bat_kw}kW{b_str} | SOC: {t_soc}% | "
-                    f"Pr: {round(p_buy, 2)}/{round(p_sell, 2)} | G: {round(g_net, 2)} | Prf: {profit}"
+                    f"{mode} | {round(amt, 2)}kW{b_str} | SOC: {soc}% | Pr: {round(p_buy, 2)}/{round(p_sell, 2)}"
                 )
-                curr_si, curr_bi = next_si, next_bi
-
-            start_entry = dp_table[0].get((int(round((curr_s_raw or 0.0) / 100.0 * b_cap / ENERGY_STEP)), curr_bi))
-            total_val = -start_entry[0] if start_entry else 0.0
 
             return {
                 "plan": plan, 
                 "formatted_plan": formatted_plan,
                 "debug": {
                     "calc_time": round(time.time()-t0, 2), 
-                    "horizon": horizon, 
-                    "future_peak": round(max_future_buy[0], 3),
-                    "total_path_value": round(total_val, 2),
-                    "avg_buy": round(sum(prices_buy.values())/len(prices_buy), 3) if prices_buy else 0,
-                    "energy_steps": energy_steps
+                    "horizon": horizon,
+                    "best_val": round(best_val, 2)
                 }
             }
+            
         except Exception as e:
             _LOGGER.error(f"DP Advice Error: {e}", exc_info=True)
             return {"error": str(e)}
-
-    def _map_mode(self, d_kwh, g_net, gen, p_sell, soc, floor) -> str:
-        if soc <= floor + 0.5 and d_kwh >= -0.05: return "bat_emergency"
-        if d_kwh < -0.1 and g_net > 0.1: return "buy"
-        if d_kwh > 0.1:
-            if g_net < -0.1: return "sale_bat"
-            return "bat_to_house"
-        if gen > 0.1:
-            if soc >= 99: return "sale_pv"
-            if d_kwh < -0.1: return "sale_pv"
-            return "sale_pv_no_bat"
-        if g_net > 0.1: return "grid_only"
-        return "sale_pv_no_bat"
 
     def _get_smart_gen_forecast(self, horizon) -> Dict[str, float]:
         res = {}
