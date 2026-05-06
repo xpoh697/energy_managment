@@ -197,7 +197,8 @@ class DPPlanner:
                 }
                 
                 formatted_plan[h_key] = (
-                    f"{mode} | {round(abs(p_ac), 2)}kW{b_str} | SOC: {t_soc}% | G: {round(g_net, 2)} | Prf: {profit}"
+                    f"{mode} | {round(abs(p_ac), 2)}kW{b_str} | SOC: {t_soc}% | "
+                    f"Pr: {round(p_buy, 2)}/{round(p_sell, 2)} | G: {round(g_net, 2)} | Prf: {profit}"
                 )
                 curr_si, curr_bi = next_si, next_bi
 
