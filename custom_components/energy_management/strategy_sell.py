@@ -446,11 +446,12 @@ class StrategySell(StrategyEngine):
                 real_p = float(trial_log.get(h_key, {}).get("p_bat", 0.0))
                 
                 if real_p > 0.1:
-                    # Accept!
-                    sell_commands[h_target] = test_p
+                    # v11.8.495: Store REALISTIC power from simulation
+                    sell_commands[h_target] = real_p
                     sim_log = trial_log
-                    if not is_solar_surplus:
-                        effective_budget_ac -= real_p
+                    # v11.8.492 logic: decrement budget for secondary peaks
+                    if not is_top_peak:
+                        effective_budget_ac -= (real_p / eff)
                     
                     floors_anchored = curr_floors
                     floors_sliding = curr_floors
