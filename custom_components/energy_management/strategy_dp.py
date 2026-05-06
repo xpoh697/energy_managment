@@ -23,8 +23,8 @@ from .utils import normalize_float, round_f
 _LOGGER = logging.getLogger(__name__)
 
 # --- DP Parameters ---
-ENERGY_STEP = 0.1          # 0.1 kWh precision
-BOILER_STEPS = 50          # 1 step = 1 degree (10 to 60)
+ENERGY_STEP = 0.2          # 0.2 kWh precision (5 steps per kWh)
+BOILER_STEPS = 10         # 1 step = 5 degrees (10 to 60)
 INF = 1e9                 
 
 # Action types
@@ -133,20 +133,17 @@ class DPPlanner:
                             if si > 0:
                                 max_dis = min(max_p, cur_kwh)
                                 min_dis_limit = float(self.manager.get_setting(CONF_MIN_SELL_POWER, 0.5))
-                                start_step = int(min_dis_limit / ENERGY_STEP)
-                                
-                                for steps in range(start_step, int(max_dis / ENERGY_STEP) + 1):
+                                # Optimized: skip steps, only check min and max and a few points in between
+                                for steps in [int(min_dis_limit / ENERGY_STEP), int(max_dis / ENERGY_STEP)]:
+                                    if steps < 1: continue
                                     dis_kwh = steps * ENERGY_STEP
                                     nsi = si - steps
+                                    if nsi < 0: continue
                                     p_ac = dis_kwh * eff
-                                    
                                     to_grid = max(0.0, p_ac + gen - cons - b_use)
                                     from_grid = max(0.0, cons + b_use - p_ac - gen)
-                                    
-                                    # Revenue: Sell energy - Cycle cost - Buying remaining deficit
                                     rev = to_grid * p_sell - from_grid * p_buy - (dis_kwh * deg_cost)
                                     if (nsi * ENERGY_STEP / b_cap * 100) < h_min_soc: rev -= 10.0
-                                    
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
                                         dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_DIS, dis_kwh, b_on)
@@ -154,16 +151,15 @@ class DPPlanner:
                             # Action: SELF_CONSUME (battery to home only, no grid export)
                             if si > 0 and (cons + b_use - gen) > 0.01:
                                 max_sc = min(max_p, cur_kwh, cons + b_use - gen)
-                                for steps in range(1, int(max_sc / ENERGY_STEP) + 1):
+                                # Optimized: just use max possible self-consume
+                                steps = int(max_sc / ENERGY_STEP)
+                                if steps >= 1:
                                     sc_kwh = steps * ENERGY_STEP
                                     nsi = si - steps
                                     p_ac = sc_kwh * eff
-                                    
                                     remaining_deficit = max(0.0, cons + b_use - gen - p_ac)
-                                    # No cycle cost for shallow self-consume (as per dp_engine.py)
                                     rev = -remaining_deficit * p_buy
                                     if (nsi * ENERGY_STEP / b_cap * 100) < h_min_soc: rev -= 10.0
-                                    
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
                                         dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_SELF_CONSUME, sc_kwh, b_on)
@@ -171,37 +167,32 @@ class DPPlanner:
                             # Action: PV_CHARGE (from surplus)
                             if pv_surplus > 0.01 and si < energy_steps:
                                 max_chg = min(max_p, energy_steps * ENERGY_STEP - cur_kwh, pv_surplus / eff)
-                                for steps in range(1, int(max_chg / ENERGY_STEP) + 1):
+                                # Optimized: just use max possible PV charge
+                                steps = int(max_chg / ENERGY_STEP)
+                                if steps >= 1:
                                     chg_kwh = steps * ENERGY_STEP
                                     nsi = si + steps
                                     used_pv = chg_kwh / eff
-                                    
-                                    # Revenue: Sell remaining surplus - buying deficit (if any)
                                     rev = max(0.0, pv_surplus - used_pv) * p_sell - pv_deficit * p_buy
-                                    # Bonus for storing PV energy in battery or boiler (tie-breaker)
                                     rev += 0.005 * chg_kwh
-                                    
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
                                         dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_PV_CHARGE, chg_kwh, b_on)
                                         
-                            # Additional Boiler logic: if b_on and we are in ACT_PV_CHARGE/SOL, 
-                            # we give a small bonus to prefer PV-heating over PV-export if boiler is not full
+                            # Additional Boiler logic bonus
                             if b_on and nbi > bi:
-                                # Small incentive to heat water with surplus
                                 dp[h+1][nsi][nbi] = (dp[h+1][nsi][nbi][0] + 0.01, *dp[h+1][nsi][nbi][1:])
 
                             # Action: GRID_CHARGE (buy from grid)
                             if si < energy_steps:
                                 max_gc = min(max_p, energy_steps * ENERGY_STEP - cur_kwh)
-                                for steps in range(1, int(max_gc / ENERGY_STEP) + 1):
+                                # Optimized: check max grid charge
+                                steps = int(max_gc / ENERGY_STEP)
+                                if steps >= 1:
                                     chg_kwh = steps * ENERGY_STEP
                                     nsi = si + steps
                                     grid_buy = chg_kwh / eff
-                                    
-                                    # Revenue: Sell PV (if any) - Buy energy - Cycle cost - Buy home deficit
                                     rev = pv_surplus * p_sell - (grid_buy + pv_deficit) * p_buy - (chg_kwh * deg_cost)
-                                    
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
                                         dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_GRID_CHARGE, chg_kwh, b_on)
