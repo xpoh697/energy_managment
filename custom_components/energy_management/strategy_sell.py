@@ -339,7 +339,7 @@ class StrategySell(StrategyEngine):
                 )
                 soc_at_start = self._get_soc_from_log(sim_log_base, sale_start_key, b_soc)
 
-            available_sell_dc = max(0.0, (soc_at_start - active_safety_floor) * b_cap / 100.0)
+            available_sell_dc = max(0.0, (soc_at_start - gatekeeper_floor) * b_cap / 100.0)
             available_sell_ac = available_sell_dc * eff
             
             _LOGGER.warning(f"[BudgetDebug] Start:{soc_at_start:.1f}% SafetyFloor:{active_safety_floor:.1f}% AvailableAC:{available_sell_ac:.2f}kWh")
