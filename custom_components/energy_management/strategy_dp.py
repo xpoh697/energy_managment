@@ -113,8 +113,8 @@ class DPPlanner:
                         # Possible actions
                         for b_on in ([True, False] if b_enabled else [False]):
                             b_use = b_power if b_on else 0.0
-                            # Boiler state transition (heat + losses 0.1kWh/h)
-                            next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.1 + b_use))
+                            # Boiler state transition (heat + cooling/usage 0.5kWh/h)
+                            next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.5 + b_use))
                             nbi = int(round(next_boi_kwh / b_capacity * BOILER_STEPS)) if b_enabled else 0
                             
                             # Action: SOL (Battery Idle)
