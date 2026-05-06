@@ -516,7 +516,7 @@ class StrategySell(StrategyEngine):
                 
                 # Diagnostics: Determine why we aren't selling at max_p
                 if real_p < p - 0.1:
-                    h_floor = floors.get(h, min_soc_val + soc_buffer)
+                    h_floor = floors_anchored.get(h, min_soc_val + soc_buffer)
                     if abs(sim_soc - user_limit) < 0.2:
                         limit_reason = "Лимит пользователя"
                     elif h_floor > min_soc_val + soc_buffer + 0.5:
