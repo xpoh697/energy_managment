@@ -135,18 +135,7 @@ class DPPlanner:
                                     else:
                                         cost = grid * p_sell
                                 
-                                # Sell Safety & Opportunity Cost
-                                if p_ac > 0.05:
-                                    current_val = p_buy if grid > -0.01 else p_sell
-                                    if current_val < (future_peak * 0.95):
-                                        cost += p_ac * (future_peak - current_val + 1.0)
-                                    if grid < -0.01 and abs(grid) < min_sell_p:
-                                        cost += 5.0
-
-                                # Micro-movement penalty
-                                if 0.01 < abs(p_ac) < 0.8:
-                                    cost += 1.0
-                                
+                                # v11.8.507: Trust the DP math. No artificial penalties for selling or moving.
                                 cost += abs(delta_bat) * (deg_cost + 0.02)
                                 if (next_kwh / b_cap * 100) < h_min_soc: cost += 2000.0
                                 
