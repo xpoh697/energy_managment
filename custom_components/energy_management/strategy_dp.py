@@ -177,12 +177,18 @@ class DPPlanner:
                                     
                                     # Revenue: Sell remaining surplus - buying deficit (if any)
                                     rev = max(0.0, pv_surplus - used_pv) * p_sell - pv_deficit * p_buy
-                                    # Bonus for storing PV energy (tie-breaker)
-                                    rev += 0.001 * chg_kwh
+                                    # Bonus for storing PV energy in battery or boiler (tie-breaker)
+                                    rev += 0.005 * chg_kwh
                                     
                                     new_rev = cur_rev + rev
                                     if new_rev > dp[h+1][nsi][nbi][0]:
                                         dp[h+1][nsi][nbi] = (new_rev, si, bi, ACT_PV_CHARGE, chg_kwh, b_on)
+                                        
+                            # Additional Boiler logic: if b_on and we are in ACT_PV_CHARGE/SOL, 
+                            # we give a small bonus to prefer PV-heating over PV-export if boiler is not full
+                            if b_on and nbi > bi:
+                                # Small incentive to heat water with surplus
+                                dp[h+1][nsi][nbi] = (dp[h+1][nsi][nbi][0] + 0.01, *dp[h+1][nsi][nbi][1:])
 
                             # Action: GRID_CHARGE (buy from grid)
                             if si < energy_steps:
@@ -202,12 +208,17 @@ class DPPlanner:
             # --- Find Best End State ---
             best_val = -INF
             best_state = (curr_si, curr_bi)
+            avg_p_buy = sum(prices_buy.values()) / len(prices_buy) if prices_buy else 0.5
+            
             for si in range(energy_steps + 1):
                 for bi in range(BOILER_STEPS + 1):
                     val, _, _, _, _, _ = dp[horizon][si][bi]
                     # Terminal value: remaining energy value
-                    # We value remaining energy at average sell price (rough estimate)
+                    # Battery energy is valued at ~sell price
                     val += (si * ENERGY_STEP) * 0.4 
+                    # v11.8.511: Boiler energy is valued at ~buy price (saved cost)
+                    val += (bi / float(BOILER_STEPS) * b_capacity) * avg_p_buy * 0.8
+                    
                     if val > best_val:
                         best_val = val
                         best_state = (si, bi)
