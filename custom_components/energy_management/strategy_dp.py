@@ -1,5 +1,6 @@
 import logging
 import time
+import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple
 
@@ -105,10 +106,10 @@ class DPPlanner:
                         best_val = INF
                         best_next = (si, bi)
                         
-                        # v11.8.505: Battery Discharge Limit (DC) is max_p.
-                        max_delta = max_p * 1.05 # 5% safety margin for stepping
-                        si_min = max(0, int((cur_kwh - max_delta) / ENERGY_STEP))
-                        si_max = min(energy_steps, int((cur_kwh + max_delta) / ENERGY_STEP))
+                        # v11.8.506: Strict Battery Discharge Limit (DC). No margins.
+                        max_delta = max_p * 1.0
+                        si_min = max(0, int(math.ceil((cur_kwh - max_delta) / ENERGY_STEP)))
+                        si_max = min(energy_steps, int(math.floor((cur_kwh + max_delta) / ENERGY_STEP)))
                         
                         for next_si in range(si_min, si_max + 1):
                             next_kwh = next_si * ENERGY_STEP
