@@ -434,8 +434,9 @@ class StrategySell(StrategyEngine):
                     else:
                         sell_commands[h] = 0.0
                     
-                    # Total budget depletion is Export + House load
-                    rem_budget -= (p_export + p_house) * duration
+                    # v11.8.568: Correct budget depletion (Export ONLY)
+                    # House load is already accounted for in active_safety_floor (Gatekeeper)
+                    rem_budget -= p_export * duration
                 
                 # 3. Simulation Check (TS 105)
                 _, trial_log, _ = self.run_soc_simulation(
