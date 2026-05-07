@@ -40,6 +40,7 @@ ACT_DIS = 1
 ACT_PV_CHARGE = 2
 ACT_GRID_CHARGE = 3
 ACT_SELF_CONSUME = 4
+ACT_PAID_IMPORT = 5
 
 class DPPlanner:
     def __init__(self, manager):
@@ -100,6 +101,7 @@ class DPPlanner:
             min_sell_p = float(self.manager.get_setting(CONF_MIN_SELL_PRICE, 0.01))
             max_p_chg = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 6.6))
             max_p_dis = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 6.6))
+            user_limit = float(self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
 
             # DP Tables: [hour][energy_idx][boiler_idx][arb_idx]
             # State: (revenue, prev_si, prev_bi, prev_ai, action_type, amount, boiler_on)
@@ -126,7 +128,7 @@ class DPPlanner:
                 h_abs = cur_hour + t_idx
                 h_rel = h_abs % 24
                 if 4 <= h_rel < 10:
-                    floors_sliding[t_idx] = emergency_soc + 1.0 # Turbo morning
+                    floors_sliding[t_idx] = min_soc + 1.0 # Turbo morning
                 else:
                     # Bridge to next sunrise
                     next_sr_abs = h_abs + 1
@@ -139,7 +141,7 @@ class DPPlanner:
                         h_bridge_kwh += max(0.0, l_v - g_v)
                     
                     # Convert house need to SOC % via efficiency
-                    survival_floor = (emergency_soc + soc_buffer) + (h_bridge_kwh / b_cap * 100.0 / eff_coeff)
+                    survival_floor = (min_soc + soc_buff) + (h_bridge_kwh / b_cap * 100.0 / eff)
                     floors_sliding[t_idx] = max(user_limit, survival_floor)
 
             def _update(nsi, nbi, nai, reward, act, amt, b_on_val, t_step, c_rev, si_orig, bi_orig, ai_orig):
@@ -149,7 +151,7 @@ class DPPlanner:
                 total_rev = c_rev + reward
                 
                 # Apply Penalty if NEXT state violates the survival floor for that hour
-                floor_soc = floors_sliding.get(t_step + 1, emergency_soc)
+                floor_soc = floors_sliding.get(t_step + 1, min_soc)
                 if (nsi * energy_step) < (floor_soc * b_cap / 100.0):
                     total_rev -= 1000.0 # Heavy penalty
                 
