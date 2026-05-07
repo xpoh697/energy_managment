@@ -90,6 +90,7 @@ class DPPlanner:
             forecast_gen = self._get_smart_gen_forecast(horizon)
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
             tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
+            tomorrow_gen = self._ensure_dict(self.manager.get_average_profile("generation_total", 7, (now.weekday() + 1) % 7))
             
             neg_inf = -1e9
             
@@ -134,7 +135,7 @@ class DPPlanner:
                     h_bridge_kwh = 0.0
                     for h_f in range(h_abs + 1, next_sr_abs):
                         l_v = float(normalize_float((avg_cons if h_f < 24 else tomorrow_cons).get(str(h_f % 24), 0.4)))
-                        g_v = float(normalize_float((prof_gen if h_f < 24 else tomorrow_gen).get(str(h_f % 24), 0.0)))
+                        g_v = float(normalize_float((forecast_gen if h_f < 24 else tomorrow_gen).get(str(h_f % 24), 0.0)))
                         h_bridge_kwh += max(0.0, l_v - g_v)
                     
                     # Convert house need to SOC % via efficiency

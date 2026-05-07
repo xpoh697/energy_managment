@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : czwartek, 7 maja 2026 20:08:33
+  Started : czwartek, 7 maja 2026 20:13:25
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -19,18 +19,18 @@
 	  *EXTRA File 		   31245	config_flow.cpython-314.pyc
 	  *EXTRA File 		    3119	const.cpython-314.pyc
 	  *EXTRA File 		    5891	number.cpython-314.pyc
-	  *EXTRA File 		  235159	sensor.cpython-314.pyc
+	  *EXTRA File 		  235111	sensor.cpython-314.pyc
 	  *EXTRA File 		    1653	strategy.cpython-314.pyc
 	  *EXTRA File 		  178925	strategy_base.cpython-314.pyc
 	  *EXTRA File 		   22080	strategy_buy.cpython-314.pyc
-	  *EXTRA File 		   23329	strategy_dp.cpython-314.pyc
+	  *EXTRA File 		   23462	strategy_dp.cpython-314.pyc
 	  *EXTRA File 		   36715	strategy_sell.cpython-314.pyc
 	  *EXTRA File 		    3254	switch.cpython-314.pyc
 	  *EXTRA File 		    3170	utils.cpython-314.pyc
 	  *EXTRA File 		    7767	__init__.cpython-314.pyc
 	    Newer     		    2685	const.py
 	    Newer     		     417	manifest.json
-	    Newer     		   19498	strategy_dp.py
+	    Newer     		   19629	strategy_dp.py
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
 
@@ -39,11 +39,11 @@
                Total    Copied   Skipped  Mismatch    FAILED    Extras
     Dirs :         3         0         3         0         0         1
    Files :        20         3        17         0         0        13
-   Bytes :    1.30 m    22.0 k    1.28 m         0         0   552.5 k
+   Bytes :    1.30 m    22.1 k    1.28 m         0         0   552.6 k
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :             125ÿ555 Bytes/sec.
-   Speed :               7,184 MegaBytes/min.
-   Ended : czwartek, 7 maja 2026 20:08:33
+   Speed :              95ÿ911 Bytes/sec.
+   Speed :               5,488 MegaBytes/min.
+   Ended : czwartek, 7 maja 2026 20:13:26
 
