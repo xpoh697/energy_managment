@@ -1,10 +1,10 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.0)
-- [x] Unified DP Engine rewrite based on dp_engine.py (v11.9.0).
-- [x] Negative price support (PAID_IMPORT).
-- [x] Full energy step loops for global optimization.
-- [x] Zero-cost self-consumption logic.
+## Current Status (v11.9.1)
+- [x] Unified DP Engine rewrite (v11.9.0).
+- [x] Smart Terminal Reserve (looking beyond 48h) (v11.9.1).
+- [x] Emergency SOC recovery bonus.
+- [x] High-precision 0.1kWh steps.
 
 ## Universal Rules (DO NOT BREAK)
 

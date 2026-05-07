@@ -69,6 +69,11 @@ class DPPlanner:
             soc_buff = float(self.manager.get_setting(CONF_SOC_BUFFER, 13.0))
             eff = getattr(self.manager, "last_eff_coeff", 0.96)
             
+            # v11.9.1: Smart Terminal Reserve (Looking beyond 48h horizon)
+            # We estimate how much we need to survive from the END of the horizon until the next generation window
+            horizon_end_dt = now + timedelta(hours=horizon)
+            min_end_usable = self._calc_survival_beyond_horizon(horizon_end_dt, b_cap)
+            
             # Boiler Params
             b_power = float(self.manager.get_setting(CONF_BOILER_POWER, 2.5))
             b_capacity = float(self.manager.get_setting(CONF_BOILER_CAPACITY, 8.5))
@@ -83,9 +88,6 @@ class DPPlanner:
             
             # DP Tables: [hour][energy_idx][boiler_idx]
             # State: (revenue, prev_si, prev_bi, action_type, amount, boiler_on)
-            dp = [[(neg_inf, -1, -1, 0, 0.0, False)] * (BOILER_STEPS + 1) for _ in range(energy_steps + 1)]
-            # We only need prev and current hour to save memory, but for backtracking we need the whole path.
-            # 48 * 170 * 10 is ~80k entries, fits in memory easily.
             full_dp = [[None] * (energy_steps + 1) for _ in range(horizon + 1)]
             for h in range(horizon + 1):
                 for si in range(energy_steps + 1):
@@ -131,20 +133,20 @@ class DPPlanner:
                             
                             def update_state(nsi: int, rwd: float, act: int, amt: float):
                                 total_rev = cur_rev + rwd
-                                # Survival Penalty
+                                # Survival Penalty (during the plan)
                                 if (nsi * energy_step / b_cap * 100) < h_min_soc:
-                                    total_rev -= 5.0 # Significant but not infinite penalty
+                                    total_rev -= 10.0 # Strict penalty for current survival
                                 
                                 if total_rev > full_dp[h+1][nsi][nbi][0]:
                                     full_dp[h+1][nsi][nbi] = (total_rev, si, bi, act, amt, b_on)
 
-                            # 1. ACT_SOL: Battery idle
-                            update_state(si, p_sell * pv_surplus - p_buy * pv_deficit, ACT_SOL, 0.0)
+                            # 1. ACT_SOL (Grid Only / Fallback): Battery idle
+                            # Tiny bonus for keeping battery idle in non-profitable hours
+                            update_state(si, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0)
                             
                             # 2. ACT_DIS: Discharge to grid
                             if p_sell > 0.01:
                                 max_exp = min(max_p_dis, usable_energy)
-                                # v11.9.0: Full loop as in dp_engine.py
                                 for ei in range(1, int(round(max_exp / energy_step)) + 1):
                                     exp = ei * energy_step
                                     nsi = si - ei
@@ -160,7 +162,7 @@ class DPPlanner:
                                     chg = ci * energy_step
                                     nsi = si + ci
                                     reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
-                                    reward += 1e-5 * chg # Tie-breaker bonus
+                                    reward += 1e-4 * chg # Prefer storing PV over idle
                                     update_state(nsi, reward, ACT_PV_CHARGE, chg)
 
                             # 4. ACT_GRID_CHARGE: Buy from grid
@@ -169,7 +171,9 @@ class DPPlanner:
                                 for ci in range(1, int(max_gc / energy_step) + 1):
                                     chg = ci * energy_step
                                     nsi = si + ci
-                                    reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
+                                    # v11.9.1: Added emergency bonus for very low SOC
+                                    em_bonus = 0.5 if (si * energy_step / b_cap * 100) < min_soc else 0.0
+                                    reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) + em_bonus
                                     update_state(nsi, reward, ACT_GRID_CHARGE, chg)
 
                             # 5. ACT_SELF_CONSUME: Battery to home ONLY
@@ -179,12 +183,10 @@ class DPPlanner:
                                     sc = sci * energy_step
                                     nsi = si - sci
                                     rem_def = max(0.0, pv_deficit - sc * eff)
-                                    # v11.9.0: No cycle cost for self-consume as per dp_engine.py
                                     update_state(nsi, -p_buy * rem_def, ACT_SELF_CONSUME, sc)
                                     
                             # 6. ACT_PAID_IMPORT: Negative price handling
                             if p_buy < 0 and (cons + b_use) > 0.01:
-                                # Battery untouched, solar curtailed
                                 update_state(si, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0)
 
             # --- Backtrack ---
@@ -192,11 +194,17 @@ class DPPlanner:
             best_state = (curr_si, curr_bi)
             avg_p_sell = sum(prices_sell.values()) / len(prices_sell) if prices_sell else 0.4
             
+            # v11.9.1: Enforce min_end_usable in backtrack selection
+            min_end_idx = int(round(min_end_usable / energy_step))
+            
             for si in range(energy_steps + 1):
+                # Penalty for ending below smart reserve
+                reserve_penalty = -20.0 if si < min_end_idx else 0.0
+                
                 for bi in range(BOILER_STEPS + 1):
                     val, _, _, _, _, _ = full_dp[horizon][si][bi]
-                    # Terminal value: Value the remaining energy at avg sell price
-                    val += (si * energy_step) * avg_p_sell * 0.9
+                    # Terminal value: remaining energy value
+                    val += (si * energy_step) * avg_p_sell * 0.9 + reserve_penalty
                     if val > best_val:
                         best_val = val
                         best_state = (si, bi)
@@ -244,6 +252,41 @@ class DPPlanner:
         except Exception as e:
             _LOGGER.error(f"DP Advice Error: {e}", exc_info=True)
             return {"error": str(e)}
+
+    def _calc_survival_beyond_horizon(self, end_dt: datetime, b_cap: float) -> float:
+        """Estimates the required energy to survive from horizon end until the next charge window."""
+        try:
+            # Look 18 hours beyond horizon
+            survival_hours = 18
+            reserve_kwh = 0.0
+            
+            # 1. Find next sunrise or cheap window
+            # For simplicity, we use the average consumption profile until 09:00 AM of the day after
+            # If horizon ends at 18:00 Tomorrow, we need to survive until 09:00 Day After Tomorrow.
+            
+            curr_dt = end_dt
+            for _ in range(survival_hours):
+                h_rel = curr_dt.hour
+                weekday = curr_dt.weekday()
+                
+                # Get consumption for this hour
+                profile = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, weekday))
+                cons = float(normalize_float(profile.get(str(h_rel), 0.4)))
+                reserve_kwh += cons
+                
+                # If it's morning (generation starts), we can stop
+                if 7 <= h_rel <= 9:
+                    break
+                
+                curr_dt += timedelta(hours=1)
+            
+            # Efficiency overhead
+            eff = getattr(self.manager, "last_eff_coeff", 0.96)
+            return round(reserve_kwh / eff, 2)
+            
+        except Exception as e:
+            _LOGGER.error(f"Error calculating terminal reserve: {e}")
+            return 2.0 # Fallback 2kWh
 
     def _get_smart_gen_forecast(self, horizon) -> Dict[str, float]:
         res = {}
