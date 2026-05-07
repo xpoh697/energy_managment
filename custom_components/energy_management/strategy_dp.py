@@ -280,6 +280,17 @@ class DPPlanner:
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)}"
 
+            # Prepare hourly forecast table for debug
+            f_table = {}
+            for h_idx in range(horizon):
+                abs_h = cur_hour + h_idx
+                h_key = f"{abs_h % 24:02d}:00" + (" (Next)" if abs_h >= 24 else "")
+                f_table[h_key] = {
+                    "gen": round(float(normalize_float(forecast_gen.get(str(abs_h), 0.0))), 2),
+                    "cons": round(float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(abs_h % 24), 0.4))), 2),
+                    "buy": round(prices_buy.get(str(abs_h), 0.0), 2)
+                }
+
             res_final = {
                 "plan": plan, 
                 "formatted_plan": formatted_plan,
@@ -290,7 +301,8 @@ class DPPlanner:
                     "energy_step": energy_step,
                     "raw_soc": curr_s_raw,
                     "soc_sensor": self.manager.battery_soc_sensor,
-                    "b_cap": b_cap
+                    "b_cap": b_cap,
+                    "forecast_table": f_table
                 }
             }
             self._cache = res_final
