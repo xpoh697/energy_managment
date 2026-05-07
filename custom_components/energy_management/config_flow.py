@@ -219,6 +219,19 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
         cp = self._user_input.get(CONF_CUSTOM_PERIOD)
         schema_dict[vol.Optional(CONF_CUSTOM_PERIOD, default=int(cp if cp is not None else 14))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=365))
 
+        # v11.9.11: Moved from investment to main settings
+        mp = self._user_input.get(CONF_BATTERY_MAX_POWER)
+        schema_dict[vol.Optional(CONF_BATTERY_MAX_POWER, default=float(mp if mp is not None else 6.6))] = vol.All(vol.Coerce(float), vol.Range(min=0.1, max=50.0))
+        
+        msp = self._user_input.get(CONF_MIN_SELL_PRICE)
+        schema_dict[vol.Optional(CONF_MIN_SELL_PRICE, default=float(msp if msp is not None else 0.01))] = vol.All(vol.Coerce(float), vol.Range(min=0.0))
+        
+        mah = self._user_input.get(CONF_MAX_ARBITRAGE_HOURS)
+        schema_dict[vol.Optional(CONF_MAX_ARBITRAGE_HOURS, default=int(mah if mah is not None else 24))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=24))
+        
+        mdk = self._user_input.get(CONF_MIN_DISCHARGE_KWH)
+        schema_dict[vol.Optional(CONF_MIN_DISCHARGE_KWH, default=float(mdk if mdk is not None else 0.1))] = vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0))
+
         return self.async_show_form(step_id="main_settings", data_schema=vol.Schema(schema_dict))
 
     async def async_step_deduct_settings_init(self, user_input=None):
@@ -306,10 +319,6 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_TOTAL_SYSTEM_COST, default=float(sc if sc is not None else 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(CONF_BATTERY_COST, default=float(bc if bc is not None else 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(CONF_BATTERY_RATED_CYCLES, default=int(br if br is not None else 6000)): vol.All(vol.Coerce(int), vol.Range(min=1)),
-            vol.Optional(CONF_BATTERY_MAX_POWER, default=float(mp if mp is not None else 6.6)): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=50.0)),
-            vol.Optional(CONF_MIN_SELL_PRICE, default=float(msp if msp is not None else 0.01)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-            vol.Optional(CONF_MAX_ARBITRAGE_HOURS, default=int(mah if mah is not None else 24)): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
-            vol.Optional(CONF_MIN_DISCHARGE_KWH, default=float(mdk if mdk is not None else 0.1)): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
             vol.Optional(CONF_ANOMALY_THRESHOLD, default=float(at if at is not None else 2.0)): vol.All(vol.Coerce(float), vol.Range(min=1.1, max=10.0)),
         })
         return self.async_show_form(step_id="investment_settings", data_schema=schema)

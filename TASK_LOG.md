@@ -1,6 +1,7 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.10)
+## Current Status (v11.9.11)
+- [x] Moved advanced battery settings to Main Configuration menu (v11.9.11).
 - [x] Fixed NameError: CONF_MAX_ARBITRAGE_HOURS in DP engine (v11.9.10).
 - [x] DP Engine: Dynamic Survival Floors (v11.9.9).
 - [x] Fixed Gatekeeper floor mismatch in simulation (v11.9.8).
