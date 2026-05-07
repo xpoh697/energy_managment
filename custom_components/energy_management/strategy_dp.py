@@ -131,20 +131,17 @@ class DPPlanner:
                             pv_surplus = max(0.0, gen - cons - b_use)
                             pv_deficit = max(0.0, cons + b_use - gen)
                             
-                            def update_state(nsi: int, rwd: float, act: int, amt: float):
-                                total_rev = cur_rev + rwd
-                                # Survival Penalty (during the plan)
-                                if (nsi * energy_step / b_cap * 100) < h_min_soc:
-                                    total_rev -= 10.0 # Strict penalty for current survival
-                                
+                            def update_state(nsi: int, rwd: float, act: int, amt: float, penalty: float = 0.0):
+                                total_rev = cur_rev + rwd - penalty
                                 if total_rev > full_dp[h+1][nsi][nbi][0]:
                                     full_dp[h+1][nsi][nbi] = (total_rev, si, bi, act, amt, b_on)
 
                             # 1. ACT_SOL (Grid Only / Fallback): Battery idle
-                            # Tiny bonus for keeping battery idle in non-profitable hours
-                            update_state(si, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0)
+                            # v11.9.2: Apply penalty only if we are below floor and not charging
+                            penalty = 5.0 if (si * energy_step / b_cap * 100) < h_min_soc else 0.0
+                            update_state(si, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0, penalty)
                             
-                            # 2. ACT_DIS: Discharge to grid
+                            # 2. ACT_DIS: Discharge to grid (Commercial Sale)
                             if p_sell > 0.01:
                                 max_exp = min(max_p_dis, usable_energy)
                                 for ei in range(1, int(round(max_exp / energy_step)) + 1):
@@ -153,25 +150,26 @@ class DPPlanner:
                                     to_grid = max(0.0, exp*eff + gen - cons - b_use)
                                     from_grid = max(0.0, cons + b_use - exp*eff - gen)
                                     reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
-                                    update_state(nsi, reward, ACT_DIS, exp)
+                                    # v11.9.2: STRICT penalty for grid sales below survival floor
+                                    dis_penalty = 10.0 if (nsi * energy_step / b_cap * 100) < h_min_soc else 0.0
+                                    update_state(nsi, reward, ACT_DIS, exp, dis_penalty)
                                     
-                            # 3. ACT_PV_CHARGE: Surplus to battery
+                            # 3. ACT_PV_CHARGE: Surplus to battery (Always good)
                             if pv_surplus > 0.01 and si < energy_steps:
                                 max_pvc = min(pv_surplus, (energy_steps - si) * energy_step, max_p_chg / eff)
                                 for ci in range(1, int(max_pvc / energy_step) + 1):
                                     chg = ci * energy_step
                                     nsi = si + ci
                                     reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
-                                    reward += 1e-4 * chg # Prefer storing PV over idle
+                                    reward += 1e-4 * chg
                                     update_state(nsi, reward, ACT_PV_CHARGE, chg)
 
-                            # 4. ACT_GRID_CHARGE: Buy from grid
+                            # 4. ACT_GRID_CHARGE: Buy from grid (Helps survival)
                             if si < energy_steps:
                                 max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
                                 for ci in range(1, int(max_gc / energy_step) + 1):
                                     chg = ci * energy_step
                                     nsi = si + ci
-                                    # v11.9.1: Added emergency bonus for very low SOC
                                     em_bonus = 0.5 if (si * energy_step / b_cap * 100) < min_soc else 0.0
                                     reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) + em_bonus
                                     update_state(nsi, reward, ACT_GRID_CHARGE, chg)
@@ -183,7 +181,9 @@ class DPPlanner:
                                     sc = sci * energy_step
                                     nsi = si - sci
                                     rem_def = max(0.0, pv_deficit - sc * eff)
-                                    update_state(nsi, -p_buy * rem_def, ACT_SELF_CONSUME, sc)
+                                    # v11.9.2: HOUSE consumption is NOT penalized unless it hits physical min_soc
+                                    sc_penalty = 10.0 if (nsi * energy_step / b_cap * 100) < min_soc else 0.0
+                                    update_state(nsi, -p_buy * rem_def, ACT_SELF_CONSUME, sc, sc_penalty)
                                     
                             # 6. ACT_PAID_IMPORT: Negative price handling
                             if p_buy < 0 and (cons + b_use) > 0.01:
