@@ -272,10 +272,12 @@ class DPPlanner:
                 
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
                 p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
-                gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
-                cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
-                
-                mode = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"][act]
+                # v11.9.29: Dynamic mode naming for better clarity
+                mode_map = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"]
+                mode = mode_map[act]
+                if act == ACT_IDLE:
+                    if gen > cons + 0.1: mode = "SOL"
+                    else: mode = "GRID"
                 
                 soc = int(round((si * energy_step) / b_cap * 100.0))
                 
