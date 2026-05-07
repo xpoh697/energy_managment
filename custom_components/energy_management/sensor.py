@@ -2998,14 +2998,16 @@ class InverterOperationModeSensor(SensorEntity):
         buy_p_cur = self.manager.get_price("buy", today_str, sim_h)
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
         # Target SOC Logic for diagnostics
+        # Target SOC Logic for diagnostics (v11.8.528: Corrected charge target)
         ai_discharge_limit = self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 100.0)
         ai_charge_limit = self.manager.get_setting(CONF_AI_CHARGE_LIMIT, 100.0)
         
-        active_target = ai_discharge_limit
+        # Use AI Charge Limit (target to fill) for peak preparation
+        active_target = ai_charge_limit
         if is_neg_buy:
             active_target = ai_charge_limit
         
-        # Determine if we are in "Buy" strategic mode (v11.4.47: removed duplicate assignment that overrode line 2835)
+        # Determine if we are in "Buy" strategic mode
         if is_buying_active:
             active_target = ai_charge_limit
 
@@ -3164,7 +3166,18 @@ class InverterOperationModeSensor(SensorEntity):
             is_low_for_morning = bool(morning_soc_proj < target_morning)
             
             hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
-            is_energy_low_for_evening = bool((is_preparing_for_peak or is_low_for_morning) and not hit_full_before)
+            
+            # v11.8.529: Arbitrage Protection Rule
+            # If (Peak Price - Degradation) > Current Price AND SOC at peak < 90%, we MUST charge.
+            is_profitable_to_save = False
+            if peak_start_abs is not None:
+                deg_cost = self.manager.get_setting("degradation_cost", 0.15)
+                peak_p = self.manager.get_price("sell", today_str, peak_start_abs % 24) or 0.0
+                cur_p = cur_price or 0.0
+                if (peak_p - deg_cost) > cur_p and (sim_soc if 'sim_soc' in locals() else batt_soc) < 90.0:
+                    is_profitable_to_save = True
+            
+            is_energy_low_for_evening = bool((is_preparing_for_peak or is_low_for_morning or is_profitable_to_save) and not hit_full_before)
             
             # Smart Deficit Throttling Awareness
             # v11.7.78: Throttling only applies to the CURRENT hour. 
