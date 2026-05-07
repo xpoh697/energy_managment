@@ -79,9 +79,8 @@ class DPPlanner:
             soc_buff = float(self.manager.get_setting(CONF_SOC_BUFFER, 13.0))
             eff = getattr(self.manager, "last_eff_coeff", 0.96)
             
-            # v11.9.39: Fixed terminal reserve (2.0 kWh) instead of dynamic 18h survival.
-            # This allows the engine to discharge more aggressively today.
-            min_end_usable = 2.0
+            # v11.9.40: Fixed terminal reserve (2.3 kWh ~= 13.5% SOC)
+            min_end_usable = 2.3
             
             # Boiler Params
             b_power = float(self.manager.get_setting(CONF_BOILER_POWER, 2.5))
