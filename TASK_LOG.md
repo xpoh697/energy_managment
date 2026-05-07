@@ -1,8 +1,8 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.5)
-- [x] Pure DP logic without heuristic penalties (v11.9.5).
-- [x] Smart Terminal Reserve (looking beyond 48h) (v11.9.1).
+## Current Status (v11.9.6)
+- [x] 4D DP engine with Max Arbitrage Hours support (v11.9.6).
+- [x] Advanced settings: Min Sell Price, Min Discharge Energy (v11.9.6).
 - [x] Emergency SOC recovery bonus.
 - [x] High-precision 0.1kWh steps.
 

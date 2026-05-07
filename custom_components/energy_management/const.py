@@ -1,5 +1,5 @@
 DOMAIN = "energy_management"
-VERSION = "v11.9.5"
+VERSION = "v11.9.6"
 VERSION_CODE = 1108564
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
@@ -66,3 +66,6 @@ CONF_BOILER_DEADLINE = "boiler_deadline"
 CONF_BOILER_MIN_TEMP = "boiler_min_temp"
 CONF_BOILER_TARGET_TEMP = "boiler_target_temp"
 CONF_MIN_SELL_POWER = "min_sell_power"
+CONF_MIN_SELL_PRICE = "min_sell_price"
+CONF_MAX_ARBITRAGE_HOURS = "max_arbitrage_hours"
+CONF_MIN_DISCHARGE_KWH = "min_discharge_kwh"

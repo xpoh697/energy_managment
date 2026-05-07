@@ -86,12 +86,19 @@ class DPPlanner:
             
             neg_inf = -1e9
             
-            # DP Tables: [hour][energy_idx][boiler_idx]
-            # State: (revenue, prev_si, prev_bi, action_type, amount, boiler_on)
+            # v11.9.6: Advanced Battery Settings
+            max_arb_h = int(self.manager.get_setting(CONF_MAX_ARBITRAGE_HOURS, 24))
+            min_dis_kwh = float(self.manager.get_setting(CONF_MIN_DISCHARGE_KWH, 0.1))
+            min_sell_p = float(self.manager.get_setting(CONF_MIN_SELL_PRICE, 0.01))
+            max_p_chg = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 6.6))
+            max_p_dis = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 6.6))
+
+            # DP Tables: [hour][energy_idx][boiler_idx][arb_idx]
+            # State: (revenue, prev_si, prev_bi, prev_ai, action_type, amount, boiler_on)
             full_dp = [[None] * (energy_steps + 1) for _ in range(horizon + 1)]
             for h in range(horizon + 1):
                 for si in range(energy_steps + 1):
-                    full_dp[h][si] = [(neg_inf, -1, -1, 0, 0.0, False)] * (BOILER_STEPS + 1)
+                    full_dp[h][si] = [[(neg_inf, -1, -1, -1, 0, 0.0, False)] * (max_arb_h + 1) for _ in range(BOILER_STEPS + 1)]
 
             # Initial state
             curr_si = min(energy_steps, max(0, int(round((curr_s_raw or 0.0) / 100.0 * b_cap / energy_step))))
@@ -100,9 +107,9 @@ class DPPlanner:
                 curr_bi = int(round(max(0, min(50, temp-10))/50.0 * BOILER_STEPS))
             else: curr_bi = 0
             
-            full_dp[0][curr_si][curr_bi] = (0.0, -1, -1, 0, 0.0, False)
+            full_dp[0][curr_si][curr_bi][0] = (0.0, -1, -1, -1, 0, 0.0, False)
 
-            # --- Forward Induction (Unified DP with Boiler) ---
+            # --- Forward Induction (Unified 4D DP) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
                 h_rel = abs_h % 24
@@ -113,100 +120,102 @@ class DPPlanner:
 
                 for si in range(energy_steps + 1):
                     for bi in range(BOILER_STEPS + 1):
-                        cur_rev, _, _, _, _, _ = full_dp[h][si][bi]
-                        if cur_rev <= neg_inf + 100: continue
-                        
-                        usable_energy = si * energy_step
-                        cur_boi_kwh = (bi / float(BOILER_STEPS)) * b_capacity if b_enabled else 0.0
-                        
-                        for b_on in ([True, False] if b_enabled else [False]):
-                            b_use = b_power if b_on else 0.0
-                            next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.4 + b_use))
-                            nbi = int(round(next_boi_kwh / b_capacity * BOILER_STEPS)) if b_enabled else 0
+                        for ai in range(max_arb_h + 1):
+                            cur_rev, _, _, _, _, _, _ = full_dp[h][si][bi][ai]
+                            if cur_rev <= neg_inf + 100: continue
                             
-                            pv_surplus = max(0.0, gen - cons - b_use)
-                            pv_deficit = max(0.0, cons + b_use - gen)
+                            usable_energy = si * energy_step
+                            cur_boi_kwh = (bi / float(BOILER_STEPS)) * b_capacity if b_enabled else 0.0
                             
-                            def _update(nsi: int, rwd: float, act: int, amt: float):
-                                total_rev = cur_rev + rwd
-                                if total_rev > full_dp[h+1][nsi][nbi][0]:
-                                    full_dp[h+1][nsi][nbi] = (total_rev, si, bi, act, amt, b_on)
+                            for b_on in ([True, False] if b_enabled else [False]):
+                                b_use = b_power if b_on else 0.0
+                                next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.4 + b_use))
+                                nbi = int(round(next_boi_kwh / b_capacity * BOILER_STEPS)) if b_enabled else 0
+                                
+                                pv_surplus = max(0.0, gen - cons - b_use)
+                                pv_deficit = max(0.0, cons + b_use - gen)
+                                
+                                def _update(nsi: int, nbi_target: int, nai: int, rwd: float, act: int, amt: float):
+                                    total_rev = cur_rev + rwd
+                                    if total_rev > full_dp[h+1][nsi][nbi_target][nai][0]:
+                                        full_dp[h+1][nsi][nbi_target][nai] = (total_rev, si, bi, ai, act, amt, b_on)
 
-                            # 1. ACT_SOL (Grid Only / Fallback): Battery idle
-                            _update(si, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0)
-                            
-                            # 2. ACT_DIS: Discharge to grid (Commercial Sale)
-                            if p_sell > 0.01:
-                                max_exp = min(max_p_dis, usable_energy)
-                                for ei in range(1, int(round(max_exp / energy_step)) + 1):
-                                    exp = ei * energy_step
-                                    nsi = si - ei
-                                    to_grid = max(0.0, exp*eff + gen - cons - b_use)
-                                    from_grid = max(0.0, cons + b_use - exp*eff - gen)
-                                    reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
-                                    _update(nsi, reward, ACT_DIS, exp)
-                                    
-                            # 3. ACT_PV_CHARGE: Surplus to battery (Always good)
-                            if pv_surplus > 0.01 and si < energy_steps:
-                                max_pvc = min(pv_surplus, (energy_steps - si) * energy_step, max_p_chg / eff)
-                                for ci in range(1, int(max_pvc / energy_step) + 1):
-                                    chg = ci * energy_step
-                                    nsi = si + ci
-                                    reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
-                                    reward += 1e-4 * chg
-                                    _update(nsi, reward, ACT_PV_CHARGE, chg)
+                                # 1. ACT_SOL: Battery idle
+                                _update(si, nbi, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0)
+                                
+                                # 2. ACT_DIS: Discharge to grid (Commercial Sale)
+                                # v11.9.6: Check min sell price, max arbitrage hours, and min discharge kWh
+                                if p_sell > min_sell_p and ai < max_arb_h:
+                                    max_exp = min(max_p_dis, usable_energy)
+                                    for ei in range(1, int(round(max_exp / energy_step)) + 1):
+                                        exp = ei * energy_step
+                                        # v11.9.6: Check minimum discharge energy
+                                        if exp < min_dis_kwh: continue
+                                        
+                                        nsi = si - ei
+                                        to_grid = max(0.0, exp*eff + gen - cons - b_use)
+                                        from_grid = max(0.0, cons + b_use - exp*eff - gen)
+                                        reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
+                                        # Increment arbitrage hour counter
+                                        _update(nsi, nbi, ai + 1, reward, ACT_DIS, exp)
+                                        
+                                # 3. ACT_PV_CHARGE: Surplus to battery
+                                if pv_surplus > 0.01 and si < energy_steps:
+                                    max_pvc = min(pv_surplus, (energy_steps - si) * energy_step, max_p_chg / eff)
+                                    for ci in range(1, int(max_pvc / energy_step) + 1):
+                                        chg = ci * energy_step
+                                        nsi = si + ci
+                                        reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
+                                        reward += 1e-4 * chg
+                                        _update(nsi, nbi, ai, reward, ACT_PV_CHARGE, chg)
 
-                            # 4. ACT_GRID_CHARGE: Buy from grid
-                            if si < energy_steps:
-                                max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
-                                for ci in range(1, int(max_gc / energy_step) + 1):
-                                    chg = ci * energy_step
-                                    nsi = si + ci
-                                    reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
-                                    _update(nsi, reward, ACT_GRID_CHARGE, chg)
+                                # 4. ACT_GRID_CHARGE: Buy from grid
+                                if si < energy_steps:
+                                    max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
+                                    for ci in range(1, int(max_gc / energy_step) + 1):
+                                        chg = ci * energy_step
+                                        nsi = si + ci
+                                        reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
+                                        _update(nsi, nbi, ai, reward, ACT_GRID_CHARGE, chg)
 
-                            # 5. ACT_SELF_CONSUME: Battery to home ONLY
-                            if pv_deficit > 0.01 and si > 0:
-                                max_sc = min(usable_energy, pv_deficit / eff)
-                                for sci in range(1, int(round(max_sc / energy_step)) + 1):
-                                    sc = sci * energy_step
-                                    nsi = si - sci
-                                    rem_def = max(0.0, pv_deficit - sc * eff)
-                                    _update(nsi, -p_buy * rem_def, ACT_SELF_CONSUME, sc)
-                                    
-                            # 6. ACT_PAID_IMPORT: Negative price handling
-                            if p_buy < 0 and (cons + b_use) > 0.01:
-                                _update(si, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0)
+                                # 5. ACT_SELF_CONSUME: Battery to home ONLY
+                                if pv_deficit > 0.01 and si > 0:
+                                    max_sc = min(usable_energy, pv_deficit / eff)
+                                    for sci in range(1, int(round(max_sc / energy_step)) + 1):
+                                        sc = sci * energy_step
+                                        nsi = si - sci
+                                        rem_def = max(0.0, pv_deficit - sc * eff)
+                                        _update(nsi, nbi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc)
+                                        
+                                # 6. ACT_PAID_IMPORT: Negative price handling
+                                if p_buy < 0 and (cons + b_use) > 0.01:
+                                    _update(si, nbi, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0)
 
             # --- Backtrack ---
             best_val = neg_inf
-            best_state = (curr_si, curr_bi)
+            best_state = (curr_si, curr_bi, 0)
             avg_p_sell = sum(prices_sell.values()) / len(prices_sell) if prices_sell else 0.4
-            
-            # v11.9.1: Enforce min_end_usable in backtrack selection
             min_end_idx = int(round(min_end_usable / energy_step))
             
             for si in range(energy_steps + 1):
-                # Penalty for ending below smart reserve
                 reserve_penalty = -20.0 if si < min_end_idx else 0.0
-                
                 for bi in range(BOILER_STEPS + 1):
-                    val, _, _, _, _, _ = full_dp[horizon][si][bi]
-                    # Terminal value: remaining energy value
-                    val += (si * energy_step) * avg_p_sell * 0.9 + reserve_penalty
-                    if val > best_val:
-                        best_val = val
-                        best_state = (si, bi)
+                    for ai in range(max_arb_h + 1):
+                        val, _, _, _, _, _, _ = full_dp[horizon][si][bi][ai]
+                        val += (si * energy_step) * avg_p_sell * 0.9 + reserve_penalty
+                        if val > best_val:
+                            best_val = val
+                            best_state = (si, bi, ai)
 
             plan, formatted_plan = {}, {}
             curr_h_state = best_state
             results = []
             for h in range(horizon, 0, -1):
-                si, bi = curr_h_state
-                entry = full_dp[h][si][bi]
-                _, psi, pbi, act, amt, b_on = entry
+                si, bi, ai = curr_h_state
+                entry = full_dp[h][si][bi][ai]
+                _, psi, pbi, pai, act, amt, b_on = entry
                 results.append((h-1, act, amt, si, bi, b_on))
-                curr_h_state = (psi, pbi)
+                curr_h_state = (psi, pbi, pai)
             
             results.reverse()
             for h_idx, act, amt, si, bi, b_on in results:
