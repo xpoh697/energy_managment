@@ -201,8 +201,9 @@ class DPPlanner:
                                 ci = int(round(chg / energy_step))
                                 if ci > 0:
                                     nsi = si + ci
+                                    # v11.9.27: Significant bonus for solar (0.3) to prioritize storing free energy
                                     reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
-                                    reward += 1e-4 * chg
+                                    reward += 0.3 * chg 
                                     _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 4. ACT_GRID_CHARGE: Buy from grid (Keep loop for precision)
@@ -211,7 +212,8 @@ class DPPlanner:
                             for ci in range(1, int(max_gc / energy_step) + 1):
                                 chg = ci * energy_step
                                 nsi = si + ci
-                                reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
+                                # v11.9.27: Small penalty (0.05) to grid charge to avoid filling 100% if solar expected
+                                reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) - (0.05 * chg)
                                 _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 5. ACT_SELF_CONSUME: Battery to home ONLY (v11.9.24: Single step optimization)
