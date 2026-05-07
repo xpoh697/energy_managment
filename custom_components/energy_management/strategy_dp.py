@@ -232,9 +232,10 @@ class DPPlanner:
                             _update(si, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0, h, cur_rev, si, ai)
 
             # --- Backtrack ---
-            # v11.9.32: Terminal value is strictly SELL price.
-            # This prevents "stockpiling" energy from grid just to have a full battery.
-            terminal_val_kwh = min_sell_p
+            # v11.9.36: FINAL SYNC with original optimizer.py (line 875)
+            # terminal_value_per_kwh = max(self.min_sell_price, global_min_buy_price)
+            min_future_buy = min(prices_buy.values()) if prices_buy else 0.5
+            terminal_val_kwh = max(min_sell_p, min_future_buy)
             
             best_val = neg_inf
             best_state = (curr_si, 0)
