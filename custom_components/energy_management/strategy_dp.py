@@ -231,11 +231,17 @@ class DPPlanner:
                         if p_buy < 0 and (cons + b_use) > 0.01:
                             _update(si, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0, h, cur_rev, si, ai)
 
-            # --- Backtrack ---
-            # v11.9.36: FINAL SYNC with original optimizer.py (line 875)
-            # terminal_value_per_kwh = max(self.min_sell_price, global_min_buy_price)
+            # v11.9.38: Debug info for constants and precise terminal value
             min_future_buy = min(prices_buy.values()) if prices_buy else 0.5
             terminal_val_kwh = max(min_sell_p, min_future_buy)
+            
+            self.manager.data["calculation_debug"]["dp_constants"] = {
+                "terminal_val": round(terminal_val_kwh, 4),
+                "min_future_buy": round(min_future_buy, 4),
+                "min_sell_p": round(min_sell_p, 4),
+                "cycle_cost": round(cycle_cost, 4),
+                "horizon_h": horizon
+            }
             
             best_val = neg_inf
             best_state = (curr_si, 0)
