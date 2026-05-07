@@ -219,19 +219,6 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
         cp = self._user_input.get(CONF_CUSTOM_PERIOD)
         schema_dict[vol.Optional(CONF_CUSTOM_PERIOD, default=int(cp if cp is not None else 14))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=365))
 
-        # v11.9.11: Moved from investment to main settings
-        mp = self._user_input.get(CONF_BATTERY_MAX_POWER)
-        schema_dict[vol.Optional(CONF_BATTERY_MAX_POWER, default=float(mp if mp is not None else 6.6))] = vol.All(vol.Coerce(float), vol.Range(min=0.1, max=50.0))
-        
-        msp = self._user_input.get(CONF_MIN_SELL_PRICE)
-        schema_dict[vol.Optional(CONF_MIN_SELL_PRICE, default=float(msp if msp is not None else 0.01))] = vol.All(vol.Coerce(float), vol.Range(min=0.0))
-        
-        mah = self._user_input.get(CONF_MAX_ARBITRAGE_HOURS)
-        schema_dict[vol.Optional(CONF_MAX_ARBITRAGE_HOURS, default=int(mah if mah is not None else 24))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=24))
-        
-        mdk = self._user_input.get(CONF_MIN_DISCHARGE_KWH)
-        schema_dict[vol.Optional(CONF_MIN_DISCHARGE_KWH, default=float(mdk if mdk is not None else 0.1))] = vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0))
-
         return self.async_show_form(step_id="main_settings", data_schema=vol.Schema(schema_dict))
 
     async def async_step_deduct_settings_init(self, user_input=None):
@@ -297,6 +284,12 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_BOILER_DEADLINE, default=int(bd if bd is not None else 18)): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
             vol.Optional(CONF_MIN_SELL_POWER, default=float(self._user_input.get(CONF_MIN_SELL_POWER, 0.5))): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
             vol.Optional(CONF_BOILER_TEMP_SENSOR, default=bs if bs and bs != "undefined" else vol.UNDEFINED): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+            
+            # v11.9.12: Integrated DP Strategy Limits
+            vol.Optional(CONF_BATTERY_MAX_POWER, default=float(self._user_input.get(CONF_BATTERY_MAX_POWER, 6.6))): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=50.0)),
+            vol.Optional(CONF_MIN_SELL_PRICE, default=float(self._user_input.get(CONF_MIN_SELL_PRICE, 0.01))): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+            vol.Optional(CONF_MAX_ARBITRAGE_HOURS, default=int(self._user_input.get(CONF_MAX_ARBITRAGE_HOURS, 24))): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
+            vol.Optional(CONF_MIN_DISCHARGE_KWH, default=float(self._user_input.get(CONF_MIN_DISCHARGE_KWH, 0.1))): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
         })
         return self.async_show_form(step_id="boiler_settings", data_schema=schema)
 
