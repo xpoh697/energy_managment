@@ -184,50 +184,50 @@ class DPPlanner:
                         # 1. ACT_SOL
                         _update(si, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0, h, cur_rev, si, ai)
                                 
-                                # 2. ACT_DIS
-                                if p_sell > min_sell_p and ai < max_arb_h:
-                                    max_exp = min(max_p_dis, usable_energy)
-                                    for ei in range(1, int(round(max_exp / energy_step)) + 1):
-                                        exp = ei * energy_step
-                                        if exp < min_dis_kwh: continue
-                                        
-                                        nsi = si - ei
-                                        to_grid = max(0.0, exp*eff + gen - cons - b_use)
-                                        from_grid = max(0.0, cons + b_use - exp*eff - gen)
-                                        reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
-                                        _update(nsi, ai + 1, reward, ACT_DIS, exp, h, cur_rev, si, ai)
-                                        
-                                # 3. ACT_PV_CHARGE: Surplus to battery
-                                if pv_surplus > 0.01 and si < energy_steps:
-                                    max_pvc = min(pv_surplus, (energy_steps - si) * energy_step, max_p_chg / eff)
-                                    for ci in range(1, int(max_pvc / energy_step) + 1):
-                                        chg = ci * energy_step
-                                        nsi = si + ci
-                                        reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
-                                        reward += 1e-4 * chg
-                                        _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
+                        # 2. ACT_DIS
+                        if p_sell > min_sell_p and ai < max_arb_h:
+                            max_exp = min(max_p_dis, usable_energy)
+                            for ei in range(1, int(round(max_exp / energy_step)) + 1):
+                                exp = ei * energy_step
+                                if exp < min_dis_kwh: continue
+                                
+                                nsi = si - ei
+                                to_grid = max(0.0, exp*eff + gen - cons - b_use)
+                                from_grid = max(0.0, cons + b_use - exp*eff - gen)
+                                reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
+                                _update(nsi, ai + 1, reward, ACT_DIS, exp, h, cur_rev, si, ai)
+                                
+                        # 3. ACT_PV_CHARGE: Surplus to battery
+                        if pv_surplus > 0.01 and si < energy_steps:
+                            max_pvc = min(pv_surplus, (energy_steps - si) * energy_step, max_p_chg / eff)
+                            for ci in range(1, int(max_pvc / energy_step) + 1):
+                                chg = ci * energy_step
+                                nsi = si + ci
+                                reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
+                                reward += 1e-4 * chg
+                                _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
  
-                                # 4. ACT_GRID_CHARGE: Buy from grid
-                                if si < energy_steps:
-                                    max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
-                                    for ci in range(1, int(max_gc / energy_step) + 1):
-                                        chg = ci * energy_step
-                                        nsi = si + ci
-                                        reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
-                                        _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
+                        # 4. ACT_GRID_CHARGE: Buy from grid
+                        if si < energy_steps:
+                            max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
+                            for ci in range(1, int(max_gc / energy_step) + 1):
+                                chg = ci * energy_step
+                                nsi = si + ci
+                                reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
+                                _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
  
-                                # 5. ACT_SELF_CONSUME: Battery to home ONLY
-                                if pv_deficit > 0.01 and si > 0:
-                                    max_sc = min(usable_energy, pv_deficit / eff)
-                                    for sci in range(1, int(round(max_sc / energy_step)) + 1):
-                                        sc = sci * energy_step
-                                        nsi = si - sci
-                                        rem_def = max(0.0, pv_deficit - sc * eff)
-                                        _update(nsi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
-                                        
-                                # 6. ACT_PAID_IMPORT: Negative price handling
-                                if p_buy < 0 and (cons + b_use) > 0.01:
-                                    _update(si, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0, h, cur_rev, si, ai)
+                        # 5. ACT_SELF_CONSUME: Battery to home ONLY
+                        if pv_deficit > 0.01 and si > 0:
+                            max_sc = min(usable_energy, pv_deficit / eff)
+                            for sci in range(1, int(round(max_sc / energy_step)) + 1):
+                                sc = sci * energy_step
+                                nsi = si - sci
+                                rem_def = max(0.0, pv_deficit - sc * eff)
+                                _update(nsi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
+                                
+                        # 6. ACT_PAID_IMPORT: Negative price handling
+                        if p_buy < 0 and (cons + b_use) > 0.01:
+                            _update(si, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0, h, cur_rev, si, ai)
 
             # --- Backtrack ---
             # v11.9.7: Use "Replacement Cost" logic for terminal value (inspired by author's engine)
