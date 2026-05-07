@@ -201,8 +201,8 @@ class DPPlanner:
                                 ci = int(round(chg / energy_step))
                                 if ci > 0:
                                     nsi = si + ci
-                                    # v11.9.33: Solar is TRULY FREE (0 cost). 
-                                    reward = p_sell * pv_surplus - p_buy * pv_deficit
+                                    # v11.9.34: Sync with dp_engine.py (opportunity cost back)
+                                    reward = p_sell * max(0.0, pv_surplus - chg/eff) - p_buy * pv_deficit
                                     _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 4. ACT_GRID_CHARGE: Buy from grid (Keep loop for precision)
@@ -211,8 +211,7 @@ class DPPlanner:
                             for ci in range(1, int(max_gc / energy_step) + 1):
                                 chg = ci * energy_step
                                 nsi = si + ci
-                                # v11.9.32: Only buy if we expect to save money later. 
-                                # Grid charging always costs price + wear.
+                                # v11.9.34: Sync with dp_engine.py
                                 reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
                                 _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
  
@@ -225,8 +224,8 @@ class DPPlanner:
                                 if sci > 0:
                                     nsi = si - sci
                                     rem_def = max(0.0, pv_deficit - sc * eff)
-                                    # v11.9.32: Using battery saves us p_buy
-                                    _update(nsi, ai, -p_buy * rem_def - (cycle_cost * sc), ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
+                                    # v11.9.34: CRITICAL SYNC - NO CYCLE COST for self-consume!
+                                    _update(nsi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
                                 
                         # 6. ACT_PAID_IMPORT: Negative price handling
                         if p_buy < 0 and (cons + b_use) > 0.01:
