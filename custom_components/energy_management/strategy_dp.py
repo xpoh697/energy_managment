@@ -30,8 +30,8 @@ from .utils import normalize_float, round_f
 _LOGGER = logging.getLogger(__name__)
 
 # --- DP Parameters ---
-ENERGY_STEP = 0.2          # 0.2 kWh precision (5 steps per kWh)
-BOILER_STEPS = 10         # 1 step = 5 degrees (10 to 60)
+ENERGY_STEP = 0.5          # 0.5 kWh precision (Reduced from 0.2 for speed)
+BOILER_STEPS = 5           # 1 step = 10 degrees (Reduced from 10 for speed)
 INF = 1e9                 
 
 # Action types
@@ -45,9 +45,15 @@ ACT_PAID_IMPORT = 5
 class DPPlanner:
     def __init__(self, manager):
         self.manager = manager
+        self._cache = {}
+        self._last_run = 0
         
     def get_dp_advice(self) -> Dict[str, Any]:
         t0 = time.time()
+        # v11.9.18: Performance Cache (5 minutes)
+        if t0 - self._last_run < 300 and self._cache:
+            return self._cache
+
         try:
             now = datetime.now()
             cur_hour = now.hour
@@ -68,8 +74,8 @@ class DPPlanner:
             curr_s_raw, b_cap_raw, _ = self.manager.get_battery_state()
             b_cap = float(b_cap_raw or 17.0)
             
-            # v11.9.0: Step resolution improvement
-            energy_step = 0.2 if b_cap > 15 else 0.1
+            # v11.9.0: Step resolution improvement (v11.9.18: Coarsened for speed)
+            energy_step = 0.5 if b_cap > 10 else 0.2
             energy_steps = int(round(b_cap / energy_step))
             
             cycle_cost = self._get_deg_cost(b_cap)
@@ -288,7 +294,7 @@ class DPPlanner:
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW{b_indicator} | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)}"
 
-            return {
+            res_final = {
                 "plan": plan, 
                 "formatted_plan": formatted_plan,
                 "debug": {
@@ -298,6 +304,9 @@ class DPPlanner:
                     "energy_step": energy_step
                 }
             }
+            self._cache = res_final
+            self._last_run = t0
+            return res_final
         except Exception as e:
             _LOGGER.error(f"DP Advice Error: {e}", exc_info=True)
             return {"error": str(e)}

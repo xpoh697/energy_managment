@@ -4244,8 +4244,7 @@ class EnergyDPAdviceSensor(SensorEntity):
     def _update_advice_threaded(self):
         """Threaded DP computation to avoid blocking HA loop."""
         try:
-            planner = DPPlanner(self.manager)
-            res = planner.get_dp_advice()
+            res = self.planner.get_dp_advice()
             self._advice = res
             if self.hass:
                 self.hass.add_job(self.async_write_ha_state)
