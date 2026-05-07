@@ -669,7 +669,6 @@ class StrategySell(StrategyEngine):
                 "start_soc": round_f(soc_at_start, 1),
                 "gatekeeper_floor": round_f(gatekeeper, 1) if not is_turbo_win else "Turbo",
                 "active_safety_floor": round_f(active_safety_floor, 1),
-                "survival_target_sunrise": round_f(emergency_soc + 2.0, 1),
                 "available_ac": round_f(available_sell_ac, 2),
                 "limit_reason": limit_reason or "None",
                 "next_peak": f"{target_hours[0] % 24:02d}:00" if target_hours else "None",
