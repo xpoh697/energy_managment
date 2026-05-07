@@ -30,8 +30,8 @@ from .utils import normalize_float, round_f
 _LOGGER = logging.getLogger(__name__)
 
 # --- DP Parameters ---
-ENERGY_STEP = 0.5          # 0.5 kWh precision (Reduced from 0.2 for speed)
-BOILER_STEPS = 5           # 1 step = 10 degrees (Reduced from 10 for speed)
+ENERGY_STEP = 0.1          # 0.1 kWh precision (Restored as per user request)
+BOILER_STEPS = 0           # Disabled for now
 INF = 1e9                 
 
 # Action types
@@ -74,8 +74,8 @@ class DPPlanner:
             curr_s_raw, b_cap_raw, _ = self.manager.get_battery_state()
             b_cap = float(b_cap_raw or 17.0)
             
-            # v11.9.0: Step resolution improvement (v11.9.18: Coarsened for speed)
-            energy_step = 0.5 if b_cap > 10 else 0.2
+            # v11.9.0: Step resolution improvement (v11.9.19: Fixed at 0.1)
+            energy_step = 0.1
             energy_steps = int(round(b_cap / energy_step))
             
             cycle_cost = self._get_deg_cost(b_cap)
@@ -109,21 +109,16 @@ class DPPlanner:
             max_p_dis = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 6.6))
             user_limit = float(self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
 
-            # DP Tables: [hour][energy_idx][boiler_idx][arb_idx]
-            # State: (revenue, prev_si, prev_bi, prev_ai, action_type, amount, boiler_on)
+            # DP Tables: [hour][energy_idx][arb_idx] (v11.9.19: Removed boiler dim)
+            # State: (revenue, prev_si, prev_ai, action_type, amount)
             full_dp = [[None] * (energy_steps + 1) for _ in range(horizon + 1)]
             for h in range(horizon + 1):
                 for si in range(energy_steps + 1):
-                    full_dp[h][si] = [[(neg_inf, -1, -1, -1, 0, 0.0, False)] * (max_arb_h + 1) for _ in range(BOILER_STEPS + 1)]
+                    full_dp[h][si] = [(neg_inf, -1, -1, 0, 0.0)] * (max_arb_h + 1)
 
             # Initial state
             curr_si = min(energy_steps, max(0, int(round((curr_s_raw or 0.0) / 100.0 * b_cap / energy_step))))
-            if b_enabled:
-                temp = float(self.manager.get_sensor_float(temp_s) or 20.0) if temp_s else 30.0
-                curr_bi = int(round(max(0, min(50, temp-10))/50.0 * BOILER_STEPS))
-            else: curr_bi = 0
-            
-            full_dp[0][curr_si][curr_bi][0] = (0.0, -1, -1, -1, 0, 0.0, False)
+            full_dp[0][curr_si][0] = (0.0, -1, -1, 0, 0.0)
             
             # v11.9.14: Define sunrise hour for floor calculation
             sunrise_h = int(float(self.manager.get_setting("sunrise_h", 8.0)))
@@ -150,7 +145,7 @@ class DPPlanner:
                     survival_floor = (min_soc + soc_buff) + (h_bridge_kwh / b_cap * 100.0 / eff)
                     floors_sliding[t_idx] = max(user_limit, survival_floor)
 
-            def _update(nsi, nbi, nai, reward, act, amt, b_on_val, t_step, c_rev, si_orig, bi_orig, ai_orig):
+            def _update(nsi, nai, reward, act, amt, t_step, c_rev, si_orig, ai_orig):
                 """Helper to update state transitions with Survival Floor Penalty (v11.9.9)"""
                 if nsi < 0 or nsi > energy_steps: return
                 
@@ -161,8 +156,8 @@ class DPPlanner:
                 if (nsi * energy_step) < (floor_soc * b_cap / 100.0):
                     total_rev -= 1000.0 # Heavy penalty
                 
-                if total_rev > full_dp[t_step + 1][nsi][nbi][nai][0]:
-                    full_dp[t_step + 1][nsi][nbi][nai] = (total_rev, si_orig, bi_orig, ai_orig, act, amt, b_on_val)
+                if total_rev > full_dp[t_step + 1][nsi][nai][0]:
+                    full_dp[t_step + 1][nsi][nai] = (total_rev, si_orig, ai_orig, act, amt)
 
             # --- Forward Induction (Unified 4D DP) ---
             for h in range(horizon):
@@ -174,39 +169,33 @@ class DPPlanner:
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
 
                 for si in range(energy_steps + 1):
-                    for bi in range(BOILER_STEPS + 1):
-                        for ai in range(max_arb_h + 1):
-                            cur_rev, _, _, _, _, _, _ = full_dp[h][si][bi][ai]
-                            if cur_rev <= neg_inf + 100: continue
-                            
-                            usable_energy = si * energy_step
-                            cur_boi_kwh = (bi / float(BOILER_STEPS)) * b_capacity if b_enabled else 0.0
-                            
-                            for b_on in ([True, False] if b_enabled else [False]):
-                                b_use = b_power if b_on else 0.0
-                                next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.4 + b_use))
-                                nbi = int(round(next_boi_kwh / b_capacity * BOILER_STEPS)) if b_enabled else 0
-                                
-                                pv_surplus = max(0.0, gen - cons - b_use)
-                                pv_deficit = max(0.0, cons + b_use - gen)
-                                
-                                # 1. ACT_SOL
-                                _update(si, nbi, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0, b_on, h, cur_rev, si, bi, ai)
+                    for ai in range(max_arb_h + 1):
+                        cur_rev, _, _, _, _ = full_dp[h][si][ai]
+                        if cur_rev <= neg_inf + 100: continue
+                        
+                        usable_energy = si * energy_step
+                        
+                        # Boiler is handled statically now (if enabled)
+                        b_use = b_power if b_enabled else 0.0
+                        
+                        pv_surplus = max(0.0, gen - cons - b_use)
+                        pv_deficit = max(0.0, cons + b_use - gen)
+                        
+                        # 1. ACT_SOL
+                        _update(si, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0, h, cur_rev, si, ai)
                                 
                                 # 2. ACT_DIS
                                 if p_sell > min_sell_p and ai < max_arb_h:
                                     max_exp = min(max_p_dis, usable_energy)
                                     for ei in range(1, int(round(max_exp / energy_step)) + 1):
                                         exp = ei * energy_step
-                                        # v11.9.6: Check minimum discharge energy
                                         if exp < min_dis_kwh: continue
                                         
                                         nsi = si - ei
                                         to_grid = max(0.0, exp*eff + gen - cons - b_use)
                                         from_grid = max(0.0, cons + b_use - exp*eff - gen)
                                         reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
-                                        # Increment arbitrage hour counter
-                                        _update(nsi, nbi, ai + 1, reward, ACT_DIS, exp, b_on, h, cur_rev, si, bi, ai)
+                                        _update(nsi, ai + 1, reward, ACT_DIS, exp, h, cur_rev, si, ai)
                                         
                                 # 3. ACT_PV_CHARGE: Surplus to battery
                                 if pv_surplus > 0.01 and si < energy_steps:
@@ -216,8 +205,8 @@ class DPPlanner:
                                         nsi = si + ci
                                         reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
                                         reward += 1e-4 * chg
-                                        _update(nsi, nbi, ai, reward, ACT_PV_CHARGE, chg, b_on, h, cur_rev, si, bi, ai)
-
+                                        _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
+ 
                                 # 4. ACT_GRID_CHARGE: Buy from grid
                                 if si < energy_steps:
                                     max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
@@ -225,8 +214,8 @@ class DPPlanner:
                                         chg = ci * energy_step
                                         nsi = si + ci
                                         reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
-                                        _update(nsi, nbi, ai, reward, ACT_GRID_CHARGE, chg, b_on, h, cur_rev, si, bi, ai)
-
+                                        _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
+ 
                                 # 5. ACT_SELF_CONSUME: Battery to home ONLY
                                 if pv_deficit > 0.01 and si > 0:
                                     max_sc = min(usable_energy, pv_deficit / eff)
@@ -234,11 +223,11 @@ class DPPlanner:
                                         sc = sci * energy_step
                                         nsi = si - sci
                                         rem_def = max(0.0, pv_deficit - sc * eff)
-                                        _update(nsi, nbi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, b_on, h, cur_rev, si, bi, ai)
+                                        _update(nsi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
                                         
                                 # 6. ACT_PAID_IMPORT: Negative price handling
                                 if p_buy < 0 and (cons + b_use) > 0.01:
-                                    _update(si, nbi, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0, b_on, h, cur_rev, si, bi, ai)
+                                    _update(si, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0, h, cur_rev, si, ai)
 
             # --- Backtrack ---
             # v11.9.7: Use "Replacement Cost" logic for terminal value (inspired by author's engine)
@@ -249,33 +238,32 @@ class DPPlanner:
             terminal_val_kwh = max(min_sell_p, min_future_buy + cycle_cost)
             
             best_val = neg_inf
-            best_state = (curr_si, curr_bi, 0)
+            best_state = (curr_si, 0)
             min_end_idx = int(round(min_end_usable / energy_step))
             
             for si in range(energy_steps + 1):
                 # Penalty for ending below smart reserve (Survival Floor)
                 reserve_penalty = -20.0 if si < min_end_idx else 0.0
-                for bi in range(BOILER_STEPS + 1):
-                    for ai in range(max_arb_h + 1):
-                        val, _, _, _, _, _, _ = full_dp[horizon][si][bi][ai]
-                        # Final score = profit during 48h + value of remaining energy
-                        val += (si * energy_step) * terminal_val_kwh + reserve_penalty
-                        if val > best_val:
-                            best_val = val
-                            best_state = (si, bi, ai)
+                for ai in range(max_arb_h + 1):
+                    val, _, _, _, _ = full_dp[horizon][si][ai]
+                    # Final score = profit during 48h + value of remaining energy
+                    val += (si * energy_step) * terminal_val_kwh + reserve_penalty
+                    if val > best_val:
+                        best_val = val
+                        best_state = (si, ai)
 
             plan, formatted_plan = {}, {}
             curr_h_state = best_state
             results = []
             for h in range(horizon, 0, -1):
-                si, bi, ai = curr_h_state
-                entry = full_dp[h][si][bi][ai]
-                _, psi, pbi, pai, act, amt, b_on = entry
-                results.append((h-1, act, amt, si, bi, b_on))
-                curr_h_state = (psi, pbi, pai)
+                si, ai = curr_h_state
+                entry = full_dp[h][si][ai]
+                _, psi, pai, act, amt = entry
+                results.append((h-1, act, amt, si))
+                curr_h_state = (psi, pai)
             
             results.reverse()
-            for h_idx, act, amt, si, bi, b_on in results:
+            for h_idx, act, amt, si in results:
                 abs_h = cur_hour + h_idx
                 h_rel = abs_h % 24
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
@@ -285,14 +273,12 @@ class DPPlanner:
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
                 
-                b_use = b_power if b_on else 0.0
                 mode = ["SOL", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"][act]
                 
                 soc = int(round((si * energy_step) / b_cap * 100.0))
-                b_indicator = f" | B: {'ON' if b_on else 'OFF'}"
                 
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
-                formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW{b_indicator} | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)}"
+                formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)}"
 
             res_final = {
                 "plan": plan, 
