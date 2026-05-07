@@ -138,9 +138,10 @@ class DPPlanner:
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
                 
-                b_use = b_power if b_enabled else 0.0
-                pv_surplus = max(0.0, gen - cons - b_use)
-                pv_deficit = max(0.0, cons + b_use - gen)
+                # v11.9.47: Remove boiler from BASELINE.
+                # It shouldn't 'eat' the sun in the model and force grid charging.
+                pv_surplus = max(0.0, gen - cons)
+                pv_deficit = max(0.0, cons - gen)
 
                 for si in range(energy_steps + 1):
                     cur_rev, _, _, _ = full_dp[h][si]
