@@ -3518,7 +3518,6 @@ class MarketStrategySensor(SensorEntity):
             "limit_used": round_f(float(res.get("limit_used", 0.0) or 0.0), 3),
             "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
-            "survival_target": res.get("survival_target", 0.0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
             "planned_power": {h: f"{d['power']} (Target SOC: {d['soc']}%)" if isinstance(d, dict) else d for h, d in res.get("planned_power_per_h", {}).items()},
@@ -3551,7 +3550,8 @@ class MarketStrategySensor(SensorEntity):
             attrs.update({
                 "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
                 "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
-                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0)
+                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
+                "gatekeeper_floor": res.get("gatekeeper_floor", 0.0)
             })
 
         return attrs
