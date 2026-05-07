@@ -239,6 +239,9 @@ class DPPlanner:
                 }
 
             # Debug Info
+            if "calculation_debug" not in self.manager.data:
+                self.manager.data["calculation_debug"] = {}
+                
             self.manager.data["calculation_debug"]["dp_constants"] = {
                 "terminal_val": round(terminal_val_kwh, 4),
                 "min_sell_p": round(min_sell_p, 4),
