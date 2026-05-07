@@ -3049,6 +3049,15 @@ class InverterOperationModeSensor(SensorEntity):
                     else:
                         p_p_disp = f"{peak_price:.2f}" if peak_price is not None else "N/A"
                         bms_debug["status"] = f"Продажа выгоднее ({cur_p:.2f} >= {p_p_disp})"
+                
+                # v11.8.524: Add peak timing and projected SOC to debug attributes
+                if peak_start_abs is not None:
+                    h_disp = f"{peak_start_abs % 24:02d}:00" + (" (Завтра)" if peak_start_abs >= 24 else "")
+                    bms_debug["next_peak"] = h_disp
+                    bms_debug["soc_at_peak"] = round_f(sim_soc, 1)
+                else:
+                    bms_debug["next_peak"] = "Нет"
+                    bms_debug["soc_at_peak"] = "N/A"
 
         # State Machine
         reason = "Значения по умолчанию"
