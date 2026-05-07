@@ -240,6 +240,8 @@ class DPPlanner:
                 }
 
             # Debug Info
+            total_gen_tomorrow = sum(forecast_gen.get(str(h), 0.0) for h in range(cur_hour + 24, cur_hour + 48))
+            
             if "calculation_debug" not in self.manager.data:
                 self.manager.data["calculation_debug"] = {}
                 
@@ -248,6 +250,7 @@ class DPPlanner:
                 "min_sell_p": round(min_sell_p, 4),
                 "cycle_cost": round(cycle_cost, 4),
                 "horizon_h": horizon,
+                "gen_tomorrow": round(total_gen_tomorrow, 2),
                 "top_hours": sorted(list(top_sell_set))
             }
 

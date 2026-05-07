@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : czwartek, 7 maja 2026 22:45:45
+  Started : czwartek, 7 maja 2026 22:52:15
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -14,21 +14,35 @@
 ------------------------------------------------------------------------------
 
 	                  16	g:\systemair\energy_mamagment\custom_components\energy_management\
+	*EXTRA Dir        -1	\\192.168.100.5\config\custom_components\energy_management\__pycache__\
+	  *EXTRA File 		   13518	binary_sensor.cpython-314.pyc
+	  *EXTRA File 		   31245	config_flow.cpython-314.pyc
+	  *EXTRA File 		    3119	const.cpython-314.pyc
+	  *EXTRA File 		    5891	number.cpython-314.pyc
+	  *EXTRA File 		  235116	sensor.cpython-314.pyc
+	  *EXTRA File 		    1653	strategy.cpython-314.pyc
+	  *EXTRA File 		  178925	strategy_base.cpython-314.pyc
+	  *EXTRA File 		   22080	strategy_buy.cpython-314.pyc
+	  *EXTRA File 		   20711	strategy_dp.cpython-314.pyc
+	  *EXTRA File 		   36715	strategy_sell.cpython-314.pyc
+	  *EXTRA File 		    3254	switch.cpython-314.pyc
+	  *EXTRA File 		    3170	utils.cpython-314.pyc
+	  *EXTRA File 		    7767	__init__.cpython-314.pyc
 	    Newer     		    2685	const.py
-	    Newer     		   15149	strategy_dp.py
+	    Newer     		   15337	strategy_dp.py
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
 
 ------------------------------------------------------------------------------
 
                Total    Copied   Skipped  Mismatch    FAILED    Extras
-    Dirs :         3         0         3         0         0         0
-   Files :        20         2        18         0         0         0
-   Bytes :    1.30 m    17.4 k    1.28 m         0         0         0
+    Dirs :         3         0         3         0         0         1
+   Files :        20         2        18         0         0        13
+   Bytes :    1.30 m    17.5 k    1.28 m         0         0   549.9 k
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :             139ÿ328 Bytes/sec.
-   Speed :               7,972 MegaBytes/min.
-   Ended : czwartek, 7 maja 2026 22:45:45
+   Speed :             147ÿ721 Bytes/sec.
+   Speed :               8,453 MegaBytes/min.
+   Ended : czwartek, 7 maja 2026 22:52:16
 
