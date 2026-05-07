@@ -106,9 +106,8 @@ class DPPlanner:
             def _update(nsi, act, amt, t_step, si_orig, total_rev):
                 if nsi < 0 or nsi > energy_steps: return
                 
-                # v11.9.44: Strict Global Floor (soc_buff, e.g. 13%)
-                # This prevents the 6% SOC dips seen in the evening.
-                floor_soc = soc_buff
+                # v11.9.45: Strict Global Floor (using min_soc instead of soc_buff)
+                floor_soc = min_soc
                 
                 if (nsi * energy_step) < (floor_soc * b_cap / 100.0):
                     # Penalize heavily if we DISCHARGE below the floor
