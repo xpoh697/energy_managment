@@ -3009,15 +3009,17 @@ class InverterOperationModeSensor(SensorEntity):
         if is_buying_active:
             active_target = ai_charge_limit
 
-        # Skip complex peak simulation during 24h forecast to save CPU
+        # v11.8.526: Always run simulation if a peak exists to provide accurate debug_soc_at_peak
         if not is_forecast and batt_cap > 0:
+            end_h = peak_start_abs if peak_start_abs is not None else (now_h_wall + 24)
+            sim_range = [h for h in range(now_h_wall, end_h) if h < 48]
+            sim_soc, sim_log, _ = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now_wall)
+            
             if batt_soc >= (active_target - 0.5):
-                bms_debug = {"status": "Батарея уже заряжена", "target_soc": active_target, "current_soc": batt_soc}
+                bms_debug["status"] = "Батарея уже заряжена"
+                bms_debug["target_soc"] = active_target
+                bms_debug["current_soc"] = batt_soc
             else:
-                end_h = peak_start_abs if peak_start_abs is not None else (now_h_wall + 24)
-                sim_range = [h for h in range(now_h_wall, end_h) if h < 48]
-                sim_soc, sim_log, _ = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now_wall)
-                
                 ever_fully_charged = any(
                     (val.get("soc", 0.0) if isinstance(val, dict) else val) >= (ai_discharge_limit - 0.5) 
                     for val in sim_log.values()
@@ -3226,11 +3228,11 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv"
             reason = f"Стандартная работа: Цена ({cur_price:.2f}) выше порога остановки ({price_stop_sell:.2f})"
 
-        # v11.8.525: Finalize debug attributes (always visible if peak exists)
+        # v11.8.526: Finalize debug attributes (always visible if peak exists)
         if peak_start_abs is not None:
             h_disp = f"{peak_start_abs % 24:02d}:00" + (" (Завтра)" if peak_start_abs >= 24 else "")
             bms_debug["next_peak"] = h_disp
-            # If simulation was skipped, use current SOC as projection
+            # Use sim_soc if available (always should be in v526+), fallback to batt_soc
             proj_soc = sim_soc if 'sim_soc' in locals() else batt_soc
             bms_debug["soc_at_peak"] = round_f(proj_soc, 1)
         else:
