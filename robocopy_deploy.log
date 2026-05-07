@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : czwartek, 7 maja 2026 19:52:06
+  Started : czwartek, 7 maja 2026 19:59:23
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -23,14 +23,14 @@
 	  *EXTRA File 		    1653	strategy.cpython-314.pyc
 	  *EXTRA File 		  178925	strategy_base.cpython-314.pyc
 	  *EXTRA File 		   22080	strategy_buy.cpython-314.pyc
-	  *EXTRA File 		   21669	strategy_dp.cpython-314.pyc
+	  *EXTRA File 		   23177	strategy_dp.cpython-314.pyc
 	  *EXTRA File 		   36715	strategy_sell.cpython-314.pyc
 	  *EXTRA File 		    3254	switch.cpython-314.pyc
 	  *EXTRA File 		    3170	utils.cpython-314.pyc
 	  *EXTRA File 		    7767	__init__.cpython-314.pyc
-	    Newer     		    2684	const.py
-	    Newer     		     416	manifest.json
-	    Newer     		   19166	strategy_dp.py
+	    Newer     		    2685	const.py
+	    Newer     		     417	manifest.json
+	    Newer     		   19331	strategy_dp.py
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
 
@@ -39,11 +39,11 @@
                Total    Copied   Skipped  Mismatch    FAILED    Extras
     Dirs :         3         0         3         0         0         1
    Files :        20         3        17         0         0        13
-   Bytes :    1.30 m    21.7 k    1.28 m         0         0   550.6 k
+   Bytes :    1.30 m    21.9 k    1.28 m         0         0   552.0 k
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :             122ÿ340 Bytes/sec.
-   Speed :               7,000 MegaBytes/min.
-   Ended : czwartek, 7 maja 2026 19:52:07
+   Speed :             108ÿ371 Bytes/sec.
+   Speed :               6,201 MegaBytes/min.
+   Ended : czwartek, 7 maja 2026 19:59:23
 

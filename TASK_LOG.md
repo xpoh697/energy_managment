@@ -1,6 +1,7 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.9)
+## Current Status (v11.9.10)
+- [x] Fixed NameError: CONF_MAX_ARBITRAGE_HOURS in DP engine (v11.9.10).
 - [x] DP Engine: Dynamic Survival Floors (v11.9.9).
 - [x] Fixed Gatekeeper floor mismatch in simulation (v11.9.8).
 - [x] Replacement Cost terminal value logic (v11.9.7).
