@@ -153,8 +153,8 @@ class DPPlanner:
                     if abs_h in top_sell_set:
                         exp = min(usable_energy, max_p_dis)
                         if exp >= min_dis_kwh:
-                            to_grid = max(0.0, exp + gen - cons - b_use)
-                            from_grid = max(0.0, cons + b_use - exp - gen)
+                            to_grid = max(0.0, exp + gen - cons)
+                            from_grid = max(0.0, cons - exp - gen)
                             reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
                             nsi = si - int(round(exp / energy_step))
                             _update(nsi, ACT_DIS, exp, h, si, cur_rev + reward)
@@ -186,8 +186,8 @@ class DPPlanner:
                                 _update(si - sci, ACT_SELF_CONSUME, sc, h, si, cur_rev - p_buy * rem_def)
                             
                     # 6. ACT_PAID_IMPORT: Negative price handling
-                    if p_buy < 0 and (cons + b_use) > 0.01:
-                        _update(si, ACT_PAID_IMPORT, 0.0, h, si, cur_rev - p_buy * (cons + b_use))
+                    if p_buy < 0 and cons > 0.01:
+                        _update(si, ACT_PAID_IMPORT, 0.0, h, si, cur_rev - p_buy * cons)
 
             # --- Backtrack ---
             min_future_buy = min(prices_buy.values()) if prices_buy else 0.5
