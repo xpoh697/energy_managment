@@ -102,14 +102,6 @@ class DPPlanner:
             
             full_dp[0][curr_si][curr_bi] = (0.0, -1, -1, 0, 0.0, False)
 
-            # v11.9.4: Pre-calculate future buy prices to avoid lossy arbitrage
-            # For each hour, find the maximum buy price in the next 6 hours
-            future_buy_max_map = {}
-            for h in range(horizon):
-                look_ahead = min(6, horizon - h - 1)
-                window = [float(normalize_float(prices_buy.get(str(cur_hour + h + k), 0.0))) for k in range(1, look_ahead + 1)]
-                future_buy_max_map[h] = max(window) if window else 0.0
-
             # --- Forward Induction (Unified DP with Boiler) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
@@ -118,13 +110,6 @@ class DPPlanner:
                 p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
-                
-                # v11.9.4: Survival floor for the TARGET hour (h+1)
-                target_h_rel = (abs_h + 1) % 24
-                h_min_soc_target = (min_soc + soc_buff) if (21 <= target_h_rel or target_h_rel <= 6) else min_soc
-                
-                # Protection against lossy arbitrage
-                f_buy_max = future_buy_max_map.get(h, 0.0)
 
                 for si in range(energy_steps + 1):
                     for bi in range(BOILER_STEPS + 1):
@@ -142,17 +127,13 @@ class DPPlanner:
                             pv_surplus = max(0.0, gen - cons - b_use)
                             pv_deficit = max(0.0, cons + b_use - gen)
                             
-                            def update_state(nsi: int, rwd: float, act: int, amt: float, penalty: float = 0.0):
-                                total_rev = cur_rev + rwd - penalty
-                                # v11.9.4: Check floor for the TARGET state
-                                if (nsi * energy_step / b_cap * 100) < h_min_soc_target:
-                                    total_rev -= 10.0
-                                
+                            def _update(nsi: int, rwd: float, act: int, amt: float):
+                                total_rev = cur_rev + rwd
                                 if total_rev > full_dp[h+1][nsi][nbi][0]:
                                     full_dp[h+1][nsi][nbi] = (total_rev, si, bi, act, amt, b_on)
 
                             # 1. ACT_SOL (Grid Only / Fallback): Battery idle
-                            update_state(si, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0)
+                            _update(si, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0)
                             
                             # 2. ACT_DIS: Discharge to grid (Commercial Sale)
                             if p_sell > 0.01:
@@ -163,14 +144,7 @@ class DPPlanner:
                                     to_grid = max(0.0, exp*eff + gen - cons - b_use)
                                     from_grid = max(0.0, cons + b_use - exp*eff - gen)
                                     reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
-                                    
-                                    # v11.9.4: Block selling if buy price later is higher (including efficiency losses)
-                                    # We use 0.9 as a conservative round-trip efficiency factor
-                                    dis_penalty = 0.0
-                                    if p_sell * 0.9 < f_buy_max:
-                                        dis_penalty = 10.0 # Strict penalty for lossy arbitrage
-                                    
-                                    update_state(nsi, reward, ACT_DIS, exp, dis_penalty)
+                                    _update(nsi, reward, ACT_DIS, exp)
                                     
                             # 3. ACT_PV_CHARGE: Surplus to battery (Always good)
                             if pv_surplus > 0.01 and si < energy_steps:
@@ -180,17 +154,16 @@ class DPPlanner:
                                     nsi = si + ci
                                     reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
                                     reward += 1e-4 * chg
-                                    update_state(nsi, reward, ACT_PV_CHARGE, chg)
+                                    _update(nsi, reward, ACT_PV_CHARGE, chg)
 
-                            # 4. ACT_GRID_CHARGE: Buy from grid (Helps survival)
+                            # 4. ACT_GRID_CHARGE: Buy from grid
                             if si < energy_steps:
                                 max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
                                 for ci in range(1, int(max_gc / energy_step) + 1):
                                     chg = ci * energy_step
                                     nsi = si + ci
-                                    em_bonus = 0.4 if (si * energy_step / b_cap * 100) < h_min_soc_target else 0.0
-                                    reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) + em_bonus
-                                    update_state(nsi, reward, ACT_GRID_CHARGE, chg)
+                                    reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
+                                    _update(nsi, reward, ACT_GRID_CHARGE, chg)
 
                             # 5. ACT_SELF_CONSUME: Battery to home ONLY
                             if pv_deficit > 0.01 and si > 0:
@@ -199,13 +172,11 @@ class DPPlanner:
                                     sc = sci * energy_step
                                     nsi = si - sci
                                     rem_def = max(0.0, pv_deficit - sc * eff)
-                                    # v11.9.4: Only physical floor is strict for house
-                                    sc_penalty = 20.0 if (nsi * energy_step / b_cap * 100) < min_soc else 0.0
-                                    update_state(nsi, -p_buy * rem_def, ACT_SELF_CONSUME, sc, sc_penalty)
+                                    _update(nsi, -p_buy * rem_def, ACT_SELF_CONSUME, sc)
                                     
                             # 6. ACT_PAID_IMPORT: Negative price handling
                             if p_buy < 0 and (cons + b_use) > 0.01:
-                                update_state(si, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0)
+                                _update(si, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0)
 
             # --- Backtrack ---
             best_val = neg_inf
