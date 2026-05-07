@@ -3228,16 +3228,20 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv"
             reason = f"Стандартная работа: Цена ({cur_price:.2f}) выше порога остановки ({price_stop_sell:.2f})"
 
-        # v11.8.526: Finalize debug attributes (always visible if peak exists)
+        # v11.8.527: Finalize debug attributes (always visible if peak exists)
         if peak_start_abs is not None:
             h_disp = f"{peak_start_abs % 24:02d}:00" + (" (Завтра)" if peak_start_abs >= 24 else "")
             bms_debug["next_peak"] = h_disp
             # Use sim_soc if available (always should be in v526+), fallback to batt_soc
             proj_soc = sim_soc if 'sim_soc' in locals() else batt_soc
             bms_debug["soc_at_peak"] = round_f(proj_soc, 1)
+            
+            p_at_p = self.manager.get_price("sell", today_str, peak_start_abs % 24)
+            bms_debug["price_at_peak"] = round_f(p_at_p, 3) if p_at_p is not None else "N/A"
         else:
             bms_debug["next_peak"] = "Нет"
             bms_debug["soc_at_peak"] = "N/A"
+            bms_debug["price_at_peak"] = "N/A"
 
         return mode, reason, bms_debug, peak_start_abs
 
