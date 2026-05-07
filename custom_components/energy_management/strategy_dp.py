@@ -201,9 +201,8 @@ class DPPlanner:
                                 ci = int(round(chg / energy_step))
                                 if ci > 0:
                                     nsi = si + ci
-                                    # v11.9.31: Balanced solar bonus (0.2)
+                                    # v11.9.32: Simple and honest math. Solar is free, Grid has wear cost.
                                     reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
-                                    reward += 0.2 * chg 
                                     _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 4. ACT_GRID_CHARGE: Buy from grid (Keep loop for precision)
@@ -212,11 +211,9 @@ class DPPlanner:
                             for ci in range(1, int(max_gc / energy_step) + 1):
                                 chg = ci * energy_step
                                 nsi = si + ci
-                                # v11.9.31: Grid penalty (0.15) applies ONLY if SOC > 60%
-                                # This ensures morning peak coverage while preserving top for solar
-                                current_soc = (si * energy_step / b_cap) * 100.0
-                                p_penalty = 0.15 if current_soc > 60.0 else 0.0
-                                reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) - (p_penalty * chg)
+                                # v11.9.32: Only buy if we expect to save money later. 
+                                # Grid charging always costs price + wear.
+                                reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
                                 _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 5. ACT_SELF_CONSUME: Battery to home ONLY (v11.9.24: Single step optimization)
@@ -228,19 +225,17 @@ class DPPlanner:
                                 if sci > 0:
                                     nsi = si - sci
                                     rem_def = max(0.0, pv_deficit - sc * eff)
-                                    _update(nsi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
+                                    # v11.9.32: Using battery saves us p_buy
+                                    _update(nsi, ai, -p_buy * rem_def - (cycle_cost * sc), ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
                                 
                         # 6. ACT_PAID_IMPORT: Negative price handling
                         if p_buy < 0 and (cons + b_use) > 0.01:
                             _update(si, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0, h, cur_rev, si, ai)
 
             # --- Backtrack ---
-            # v11.9.7: Use "Replacement Cost" logic for terminal value (inspired by author's engine)
-            # Find minimum future buy price to estimate what it costs to "refill" the battery later
-            min_future_buy = min(prices_buy.values()) if prices_buy else 0.5
-            # Terminal value = what a kWh in battery is worth at the end of the horizon.
-            # It's either the cost to buy it back later + wear, OR the min price we'd sell it for.
-            terminal_val_kwh = max(min_sell_p, min_future_buy + cycle_cost)
+            # v11.9.32: Terminal value is strictly SELL price.
+            # This prevents "stockpiling" energy from grid just to have a full battery.
+            terminal_val_kwh = min_sell_p
             
             best_val = neg_inf
             best_state = (curr_si, 0)
@@ -251,7 +246,7 @@ class DPPlanner:
                 reserve_penalty = -20.0 if si < min_end_idx else 0.0
                 for ai in range(max_arb_h + 1):
                     val, _, _, _, _ = full_dp[horizon][si][ai]
-                    # Final score = profit during 48h + value of remaining energy
+                    # Final score = profit during horizon + value of remaining energy
                     val += (si * energy_step) * terminal_val_kwh + reserve_penalty
                     if val > best_val:
                         best_val = val
