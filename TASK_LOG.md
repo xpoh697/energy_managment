@@ -1,6 +1,7 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.8)
+## Current Status (v11.9.9)
+- [x] DP Engine: Dynamic Survival Floors (v11.9.9).
 - [x] Fixed Gatekeeper floor mismatch in simulation (v11.9.8).
 - [x] Replacement Cost terminal value logic (v11.9.7).
 - [x] 4D DP engine with Max Arbitrage Hours support (v11.9.6).

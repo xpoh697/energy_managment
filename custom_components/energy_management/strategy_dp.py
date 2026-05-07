@@ -109,6 +109,42 @@ class DPPlanner:
             
             full_dp[0][curr_si][curr_bi][0] = (0.0, -1, -1, -1, 0, 0.0, False)
 
+            # v11.9.9: Pre-calculate Survival Floors for the DP horizon (sync with strategy_sell)
+            floors_sliding = {}
+            for t_idx in range(horizon + 1):
+                h_abs = cur_hour + t_idx
+                h_rel = h_abs % 24
+                if 4 <= h_rel < 10:
+                    floors_sliding[t_idx] = emergency_soc + 1.0 # Turbo morning
+                else:
+                    # Bridge to next sunrise
+                    next_sr_abs = h_abs + 1
+                    while next_sr_abs % 24 != sunrise_h: next_sr_abs += 1
+                    
+                    h_bridge_kwh = 0.0
+                    for h_f in range(h_abs + 1, next_sr_abs):
+                        l_v = float(normalize_float((avg_cons if h_f < 24 else tomorrow_cons).get(str(h_f % 24), 0.4)))
+                        g_v = float(normalize_float((prof_gen if h_f < 24 else tomorrow_gen).get(str(h_f % 24), 0.0)))
+                        h_bridge_kwh += max(0.0, l_v - g_v)
+                    
+                    # Convert house need to SOC % via efficiency
+                    survival_floor = (emergency_soc + soc_buffer) + (h_bridge_kwh / b_cap * 100.0 / eff_coeff)
+                    floors_sliding[t_idx] = max(user_limit, survival_floor)
+
+            def _update(nsi, nbi, nai, reward, act, amt, b_on_val, t_step, c_rev, si_orig, bi_orig, ai_orig):
+                """Helper to update state transitions with Survival Floor Penalty (v11.9.9)"""
+                if nsi < 0 or nsi > energy_steps: return
+                
+                total_rev = c_rev + reward
+                
+                # Apply Penalty if NEXT state violates the survival floor for that hour
+                floor_soc = floors_sliding.get(t_step + 1, emergency_soc)
+                if (nsi * energy_step) < (floor_soc * b_cap / 100.0):
+                    total_rev -= 1000.0 # Heavy penalty
+                
+                if total_rev > full_dp[t_step + 1][nsi][nbi][nai][0]:
+                    full_dp[t_step + 1][nsi][nbi][nai] = (total_rev, si_orig, bi_orig, ai_orig, act, amt, b_on_val)
+
             # --- Forward Induction (Unified 4D DP) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
@@ -135,16 +171,10 @@ class DPPlanner:
                                 pv_surplus = max(0.0, gen - cons - b_use)
                                 pv_deficit = max(0.0, cons + b_use - gen)
                                 
-                                def _update(nsi: int, nbi_target: int, nai: int, rwd: float, act: int, amt: float):
-                                    total_rev = cur_rev + rwd
-                                    if total_rev > full_dp[h+1][nsi][nbi_target][nai][0]:
-                                        full_dp[h+1][nsi][nbi_target][nai] = (total_rev, si, bi, ai, act, amt, b_on)
-
-                                # 1. ACT_SOL: Battery idle
-                                _update(si, nbi, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0)
+                                # 1. ACT_SOL
+                                _update(si, nbi, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0, b_on, h, cur_rev, si, bi, ai)
                                 
-                                # 2. ACT_DIS: Discharge to grid (Commercial Sale)
-                                # v11.9.6: Check min sell price, max arbitrage hours, and min discharge kWh
+                                # 2. ACT_DIS
                                 if p_sell > min_sell_p and ai < max_arb_h:
                                     max_exp = min(max_p_dis, usable_energy)
                                     for ei in range(1, int(round(max_exp / energy_step)) + 1):
@@ -157,7 +187,7 @@ class DPPlanner:
                                         from_grid = max(0.0, cons + b_use - exp*eff - gen)
                                         reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
                                         # Increment arbitrage hour counter
-                                        _update(nsi, nbi, ai + 1, reward, ACT_DIS, exp)
+                                        _update(nsi, nbi, ai + 1, reward, ACT_DIS, exp, b_on, h, cur_rev, si, bi, ai)
                                         
                                 # 3. ACT_PV_CHARGE: Surplus to battery
                                 if pv_surplus > 0.01 and si < energy_steps:
@@ -167,7 +197,7 @@ class DPPlanner:
                                         nsi = si + ci
                                         reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
                                         reward += 1e-4 * chg
-                                        _update(nsi, nbi, ai, reward, ACT_PV_CHARGE, chg)
+                                        _update(nsi, nbi, ai, reward, ACT_PV_CHARGE, chg, b_on, h, cur_rev, si, bi, ai)
 
                                 # 4. ACT_GRID_CHARGE: Buy from grid
                                 if si < energy_steps:
@@ -176,7 +206,7 @@ class DPPlanner:
                                         chg = ci * energy_step
                                         nsi = si + ci
                                         reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
-                                        _update(nsi, nbi, ai, reward, ACT_GRID_CHARGE, chg)
+                                        _update(nsi, nbi, ai, reward, ACT_GRID_CHARGE, chg, b_on, h, cur_rev, si, bi, ai)
 
                                 # 5. ACT_SELF_CONSUME: Battery to home ONLY
                                 if pv_deficit > 0.01 and si > 0:
@@ -185,11 +215,11 @@ class DPPlanner:
                                         sc = sci * energy_step
                                         nsi = si - sci
                                         rem_def = max(0.0, pv_deficit - sc * eff)
-                                        _update(nsi, nbi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc)
+                                        _update(nsi, nbi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, b_on, h, cur_rev, si, bi, ai)
                                         
                                 # 6. ACT_PAID_IMPORT: Negative price handling
                                 if p_buy < 0 and (cons + b_use) > 0.01:
-                                    _update(si, nbi, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0)
+                                    _update(si, nbi, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0, b_on, h, cur_rev, si, bi, ai)
 
             # --- Backtrack ---
             # v11.9.7: Use "Replacement Cost" logic for terminal value (inspired by author's engine)
