@@ -3050,14 +3050,7 @@ class InverterOperationModeSensor(SensorEntity):
                         p_p_disp = f"{peak_price:.2f}" if peak_price is not None else "N/A"
                         bms_debug["status"] = f"Продажа выгоднее ({cur_p:.2f} >= {p_p_disp})"
                 
-                # v11.8.524: Add peak timing and projected SOC to debug attributes
-                if peak_start_abs is not None:
-                    h_disp = f"{peak_start_abs % 24:02d}:00" + (" (Завтра)" if peak_start_abs >= 24 else "")
-                    bms_debug["next_peak"] = h_disp
-                    bms_debug["soc_at_peak"] = round_f(sim_soc, 1)
-                else:
-                    bms_debug["next_peak"] = "Нет"
-                    bms_debug["soc_at_peak"] = "N/A"
+                # Debug attributes moved to end of function (v11.8.525)
 
         # State Machine
         reason = "Значения по умолчанию"
@@ -3232,6 +3225,17 @@ class InverterOperationModeSensor(SensorEntity):
             # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
             mode = "sale_pv"
             reason = f"Стандартная работа: Цена ({cur_price:.2f}) выше порога остановки ({price_stop_sell:.2f})"
+
+        # v11.8.525: Finalize debug attributes (always visible if peak exists)
+        if peak_start_abs is not None:
+            h_disp = f"{peak_start_abs % 24:02d}:00" + (" (Завтра)" if peak_start_abs >= 24 else "")
+            bms_debug["next_peak"] = h_disp
+            # If simulation was skipped, use current SOC as projection
+            proj_soc = sim_soc if 'sim_soc' in locals() else batt_soc
+            bms_debug["soc_at_peak"] = round_f(proj_soc, 1)
+        else:
+            bms_debug["next_peak"] = "Нет"
+            bms_debug["soc_at_peak"] = "N/A"
 
         return mode, reason, bms_debug, peak_start_abs
 
