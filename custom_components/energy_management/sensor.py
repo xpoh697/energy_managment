@@ -4227,6 +4227,7 @@ class EnergyDPAdviceSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         return {
+            "profitability_score": self._advice.get("best_value", 0.0),
             "hourly_plan": self._advice.get("formatted_plan", {}),
             "calculation_debug": self._advice.get("debug", {}),
             "last_update": datetime.now().strftime("%H:%M:%S")
