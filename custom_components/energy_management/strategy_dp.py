@@ -212,8 +212,8 @@ class DPPlanner:
                             for ci in range(1, int(max_gc / energy_step) + 1):
                                 chg = ci * energy_step
                                 nsi = si + ci
-                                # v11.9.28: Aggressive penalty (0.25) to prevent "stockpiling" cheap grid energy
-                                reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) - (0.25 * chg)
+                                # v11.9.30: Very aggressive penalty (0.5) to grid charge to prioritize solar space
+                                reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) - (0.5 * chg)
                                 _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 5. ACT_SELF_CONSUME: Battery to home ONLY (v11.9.24: Single step optimization)
@@ -272,6 +272,9 @@ class DPPlanner:
                 
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
                 p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
+                gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
+                cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
+                
                 # v11.9.29: Dynamic mode naming for better clarity
                 mode_map = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"]
                 mode = mode_map[act]
