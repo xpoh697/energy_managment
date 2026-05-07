@@ -138,6 +138,10 @@ class StrategySell(StrategyEngine):
                     sunrise_h = h
                     break
             res["sunrise_hour"] = sunrise_h
+            
+            # v11.8.523: Define profiles at top level to avoid UnboundLocalError in downstream stages
+            _sim_gen_profile = dict(man.get_predicted_profile("generation"))
+            _sim_cons_profile = dict(man.get_predicted_profile("consumption_base"))
 
             target_hours = []
             epochs = []
@@ -247,7 +251,8 @@ class StrategySell(StrategyEngine):
                 res["current_mode_text"] = "Нет будущих окон"
                 return res
 
-            target_price = all_sell_prices.get(target_hours[0], 0.0) if target_hours else 0.0
+            # v11.8.521: UI Bugfix - Target price should be the maximum of all candidates, not just the first hour.
+            target_price = max([all_sell_prices.get(th, 0.0) for th in target_hours], default=0.0) if target_hours else 0.0
 
             # --- TS 6.1 Sunrise Guard & Budget Grouping ---
             # Initial contiguity grouping
@@ -314,12 +319,17 @@ class StrategySell(StrategyEngine):
                         else:
                             break
                 
+                # Profiles now defined at top level (v11.8.523)
                 range_start = current_epoch_end + 1
                 for h_abs in range(range_start, next_sunrise_abs):
-                    h_rel = h_abs % 24
-                    p_prof = prof_cons_tom if h_abs >= 24 else prof_cons_cur
-                    h_load = p_prof.get(f"{h_rel:02d}") or p_prof.get(str(h_rel))
-                    house_kwh_until_sunrise += float(normalize_float(h_load if h_load is not None else 0.4))
+                    h_load = _sim_cons_profile.get(str(h_abs % 24))
+                    h_gen = _sim_gen_profile.get(str(h_abs % 24))
+                    
+                    p_load = float(normalize_float(h_load if h_load is not None else 0.4))
+                    p_gen = float(normalize_float(h_gen if h_gen is not None else 0.0))
+                    
+                    # v11.8.519: Use NET consumption until sunrise as per TS 6.1 (180)
+                    house_kwh_until_sunrise += max(0.0, p_load - p_gen)
                 
                 gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
                 morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
@@ -418,12 +428,25 @@ class StrategySell(StrategyEngine):
                 
                 curr_floors = {}
                 for h_sim in sim_range:
-                    target_sunrise = sunrise_h if h_sim < sunrise_h else (sunrise_h + 24 if h_sim < sunrise_h + 24 else sunrise_h + 48)
-                    h_rem_kwh = sum(float(normalize_float(_sim_cons_profile.get(str(hx % 24), 0.5))) for hx in range(h_sim, target_sunrise))
+                    # v11.8.521: Morning Guard Stickiness.
+                    # Only protect for the NEXT sunrise if we are past the current morning window (10:00).
+                    # Otherwise, use the current sunrise as the target to allow discharge in the morning peak.
+                    h_sim_rel = int(h_sim % 24)
+                    if h_sim_rel < 10:
+                        target_sunrise = (int(h_sim // 24) * 24) + sunrise_h
+                    else:
+                        target_sunrise = (int(h_sim // 24) * 24) + sunrise_h + 24
+                    # v11.8.520: Use NET consumption until sunrise (TS 6.1)
+                    h_rem_kwh = 0.0
+                    for hx in range(h_sim, target_sunrise):
+                        h_l = _sim_cons_profile.get(str(hx % 24), 0.4)
+                        h_g = _sim_gen_profile.get(str(hx % 24), 0.0)
+                        h_rem_kwh += max(0.0, float(normalize_float(h_l)) - float(normalize_float(h_g)))
+                    
                     bridge_soc = (h_rem_kwh / b_cap * 100.0)
                     
-                    # v11.8.517: Survival floor must be (Reserve + Buffer) + Consumption
-                    # to ensure we have the full safety margin left AT sunrise.
+                    # v11.8.519/520: Survival target at sunrise must be (min_soc + soc_buffer)
+                    # To hit that, we need (min_soc + soc_buffer) + NET consumption now.
                     h_floor = max(eff_morning_strict, (min_soc_val + soc_buffer) + bridge_soc)
                     
                     is_h_sim_planned = bool(h_sim in target_hours)
@@ -449,16 +472,33 @@ class StrategySell(StrategyEngine):
                 real_p = float(trial_log.get(h_key, {}).get("p_bat", 0.0))
                 
                 if real_p > 0.1:
-                    # v11.8.499: Use test_p for UI/Command if not SOC-limited (within 10% margin)
-                    # This restores "6.6" in UI instead of "6.494" due to efficiency losses
-                    sell_commands[h_target] = test_p if real_p > (test_p * 0.9) else real_p
-                    sim_log = trial_log
-                    # v11.8.492 logic: decrement budget for secondary peaks
-                    if not is_top_peak:
-                        effective_budget_ac -= (real_p / eff)
+                    # v11.8.522: Future Peak Protection (Nuclear Priority)
+                    # We must ensure that adding this hour (h_target) does not "steal" energy 
+                    # from higher-priced hours that we already planned.
+                    is_stealing = False
+                    for h_prev, p_prev in sell_commands.items():
+                        if p_prev <= 0.05: continue
+                        h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
+                        p_in_trial = float(trial_log.get(h_prev_key, {}).get("p_bat", 0.0))
+                        
+                        # If the previously planned power dropped significantly, we are stealing.
+                        if p_in_trial < p_prev - 0.1:
+                            is_stealing = True
+                            _LOGGER.debug(f"[Strategy] v11.8.522: Hour {h_target} rejected. Steals from {h_prev} ({p_in_trial:.2f} < {p_prev:.2f})")
+                            break
                     
-                    floors_anchored = curr_floors
-                    floors_sliding = curr_floors
+                    if not is_stealing:
+                        # v11.8.499: Use test_p for UI/Command if not SOC-limited (within 10% margin)
+                        sell_commands[h_target] = test_p if real_p > (test_p * 0.9) else real_p
+                        sim_log = trial_log
+                        # v11.8.492 logic: decrement budget for secondary peaks
+                        if not is_top_peak:
+                            effective_budget_ac -= (real_p / eff)
+                        
+                        floors_anchored = curr_floors
+                        floors_sliding = curr_floors
+                    else:
+                        sell_commands[h_target] = 0.0
                 else:
                     sell_commands[h_target] = 0.0
 
@@ -532,6 +572,7 @@ class StrategySell(StrategyEngine):
             )
             sim_log = sim_log_final # Use this for all UI displays below
 
+            # v11.8.523: Show all price candidates, even if battery power is 0kW.
             res["strategy_candidates"] = [f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "") for h in target_hours]
             res["active_hours"] = active_h
             

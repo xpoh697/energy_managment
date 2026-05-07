@@ -1,22 +1,66 @@
-# DEBATE: Refactoring DP Strategy based on dp_engine.py
+### [2026-05-07 07:00] Задача: Исправление UnboundLocalError (_sim_gen_profile) и возврат 08:00 в кандидаты.
 
-## Archi (Lead Architect)
-**Issue**: The current `strategy_dp.py` has become cluttered with heuristics and doesn't match the clean, reliable logic of the reference `dp_engine.py`.
-**Proposal**: Perform a complete refactor of `strategy_dp.py`. Use the architecture of `dp_engine.py` (Action-based transitions, explicit backtracking tables) but integrate our smart forecast data and boiler control.
-**Vibe**: Clean start, high performance, reference-grade logic.
+### Archi
+Я допустил повторную ошибку, инициализировав профили внутри условного блока. Теперь они вынесены на уровень всей функции `get_market_strategy`. Также я убрал фильтрацию по мощности из списка кандидатов — теперь 08:00 снова виден, как вы и просили.
 
-## Skeptic (Senior SRE/Security)
-**Concerns**: Will the boiler logic slow down the DP?
-**Response**: With 5 boiler steps and 170 energy steps, the state space is manageable. We will ensure the loops are optimized.
+### Skeptic
+1. Ошибка с необъявленными переменными в циклах — это уже система. Нужно быть внимательнее при переносе блоков кода.
+2. Возврат 08:00 логичен: пользователь должен видеть все выгодные часы, даже если сейчас в них 0 кВт.
+3. Код стал чище, так как профили теперь инициализируются один раз в начале.
 
-## Znaika (Senior Architect / TS Specialist)
-**Analysis**: The user wants the DP to be "blindly" optimal based on our profiles. By using the `dp_engine.py` core, we ensure that the optimization is mathematically sound without artificial "fear" penalties.
-**Verdict**: Approved. This is the right move for stabilization.
+### Заключение
+Профили `_sim_gen_profile` и `_sim_cons_profile` определены глобально для функции. Фильтр в `strategy_candidates` удален.
 
-## Final Approval
-**Archi**: Approved.
-**Skeptic**: Approved.
-**Znaika**: Approved.
+---
 
-## Resolution
-Rewrite `strategy_dp.py` using `dp_engine.py` as the architectural baseline. Integrate HA-specific sensors and boiler state into the new engine.
+### [2026-05-07 00:07] Задача: Реализация "Future Peak Protection" (Ядерный приоритет цен) в strategy_sell.py.
+
+### Archi
+Для исправления «конченого» распределения я внедрил механизм проверки воровства энергии. Теперь при добавлении любого часа (даже если он раньше по времени) мы проверяем, не упала ли мощность в уже запланированных более дорогих часах. Если 06:00 (дешевле) крадет у 07:00 (дороже) — 06:00 блокируется или квотируется.
+
+### Skeptic
+1. Проверка идет по всем уже запланированным часам (`sell_commands`). Это надежно.
+2. Использован порог в 0.1 кВт, чтобы избежать ложных срабатываний из-за погрешностей округления эффективности.
+3. Это гарантирует, что самый дорогой час в цикле всегда получит максимум возможного, а остальные — только остатки.
+
+### Заключение
+Алгоритм теперь соблюдает строгий приоритет цены над временем. Дорогие часы «бронируют» энергию, и более дешевые часы (даже идущие раньше) не могут ее забрать.
+
+---
+
+### [2026-05-06 23:44] Задача: Исправление UnboundLocalError (_sim_cons_profile) в strategy_sell.py.
+
+### Archi
+При реализации логики защиты рассвета я использовал переменную `_sim_cons_profile`, но забыл ее инициализировать в блоке `else`. Нужно добавить получение профиля `consumption_base` через `man.get_predicted_profile`.
+
+### Skeptic
+1. Опять спешка! Нужно проверять код на наличие необъявленных переменных перед деплоем.
+2. Проверь, что `man.get_predicted_profile` не вернет `None`.
+3. Убедись, что используется правильный тип профиля (Base vs Total). Для выживания по ТЗ используем Base.
+
+### Заключение
+Добавлена инициализация `_sim_cons_profile` и `_sim_gen_profile` с оберткой в `dict()` для безопасного вызова `.get()`.
+
+---
+
+## [2026-05-06 23:24] Задача: Исправление утреннего окна и ошибок отображения цен в strategy_sell.py.
+
+### Archi
+Проблема в том, что `target_sunrise` слишком рано перескакивает на следующий день. Когда мы находимся в 6-7 утра, алгоритм видит, что час рассвета наступил или наступает, и переключает цель защиты на 24 часа вперед. Это заставляет систему резервировать энергию на всю следующую ночь, блокируя текущие продажи. 
+
+**Предложение:**
+1. Поправить `target_sunrise`, чтобы он переключался на следующий день только после выхода из утреннего окна (после 10:00).
+2. В `target_price` брать `max()` от цен кандидатов, а не первый час.
+3. Фильтровать `strategy_candidates`, убирая часы с мощностью < 0.05 кВт, чтобы не вводить пользователя в заблуждение.
+
+### Skeptic
+Твое решение по `target_sunrise` выглядит рабочим, но есть риски:
+
+1. **Риск недобора:** Если мы в 9 утра решим, что нам не нужно защищать следующую ночь, и продадим всё, а солнце не выйдет (Solcast ошибся) — дом останется без энергии вечером. Нужно убедиться, что базовый `min_soc` и `user_limit` всегда остаются "якорем".
+2. **Прозрачность:** Если мы просто спрячем кандидатов с нулевой мощностью, пользователь может подумать, что система вообще не видит это окно цен. Лучше оставить их, но добавить статус "Low SOC".
+3. **Производительность:** `target_price = max(...)` — ок, но убедись, что мы не пересчитываем это в тяжелых циклах.
+
+### Заключение
+1. **Target Sunrise:** Переключение на следующий день происходит только если `h_sim >= 10` (конец утреннего окна). До этого момента "точкой защиты" остается текущий рассвет.
+2. **Цена и кандидаты:** В UI выводим `max_price`. Кандидатов фильтруем, но в `limit_reason` пишем конкретную причину (например, "Survival Buffer"), чтобы было понятно, почему 0кВт.
+3. **Безопасность:** Сохраняем `max(user_limit, morning_floor)` как абсолютный минимум даже при отключенном Gatekeeper.
