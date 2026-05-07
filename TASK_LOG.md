@@ -1,8 +1,8 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.2)
+## Current Status (v11.9.3)
+- [x] Survival incentives for grid charging below h_min_soc (v11.9.3).
 - [x] Separated survival limits for house vs grid sale (v11.9.2).
-- [x] Smart Terminal Reserve (looking beyond 48h) (v11.9.1).
 - [x] Emergency SOC recovery bonus.
 - [x] High-precision 0.1kWh steps.
 

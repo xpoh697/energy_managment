@@ -170,7 +170,8 @@ class DPPlanner:
                                 for ci in range(1, int(max_gc / energy_step) + 1):
                                     chg = ci * energy_step
                                     nsi = si + ci
-                                    em_bonus = 0.5 if (si * energy_step / b_cap * 100) < min_soc else 0.0
+                                    # v11.9.3: Incentive to reach survival floor if price is not extreme
+                                    em_bonus = 0.4 if (si * energy_step / b_cap * 100) < h_min_soc else 0.0
                                     reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) + em_bonus
                                     update_state(nsi, reward, ACT_GRID_CHARGE, chg)
 
@@ -181,8 +182,8 @@ class DPPlanner:
                                     sc = sci * energy_step
                                     nsi = si - sci
                                     rem_def = max(0.0, pv_deficit - sc * eff)
-                                    # v11.9.2: HOUSE consumption is NOT penalized unless it hits physical min_soc
-                                    sc_penalty = 10.0 if (nsi * energy_step / b_cap * 100) < min_soc else 0.0
+                                    # v11.9.3: Physical limit is strict, survival floor is soft for house
+                                    sc_penalty = 20.0 if (nsi * energy_step / b_cap * 100) < min_soc else 0.0
                                     update_state(nsi, -p_buy * rem_def, ACT_SELF_CONSUME, sc, sc_penalty)
                                     
                             # 6. ACT_PAID_IMPORT: Negative price handling
