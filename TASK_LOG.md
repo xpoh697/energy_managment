@@ -1,8 +1,8 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.6)
+## Current Status (v11.9.7)
+- [x] Replacement Cost terminal value logic (v11.9.7).
 - [x] 4D DP engine with Max Arbitrage Hours support (v11.9.6).
-- [x] Advanced settings: Min Sell Price, Min Discharge Energy (v11.9.6).
 - [x] Emergency SOC recovery bonus.
 - [x] High-precision 0.1kWh steps.
 

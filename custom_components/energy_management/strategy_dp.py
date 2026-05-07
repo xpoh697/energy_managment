@@ -192,17 +192,25 @@ class DPPlanner:
                                     _update(si, nbi, ai, -p_buy * (cons + b_use), ACT_PAID_IMPORT, 0.0)
 
             # --- Backtrack ---
+            # v11.9.7: Use "Replacement Cost" logic for terminal value (inspired by author's engine)
+            # Find minimum future buy price to estimate what it costs to "refill" the battery later
+            min_future_buy = min(prices_buy.values()) if prices_buy else 0.5
+            # Terminal value = what a kWh in battery is worth at the end of the horizon.
+            # It's either the cost to buy it back later + wear, OR the min price we'd sell it for.
+            terminal_val_kwh = max(min_sell_p, min_future_buy + cycle_cost)
+            
             best_val = neg_inf
             best_state = (curr_si, curr_bi, 0)
-            avg_p_sell = sum(prices_sell.values()) / len(prices_sell) if prices_sell else 0.4
             min_end_idx = int(round(min_end_usable / energy_step))
             
             for si in range(energy_steps + 1):
+                # Penalty for ending below smart reserve (Survival Floor)
                 reserve_penalty = -20.0 if si < min_end_idx else 0.0
                 for bi in range(BOILER_STEPS + 1):
                     for ai in range(max_arb_h + 1):
                         val, _, _, _, _, _, _ = full_dp[horizon][si][bi][ai]
-                        val += (si * energy_step) * avg_p_sell * 0.9 + reserve_penalty
+                        # Final score = profit during 48h + value of remaining energy
+                        val += (si * energy_step) * terminal_val_kwh + reserve_penalty
                         if val > best_val:
                             best_val = val
                             best_state = (si, bi, ai)
