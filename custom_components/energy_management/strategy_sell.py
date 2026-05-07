@@ -353,6 +353,7 @@ class StrategySell(StrategyEngine):
             first_epoch = epochs[0] if epochs else []
 
             # 1. Pre-calculate safety floors for simulation (Sliding Guard)
+            # v11.9.8: Unified Floor Logic (House Survival + User Limit + Efficiency)
             floors_sliding = {}
             floors_anchored = {}
             _sim_cons_profile = dict(man.get_predicted_profile("consumption_total"))
@@ -363,10 +364,10 @@ class StrategySell(StrategyEngine):
                 is_turbo = (4 <= h_rel < 10)
                 
                 if is_turbo:
-                    h_floor = emergency_soc + 2.0
+                    # Turbo mode allows discharging deeper (close to emergency reserve) to maximize morning profit
+                    h_floor = emergency_soc + 1.0 
                 else:
-                    # Survival Bridge (Minimal) to next sunrise
-                    # На утро смотрим что бы не просесть меньше резерв+2
+                    # Survival Bridge to next sunrise
                     next_sr = get_next_sunrise(h_abs)
                     h_bridge_kwh = 0.0
                     for h_future in range(h_abs + 1, next_sr):
@@ -374,9 +375,12 @@ class StrategySell(StrategyEngine):
                         g_v = float(normalize_float(_sim_gen_profile.get(str(h_future % 24), 0.0)))
                         h_bridge_kwh += max(0.0, l_v - g_v)
                     
-                    h_floor = (emergency_soc + 2.0) + (h_bridge_kwh / b_cap * 100.0)
+                    # Survival floor includes SOC buffer and predicted house need adjusted by efficiency
+                    survival_floor = (emergency_soc + soc_buffer) + (h_bridge_kwh / b_cap * 100.0 / eff)
+                    # Absolute floor is the higher of survival needs or user-defined AI limit
+                    h_floor = max(user_limit, survival_floor)
                 
-                floors_sliding[h_abs] = h_floor # Absolute Survival Floor for simulation
+                floors_sliding[h_abs] = h_floor 
                 floors_anchored[h_abs] = h_floor
 
             # 2. Budget Calculation

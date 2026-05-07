@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : czwartek, 7 maja 2026 19:42:24
+  Started : czwartek, 7 maja 2026 19:46:07
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -16,7 +16,7 @@
 	                  16	g:\systemair\energy_mamagment\custom_components\energy_management\
 	    Newer     		    2684	const.py
 	    Newer     		     416	manifest.json
-	    Newer     		   17453	strategy_dp.py
+	    Newer     		   36390	strategy_sell.py
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
 
@@ -25,11 +25,11 @@
                Total    Copied   Skipped  Mismatch    FAILED    Extras
     Dirs :         3         0         3         0         0         0
    Files :        20         3        17         0         0         0
-   Bytes :    1.30 m    20.0 k    1.28 m         0         0         0
+   Bytes :    1.30 m    38.5 k    1.26 m         0         0         0
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :             116ÿ118 Bytes/sec.
-   Speed :               6,644 MegaBytes/min.
-   Ended : czwartek, 7 maja 2026 19:42:24
+   Speed :             243ÿ765 Bytes/sec.
+   Speed :              13,948 MegaBytes/min.
+   Ended : czwartek, 7 maja 2026 19:46:07
 
