@@ -1,14 +1,10 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.8.451)
-- [x] EMERGENCY ROLLBACK TO v11.8.439. Stabilizing market strategy after failed allocation precision attempts.
-- [x] House-load aware budgeting removed. (Rollbacked)
-- [x] Fix "Zero House Load" simulation bug (fallback to profile)
-- [x] Restricted "saturation-based" discharge to 04:00-11:00 only
-- [x] Implemented Dual-Floor logic (Anchored for Strategy, Sliding for Projection)
-- [x] Initialized all debug attributes to avoid 0/None in UI
-- [x] Fixed NameError in simulation log keys
-- [x] Push all changes to Git
+## Current Status (v11.8.558)
+- [x] Maximum Export Strategy implemented in StrategySell.
+- [x] Allocator no longer pre-throttles export commands by house load.
+- [x] Budget is correctly reduced by (Export + House) to maintain physical consistency.
+- [x] Peak power at 20:00 (and others) will now hit full max_batt_p if budget allows.
 
 ## Universal Rules (DO NOT BREAK)
 

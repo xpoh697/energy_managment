@@ -258,13 +258,15 @@ class StrategySell(StrategyEngine):
             # Initial contiguity grouping
             epochs = self._group_contiguous(target_hours)
             
-            min_soc_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
             user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+            # v11.8.530: Use Strategic User Limit as the base for all safety calculations
+            min_soc_val = user_limit
             soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 5.0))
+
             # Window check
             current_hour_in_24 = cur_hour % 24
             is_morning_window = (4 <= current_hour_in_24 < 10)
-            active_floor = (min_soc_val + 2.0) if is_morning_window else max(user_limit, min_soc_val + soc_buffer)
+            active_floor = (min_soc_val + 2.0) if is_morning_window else (min_soc_val + soc_buffer)
             
             # Initial potential budget (max discharge possible until window-specific floor)
             # v11.7.69: Budget for the NEXT target hour depends on ITS time window
@@ -286,6 +288,25 @@ class StrategySell(StrategyEngine):
             else:
                 morning_h_abs = morning_h + 24
             
+            sim_range = list(range(cur_hour, cur_hour + 48))
+            _, sim_log_base, _ = self.run_soc_simulation(
+                b_soc, sim_range, now, 
+                commands={}, 
+                b_min_soc=min_soc_val, 
+                ignore_blended=True, house_profile_override="consumption_base"
+            )
+            
+            # Detect Solar Surplus (Saturation Awareness)
+            hit_full_before = any(v.get("soc", 0.0) >= 99.0 for h, v in sim_log_base.items() if ":" in h and "Завтра" not in h)
+            is_solar_surplus = is_solar_surplus or hit_full_before
+
+            # Find projected SOC at the exact start of the sale window
+            soc_at_start = b_soc
+            if first_target_h > cur_hour:
+                prev_h = first_target_h - 1
+                sale_start_key = f"{prev_h%24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
+                soc_at_start = self._get_soc_from_log(sim_log_base, sale_start_key, b_soc)
+            
             # v11.7.111: Re-init profiles with safety
             prof_cons_cur = dict(man.get_average_profile("consumption_base", 7, now.weekday()))
             prof_cons_tom = dict(man.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
@@ -298,106 +319,69 @@ class StrategySell(StrategyEngine):
             gatekeeper_floor = min_soc_val
             morning_reserve_floor = min_soc_val + soc_buffer
             
-            if is_morning_window:
-                # v11.7.390: Relax buffer during solar surplus mornings
-                if is_solar_surplus:
-                    active_safety_floor = min_soc_val
-                else:
-                    active_safety_floor = min_soc_val + 2.0
-                house_kwh_until_sunrise = 0.0
-            else:
-                # v11.8.430: Find the END of the current or near-term sell block
-                # instead of the absolute last hour of the 48h plan.
-                next_sunrise_abs = morning_h_abs
-                
-                # We care about the house load until the FIRST sunrise after our current selling activity
-                current_epoch_end = cur_hour
-                if target_hours:
-                    for h in target_hours:
-                        if h < next_sunrise_abs:
-                            current_epoch_end = h
-                        else:
-                            break
-                
-                # Profiles now defined at top level (v11.8.523)
-                range_start = current_epoch_end + 1
-                for h_abs in range(range_start, next_sunrise_abs):
-                    h_load = _sim_cons_profile.get(str(h_abs % 24))
-                    h_gen = _sim_gen_profile.get(str(h_abs % 24))
-                    
-                    p_load = float(normalize_float(h_load if h_load is not None else 0.4))
-                    p_gen = float(normalize_float(h_gen if h_gen is not None else 0.0))
-                    
-                    # v11.8.519: Use NET consumption until sunrise as per TS 6.1 (180)
-                    house_kwh_until_sunrise += max(0.0, p_load - p_gen)
-                
-                gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
-                morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
-                active_safety_floor = max(user_limit, gatekeeper_floor, morning_reserve_floor)
-
-            # --- Stage 2: Budget Calculation (Projected SOC at Start of Sale) ---
-            soc_at_start = b_soc
-            if first_target_h > cur_hour:
-                # Find projected SOC at the exact start of the sale window (End of the hour BEFORE)
-                prev_h = first_target_h - 1
-                sale_start_key = f"{prev_h%24:02d}:59" + (" (Завтра)" if prev_h >= 24 else "")
-                
-                # We use the baseline simulation (no commands) to see where we'll be
-                _, sim_log_base, _ = self.run_soc_simulation(
-                    start_soc=b_soc, sim_range=list(range(cur_hour, first_target_h)),
-                    now=now, commands={}, house_profile_override="consumption_base", ignore_blended=True
-                )
-                soc_at_start = self._get_soc_from_log(sim_log_base, sale_start_key, b_soc)
-
-            available_sell_dc = max(0.0, (soc_at_start - gatekeeper_floor) * b_cap / 100.0)
-            available_sell_ac = available_sell_dc * eff
             
-            _LOGGER.warning(f"[BudgetDebug] v11.8.473: StartSOC:{soc_at_start:.1f}% Floor:{gatekeeper_floor:.1f}% BudgetAC:{available_sell_ac:.2f}kWh Surplus:{is_solar_surplus}")
-
-            f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
-            tom_h_need = sum(float(normalize_float(prof_cons_tom.get(str(h % 24), 0.0))) for h in range(morning_h + 24, morning_h + 48))
-            solar_deficit = max(0.0, tom_h_need - f_tom)
-            if solar_deficit > 0.1:
-                available_sell_ac = max(0.0, available_sell_ac - (solar_deficit / eff))
-                if not limit_reason or limit_reason == "None": limit_reason = "Дефицит солнца завтра"
-
-            # --- Stage 3: Greedy Priority Allocator (v11.7.136) ---
-            sell_commands = {}
+            # v11.8.430: Find the END of the current or near-term sell block
+            next_sunrise_abs = morning_h_abs
+            current_epoch_end = cur_hour
+            if target_hours:
+                for h in target_hours:
+                    if h < next_sunrise_abs: current_epoch_end = h
+                    else: break
             
-            # v11.7.275: Pre-populate sim_log with Baseline (Solar-Aware)
-            sim_range = list(range(cur_hour, cur_hour + 48))
-            _, sim_log, _ = self.run_soc_simulation(
-                b_soc, sim_range, now, 
-                commands={}, 
-                b_min_soc=min_soc_val, 
-                ignore_blended=True, house_profile_override="consumption_base"
-            )
+            range_start = current_epoch_end + 1
+            for h_abs in range(range_start, next_sunrise_abs):
+                h_load = _sim_cons_profile.get(str(h_abs % 24))
+                h_gen = _sim_gen_profile.get(str(h_abs % 24))
+                p_load = float(normalize_float(h_load if h_load is not None else 0.4))
+                p_gen = float(normalize_float(h_gen if h_gen is not None else 0.0))
+                house_kwh_until_sunrise += max(0.0, p_load - p_gen)
             
-            # v11.7.397: Saturation Awareness (hit_full_before)
-            # Check if any hour today reaches 99% SOC in the baseline simulation
-            hit_full_before = any(v.get("soc", 0.0) >= 99.0 for h, v in sim_log.items() if ":" in h and "Завтра" not in h)
-            is_solar_surplus = is_solar_surplus or hit_full_before
-
+            gatekeeper_floor = min_soc_val + (house_kwh_until_sunrise / b_cap * 100.0)
+            morning_reserve_floor = (min_soc_val + soc_buffer) + (house_kwh_until_sunrise / b_cap * 100.0)
+            active_safety_floor = max(user_limit, gatekeeper_floor, morning_reserve_floor)
+            if is_morning_window and is_solar_surplus:
+                active_safety_floor = min_soc_val
+            
             # v11.7.280: Restore epochs for the allocator
             p_today = man.data.get("prices_sell", {})
             p_tomorrow = man.data.get("prices_sell_tomorrow", {})
             epochs = self.get_strategy_epochs(target_hours, p_today, p_tomorrow)
             first_epoch = epochs[0] if epochs else []
 
-            # 1. Pre-calculate safety floors
+            # 1. Pre-calculate safety floors (Sunrise Guard)
             floors_sliding = {}
             floors_anchored = {}
             _sim_cons_profile = dict(man.get_predicted_profile("consumption_total"))
+            _sim_gen_profile = dict(man.get_predicted_profile("generation_total"))
             
-            morning_strict = min_soc_val + soc_buffer
-            last_h_floor = morning_strict
-            
-            # 2. Greedy Fill in Price-Descending order (v11.8.492: Selective Budget)
-            # v11.8.492: Budget is what we have above min_soc + solar forecast
-            f_today_val = float(man.get_sensor_float(man.forecast_today_sensor) or 0.0)
-            available_sell_dc = max(0.0, (b_soc - min_soc_val) * b_cap / 100.0) + f_today_val
-            effective_budget_ac = available_sell_dc * eff
-            if is_solar_surplus: effective_budget_ac = 99.0
+            for h_abs in sim_range:
+                # Morning window check
+                h_rel = h_abs % 24
+                is_m_win = (4 <= h_rel < 10)
+                
+                # Goal at the END of this hour (to survive until sunrise)
+                # Sunrise is morning_h_abs.
+                bridge_soc = 0.0
+                if h_abs < morning_h_abs:
+                    house_kwh_rem = 0.0
+                    for h_future in range(h_abs + 1, morning_h_abs):
+                        l_val = float(normalize_float(_sim_cons_profile.get(str(h_future % 24), 0.4)))
+                        g_val = float(normalize_float(_sim_gen_profile.get(str(h_future % 24), 0.0)))
+                        house_kwh_rem += max(0.0, l_val - g_val)
+                    bridge_soc = (house_kwh_rem / b_cap * 100.0)
+                
+                # Target at sunrise (Use CURRENT rule for the entire simulation to avoid 'stealing' from future relaxation)
+                morning_target = min_soc_val + (2.0 if is_m_win else soc_buffer)
+                
+                # The floor for THIS hour h_abs is Target_at_Sunrise + consumption_until_sunrise
+                h_floor = morning_target + bridge_soc
+                
+                # Also must respect User Limit (hard cutoff)
+                floors_sliding[h_abs] = h_floor
+                floors_anchored[h_abs] = max(user_limit, h_floor)
+
+            # 2. Budget Calculation
+            available_sell_dc = max(0.0, (b_soc - active_safety_floor) * b_cap / 100.0)
             
             # v11.8.490: First Non-Empty Discharge Cycle
             # Group target hours into 24h clusters ending at 10:00 AM.
@@ -412,95 +396,101 @@ class StrategySell(StrategyEngine):
                 
                 first_c_id = min(cycle_map.keys())
                 target_hours = cycle_map[first_c_id]
-                
-            h_by_priority = sorted(target_hours, key=lambda h: all_sell_prices.get(h, 0.0), reverse=True)
+            
+            # Sort by Price (Primary) and Hour (Secondary). 
+            # If prices are equal, prioritize the LATER hour to protect SOC for earlier peaks
+            # and follow the natural flow of evening discharge.
+            h_by_priority = sorted(target_hours, key=lambda h: (all_sell_prices.get(h, 0.0), h), reverse=True)
+            max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
+            # 1. Initial Budget (Initial Guess as per TS 103)
+            available_sell_dc = max(0.0, (soc_at_start - active_safety_floor) * b_cap / 100.0)
+            target_budget_ac = available_sell_dc * eff
+            if is_solar_surplus:
+                target_budget_ac = max(target_budget_ac, b_cap * 2.0)
+            
             sell_commands = {}
             sim_log = {}
             
-            for h_target in h_by_priority:
-                # v11.8.492: Top peaks ignore budget. Budget only throttles secondary hours.
-                is_top_peak = (all_sell_prices.get(h_target, 0.0) >= target_price * 0.95)
-                if not is_top_peak and effective_budget_ac <= 0.05: break
+            for attempt in range(7): # Iterative refinement ( п. 6 ТЗ)
+                sell_commands = {}
+                rem_budget = target_budget_ac
                 
-                # RE-CALCULATE FLOORS for THIS target hour (Night vs Morning context)
-                is_morning_window = bool(4 <= (h_target % 24) < 10)
-                eff_morning_strict = (min_soc_val + 2.0) if is_morning_window else morning_strict
-                
-                curr_floors = {}
-                for h_sim in sim_range:
-                    # v11.8.521: Morning Guard Stickiness.
-                    # Only protect for the NEXT sunrise if we are past the current morning window (10:00).
-                    # Otherwise, use the current sunrise as the target to allow discharge in the morning peak.
-                    h_sim_rel = int(h_sim % 24)
-                    if h_sim_rel < 10:
-                        target_sunrise = (int(h_sim // 24) * 24) + sunrise_h
+                # 2. Distribution: Strict price-hour priority (TS 104)
+                # v11.8.558: Maximum Export Strategy (No pre-throttling by house load)
+                for h in h_by_priority:
+                    duration = 1.0
+                    if h == cur_hour:
+                        duration = max(0.01, 1.0 - (now.minute / 60.0))
+                    
+                    # Calculate net house load for budget tracking
+                    h_load = _sim_cons_profile.get(str(h % 24), 0.4)
+                    h_gen = _sim_gen_profile.get(str(h % 24), 0.0)
+                    p_house = max(0.0, float(normalize_float(h_load)) - float(normalize_float(h_gen)))
+                    
+                    # Sell command is greedy: take as much as possible for export
+                    p_export = min(max_batt_p, rem_budget / duration)
+                    
+                    if p_export > 0.05:
+                        sell_commands[h] = round_f(p_export, 3)
                     else:
-                        target_sunrise = (int(h_sim // 24) * 24) + sunrise_h + 24
-                    # v11.8.520: Use NET consumption until sunrise (TS 6.1)
-                    h_rem_kwh = 0.0
-                    for hx in range(h_sim, target_sunrise):
-                        h_l = _sim_cons_profile.get(str(hx % 24), 0.4)
-                        h_g = _sim_gen_profile.get(str(hx % 24), 0.0)
-                        h_rem_kwh += max(0.0, float(normalize_float(h_l)) - float(normalize_float(h_g)))
+                        sell_commands[h] = 0.0
                     
-                    bridge_soc = (h_rem_kwh / b_cap * 100.0)
-                    
-                    # v11.8.519/520: Survival target at sunrise must be (min_soc + soc_buffer)
-                    # To hit that, we need (min_soc + soc_buffer) + NET consumption now.
-                    h_floor = max(eff_morning_strict, (min_soc_val + soc_buffer) + bridge_soc)
-                    
-                    is_h_sim_planned = bool(h_sim in target_hours)
-                    future_sales = [th for th in target_hours if h_sim < th <= target_sunrise]
-                    if is_h_sim_planned or future_sales:
-                        curr_floors[h_sim] = max(h_floor, user_limit)
-                    else:
-                        curr_floors[h_sim] = h_floor
-
-                # v11.8.492: Top peak ignores budget trial. 
-                test_p = max_p if (is_solar_surplus or is_top_peak) else min(max_p, effective_budget_ac)
-                trial_commands = sell_commands.copy()
-                trial_commands[h_target] = test_p
+                    # Total budget depletion is Export + House load
+                    rem_budget -= (p_export + p_house) * duration
                 
+                # 3. Simulation Check (TS 105)
                 _, trial_log, _ = self.run_soc_simulation(
-                    b_soc, sim_range, now, commands={h: -p for h, p in trial_commands.items()}, 
+                    b_soc, sim_range, now, commands={h: -p for h, p in sell_commands.items()}, 
                     b_min_soc=min_soc_val, ignore_blended=True, 
-                    house_profile_override="consumption_base", dynamic_floors=curr_floors
+                    house_profile_override="consumption_base", dynamic_floors=floors_sliding
                 )
+                sim_log = trial_log
                 
-                # Check if this priority hour can actually discharge anything
-                h_key = f"{h_target%24:02d}:59" + (" (Завтра)" if h_target >= 24 else "")
-                real_p = float(trial_log.get(h_key, {}).get("p_bat", 0.0))
-                
-                if real_p > 0.1:
-                    # v11.8.522: Future Peak Protection (Nuclear Priority)
-                    # We must ensure that adding this hour (h_target) does not "steal" energy 
-                    # from higher-priced hours that we already planned.
-                    is_stealing = False
-                    for h_prev, p_prev in sell_commands.items():
-                        if p_prev <= 0.05: continue
-                        h_prev_key = f"{h_prev%24:02d}:59" + (" (Завтра)" if h_prev >= 24 else "")
-                        p_in_trial = float(trial_log.get(h_prev_key, {}).get("p_bat", 0.0))
-                        
-                        # If the previously planned power dropped significantly, we are stealing.
-                        if p_in_trial < p_prev - 0.1:
-                            is_stealing = True
-                            _LOGGER.debug(f"[Strategy] v11.8.522: Hour {h_target} rejected. Steals from {h_prev} ({p_in_trial:.2f} < {p_prev:.2f})")
-                            break
+                # 4. Bidirectional Refinement (TS 106)
+                total_deficit_kwh = 0.0
+                for h_cmd, p_req in sell_commands.items():
+                    # v11.8.557: Correct deficit tracking (Export + House vs Real p_bat)
+                    duration = 1.0
+                    if h_cmd == cur_hour:
+                        duration = max(0.01, 1.0 - (now.minute / 60.0))
                     
-                    if not is_stealing:
-                        # v11.8.499: Use test_p for UI/Command if not SOC-limited (within 10% margin)
-                        sell_commands[h_target] = test_p if real_p > (test_p * 0.9) else real_p
-                        sim_log = trial_log
-                        # v11.8.492 logic: decrement budget for secondary peaks
-                        if not is_top_peak:
-                            effective_budget_ac -= (real_p / eff)
-                        
-                        floors_anchored = curr_floors
-                        floors_sliding = curr_floors
-                    else:
-                        sell_commands[h_target] = 0.0
+                    h_load = _sim_cons_profile.get(str(h_cmd % 24), 0.4)
+                    h_gen = _sim_gen_profile.get(str(h_cmd % 24), 0.0)
+                    p_house = max(0.0, float(normalize_float(h_load)) - float(normalize_float(h_gen)))
+                    
+                    h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
+                    p_real = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
+                    
+                    # Target discharge power was p_req + p_house (limited by max_batt_p)
+                    p_target = min(max_batt_p, p_req + p_house)
+                    
+                    if p_real < p_target - 0.05:
+                        total_deficit_kwh += (p_target - p_real) * duration
+                
+                # Check SOC at sunrise to find surplus
+                sunrise_key = f"{sunrise_h:02d}:59"
+                if cur_hour >= sunrise_h: sunrise_key += " (Завтра)"
+                final_soc = trial_log.get(sunrise_key, {}).get("soc", 100.0)
+                target_final = floors_sliding.get(sunrise_h if cur_hour < sunrise_h else (sunrise_h + 24), min_soc_val + (2.0 if is_morning_window else soc_buffer))
+                
+                if total_deficit_kwh > 0.005:
+                    # Point 4 TS 107: Decrease global budget by energy deficit
+                    target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 1.05)
+                elif final_soc > target_final + 0.1:
+                    # Point 4 TS 108: Increase budget by surplus to allow "overflow" into secondary windows
+                    surplus_soc = final_soc - target_final
+                    surplus_kwh = (surplus_soc * b_cap / 100.0) * eff
+                    target_budget_ac += (surplus_kwh * 0.8)
+                elif final_soc < target_final - 0.1:
+                    # Decrease budget if below target at sunrise
+                    deficit_soc = target_final - final_soc
+                    deficit_kwh = (deficit_soc * b_cap / 100.0) * eff
+                    target_budget_ac = max(0.0, target_budget_ac - deficit_kwh * 1.1)
                 else:
-                    sell_commands[h_target] = 0.0
+                    # Convergence!
+                    break
+            
+            # Final Pass: Use the best sim_log we found
 
             house_rem_total = house_kwh_until_sunrise
 
@@ -513,16 +503,19 @@ class StrategySell(StrategyEngine):
             limit_reason = "Активная продажа (Приоритет: Цена)" if active_h else "Ожидание пика"
             
             for h in sorted_h:
-                p = sell_commands.get(h, 0.0)
-                if p <= 0.05: continue
-                
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
                 sim_entry = sim_log.get(h_sim_key, {})
+                # v11.8.555: Only show hours where we actually HAVE a sell command
+                # (to avoid showing base house-load coverage in the strategic plan)
+                if sell_commands.get(h, 0.0) <= 0.05: continue
+                
                 real_p = float(sim_entry.get("p_bat", 0.0))
+                if real_p <= 0.05: continue
+                
                 sim_soc = float(sim_entry.get("soc", b_soc))
                 
                 # Diagnostics: Determine why we aren't selling at max_p
-                if real_p < p - 0.1:
+                if real_p < sell_commands.get(h, 0.0) - 0.1:
                     h_floor = floors_anchored.get(h, min_soc_val + soc_buffer)
                     if abs(sim_soc - user_limit) < 0.2:
                         limit_reason = "Лимит пользователя"
@@ -532,7 +525,7 @@ class StrategySell(StrategyEngine):
                         limit_reason = "Утренний лимит"
                 
                 planned_results[f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")] = {
-                    "power": round_f(sell_commands.get(h, 0.0), 3),
+                    "power": round_f(real_p, 3), # v11.8.550: Show actual predicted discharge
                     "soc": round_f(sim_soc, 1)
                 }
 
@@ -691,7 +684,7 @@ class StrategySell(StrategyEngine):
             })
 
             res["arbitrage_sell_debug"] = {
-                "start_soc": b_soc,
+                "start_soc": round_f(soc_at_start, 1),
                 "gatekeeper_floor": round_f(gatekeeper_floor, 1),
                 "active_safety_floor": round_f(active_safety_floor, 1),
                 "survival_target": round_f(morning_reserve_floor, 1),
