@@ -35,7 +35,7 @@ BOILER_STEPS = 0           # Disabled for now
 INF = 1e9                 
 
 # Action types
-ACT_SOL = 0
+ACT_IDLE = 0
 ACT_DIS = 1
 ACT_PV_CHARGE = 2
 ACT_GRID_CHARGE = 3
@@ -118,7 +118,7 @@ class DPPlanner:
 
             # Initial state
             curr_si = min(energy_steps, max(0, int(round((curr_s_raw or 0.0) / 100.0 * b_cap / energy_step))))
-            full_dp[0][curr_si][0] = (0.0, -1, -1, 0, 0.0)
+            full_dp[0][curr_si][0] = (0.0, -1, -1, ACT_IDLE, 0.0)
             
             # v11.9.14: Define sunrise hour for floor calculation
             sunrise_h = int(float(self.manager.get_setting("sunrise_h", 8.0)))
@@ -181,8 +181,8 @@ class DPPlanner:
                         pv_surplus = max(0.0, gen - cons - b_use)
                         pv_deficit = max(0.0, cons + b_use - gen)
                         
-                        # 1. ACT_SOL
-                        _update(si, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0, h, cur_rev, si, ai)
+                        # 1. ACT_IDLE (Baseline Grid)
+                        _update(si, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_IDLE, 0.0, h, cur_rev, si, ai)
                                 
                         # 2. ACT_DIS
                         if p_sell > min_sell_p and ai < max_arb_h:
@@ -197,17 +197,19 @@ class DPPlanner:
                                 reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
                                 _update(nsi, ai + 1, reward, ACT_DIS, exp, h, cur_rev, si, ai)
                                 
-                        # 3. ACT_PV_CHARGE: Surplus to battery
+                        # 3. ACT_PV_CHARGE: Surplus to battery (v11.9.24: Single step optimization)
                         if pv_surplus > 0.01 and si < energy_steps:
-                            max_pvc = min(pv_surplus, (energy_steps - si) * energy_step, max_p_chg / eff)
-                            for ci in range(1, int(max_pvc / energy_step) + 1):
-                                chg = ci * energy_step
-                                nsi = si + ci
-                                reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
-                                reward += 1e-4 * chg
-                                _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
+                            # Charge as much as possible from surplus
+                            chg = min(pv_surplus * eff, (energy_steps - si) * energy_step, max_p_chg)
+                            if chg > 0.01:
+                                ci = int(round(chg / energy_step))
+                                if ci > 0:
+                                    nsi = si + ci
+                                    reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
+                                    reward += 1e-4 * chg
+                                    _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
  
-                        # 4. ACT_GRID_CHARGE: Buy from grid
+                        # 4. ACT_GRID_CHARGE: Buy from grid (Keep loop for precision)
                         if si < energy_steps:
                             max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
                             for ci in range(1, int(max_gc / energy_step) + 1):
@@ -216,14 +218,16 @@ class DPPlanner:
                                 reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
                                 _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
  
-                        # 5. ACT_SELF_CONSUME: Battery to home ONLY
+                        # 5. ACT_SELF_CONSUME: Battery to home ONLY (v11.9.24: Single step optimization)
                         if pv_deficit > 0.01 and si > 0:
-                            max_sc = min(usable_energy, pv_deficit / eff)
-                            for sci in range(1, int(round(max_sc / energy_step)) + 1):
-                                sc = sci * energy_step
-                                nsi = si - sci
-                                rem_def = max(0.0, pv_deficit - sc * eff)
-                                _update(nsi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
+                            # Discharge as much as possible to cover deficit
+                            sc = min(usable_energy, pv_deficit / eff, max_p_dis)
+                            if sc > 0.01:
+                                sci = int(round(sc / energy_step))
+                                if sci > 0:
+                                    nsi = si - sci
+                                    rem_def = max(0.0, pv_deficit - sc * eff)
+                                    _update(nsi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
                                 
                         # 6. ACT_PAID_IMPORT: Negative price handling
                         if p_buy < 0 and (cons + b_use) > 0.01:
@@ -273,7 +277,7 @@ class DPPlanner:
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
                 
-                mode = ["SOL", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"][act]
+                mode = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"][act]
                 
                 soc = int(round((si * energy_step) / b_cap * 100.0))
                 
