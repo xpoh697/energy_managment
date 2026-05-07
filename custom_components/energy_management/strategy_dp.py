@@ -79,10 +79,9 @@ class DPPlanner:
             soc_buff = float(self.manager.get_setting(CONF_SOC_BUFFER, 13.0))
             eff = getattr(self.manager, "last_eff_coeff", 0.96)
             
-            # v11.9.1: Smart Terminal Reserve (Looking beyond 48h horizon)
-            # We estimate how much we need to survive from the END of the horizon until the next generation window
-            horizon_end_dt = now + timedelta(hours=horizon)
-            min_end_usable = self._calc_survival_beyond_horizon(horizon_end_dt, b_cap)
+            # v11.9.39: Fixed terminal reserve (2.0 kWh) instead of dynamic 18h survival.
+            # This allows the engine to discharge more aggressively today.
+            min_end_usable = 2.0
             
             # Boiler Params
             b_power = float(self.manager.get_setting(CONF_BOILER_POWER, 2.5))
