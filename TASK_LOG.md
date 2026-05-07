@@ -1,6 +1,7 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.12)
+## Current Status (v11.9.13)
+- [x] Fixed ImportError in DP engine (v11.9.13).
 - [x] Renamed and reorganized menu: "DP Settings (Boiler + Limits)" (v11.9.12).
 - [x] Moved advanced battery settings to Main Configuration menu (v11.9.11).
 - [x] Fixed NameError: CONF_MAX_ARBITRAGE_HOURS in DP engine (v11.9.10).
