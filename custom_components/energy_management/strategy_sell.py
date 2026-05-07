@@ -499,7 +499,17 @@ class StrategySell(StrategyEngine):
             planned_results = {}
             sorted_h = sorted(sell_commands.keys())
             active_h = [h for h, p in sell_commands.items() if p > 0.05]
-            limit_reason = "Активная продажа (Приоритет: Цена)" if active_h else "Ожидание пика"
+            
+            # Initial reason based on current hour command
+            cur_cmd = sell_commands.get(cur_hour, 0.0)
+            if cur_cmd > 0.05:
+                limit_reason = "Активная продажа (Приоритет: Цена)"
+            elif cur_hour in target_hours:
+                limit_reason = "Ограничение (Цена > Порог, но бюджет на другие часы)"
+            elif target_hours:
+                limit_reason = "Ожидание пика"
+            else:
+                limit_reason = "Нет ценового окна"
             
             for h in sorted_h:
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
@@ -517,11 +527,14 @@ class StrategySell(StrategyEngine):
                 if real_p < sell_commands.get(h, 0.0) - 0.1:
                     h_floor = floors_anchored.get(h, emergency_soc + 2.0)
                     if abs(sim_soc - user_limit) < 0.2:
-                        limit_reason = "Лимит пользователя"
+                        limit_reason_h = "Лимит пользователя"
                     elif h_floor > emergency_soc + 2.0 + 0.5:
-                        limit_reason = "Gatekeeper"
+                        limit_reason_h = "Gatekeeper"
                     else:
-                        limit_reason = "Утренний лимит"
+                        limit_reason_h = "Утренний лимит"
+                    
+                    if h == cur_hour:
+                        limit_reason = limit_reason_h
                 
                 planned_results[f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")] = {
                     "power": round_f(real_p, 3), # v11.8.550: Show actual predicted discharge
@@ -675,7 +688,7 @@ class StrategySell(StrategyEngine):
                 "soc_at_peak": f"{b_soc:.1f}%", 
                 "house_until_sunrise_pct": round_f(house_after_pct + house_during_pct, 2),
                 "house_h": "Profile",
-                "sim_gen": round_f(sum(float(v.get('gen', 0)) for v in sim_log.values()), 1),
+                "sim_gen": round_f(sum(float(v.get('gen_kw', 0)) for v in sim_log.values()), 1),
                 "sim_log": " | ".join(debug_log_parts),
                 "final_targets": str(target_hours),
                 "f_today": f_today,

@@ -1,10 +1,10 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.8.566)
+## Current Status (v11.8.567)
 - [x] Unified Gatekeeper & Morning Turbo Mode (v11.8.561).
 - [x] House consumption calculation from end of pool (v11.8.562).
 - [x] Reverse Bridging for separated night pools (v11.8.563).
-- [x] Bugfixes and Attribute cleanup (v11.8.566).
+- [x] Debug display fixes and cleanup (v11.8.567).
 
 ## Universal Rules (DO NOT BREAK)
 
