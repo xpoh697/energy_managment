@@ -201,8 +201,8 @@ class DPPlanner:
                                 ci = int(round(chg / energy_step))
                                 if ci > 0:
                                     nsi = si + ci
-                                    # v11.9.34: Sync with dp_engine.py (opportunity cost back)
-                                    reward = p_sell * max(0.0, pv_surplus - chg/eff) - p_buy * pv_deficit
+                                    # v11.9.37: Sync with dp_engine.py (100% Efficiency assumed in core)
+                                    reward = p_sell * max(0.0, pv_surplus - chg) - p_buy * pv_deficit
                                     _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 4. ACT_GRID_CHARGE: Buy from grid (Keep loop for precision)
@@ -211,19 +211,19 @@ class DPPlanner:
                             for ci in range(1, int(max_gc / energy_step) + 1):
                                 chg = ci * energy_step
                                 nsi = si + ci
-                                # v11.9.34: Sync with dp_engine.py
-                                reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg)
+                                # v11.9.37: Sync with dp_engine.py (100% Efficiency)
+                                reward = p_sell * pv_surplus - p_buy * (chg + pv_deficit) - (cycle_cost * chg)
                                 _update(nsi, ai, reward, ACT_GRID_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 5. ACT_SELF_CONSUME: Battery to home ONLY (v11.9.24: Single step optimization)
                         if pv_deficit > 0.01 and si > 0:
                             # Discharge as much as possible to cover deficit
-                            sc = min(usable_energy, pv_deficit / eff, max_p_dis)
+                            sc = min(usable_energy, pv_deficit, max_p_dis)
                             if sc > 0.01:
                                 sci = int(round(sc / energy_step))
                                 if sci > 0:
                                     nsi = si - sci
-                                    rem_def = max(0.0, pv_deficit - sc * eff)
+                                    rem_def = max(0.0, pv_deficit - sc)
                                     # v11.9.34: CRITICAL SYNC - NO CYCLE COST for self-consume!
                                     _update(nsi, ai, -p_buy * rem_def, ACT_SELF_CONSUME, sc, h, cur_rev, si, ai)
                                 
