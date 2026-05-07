@@ -80,9 +80,7 @@ class DPPlanner:
             
             min_end_usable = 2.3 # v11.9.40 (approx 13.5% SOC)
             
-            # Boiler Params
-            b_power = float(self.manager.get_setting(CONF_BOILER_POWER, 2.5))
-            b_enabled = bool(self.manager.get_setting(CONF_BOILER_ENABLE, False))
+            # v11.9.48: Boiler logic completely removed from DP model.
             
             forecast_gen = self._get_smart_gen_forecast(horizon)
             avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
