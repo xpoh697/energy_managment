@@ -201,8 +201,8 @@ class DPPlanner:
                                 ci = int(round(chg / energy_step))
                                 if ci > 0:
                                     nsi = si + ci
-                                    # v11.9.32: Simple and honest math. Solar is free, Grid has wear cost.
-                                    reward = p_sell * (pv_surplus - chg/eff) - p_buy * pv_deficit
+                                    # v11.9.33: Solar is TRULY FREE (0 cost). 
+                                    reward = p_sell * pv_surplus - p_buy * pv_deficit
                                     _update(nsi, ai, reward, ACT_PV_CHARGE, chg, h, cur_rev, si, ai)
  
                         # 4. ACT_GRID_CHARGE: Buy from grid (Keep loop for precision)
