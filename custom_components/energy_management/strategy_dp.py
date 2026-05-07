@@ -102,6 +102,14 @@ class DPPlanner:
             
             full_dp[0][curr_si][curr_bi] = (0.0, -1, -1, 0, 0.0, False)
 
+            # v11.9.4: Pre-calculate future buy prices to avoid lossy arbitrage
+            # For each hour, find the maximum buy price in the next 6 hours
+            future_buy_max_map = {}
+            for h in range(horizon):
+                look_ahead = min(6, horizon - h - 1)
+                window = [float(normalize_float(prices_buy.get(str(cur_hour + h + k), 0.0))) for k in range(1, look_ahead + 1)]
+                future_buy_max_map[h] = max(window) if window else 0.0
+
             # --- Forward Induction (Unified DP with Boiler) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
@@ -111,8 +119,12 @@ class DPPlanner:
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
                 
-                # Dynamic night buffer
-                h_min_soc = (min_soc + soc_buff) if (21 <= h_rel or h_rel <= 6) else min_soc
+                # v11.9.4: Survival floor for the TARGET hour (h+1)
+                target_h_rel = (abs_h + 1) % 24
+                h_min_soc_target = (min_soc + soc_buff) if (21 <= target_h_rel or target_h_rel <= 6) else min_soc
+                
+                # Protection against lossy arbitrage
+                f_buy_max = future_buy_max_map.get(h, 0.0)
 
                 for si in range(energy_steps + 1):
                     for bi in range(BOILER_STEPS + 1):
@@ -124,8 +136,7 @@ class DPPlanner:
                         
                         for b_on in ([True, False] if b_enabled else [False]):
                             b_use = b_power if b_on else 0.0
-                            # Transition boiler
-                            next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.4 + b_use)) # 0.4kWh loss/usage
+                            next_boi_kwh = max(0.0, min(b_capacity, cur_boi_kwh - 0.4 + b_use))
                             nbi = int(round(next_boi_kwh / b_capacity * BOILER_STEPS)) if b_enabled else 0
                             
                             pv_surplus = max(0.0, gen - cons - b_use)
@@ -133,13 +144,15 @@ class DPPlanner:
                             
                             def update_state(nsi: int, rwd: float, act: int, amt: float, penalty: float = 0.0):
                                 total_rev = cur_rev + rwd - penalty
+                                # v11.9.4: Check floor for the TARGET state
+                                if (nsi * energy_step / b_cap * 100) < h_min_soc_target:
+                                    total_rev -= 10.0
+                                
                                 if total_rev > full_dp[h+1][nsi][nbi][0]:
                                     full_dp[h+1][nsi][nbi] = (total_rev, si, bi, act, amt, b_on)
 
                             # 1. ACT_SOL (Grid Only / Fallback): Battery idle
-                            # v11.9.2: Apply penalty only if we are below floor and not charging
-                            penalty = 5.0 if (si * energy_step / b_cap * 100) < h_min_soc else 0.0
-                            update_state(si, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0, penalty)
+                            update_state(si, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_SOL, 0.0)
                             
                             # 2. ACT_DIS: Discharge to grid (Commercial Sale)
                             if p_sell > 0.01:
@@ -150,8 +163,13 @@ class DPPlanner:
                                     to_grid = max(0.0, exp*eff + gen - cons - b_use)
                                     from_grid = max(0.0, cons + b_use - exp*eff - gen)
                                     reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
-                                    # v11.9.2: STRICT penalty for grid sales below survival floor
-                                    dis_penalty = 10.0 if (nsi * energy_step / b_cap * 100) < h_min_soc else 0.0
+                                    
+                                    # v11.9.4: Block selling if buy price later is higher (including efficiency losses)
+                                    # We use 0.9 as a conservative round-trip efficiency factor
+                                    dis_penalty = 0.0
+                                    if p_sell * 0.9 < f_buy_max:
+                                        dis_penalty = 10.0 # Strict penalty for lossy arbitrage
+                                    
                                     update_state(nsi, reward, ACT_DIS, exp, dis_penalty)
                                     
                             # 3. ACT_PV_CHARGE: Surplus to battery (Always good)
@@ -170,8 +188,7 @@ class DPPlanner:
                                 for ci in range(1, int(max_gc / energy_step) + 1):
                                     chg = ci * energy_step
                                     nsi = si + ci
-                                    # v11.9.3: Incentive to reach survival floor if price is not extreme
-                                    em_bonus = 0.4 if (si * energy_step / b_cap * 100) < h_min_soc else 0.0
+                                    em_bonus = 0.4 if (si * energy_step / b_cap * 100) < h_min_soc_target else 0.0
                                     reward = p_sell * pv_surplus - p_buy * (chg/eff + pv_deficit) - (cycle_cost * chg) + em_bonus
                                     update_state(nsi, reward, ACT_GRID_CHARGE, chg)
 
@@ -182,7 +199,7 @@ class DPPlanner:
                                     sc = sci * energy_step
                                     nsi = si - sci
                                     rem_def = max(0.0, pv_deficit - sc * eff)
-                                    # v11.9.3: Physical limit is strict, survival floor is soft for house
+                                    # v11.9.4: Only physical floor is strict for house
                                     sc_penalty = 20.0 if (nsi * energy_step / b_cap * 100) < min_soc else 0.0
                                     update_state(nsi, -p_buy * rem_def, ACT_SELF_CONSUME, sc, sc_penalty)
                                     

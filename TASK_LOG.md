@@ -1,8 +1,8 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.3)
-- [x] Survival incentives for grid charging below h_min_soc (v11.9.3).
-- [x] Separated survival limits for house vs grid sale (v11.9.2).
+## Current Status (v11.9.4)
+- [x] Target-hour survival look-ahead (v11.9.4).
+- [x] Lossy arbitrage protection (selling low to buy high) (v11.9.4).
 - [x] Emergency SOC recovery bonus.
 - [x] High-precision 0.1kWh steps.
 
