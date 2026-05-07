@@ -153,6 +153,15 @@ class DPPlanner:
                 if total_rev > full_dp[t_step + 1][nsi][nai][0]:
                     full_dp[t_step + 1][nsi][nai] = (total_rev, si_orig, ai_orig, act, amt)
 
+            # v11.9.41: Top-N Arbitrage Sorting PER DAY (Sync with original author's logic)
+            top_sell_set = set()
+            for day in range(horizon // 24 + 1):
+                d_start = cur_hour + day * 24
+                d_end = d_start + 24
+                d_prices = [(int(h), p) for h, p in prices_sell.items() if d_start <= int(h) < d_end and p > min_sell_p]
+                d_top = sorted(d_prices, key=lambda x: x[1], reverse=True)[:max_arb_h]
+                for h_abs, p in d_top: top_sell_set.add(h_abs)
+            
             # --- Forward Induction (Unified 4D DP) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
@@ -161,6 +170,11 @@ class DPPlanner:
                 p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
                 gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
                 cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
+                
+                # Standby and Surplus
+                b_use = b_power if b_enabled else 0.0
+                pv_surplus = max(0.0, gen - cons - b_use)
+                pv_deficit = max(0.0, cons + b_use - gen)
 
                 for si in range(energy_steps + 1):
                     for ai in range(max_arb_h + 1):
@@ -168,33 +182,24 @@ class DPPlanner:
                         if cur_rev <= neg_inf + 100: continue
                         
                         usable_energy = si * energy_step
-                        
-                        # Boiler is handled statically now (if enabled)
-                        b_use = b_power if b_enabled else 0.0
-                        
-                        pv_surplus = max(0.0, gen - cons - b_use)
-                        pv_deficit = max(0.0, cons + b_use - gen)
-                        
                         # 1. ACT_IDLE (Baseline Grid)
                         _update(si, ai, p_sell * pv_surplus - p_buy * pv_deficit + 1e-6, ACT_IDLE, 0.0, h, cur_rev, si, ai)
                                 
-                        # 2. ACT_DIS
-                        if p_sell > min_sell_p and ai < max_arb_h:
-                            max_exp = min(max_p_dis, usable_energy)
-                            for ei in range(1, int(round(max_exp / energy_step)) + 1):
-                                exp = ei * energy_step
-                                if exp < min_dis_kwh: continue
-                                
-                                nsi = si - ei
-                                to_grid = max(0.0, exp*eff + gen - cons - b_use)
-                                from_grid = max(0.0, cons + b_use - exp*eff - gen)
+                        # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
+                        # v11.9.41: Restricted to TOP-N hours only!
+                        if abs_h in top_sell_set and ai < max_arb_h:
+                            exp = min(usable_energy, max_p_dis)
+                            # v11.9.41: Min discharge energy check (0.5 kWh)
+                            if exp >= min_dis_kwh:
+                                to_grid = max(0.0, exp + gen - cons - b_use)
+                                from_grid = max(0.0, cons + b_use - exp - gen)
                                 reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
+                                nsi = si - int(round(exp / energy_step))
                                 _update(nsi, ai + 1, reward, ACT_DIS, exp, h, cur_rev, si, ai)
                                 
-                        # 3. ACT_PV_CHARGE: Surplus to battery (v11.9.24: Single step optimization)
+                        # 3. ACT_PV_CHARGE: Surplus to battery
                         if pv_surplus > 0.01 and si < energy_steps:
-                            # Charge as much as possible from surplus
-                            chg = min(pv_surplus * eff, (energy_steps - si) * energy_step, max_p_chg)
+                            chg = min(pv_surplus, (energy_steps - si) * energy_step, max_p_chg)
                             if chg > 0.01:
                                 ci = int(round(chg / energy_step))
                                 if ci > 0:
