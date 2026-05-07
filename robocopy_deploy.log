@@ -3,44 +3,47 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : czwartek, 7 maja 2026 16:54:59
+  Started : czwartek, 7 maja 2026 17:41:41
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
     Files : *.*
 	    
-  Options : *.* /FFT /S /E /DCOPY:DA /COPY:DAT /PURGE /MIR /Z /XA:H /MT:32 /R:5 /W:5 
+  Options : *.* /FFT /TEE /S /E /DCOPY:DA /COPY:DAT /PURGE /MIR /Z /NP /XO /R:3 /W:5 
 
 ------------------------------------------------------------------------------
 
+	                  16	g:\systemair\energy_mamagment\custom_components\energy_management\
 	*EXTRA Dir        -1	\\192.168.100.5\config\custom_components\energy_management\__pycache__\
-	  *EXTRA File 		   13518	\\192.168.100.5\config\custom_components\energy_management\__pycache__\binary_sensor.cpython-314.pyc
-	  *EXTRA File 		   29094	\\192.168.100.5\config\custom_components\energy_management\__pycache__\config_flow.cpython-314.pyc
-	  *EXTRA File 		    2963	\\192.168.100.5\config\custom_components\energy_management\__pycache__\const.cpython-314.pyc
-	  *EXTRA File 		    5891	\\192.168.100.5\config\custom_components\energy_management\__pycache__\number.cpython-314.pyc
-	  *EXTRA File 		  235314	\\192.168.100.5\config\custom_components\energy_management\__pycache__\sensor.cpython-314.pyc
-	  *EXTRA File 		    1653	\\192.168.100.5\config\custom_components\energy_management\__pycache__\strategy.cpython-314.pyc
-	  *EXTRA File 		  178925	\\192.168.100.5\config\custom_components\energy_management\__pycache__\strategy_base.cpython-314.pyc
-	  *EXTRA File 		   22080	\\192.168.100.5\config\custom_components\energy_management\__pycache__\strategy_buy.cpython-314.pyc
-	  *EXTRA File 		   20680	\\192.168.100.5\config\custom_components\energy_management\__pycache__\strategy_dp.cpython-314.pyc
-	  *EXTRA File 		   35525	\\192.168.100.5\config\custom_components\energy_management\__pycache__\strategy_sell.cpython-314.pyc
-	  *EXTRA File 		    3254	\\192.168.100.5\config\custom_components\energy_management\__pycache__\switch.cpython-314.pyc
-	  *EXTRA File 		    3170	\\192.168.100.5\config\custom_components\energy_management\__pycache__\utils.cpython-314.pyc
-	  *EXTRA File 		    7767	\\192.168.100.5\config\custom_components\energy_management\__pycache__\__init__.cpython-314.pyc
-	    Newer     		    2550	g:\systemair\energy_mamagment\custom_components\energy_management\const.py100%  
-	    Newer     		     418	g:\systemair\energy_mamagment\custom_components\energy_management\manifest.json100%  
-	    Newer     		   36622	g:\systemair\energy_mamagment\custom_components\energy_management\strategy_sell.py100%  
+	  *EXTRA File 		   13518	binary_sensor.cpython-314.pyc
+	  *EXTRA File 		   29094	config_flow.cpython-314.pyc
+	  *EXTRA File 		    2963	const.cpython-314.pyc
+	  *EXTRA File 		    5891	number.cpython-314.pyc
+	  *EXTRA File 		  235266	sensor.cpython-314.pyc
+	  *EXTRA File 		    1653	strategy.cpython-314.pyc
+	  *EXTRA File 		  178925	strategy_base.cpython-314.pyc
+	  *EXTRA File 		   22080	strategy_buy.cpython-314.pyc
+	  *EXTRA File 		   20680	strategy_dp.cpython-314.pyc
+	  *EXTRA File 		   36724	strategy_sell.cpython-314.pyc
+	  *EXTRA File 		    3254	switch.cpython-314.pyc
+	  *EXTRA File 		    3170	utils.cpython-314.pyc
+	  *EXTRA File 		    7767	__init__.cpython-314.pyc
+	    Newer     		    2550	const.py
+	    Newer     		     418	manifest.json
+	    Newer     		   35478	strategy_sell.py
+	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
+	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
 
 ------------------------------------------------------------------------------
 
                Total    Copied   Skipped  Mismatch    FAILED    Extras
-    Dirs :         3         3         3         0         0         1
+    Dirs :         3         0         3         0         0         1
    Files :        20         3        17         0         0        13
-   Bytes :    1.30 m    38.6 k    1.26 m         0         0   546.7 k
-   Times :   0:00:01   0:00:00                       0:00:00   0:00:00
+   Bytes :    1.30 m    37.5 k    1.26 m         0         0   547.8 k
+   Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :             100ÿ994 Bytes/sec.
-   Speed :               5,779 MegaBytes/min.
-   Ended : czwartek, 7 maja 2026 16:55:00
+   Speed :             194ÿ171 Bytes/sec.
+   Speed :              11,111 MegaBytes/min.
+   Ended : czwartek, 7 maja 2026 17:41:42
 

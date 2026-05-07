@@ -1,10 +1,10 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.8.558)
-- [x] Maximum Export Strategy implemented in StrategySell.
-- [x] Allocator no longer pre-throttles export commands by house load.
-- [x] Budget is correctly reduced by (Export + House) to maintain physical consistency.
-- [x] Peak power at 20:00 (and others) will now hit full max_batt_p if budget allows.
+## Current Status (v11.8.564)
+- [x] Unified Gatekeeper & Morning Turbo Mode (v11.8.561).
+- [x] House consumption calculation from end of pool (v11.8.562).
+- [x] Reverse Bridging for separated night pools (v11.8.563).
+- [x] Bugfixes in diagnostics and cleanup (v11.8.564).
 
 ## Universal Rules (DO NOT BREAK)
 
