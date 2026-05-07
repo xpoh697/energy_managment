@@ -1,6 +1,7 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.13)
+## Current Status (v11.9.14)
+- [x] Fixed NameError: sunrise_h in DP engine (v11.9.14).
 - [x] Fixed ImportError in DP engine (v11.9.13).
 - [x] Renamed and reorganized menu: "DP Settings (Boiler + Limits)" (v11.9.12).
 - [x] Moved advanced battery settings to Main Configuration menu (v11.9.11).

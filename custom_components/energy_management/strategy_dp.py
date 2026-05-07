@@ -115,7 +115,10 @@ class DPPlanner:
             else: curr_bi = 0
             
             full_dp[0][curr_si][curr_bi][0] = (0.0, -1, -1, -1, 0, 0.0, False)
-
+            
+            # v11.9.14: Define sunrise hour for floor calculation
+            sunrise_h = int(float(self.manager.get_setting("sunrise_h", 8.0)))
+            
             # v11.9.9: Pre-calculate Survival Floors for the DP horizon (sync with strategy_sell)
             floors_sliding = {}
             for t_idx in range(horizon + 1):
