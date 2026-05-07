@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : czwartek, 7 maja 2026 21:28:35
+  Started : czwartek, 7 maja 2026 21:33:49
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -23,13 +23,13 @@
 	  *EXTRA File 		    1653	strategy.cpython-314.pyc
 	  *EXTRA File 		  178925	strategy_base.cpython-314.pyc
 	  *EXTRA File 		   22080	strategy_buy.cpython-314.pyc
-	  *EXTRA File 		   22722	strategy_dp.cpython-314.pyc
+	  *EXTRA File 		   22989	strategy_dp.cpython-314.pyc
 	  *EXTRA File 		   36715	strategy_sell.cpython-314.pyc
 	  *EXTRA File 		    3254	switch.cpython-314.pyc
 	  *EXTRA File 		    3170	utils.cpython-314.pyc
 	  *EXTRA File 		    7767	__init__.cpython-314.pyc
 	    Newer     		    2685	const.py
-	    Newer     		   19736	strategy_dp.py
+	    Newer     		   19983	strategy_dp.py
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
 
@@ -38,11 +38,11 @@
                Total    Copied   Skipped  Mismatch    FAILED    Extras
     Dirs :         3         0         3         0         0         1
    Files :        20         2        18         0         0        13
-   Bytes :    1.30 m    21.8 k    1.28 m         0         0   551.9 k
+   Bytes :    1.30 m    22.1 k    1.28 m         0         0   552.1 k
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :             150ÿ476 Bytes/sec.
-   Speed :               8,610 MegaBytes/min.
-   Ended : czwartek, 7 maja 2026 21:28:35
+   Speed :             192ÿ101 Bytes/sec.
+   Speed :              10,992 MegaBytes/min.
+   Ended : czwartek, 7 maja 2026 21:33:49
 
