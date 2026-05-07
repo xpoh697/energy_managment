@@ -50,10 +50,6 @@ class DPPlanner:
         
     def get_dp_advice(self) -> Dict[str, Any]:
         t0 = time.time()
-        # v11.9.18: Performance Cache (5 minutes)
-        if t0 - self._last_run < 300 and self._cache:
-            return self._cache
-
         try:
             now = datetime.now()
             cur_hour = now.hour
@@ -291,7 +287,10 @@ class DPPlanner:
                     "calc_time": round(time.time()-t0, 2), 
                     "horizon": horizon,
                     "best_val": round(best_val, 2),
-                    "energy_step": energy_step
+                    "energy_step": energy_step,
+                    "raw_soc": curr_s_raw,
+                    "soc_sensor": self.manager.battery_soc_sensor,
+                    "b_cap": b_cap
                 }
             }
             self._cache = res_final
