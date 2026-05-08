@@ -255,7 +255,7 @@ class DPPlanner:
             total_gen_today_rem = sum(f_gen_full.get(str(h), 0.0) for h in range(cur_hour, 24))
             total_gen_tomorrow = sum(f_gen_full.get(str(h), 0.0) for h in range(24, 48))
             
-            soc_st_obj = self.hass.states.get(self.manager.battery_soc_sensor) if self.manager.battery_soc_sensor else None
+            soc_st_obj = self.manager.hass.states.get(self.manager.battery_soc_sensor) if self.manager.battery_soc_sensor else None
             raw_soc_val = soc_st_obj.state if soc_st_obj else "Unknown"
             soc_unit_val = soc_st_obj.attributes.get("unit_of_measurement", "") if soc_st_obj else ""
 
