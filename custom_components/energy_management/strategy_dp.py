@@ -250,6 +250,8 @@ class DPPlanner:
                 "min_sell_p": round(min_sell_p, 4),
                 "cycle_cost": round(cycle_cost, 4),
                 "horizon_h": horizon,
+                "soc_start": round(float(curr_s_raw or 0.0), 2),
+                "soc_sensor": self.manager.battery_soc_sensor,
                 "gen_today_raw": round(total_gen_today_raw, 2),
                 "gen_today": round(total_gen_today, 2),
                 "gen_today_rem": round(total_gen_today_rem, 2),
@@ -266,6 +268,7 @@ class DPPlanner:
                     "calc_time": round(time.time()-t0, 2), 
                     "horizon": horizon,
                     "b_cap": b_cap,
+                    "constants": self.manager.data.get("calculation_debug", {}).get("dp_constants", {}),
                     "forecast_table": f_table
                 }
             }
