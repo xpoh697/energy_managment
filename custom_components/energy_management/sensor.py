@@ -1879,9 +1879,20 @@ class EnergyProfileManager:
                     res[sh] = round_f(float(self.avg_gen_kw), 3)
                 else: res[sh] = 0.0
             else:
-                # v7.9.9 - Use get_average_profile to ensure MEDIAN filter is applied to history
-                avg_prof = self.get_average_profile(profile_type, self.custom_period)
-                res[sh] = round_f(float(avg_prof.get(sh, 0.0)), 3)
+                # v11.9.65: Future: Use smart forecast if available, fallback to average historical
+                val = 0.0
+                if profile_type == "generation":
+                    dist = self.get_forecast_hourly_distribution(self.forecast_today_hourly_sensor)
+                    if dist and str(h) in dist:
+                        val = float(normalize_float(dist.get(str(h), 0.0)))
+                    else:
+                        avg_prof = self.get_average_profile(profile_type, self.custom_period)
+                        val = float(normalize_float(avg_prof.get(sh, 0.0)))
+                else:
+                    avg_prof = self.get_average_profile(profile_type, self.custom_period)
+                    val = float(normalize_float(avg_prof.get(sh, 0.0)))
+                
+                res[sh] = round_f(val, 3)
         return res
 
     def get_todays_profile(self, profile_type):
