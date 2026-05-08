@@ -278,12 +278,10 @@ class DPPlanner:
                 "raw_soc": raw_soc_val,
                 "soc_unit": soc_unit_val,
                 "soc_sensor": self.manager.battery_soc_sensor,
-                "gen_today_raw": round(total_gen_today_raw, 2),
-                "gen_today": round(total_gen_today, 2),
-                "gen_today_rem": round(total_gen_today_rem, 2),
-                "gen_tomorrow": round(total_gen_tomorrow, 2),
-                "gen_coeff": round(coeff, 3),
-                "gen_sensors": getattr(self.manager, "forecast_today_hourly_sensor", []),
+                "gen_remaining_kwh": round(float(total_gen_today_rem), 2),
+                "gen_total_today_kwh": round(float(total_gen_today), 2),
+                "gen_coeff": round(float(coeff), 3),
+                "gen_sensors": self.manager.forecast_today_sensor,
                 "top_hours": sorted(list(top_sell_set))
             }
 
