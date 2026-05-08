@@ -48,7 +48,7 @@ class DPPlanner:
         self._cache = {}
         self._last_run = 0
         
-    def get_dp_advice(self) -> Dict[str, Any]:
+    def get_dp_advice(self, data_snapshot: Dict[str, Any] = None) -> Dict[str, Any]:
         t0 = time.time()
         # v11.9.61: Restore cache to prevent UI lag and sensor thrashing
         if self._last_run and (t0 - self._last_run) < 60:
@@ -58,9 +58,18 @@ class DPPlanner:
             now = self.manager.now
             cur_hour = now.hour
             
-            prices_buy = self._get_prices("prices_buy")
-            prices_sell = self._get_prices("prices_sell")
-            
+            # v11.9.64: Use pre-fetched snapshot if available
+            if data_snapshot:
+                prices_buy = data_snapshot.get("prices_buy", {})
+                prices_sell = data_snapshot.get("prices_sell", {})
+                curr_s_raw = data_snapshot.get("soc", 0.0)
+                b_cap = data_snapshot.get("capacity", 17.0)
+            else:
+                prices_buy = self._get_prices("prices_buy")
+                prices_sell = self._get_prices("prices_sell")
+                curr_s_raw, b_cap_raw, _ = self.manager.get_battery_state()
+                b_cap = float(b_cap_raw or 17.0)
+
             if not prices_buy or not prices_sell:
                 return {"error": "Missing price data"}
 
@@ -71,8 +80,6 @@ class DPPlanner:
             # --- Configuration ---
             max_p_dis = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             max_p_chg = max_p_dis 
-            curr_s_raw, b_cap_raw, _ = self.manager.get_battery_state()
-            b_cap = float(b_cap_raw or 17.0)
             
             energy_step = 0.1
             energy_steps = int(round(b_cap / energy_step))

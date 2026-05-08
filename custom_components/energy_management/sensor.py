@@ -4243,17 +4243,33 @@ class EnergyDPAdviceSensor(SensorEntity):
 
     async def async_added_to_hass(self):
         if self.manager:
-            self.manager.update_listeners.append(self._update_advice_threaded)
-            self.hass.async_add_executor_job(self._update_advice_threaded)
+            self.manager.update_listeners.append(self._async_trigger_update)
+            # Initial run
+            await self._async_trigger_update()
 
     async def async_will_remove_from_hass(self):
-        if self.manager and self._update_advice_threaded in self.manager.update_listeners:
-            self.manager.update_listeners.remove(self._update_advice_threaded)
+        if self.manager and self._async_trigger_update in self.manager.update_listeners:
+            self.manager.update_listeners.remove(self._async_trigger_update)
 
-    def _update_advice_threaded(self):
-        """Threaded DP computation to avoid blocking HA loop."""
+    async def _async_trigger_update(self):
+        """Prepare snapshot in main thread and trigger background worker."""
+        if not self.hass: return
+        
+        # Capture critical data in main thread where it's safe
+        soc, cap, _ = self.manager.get_battery_state()
+        snapshot = {
+            "soc": soc,
+            "capacity": cap,
+            "prices_buy": self.planner._get_prices("prices_buy"),
+            "prices_sell": self.planner._get_prices("prices_sell")
+        }
+        
+        self.hass.async_add_executor_job(self._update_advice_threaded, snapshot)
+
+    def _update_advice_threaded(self, snapshot):
+        """Threaded DP computation using pre-captured snapshot."""
         try:
-            res = self.planner.get_dp_advice()
+            res = self.planner.get_dp_advice(snapshot)
             self._advice = res
             if self.hass:
                 self.hass.add_job(self.async_write_ha_state)
