@@ -243,6 +243,7 @@ class DPPlanner:
                 mode = mode_map[act]
                 if act == ACT_IDLE:
                     if gen > cons + 0.1: mode = "SOL"
+                    elif abs(gen - cons) < 0.1: mode = "IDLE"
                     else: mode = "GRID"
                 soc = int(round((si * energy_step) / b_cap * 100.0))
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
