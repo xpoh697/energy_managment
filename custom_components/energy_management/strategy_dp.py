@@ -253,6 +253,7 @@ class DPPlanner:
                 "horizon_h": horizon,
                 "gen_today": round(total_gen_today, 2),
                 "gen_tomorrow": round(total_gen_tomorrow, 2),
+                "gen_coeff": round(getattr(self.manager, "last_blended_coeff", 1.0), 3),
                 "top_hours": sorted(list(top_sell_set))
             }
 
