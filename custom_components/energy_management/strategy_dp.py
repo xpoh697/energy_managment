@@ -262,10 +262,7 @@ class DPPlanner:
             total_gen_today_rem = sum(f_gen_full.get(str(h), 0.0) for h in range(cur_hour, 24))
             total_gen_tomorrow = sum(f_gen_full.get(str(h), 0.0) for h in range(24, 48))
             
-            soc_st_obj = self.manager.hass.states.get(self.manager.battery_soc_sensor) if self.manager.battery_soc_sensor else None
-            raw_soc_val = soc_st_obj.state if soc_st_obj else "Unknown"
-            soc_unit_val = soc_st_obj.attributes.get("unit_of_measurement", "") if soc_st_obj else ""
-
+            # v11.9.68: Fix debug info - don't query HA directly from thread!
             if "calculation_debug" not in self.manager.data:
                 self.manager.data["calculation_debug"] = {}
                 
@@ -274,10 +271,8 @@ class DPPlanner:
                 "min_sell_p": round(min_sell_p, 4),
                 "cycle_cost": round(cycle_cost, 4),
                 "horizon_h": horizon,
-                "soc_start": round(float(curr_s_raw or 0.0), 2),
-                "raw_soc": raw_soc_val,
-                "soc_unit": soc_unit_val,
-                "soc_sensor": self.manager.battery_soc_sensor,
+                "soc_start_pct": round(float(curr_s_raw or 0.0), 2),
+                "b_cap_kwh": b_cap,
                 "gen_remaining_kwh": round(float(total_gen_today_rem), 2),
                 "gen_total_today_kwh": round(float(total_gen_today), 2),
                 "gen_coeff": round(float(coeff), 3),
