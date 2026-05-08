@@ -2007,6 +2007,7 @@ class EnergyProfileManager:
 
     def get_battery_state(self, soc_default=0.0):
         """Read battery SOC, capacity, and calculate stored energy."""
+        # v11.9.60: Robust SOC reading
         st = self.hass.states.get(self.battery_soc_sensor) if self.battery_soc_sensor else None
         soc = soc_default
         if st:
@@ -2018,14 +2019,12 @@ class EnergyProfileManager:
                 soc = float(normalize_float(soc))
         
         cap = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
-        
-        # v11.0.2 - Fallback to manual setup if sensor is unknown/0
         if cap <= 0.1:
             from .const import CONF_BATTERY_CAPACITY
-            cap = self.get_setting(CONF_BATTERY_CAPACITY, 0.0)
+            cap = self.get_setting(CONF_BATTERY_CAPACITY, 17.0)
             
         energy = cap * (soc / 100.0) if cap > 0 else 0.0
-        return soc, cap, energy
+        return float(soc), float(cap), energy
 
     def get_forecast_value(self, sensor_list):
         """Sum forecast values from a list of sensor entity IDs. Returns None if no data."""

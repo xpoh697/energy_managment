@@ -50,8 +50,12 @@ class DPPlanner:
         
     def get_dp_advice(self) -> Dict[str, Any]:
         t0 = time.time()
+        # v11.9.61: Restore cache to prevent UI lag and sensor thrashing
+        if self._last_run and (t0 - self._last_run) < 60:
+            return self._cache.get("advice", {})
+
         try:
-            now = datetime.now()
+            now = self.manager.now
             cur_hour = now.hour
             
             prices_buy = self._get_prices("prices_buy")
@@ -82,9 +86,19 @@ class DPPlanner:
             
             # v11.9.48: Boiler logic completely removed from DP model.
             
-            forecast_gen = self._get_smart_gen_forecast(horizon)
-            avg_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, now.weekday()))
-            tomorrow_cons = self._ensure_dict(self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
+            # v11.9.61: Use standard prediction profiles (consistent with working Sell strategy)
+            forecast_gen = self.manager.get_predicted_profile("generation")
+            avg_cons = self.manager.get_predicted_profile("consumption_base")
+            # For tomorrow, use the same profile but shifted or average (simplified fallback)
+            tomorrow_gen = self.manager.get_average_profile("generation", 7, (now.weekday() + 1) % 7)
+            tomorrow_cons = self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7)
+            
+            # Populate extended horizon for DP
+            f_gen_full = {str(h): float(normalize_float(forecast_gen.get(str(h), 0.0))) for h in range(24)}
+            f_cons_full = {str(h): float(normalize_float(avg_cons.get(str(h), 0.0))) for h in range(24)}
+            for h in range(24):
+                f_gen_full[str(h+24)] = float(normalize_float(tomorrow_gen.get(str(h), 0.0)))
+                f_cons_full[str(h+24)] = float(normalize_float(tomorrow_cons.get(str(h), 0.0)))
             
             neg_inf = -1e9
             # v11.9.42: Arbitrage TOP hours per day
@@ -126,11 +140,10 @@ class DPPlanner:
             # --- Forward Induction (2D DP) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
-                h_rel = abs_h % 24
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
                 p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
-                gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
-                cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
+                gen = float(normalize_float(f_gen_full.get(str(abs_h), 0.0)))
+                cons = float(normalize_float(f_cons_full.get(str(abs_h), 0.4)))
                 
                 # v11.9.47: Remove boiler from BASELINE.
                 # It shouldn't 'eat' the sun in the model and force grid charging.
@@ -216,8 +229,8 @@ class DPPlanner:
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
                 p_sell = float(normalize_float(prices_sell.get(str(abs_h), 0.4)))
-                gen = float(normalize_float(forecast_gen.get(str(abs_h), 0.0)))
-                cons = float(normalize_float((avg_cons if abs_h < 24 else tomorrow_cons).get(str(h_rel), 0.4)))
+                gen = float(normalize_float(f_gen_full.get(str(abs_h), 0.0)))
+                cons = float(normalize_float(f_cons_full.get(str(abs_h), 0.4)))
                 
                 mode_map = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"]
                 mode = mode_map[act]
@@ -237,10 +250,10 @@ class DPPlanner:
             # Debug Info
             # Debug Info
             coeff = getattr(self.manager, "last_blended_coeff", 1.0)
-            total_gen_today_raw = sum(forecast_gen.get(str(h), 0.0) for h in range(0, 24)) / (coeff if coeff > 0 else 1.0)
-            total_gen_today = sum(forecast_gen.get(str(h), 0.0) for h in range(0, 24))
-            total_gen_today_rem = sum(forecast_gen.get(str(h), 0.0) for h in range(cur_hour, 24))
-            total_gen_tomorrow = sum(forecast_gen.get(str(h), 0.0) for h in range(24, 48))
+            total_gen_today_raw = sum(f_gen_full.get(str(h), 0.0) for h in range(0, 24)) / (coeff if coeff > 0 else 1.0)
+            total_gen_today = sum(f_gen_full.get(str(h), 0.0) for h in range(0, 24))
+            total_gen_today_rem = sum(f_gen_full.get(str(h), 0.0) for h in range(cur_hour, 24))
+            total_gen_tomorrow = sum(f_gen_full.get(str(h), 0.0) for h in range(24, 48))
             
             soc_st_obj = self.hass.states.get(self.manager.battery_soc_sensor) if self.manager.battery_soc_sensor else None
             raw_soc_val = soc_st_obj.state if soc_st_obj else "Unknown"
@@ -308,23 +321,27 @@ class DPPlanner:
     def _get_smart_gen_forecast(self, horizon) -> Dict[str, float]:
         res = {}
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
+        
+        # v11.9.60: Start with average profile as BASELINE (Always reliable)
+        profile_today = self._ensure_dict(self.manager.get_average_profile("generation", 14, datetime.now().weekday()))
+        profile_tm = self._ensure_dict(self.manager.get_average_profile("generation", 14, (datetime.now().weekday() + 1) % 7))
+        
+        for h in range(24):
+            res[str(h)] = float(normalize_float(profile_today.get(str(h), 0.0)))
+            res[str(h + 24)] = float(normalize_float(profile_tm.get(str(h), 0.0)))
+            
+        # Overlay smart forecast if available (Solcast/Forecast.Solar)
         s_today = getattr(self.manager, "forecast_today_hourly_sensor", [])
         s_tomorrow = getattr(self.manager, "forecast_tomorrow_sensor", [])
         
         dist_today = self._ensure_dict(self.manager.get_forecast_hourly_distribution(s_today)) if s_today else {}
+        if any(v > 0.01 for v in dist_today.values()):
+             for h, v in dist_today.items(): res[str(h)] = float(normalize_float(v)) * coeff
+             
         dist_tomorrow = self._ensure_dict(self.manager.get_forecast_hourly_distribution(s_tomorrow, (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"))) if s_tomorrow else {}
-        
-        for h, v in dist_today.items(): res[str(h)] = float(normalize_float(v)) * coeff
-        for h, v in dist_tomorrow.items(): res[str(int(h) + 24)] = float(normalize_float(v)) * coeff
-        
-        # v11.9.59: Fallback to average profile if forecast is empty
-        if sum(res.values()) < 0.1:
-            _LOGGER.debug("Smart forecast empty, falling back to average profile")
-            profile = self._ensure_dict(self.manager.get_average_profile("generation", 14, "all"))
-            for h in range(24):
-                val = float(normalize_float(profile.get(str(h), 0.0)))
-                res[str(h)] = val
-                res[str(h + 24)] = val # Assume same for tomorrow
+        if any(v > 0.01 for v in dist_tomorrow.values()):
+             for h, v in dist_tomorrow.items(): res[str(int(h) + 24)] = float(normalize_float(v)) * coeff
+             
         return res
 
     def _ensure_dict(self, data: Any) -> Dict[str, Any]:
