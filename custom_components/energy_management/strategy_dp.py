@@ -240,7 +240,10 @@ class DPPlanner:
 
             # Debug Info
             # Debug Info
+            coeff = getattr(self.manager, "last_blended_coeff", 1.0)
+            total_gen_today_raw = sum(forecast_gen.get(str(h), 0.0) for h in range(0, 24)) / (coeff if coeff > 0 else 1.0)
             total_gen_today = sum(forecast_gen.get(str(h), 0.0) for h in range(0, 24))
+            total_gen_today_rem = sum(forecast_gen.get(str(h), 0.0) for h in range(cur_hour, 24))
             total_gen_tomorrow = sum(forecast_gen.get(str(h), 0.0) for h in range(24, 48))
             
             if "calculation_debug" not in self.manager.data:
@@ -251,9 +254,11 @@ class DPPlanner:
                 "min_sell_p": round(min_sell_p, 4),
                 "cycle_cost": round(cycle_cost, 4),
                 "horizon_h": horizon,
+                "gen_today_raw": round(total_gen_today_raw, 2),
                 "gen_today": round(total_gen_today, 2),
+                "gen_today_rem": round(total_gen_today_rem, 2),
                 "gen_tomorrow": round(total_gen_tomorrow, 2),
-                "gen_coeff": round(getattr(self.manager, "last_blended_coeff", 1.0), 3),
+                "gen_coeff": round(coeff, 3),
                 "top_hours": sorted(list(top_sell_set))
             }
 
