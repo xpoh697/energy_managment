@@ -268,8 +268,7 @@ class DPPlanner:
                     "calc_time": round(time.time()-t0, 2), 
                     "horizon": horizon,
                     "b_cap": b_cap,
-                    "constants": self.manager.data.get("calculation_debug", {}).get("dp_constants", {}),
-                    "forecast_table": f_table
+                    "constants": self.manager.data.get("calculation_debug", {}).get("dp_constants", {})
                 }
             }
             self._cache["advice"] = res_final
