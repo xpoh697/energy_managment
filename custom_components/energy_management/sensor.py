@@ -2007,7 +2007,16 @@ class EnergyProfileManager:
 
     def get_battery_state(self, soc_default=0.0):
         """Read battery SOC, capacity, and calculate stored energy."""
-        soc = self.get_sensor_float(self.battery_soc_sensor, soc_default)
+        st = self.hass.states.get(self.battery_soc_sensor) if self.battery_soc_sensor else None
+        soc = soc_default
+        if st:
+            try:
+                soc = float(str(st.state).replace(',', '.'))
+            except (ValueError, TypeError):
+                # Check attributes if state is non-numeric (e.g. 'online')
+                soc = st.attributes.get("soc") or st.attributes.get("battery_level") or st.attributes.get("battery") or soc_default
+                soc = float(normalize_float(soc))
+        
         cap = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
         
         # v11.0.2 - Fallback to manual setup if sensor is unknown/0

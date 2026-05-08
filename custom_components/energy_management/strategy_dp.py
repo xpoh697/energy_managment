@@ -242,6 +242,10 @@ class DPPlanner:
             total_gen_today_rem = sum(forecast_gen.get(str(h), 0.0) for h in range(cur_hour, 24))
             total_gen_tomorrow = sum(forecast_gen.get(str(h), 0.0) for h in range(24, 48))
             
+            soc_st_obj = self.hass.states.get(self.manager.battery_soc_sensor) if self.manager.battery_soc_sensor else None
+            raw_soc_val = soc_st_obj.state if soc_st_obj else "Unknown"
+            soc_unit_val = soc_st_obj.attributes.get("unit_of_measurement", "") if soc_st_obj else ""
+
             if "calculation_debug" not in self.manager.data:
                 self.manager.data["calculation_debug"] = {}
                 
@@ -251,12 +255,15 @@ class DPPlanner:
                 "cycle_cost": round(cycle_cost, 4),
                 "horizon_h": horizon,
                 "soc_start": round(float(curr_s_raw or 0.0), 2),
+                "raw_soc": raw_soc_val,
+                "soc_unit": soc_unit_val,
                 "soc_sensor": self.manager.battery_soc_sensor,
                 "gen_today_raw": round(total_gen_today_raw, 2),
                 "gen_today": round(total_gen_today, 2),
                 "gen_today_rem": round(total_gen_today_rem, 2),
                 "gen_tomorrow": round(total_gen_tomorrow, 2),
                 "gen_coeff": round(coeff, 3),
+                "gen_sensors": getattr(self.manager, "forecast_today_hourly_sensor", []),
                 "top_hours": sorted(list(top_sell_set))
             }
 
@@ -301,12 +308,23 @@ class DPPlanner:
     def _get_smart_gen_forecast(self, horizon) -> Dict[str, float]:
         res = {}
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
-        s_today = getattr(self.manager, "forecast_today_hourly_sensor", None)
-        s_tomorrow = getattr(self.manager, "forecast_tomorrow_sensor", None)
+        s_today = getattr(self.manager, "forecast_today_hourly_sensor", [])
+        s_tomorrow = getattr(self.manager, "forecast_tomorrow_sensor", [])
+        
         dist_today = self._ensure_dict(self.manager.get_forecast_hourly_distribution(s_today)) if s_today else {}
         dist_tomorrow = self._ensure_dict(self.manager.get_forecast_hourly_distribution(s_tomorrow, (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"))) if s_tomorrow else {}
+        
         for h, v in dist_today.items(): res[str(h)] = float(normalize_float(v)) * coeff
         for h, v in dist_tomorrow.items(): res[str(int(h) + 24)] = float(normalize_float(v)) * coeff
+        
+        # v11.9.59: Fallback to average profile if forecast is empty
+        if sum(res.values()) < 0.1:
+            _LOGGER.debug("Smart forecast empty, falling back to average profile")
+            profile = self._ensure_dict(self.manager.get_average_profile("generation", 14, "all"))
+            for h in range(24):
+                val = float(normalize_float(profile.get(str(h), 0.0)))
+                res[str(h)] = val
+                res[str(h + 24)] = val # Assume same for tomorrow
         return res
 
     def _ensure_dict(self, data: Any) -> Dict[str, Any]:
