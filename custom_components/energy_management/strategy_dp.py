@@ -104,16 +104,12 @@ class DPPlanner:
             def _update(nsi, act, amt, t_step, si_orig, total_rev):
                 if nsi < 0 or nsi > energy_steps: return
                 
-                # v11.9.45: Strict Global Floor (using min_soc instead of soc_buff)
-                floor_soc = min_soc
-                
-                if (nsi * energy_step) < (floor_soc * b_cap / 100.0):
-                    # Penalize heavily if we DISCHARGE below the floor
-                    if nsi < si_orig:
-                        total_rev -= 10000.0
-                    # If we are already below floor (at start), standing IDLE is okay but not great
-                    elif nsi == si_orig:
-                        total_rev -= 10.0 
+                # v11.9.54: Progressive Global Floor Penalty
+                floor_idx = int(round(min_soc / 100.0 * energy_steps))
+                if nsi < floor_idx:
+                    # Penalize distance to floor to force maximum recovery speed
+                    dist_kwh = (floor_idx - nsi) * energy_step
+                    total_rev -= (5000.0 + dist_kwh * 1000.0)
                 
                 if total_rev > full_dp[t_step + 1][nsi][0]:
                     full_dp[t_step + 1][nsi] = (total_rev, si_orig, act, amt)
