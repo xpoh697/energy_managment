@@ -1879,13 +1879,23 @@ class EnergyProfileManager:
                     res[sh] = round_f(float(self.avg_gen_kw), 3)
                 else: res[sh] = 0.0
             else:
-                # v11.9.65: Future: Use smart forecast if available, fallback to average historical
+                # v11.9.69: Future: Use smart forecast scaled to match total remaining forecast
                 val = 0.0
                 if profile_type == "generation":
                     dist = self.get_forecast_hourly_distribution(self.forecast_today_hourly_sensor)
-                    if dist and str(h) in dist:
-                        val = float(normalize_float(dist.get(str(h), 0.0)))
+                    if dist:
+                        # Calculate current sum of smart forecast
+                        smart_sum = sum(float(v) for h_str, v in dist.items() if int(h_str) >= cur_hour)
+                        # Get real total remaining from sensor state
+                        real_rem = self.get_forecast_value(self.forecast_today_sensor) or 0.0
+                        
+                        if smart_sum > 0.1:
+                            scale = real_rem / smart_sum
+                            val = float(dist.get(str(h), 0.0)) * scale
+                        else:
+                            val = 0.0 # No forecast left
                     else:
+                        # Fallback to history
                         avg_prof = self.get_average_profile(profile_type, self.custom_period)
                         val = float(normalize_float(avg_prof.get(sh, 0.0)))
                 else:
