@@ -3213,7 +3213,11 @@ class InverterOperationModeSensor(SensorEntity):
 
         # State Machine Ladder
         # v11.9.106: Differentiate forecast vs live for buying priority
-        _is_buy_priority = is_buying_active and (buy_strategy.get("is_charging_now") or is_forecast)
+        # v11.9.170: Force BUY mode if price is zero or negative (TS 4.1 Priority 1)
+        _is_buy_priority = is_buying_active and (
+            (buy_strategy.get("is_charging_now") or is_neg_buy) if not is_forecast 
+            else (check_h_abs in buy_strategy.get("active_hours", []) or is_neg_buy)
+        )
         
         if _is_buy_priority:
             # v11.6.32/v11.9.97 - Priority 1: Buying (Strictly restricted to active charging window)
