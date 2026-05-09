@@ -295,17 +295,25 @@ class StrategyBuy(StrategyEngine):
                     res["analyzed_window"] = "Нет окон"
                     res["active_periods"] = ""
                 
+                # v11.9.130: Unified Key Helper
+                def get_h_log_key(h_abs):
+                    h_rel = h_abs % 24
+                    suffix = ""
+                    if h_abs >= 48: suffix = " (Через день)"
+                    elif h_abs >= 24: suffix = " (Завтра)"
+                    return f"{h_rel:02d}:59{suffix}"
+
                 # Final Simulation
                 sim_range = list(range(cur_hour, cur_hour + 48))
-                # v11.9.125: Allow discharge in final simulation to reflect real house consumption
                 _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True)
                 
-                soc_end = self._get_soc_from_log(sim_log, f"{max(target_hours)%24:02d}:59" if target_hours else f"{cur_hour%24:02d}:59", b_soc)
+                last_h = max(target_hours) if target_hours else cur_hour
+                soc_end = self._get_soc_from_log(sim_log, get_h_log_key(last_h), b_soc)
                 
                 res["gatekeeper_floor"] = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
                 res["survival_floor"] = self.get_survival_floor(last_h + 1, morning_h_abs)
                 
-                soc_morning = self._get_soc_from_log(sim_log, f"{(morning_h-1)%24:02d}:59 (Завтра)", soc_end)
+                soc_morning = self._get_soc_from_log(sim_log, get_h_log_key(morning_h_abs - 1), soc_end)
                 res["buy_simulation"] = {
                     "projected_soc_at_start_pct": round_f(soc_at_start_plan, 1),
                     "projected_soc_at_end_pct": round_f(soc_end, 1),
@@ -331,22 +339,19 @@ class StrategyBuy(StrategyEngine):
                     self._last_strat_log = strat_log
                 
 
-                # v11.9.128: Build the hourly plan using the same sim_log as soc_end
+                # v11.9.130: Build the hourly plan using the unified key helper
                 planned_results = {}
                 for h, p in charge_commands.items():
                     if p <= 0.05: continue
-                    h_fmt = f"{h%24:02d}:00"
-                    if h >= 24: h_fmt += " (Завтра)"
+                    h_fmt = f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")
                     
-                    h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
-                    h_soc = self._get_soc_from_log(sim_log, h_sim_key, b_soc)
+                    h_soc = self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc)
                     
                     planned_results[h_fmt] = {
                         "power": round_f(p, 3),
                         "soc": round_f(h_soc, 1)
                     }
                 res["planned_power_per_h"] = planned_results
-                # v11.9.128: target_soc should show the INTENDED target for the window, not current hour's progress
                 res["target_soc"] = round_f(target_soc, 1)
 
                 # v12.0.1: Synchronize with Inverter Mode Command sensor
