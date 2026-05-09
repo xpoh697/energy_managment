@@ -98,6 +98,7 @@ class StrategyBuy(StrategyEngine):
         
         # v11.9.106: Set the active buy limit for debug transparency
         price_buy_limit = float(man.get_setting(CONF_PRICE_BUY_LIMIT, 0.05))
+        target_soc = b_soc # v11.9.135: Global init to prevent UnboundLocalError
         res["limit_used"] = price_buy_limit
         
         try:
@@ -262,8 +263,8 @@ class StrategyBuy(StrategyEngine):
 
                 if target_hours:
                     first_h = min(target_hours)
-                    # v11.9.125: Use allow_discharge=True to see real SOC drop before charging starts
-                    soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=True)
+                    # v11.9.133: Reverted to False to match user expectation of SOC at start
+                    soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=False)
                     
                     # v11.9.120: Deduct solar forecast during the charging window to avoid overshooting target_soc
                     _sim_h_window = list(range(cur_hour, max(target_hours) + 1))
@@ -305,7 +306,8 @@ class StrategyBuy(StrategyEngine):
 
                 # Final Simulation
                 sim_range = list(range(cur_hour, cur_hour + 48))
-                _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True)
+                # v11.9.133: Reverted to allow_discharge=False to show clean Target SOC matching the limit
+                _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=False)
                 
                 last_h = max(target_hours) if target_hours else cur_hour
                 soc_end = self._get_soc_from_log(sim_log, get_h_log_key(last_h), b_soc)
