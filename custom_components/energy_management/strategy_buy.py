@@ -242,11 +242,13 @@ class StrategyBuy(StrategyEngine):
                 
                 base_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
                 
-                if res["charge_reason"] in ["Отрицательная цена", "Арбитраж"]:
+                # v11.9.120: Adhere to user limit (base_limit) for Arbitrage and Cheap modes
+                if res["charge_reason"] == "Отрицательная цена":
                     target_soc = 100.0
                 elif res["charge_reason"] == "Выживание":
                     target_soc = min(base_limit, survival_target)
                 else:
+                    # Cheap and Arbitrage both respect the user limit
                     target_soc = base_limit
                 
                 res["survival_target"] = survival_target
@@ -262,7 +264,13 @@ class StrategyBuy(StrategyEngine):
                     first_h = min(target_hours)
                     soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=False)
                     
-                    needed_kwh_dc = (target_soc - soc_at_start_plan) * b_cap / 100.0
+                    # v11.9.120: Deduct solar forecast during the charging window to avoid overshooting target_soc
+                    _sim_h_window = list(range(cur_hour, max(target_hours) + 1))
+                    _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, {}, allow_discharge=False)
+                    soc_with_sun_only = self._get_soc_from_log(_log_sun, f"{max(target_hours)%24:02d}:59", b_soc)
+                    
+                    # Energy needed from grid = (Target - SOC_with_sun_only)
+                    needed_kwh_dc = max(0.0, (target_soc - soc_with_sun_only) * b_cap / 100.0)
                     accum_kwh_dc = 0.0
                     for h in sorted(target_hours):
                         if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0: break
