@@ -99,6 +99,9 @@ class StrategyBuy(StrategyEngine):
         # v11.9.106: Set the active buy limit for debug transparency
         price_buy_limit = float(man.get_setting(CONF_PRICE_BUY_LIMIT, 0.05))
         target_soc = b_soc # v11.9.135: Global init to prevent UnboundLocalError
+        charge_commands = {} # v11.9.140: Global init to prevent UnboundLocalError
+        target_hours = []
+        negative_hours = []
         res["limit_used"] = price_buy_limit
         
         try:
