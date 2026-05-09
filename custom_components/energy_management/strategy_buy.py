@@ -38,7 +38,7 @@ class StrategyBuy(StrategyEngine):
     """Specialized engine for BUY-mode energy management strategies."""
     
     def get_market_strategy(self, mode="buy"):
-        """Standardized Buying Strategy v11.9.150+"""
+        """Standardized Buying Strategy v11.9.180+"""
         def group_h(hours):
             if not hours: return ""
             sorted_h = sorted(list(hours))
@@ -59,7 +59,7 @@ class StrategyBuy(StrategyEngine):
         now = dt_util.now()
         man: Any = self.manager
         
-        # v11.9.150: Extended cache time for stability
+        # v11.9.180: Extended cache time for stability
         cache_key = f"market_strategy_{mode}"
         cached = self._strategy_cache.get(cache_key)
         if cached and (now - cached["time"]).total_seconds() < 120 and cached["time"].hour == now.hour:
@@ -255,10 +255,10 @@ class StrategyBuy(StrategyEngine):
 
             if target_hours:
                 first_h = min(target_hours)
-                soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=False)
+                soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=True)
                 
                 _sim_h_window = list(range(cur_hour, max(target_hours) + 1))
-                _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, {}, allow_discharge=False)
+                _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, {}, allow_discharge=True)
                 soc_with_sun_only = self._get_soc_from_log(_log_sun, get_h_log_key(max(target_hours)), b_soc)
                 
                 # v11.9.155: Don't deduct solar for negative prices, we want to buy and export solar instead
@@ -284,7 +284,7 @@ class StrategyBuy(StrategyEngine):
                 res["active_periods"] = ""
             
             sim_range = list(range(cur_hour, cur_hour + 48))
-            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=False)
+            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True)
             
             last_h = max(target_hours) if target_hours else cur_hour
             soc_end = self._get_soc_from_log(sim_log, get_h_log_key(last_h), b_soc)
@@ -325,7 +325,7 @@ class StrategyBuy(StrategyEngine):
                 }
             res["planned_power_per_h"] = planned_results
             res["target_soc"] = round_f(target_soc, 1)
-            res["active_hours"] = [int(h) for h, v in charge_commands.items() if v > 0.05]
+            res["active_hours"] = [int(h) for h, v in charge_commands.items() if v > 0.05 or all_buy_prices.get(int(h), 1.0) <= 0.0]
             if negative_hours:
                 res["first_negative_hour"] = min(negative_hours)
                 res["last_negative_hour"] = max(negative_hours)
