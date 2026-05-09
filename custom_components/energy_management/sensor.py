@@ -2670,19 +2670,17 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
     def extra_state_attributes(self):
         attrs = dict(getattr(self, "_attr_extra_state_attributes", {}))
         
-        # Calculate expected vs actual so far (v11.9.110: Fresh calculation on every UI request)
+        # Calculate expected vs actual so far (v11.9.118: Using hourly sensor and temp_daily_gen)
         now = dt_util.now()
         expected_so_far = 0.0
-        actual_so_far = 0.0
+        actual_so_far = float(self.manager.data.get("temp_daily_gen", 0.0) or 0.0)
+        
         try:
             today_str = now.strftime("%Y-%m-%d")
-            f_dist = self.manager.get_forecast_hourly_distribution(self.manager.forecast_today_sensor, today_str)
+            # v11.9.118: Corrected sensor usage - must use HOURLY sensor for distribution
+            f_dist = self.manager.get_forecast_hourly_distribution(self.manager.forecast_today_hourly_sensor, today_str)
             if f_dist:
                 expected_so_far = sum(float(v) for h, v in f_dist.items() if int(h) < now.hour)
-            
-            actual_dist = self.manager.get_todays_profile("generation")
-            if actual_dist:
-                actual_so_far = sum(float(v) for h, v in actual_dist.items() if int(h) < now.hour)
         except Exception:
             pass
 
