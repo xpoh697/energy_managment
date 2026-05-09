@@ -3203,8 +3203,9 @@ class InverterOperationModeSensor(SensorEntity):
         except Exception: pass
 
         if can_wait and neg_h is not None and not is_gen_night:
-            # v11.6.29: Use check_h_abs (absolute hour) to compare with neg_h (absolute hour).
-            if not is_forecast or check_h_abs < neg_h:
+            # v11.9.165: Extended to include the negative hours themselves to prevent solar charging
+            last_neg_h = buy_strategy.get("last_negative_hour") or neg_h
+            if not is_forecast or check_h_abs <= last_neg_h:
                 # 1. Check if there are any planned AI sales between now and the negative price
                 planned_sales = [h for h in sell_strategy.get("active_hours", []) if check_h_abs <= h < neg_h]
                 if not planned_sales:

@@ -261,7 +261,11 @@ class StrategyBuy(StrategyEngine):
                 _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, {}, allow_discharge=False)
                 soc_with_sun_only = self._get_soc_from_log(_log_sun, get_h_log_key(max(target_hours)), b_soc)
                 
-                needed_kwh_dc = max(0.0, (target_soc - soc_with_sun_only) * b_cap / 100.0)
+                # v11.9.155: Don't deduct solar for negative prices, we want to buy and export solar instead
+                if res.get("charge_reason") == "Отрицательная цена":
+                    needed_kwh_dc = max(0.0, (target_soc - soc_at_start_plan) * b_cap / 100.0)
+                else:
+                    needed_kwh_dc = max(0.0, (target_soc - soc_with_sun_only) * b_cap / 100.0)
                 accum_kwh_dc = 0.0
                 for h in sorted(target_hours):
                     if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0: break
@@ -324,6 +328,7 @@ class StrategyBuy(StrategyEngine):
             res["active_hours"] = [int(h) for h, v in charge_commands.items() if v > 0.05]
             if negative_hours:
                 res["first_negative_hour"] = min(negative_hours)
+                res["last_negative_hour"] = max(negative_hours)
                 res["can_wait_for_negative"] = True
 
             if charge_commands.get(cur_hour, 0.0) > 0.05 or cur_p_f <= 0: 
