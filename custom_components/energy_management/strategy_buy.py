@@ -266,8 +266,12 @@ class StrategyBuy(StrategyEngine):
                     needed_kwh_dc = max(0.0, (target_soc - soc_at_start_plan) * b_cap / 100.0)
                 else:
                     needed_kwh_dc = max(0.0, (target_soc - soc_with_sun_only) * b_cap / 100.0)
-                accum_kwh_dc = 0.0
-                # v11.9.195: Advanced Allocator (Price-Priority with progressive SOC)
+                
+                # v11.9.200: Debug Logging for Allocator
+                _dbg_log = f"[Strategy Buy Debug] Reason: {res.get('charge_reason')} | Target: {target_soc}% | StartSOC: {soc_at_start_plan:.1f}% | Need: {needed_kwh_dc:.3f} kWh | Cap: {b_cap:.1f} | Eff: {eff:.2f}"
+                man.log_to_file(_dbg_log)
+                
+                # v11.9.200: Advanced Allocator (Price-Priority with progressive SOC)
                 # 1. Sort by price to fill cheapest hours first
                 sorted_by_price = sorted(target_hours, key=lambda x: all_buy_prices.get(int(x), 100.0))
                 
