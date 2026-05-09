@@ -102,6 +102,14 @@ class StrategyBuy(StrategyEngine):
         charge_commands = {} # v11.9.140: Global init to prevent UnboundLocalError
         target_hours = []
         negative_hours = []
+        # v11.9.130: Unified Key Helper (Moved to top in v11.9.147)
+        def get_h_log_key(h_abs):
+            h_rel = h_abs % 24
+            suffix = ""
+            if h_abs >= 48: suffix = " (Через день)"
+            elif h_abs >= 24: suffix = " (Завтра)"
+            return f"{h_rel:02d}:59{suffix}"
+
         res["limit_used"] = price_buy_limit
         
         try:
@@ -272,7 +280,8 @@ class StrategyBuy(StrategyEngine):
                     # v11.9.120: Deduct solar forecast during the charging window to avoid overshooting target_soc
                     _sim_h_window = list(range(cur_hour, max(target_hours) + 1))
                     _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, {}, allow_discharge=False)
-                    soc_with_sun_only = self._get_soc_from_log(_log_sun, f"{max(target_hours)%24:02d}:59", b_soc)
+                    # v11.9.147: Use unified helper to avoid Tomorrow suffix mismatches
+                    soc_with_sun_only = self._get_soc_from_log(_log_sun, get_h_log_key(max(target_hours)), b_soc)
                     
                     # Energy needed from grid = (Target - SOC_with_sun_only)
                     needed_kwh_dc = max(0.0, (target_soc - soc_with_sun_only) * b_cap / 100.0)
@@ -299,14 +308,6 @@ class StrategyBuy(StrategyEngine):
                     res["analyzed_window"] = "Нет окон"
                     res["active_periods"] = ""
                 
-                # v11.9.130: Unified Key Helper
-                def get_h_log_key(h_abs):
-                    h_rel = h_abs % 24
-                    suffix = ""
-                    if h_abs >= 48: suffix = " (Через день)"
-                    elif h_abs >= 24: suffix = " (Завтра)"
-                    return f"{h_rel:02d}:59{suffix}"
-
                 # Final Simulation
                 sim_range = list(range(cur_hour, cur_hour + 48))
                 # v11.9.133: Reverted to allow_discharge=False to show clean Target SOC matching the limit
