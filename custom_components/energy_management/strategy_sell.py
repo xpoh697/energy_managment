@@ -681,9 +681,23 @@ class StrategySell(StrategyEngine):
                 "hit_full_before": hit_full_before,
                 "projected_soc_at_sale_start_pct": round_f(self._get_soc_from_log(sim_log, f"{(first_sell_h-1)%24:02d}:59" + (" (Завтра)" if (first_sell_h-1) >= 24 else ""), b_soc), 1),
                 "projected_soc_after_sale_pct": round_f(self._get_soc_from_log(sim_log, f"{last_sell_h%24:02d}:59" + (" (Завтра)" if last_sell_h >= 24 else ""), b_soc), 1),
-                "projected_soc_morning_pct": round_f(self._get_soc_from_log(sim_log, f"{morning_h_abs%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else ""), b_soc), 1),
+                # v11.9.145: Use morning_h_abs - 1 to see SOC at the START of sunrise hour (before generation)
+                "projected_soc_morning_pct": round_f(self._get_soc_from_log(sim_log, f"{(morning_h_abs-1)%24:02d}:59" + (" (Завтра)" if (morning_h_abs-1) >= 24 else ""), b_soc), 1),
                 "log": sim_log
             }
+
+            # v11.9.145: Correct sim_gen to only sum the next 24 hours
+            sim_gen_24h = 0.0
+            for h_offset in range(24):
+                h_sim = cur_hour + h_offset
+                h_sim_rel = h_sim % 24
+                h_sim_suffix = ""
+                if h_sim >= 48: h_sim_suffix = " (Через день)"
+                elif h_sim >= 24: h_sim_suffix = " (Завтра)"
+                h_sim_key = f"{h_sim_rel:02d}:59{h_sim_suffix}"
+                h_sim_data = sim_log.get(h_sim_key)
+                if isinstance(h_sim_data, dict):
+                    sim_gen_24h += float(h_sim_data.get('gen_kw', 0.0))
 
             res["arbitrage_sell_debug"] = {
                 "start_soc": round_f(soc_at_start, 1),
@@ -695,7 +709,7 @@ class StrategySell(StrategyEngine):
                 "soc_at_peak": f"{b_soc:.1f}%", 
                 "house_until_sunrise_pct": round_f(house_after_pct + house_during_pct, 2),
                 "house_h": "Profile",
-                "sim_gen": round_f(sum(float(v.get('gen_kw', 0)) for v in sim_log.values()), 1),
+                "sim_gen": round_f(sim_gen_24h, 1),
                 "sim_log": " | ".join(debug_log_parts),
                 "final_targets": str(target_hours),
                 "f_today": f_today,
