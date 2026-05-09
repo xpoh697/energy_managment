@@ -314,7 +314,8 @@ class StrategyBuy(StrategyEngine):
             res["buy_simulation"] = {
                 "projected_soc_at_start_pct": round_f(soc_at_start_plan, 1),
                 "projected_soc_at_end_pct": round_f(soc_end, 1),
-                "projected_soc_morning_pct": round_f(soc_morning, 1)
+                "projected_soc_morning_pct": round_f(soc_morning, 1),
+                "eff": 0.98
             }
             res["charge_commands"] = charge_commands
             res["recommended_power_kw"] = charge_commands.get(cur_hour, 0.0)

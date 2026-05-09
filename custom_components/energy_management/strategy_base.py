@@ -122,12 +122,8 @@ class StrategyEngine:
                     sum_l += l_val
                     smp_count += 1
         
-        if smp_count < 3 or sum_g < 1.0:
-            return 0.95 # Reasonable modern inverter default
-            
-        eff_ratio = float((sum_g - sum_l) / sum_g)
-        # Never allow less than 85% or more than 99%
-        return float(max(0.85, min(0.99, eff_ratio)))
+        # v11.9.205: Hardcoded to 0.98 per user request to stabilize simulations
+        return 0.98
 
     def get_survival_floor(self, start_h_abs: int, end_h_abs: int) -> float:
         """Calculate required SOC floor to survive home consumption between two points (Raw, No Buffer)."""
