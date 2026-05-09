@@ -255,10 +255,10 @@ class StrategyBuy(StrategyEngine):
 
             if target_hours:
                 first_h = min(target_hours)
-                soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=True)
+                soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=True, no_solar_to_bat=True)
                 
                 _sim_h_window = list(range(cur_hour, max(target_hours) + 1))
-                _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, {}, allow_discharge=True)
+                _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, {}, allow_discharge=True, no_solar_to_bat=True)
                 soc_with_sun_only = self._get_soc_from_log(_log_sun, get_h_log_key(max(target_hours)), b_soc)
                 
                 # v11.9.155: Don't deduct solar for negative prices, we want to buy and export solar instead

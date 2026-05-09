@@ -841,7 +841,7 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else default
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None, no_solar_to_bat=False):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -1021,14 +1021,14 @@ class StrategyEngine:
                 
                 # 2. Total Net Power for battery
                 if not allow_discharge:
-                    total_net_kw = rem_gen + cmd_p
+                    total_net_kw = (0.0 if no_solar_to_bat else rem_gen) + cmd_p
                 else:
                     # v11.7.68: Solar Bypass during Sale
                     # If selling (cmd_p < -0.01), solar (rem_gen) does NOT help the battery discharge
                     if cmd_p < -0.01:
                         total_net_kw = -rem_cons + cmd_p
                     else:
-                        total_net_kw = rem_gen - rem_cons + cmd_p
+                        total_net_kw = (0.0 if no_solar_to_bat else rem_gen) - rem_cons + cmd_p
 
             
                 sim_eff = float(max(0.85, eff_coeff))
@@ -1137,7 +1137,7 @@ class StrategyEngine:
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": VERSION,
+            "strategy_version": "v11.9.185",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -1173,8 +1173,9 @@ class StrategyEngine:
         natural_soc_after_sale = b_soc
         
         # v11.6.228: Ensure VERSION is defined for the response object
-        from .const import VERSION as CONST_VERSION
-        res["strategy_version"] = CONST_VERSION
+        VERSION = "v11.9.185"
+        VERSION_CODE = 1109185
+        res["strategy_version"] = VERSION
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
