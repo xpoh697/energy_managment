@@ -2652,20 +2652,11 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
         f_val = f_raw * coeff if f_raw is not None else 0.0
 
-        # Calculate expected vs actual so far (v11.9.106: Restored missing attributes)
-        today_str = now.strftime("%Y-%m-%d")
-        f_dist = self.manager.get_forecast_hourly_distribution(self.manager.forecast_today_sensor, today_str)
-        expected_so_far = sum(float(v) for h, v in f_dist.items() if int(h) < now.hour)
-        
-        actual_dist = self.manager.get_todays_profile("generation")
-        actual_so_far = sum(float(v) for h, v in actual_dist.items() if int(h) < now.hour)
 
         self._attr_extra_state_attributes = {
             "prediction_target": target_label,
             "target_hour": f"{target_hour:02d}:00",
             "current_soc_pct": round_f(batt_soc, 1),
-            "expected_kwh_so_far": round_f(expected_so_far, 2),
-            "actual_kwh_so_far": round_f(actual_so_far, 2),
             "forecast_income_remaining_kwh": round_f(f_val, 2),
             "forecast_raw_kwh": round_f(f_raw or 0.0, 2),
             "forecast_coefficient_blended": round_f(coeff, 3),
@@ -2677,9 +2668,28 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        if not hasattr(self, "_attr_extra_state_attributes"):
-            return {}
-        return self._attr_extra_state_attributes
+        attrs = dict(getattr(self, "_attr_extra_state_attributes", {}))
+        
+        # Calculate expected vs actual so far (v11.9.110: Fresh calculation on every UI request)
+        now = dt_util.now()
+        expected_so_far = 0.0
+        actual_so_far = 0.0
+        try:
+            today_str = now.strftime("%Y-%m-%d")
+            f_dist = self.manager.get_forecast_hourly_distribution(self.manager.forecast_today_sensor, today_str)
+            if f_dist:
+                expected_so_far = sum(float(v) for h, v in f_dist.items() if int(h) < now.hour)
+            
+            actual_dist = self.manager.get_todays_profile("generation")
+            if actual_dist:
+                actual_so_far = sum(float(v) for h, v in actual_dist.items() if int(h) < now.hour)
+        except Exception:
+            pass
+
+        attrs["expected_kwh_so_far"] = round_f(expected_so_far, 2)
+        attrs["actual_kwh_so_far"] = round_f(actual_so_far, 2)
+        
+        return attrs
 
 
 class ConsumptionDeviationSensor(EnergyBaseSensor):
