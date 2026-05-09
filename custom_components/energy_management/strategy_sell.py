@@ -105,6 +105,8 @@ class StrategySell(StrategyEngine):
         min_soc_val = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
         soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 5.0))
         user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+        price_sell_limit = float(man.get_setting(CONF_PRICE_SELL_LIMIT, 5.0))
+        res["limit_used"] = price_sell_limit
         
         try:
             cur_hour = int(now.hour)
@@ -709,6 +711,11 @@ class StrategySell(StrategyEngine):
                 res["current_mode_text"] = "Активная продажа"
             else:
                 res["current_mode_text"] = "Ожидание пика" if target_hours else "Нет ценового окна"
+
+            # v11.9.106: Final Peak Identification (Strict AI Vision)
+            # Peak is ONLY what AI chose for selling (target_hours).
+            if target_hours:
+                res["next_peak_h"] = min(target_hours)
 
             self._strategy_cache[cache_key] = {"time": now, "res": res}
             return res

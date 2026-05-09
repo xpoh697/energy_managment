@@ -51,7 +51,8 @@ class DPPlanner:
     def get_dp_advice(self, data_snapshot: Dict[str, Any] = None) -> Dict[str, Any]:
         t0 = time.time()
         # v11.9.61: Restore cache to prevent UI lag and sensor thrashing
-        if self._last_run and (t0 - self._last_run) < 60:
+        # v11.9.74: Bypass cache if explicit data_snapshot is provided
+        if not data_snapshot and self._last_run and (t0 - self._last_run) < 60:
             return self._cache.get("advice", {})
 
         try:
@@ -267,13 +268,14 @@ class DPPlanner:
             if "calculation_debug" not in self.manager.data:
                 self.manager.data["calculation_debug"] = {}
                 
-            self.manager.data["calculation_debug"]["dp_constants"] = {
+            dp_constants = {
                 "terminal_val": round(terminal_val_kwh, 4),
                 "min_sell_p": round(min_sell_p, 4),
                 "cycle_cost": round(cycle_cost, 4),
                 "horizon_h": horizon,
                 "soc_start_pct": round(float(curr_s_raw or 0.0), 2),
-                "b_cap_kwh": b_cap,
+                "soc_sensor_id": getattr(self.manager, 'battery_soc_sensor', 'None'),
+                "b_cap_kwh": round(b_cap, 2),
                 "gen_remaining_kwh": round(float(total_gen_today_rem), 2),
                 "gen_total_today_kwh": round(float(total_gen_today), 2),
                 "gen_coeff": round(float(coeff), 3),
@@ -289,7 +291,7 @@ class DPPlanner:
                     "calc_time": round(time.time()-t0, 2), 
                     "horizon": horizon,
                     "b_cap": b_cap,
-                    "constants": self.manager.data.get("calculation_debug", {}).get("dp_constants", {})
+                    "constants": dp_constants
                 }
             }
             self._cache["advice"] = res_final
@@ -357,7 +359,6 @@ class DPPlanner:
         tm_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         for h, p in self._ensure_dict(ps.get(t_str, {})).items(): res[str(h)] = p
         tm_data = self._ensure_dict(ps.get(tm_str, {}))
-        if not tm_data: tm_data = self._ensure_dict(ps.get(t_str, {}))
         for h, p in tm_data.items(): res[str(int(h) + 24)] = p
         return res
 

@@ -1,4 +1,5 @@
 import logging
+import time
 import json
 import os
 from typing import Any, cast, List, Tuple, Dict, Optional
@@ -338,19 +339,27 @@ class EnergyProfileManager:
         
         raw_soc = config_data.get(CONF_BATTERY_SOC)
         if isinstance(raw_soc, list): raw_soc = raw_soc[0] if raw_soc else None
-        self.battery_soc_sensor = str(raw_soc) if raw_soc else None
+        self.battery_soc_sensor = str(raw_soc).strip() if raw_soc else None
         
         raw_cap = config_data.get(CONF_BATTERY_CAPACITY)
         if isinstance(raw_cap, list): raw_cap = raw_cap[0] if raw_cap else None
-        self.battery_capacity_sensor = str(raw_cap) if raw_cap else None
+        self.battery_capacity_sensor = str(raw_cap).strip() if raw_cap else None
         
         raw_bat_p = config_data.get(CONF_BATTERY_POWER)
         if isinstance(raw_bat_p, list): raw_bat_p = raw_bat_p[0] if raw_bat_p else None
-        self.battery_power_sensor = str(raw_bat_p) if raw_bat_p else None
+        self.battery_power_sensor = str(raw_bat_p).strip() if raw_bat_p else None
         
         raw_grid_p = config_data.get(CONF_GRID_POWER)
         if isinstance(raw_grid_p, list): raw_grid_p = raw_grid_p[0] if raw_grid_p else None
-        self.grid_power_sensor = str(raw_grid_p) if raw_grid_p else None
+        self.grid_power_sensor = str(raw_grid_p).strip() if raw_grid_p else None
+
+        raw_p_buy = config_data.get(CONF_PRICE_BUY)
+        if isinstance(raw_p_buy, list): raw_p_buy = raw_p_buy[0] if raw_p_buy else None
+        self.price_buy_sensor = str(raw_p_buy).strip() if raw_p_buy else None
+        
+        raw_p_sell = config_data.get(CONF_PRICE_SELL)
+        if isinstance(raw_p_sell, list): raw_p_sell = raw_p_sell[0] if raw_p_sell else None
+        self.price_sell_sensor = str(raw_p_sell).strip() if raw_p_sell else None
 
         # v11.1.35: Using hardcoded string if constant import fails in end-user environment
         raw_bat_v = config_data.get("battery_voltage")
@@ -1632,6 +1641,25 @@ class EnergyProfileManager:
         """Cost of battery wear per kWh."""
         return self.strategy_engine.get_battery_degradation_cost()
 
+    def log_to_file(self, message: str):
+        """Persistent logging to a dedicated file in the config directory with rotation."""
+        try:
+            log_file = self.hass.config.path("energy_management.log")
+            timestamp = dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
+            full_msg = f"{timestamp} {message}\n"
+            
+            # Rotation: Check size (max 5MB)
+            import os
+            if os.path.exists(log_file) and os.path.getsize(log_file) > 5 * 1024 * 1024:
+                old_log = log_file + ".old"
+                if os.path.exists(old_log): os.remove(old_log)
+                os.rename(log_file, old_log)
+                
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(full_msg)
+        except Exception as e:
+            _LOGGER.error("Failed to write to energy_management.log: %s", e)
+
     def get_expected_consumption(self):
         """Helper to get the expected consumption value for the current hour."""
         now = dt_util.now()
@@ -2035,10 +2063,16 @@ class EnergyProfileManager:
         if st:
             try:
                 soc = float(str(st.state).replace(',', '.'))
+                _LOGGER.info(f"Battery SOC read: {soc}% from {self.battery_soc_sensor} (state={st.state})")
             except (ValueError, TypeError):
                 # Check attributes if state is non-numeric (e.g. 'online')
-                soc = st.attributes.get("soc") or st.attributes.get("battery_level") or st.attributes.get("battery") or soc_default
-                soc = float(normalize_float(soc))
+                soc_attr = st.attributes.get("soc") or st.attributes.get("battery_level") or st.attributes.get("battery") or soc_default
+                soc = float(normalize_float(soc_attr))
+                _LOGGER.info(f"Battery SOC read from attributes: {soc}% from {self.battery_soc_sensor} (state={st.state})")
+        elif self.battery_soc_sensor:
+            _LOGGER.warning(f"Battery SOC sensor {self.battery_soc_sensor} not found in Home Assistant states.")
+        else:
+            _LOGGER.debug("Battery SOC sensor is not configured.")
         
         cap = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
         if cap <= 0.1:
@@ -2618,10 +2652,20 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
         f_val = f_raw * coeff if f_raw is not None else 0.0
 
+        # Calculate expected vs actual so far (v11.9.106: Restored missing attributes)
+        today_str = now.strftime("%Y-%m-%d")
+        f_dist = self.manager.get_forecast_hourly_distribution(self.manager.forecast_today_sensor, today_str)
+        expected_so_far = sum(float(v) for h, v in f_dist.items() if int(h) < now.hour)
+        
+        actual_dist = self.manager.get_todays_profile("generation")
+        actual_so_far = sum(float(v) for h, v in actual_dist.items() if int(h) < now.hour)
+
         self._attr_extra_state_attributes = {
             "prediction_target": target_label,
             "target_hour": f"{target_hour:02d}:00",
             "current_soc_pct": round_f(batt_soc, 1),
+            "expected_kwh_so_far": round_f(expected_so_far, 2),
+            "actual_kwh_so_far": round_f(actual_so_far, 2),
             "forecast_income_remaining_kwh": round_f(f_val, 2),
             "forecast_raw_kwh": round_f(f_raw or 0.0, 2),
             "forecast_coefficient_blended": round_f(coeff, 3),
@@ -2704,6 +2748,8 @@ class InverterOperationModeSensor(SensorEntity):
             "charge_amps": 0.0,
         }
         self._last_logged_hour = None
+        self._mode_lock_until = None
+        self._locked_mode = None
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
             name=manager.entry.data.get("name", "Energy Management"),
@@ -2717,12 +2763,29 @@ class InverterOperationModeSensor(SensorEntity):
     @property
     def native_value(self):
         try:
+            now = dt_util.now()
             batt_soc, _, _ = self.manager.get_battery_state(soc_default=100.0)
-            # v11.4.50: Fix: _get_mode_at returns (mode, reason, bms_debug, peak_start_abs).
-            # Previously used `mode, _` → ValueError (too many values to unpack) →
-            # silently fell through to except → always returned "sale_pv" default.
-            mode, _, _, _ = self._get_mode_at(dt_util.now(), batt_soc)
-            return mode
+            min_soc = float(self.manager.get_setting("min_soc_bat", 10.0))
+            
+            # 1. Calculate raw mode from current strategy/conditions
+            raw_mode, reason, _, _ = self._get_mode_at(now, batt_soc)
+            
+            # 2. Hysteresis / Lock Logic
+            # Emergency bypass: if battery is in emergency or critical state, ignore lock
+            is_emergency = (raw_mode == "bat_emergency" or batt_soc <= (min_soc - 0.5))
+            
+            if not is_emergency and self._mode_lock_until and now < self._mode_lock_until:
+                # Keep the locked mode if it's still valid or if we're in the window
+                if self._locked_mode:
+                    return self._locked_mode
+
+            # 3. Mode Change Detection
+            if raw_mode != self._locked_mode:
+                # Lock for 10 minutes
+                self._mode_lock_until = now + timedelta(minutes=10)
+                self._locked_mode = raw_mode
+                
+            return raw_mode
         except Exception as e:
             _LOGGER.error("Error in InverterOperationModeSensor native_value: %s", e)
             return "sale_pv"
@@ -2744,6 +2807,7 @@ class InverterOperationModeSensor(SensorEntity):
             
             attrs = {}
             attrs["mode_reason"] = reason
+            attrs["mode_lock_until"] = self._mode_lock_until.isoformat() if self._mode_lock_until else "None"
             attrs["bms_status"] = bms_debug
             
             # Forecast 24h
@@ -2904,7 +2968,6 @@ class InverterOperationModeSensor(SensorEntity):
             attrs["next_peak_start_hour"] = self.manager.strategy_engine._format_h(peak_start_abs)
             attrs["morning_soc_target"] = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", (min_soc + 5.0))
             attrs["morning_soc_projected"] = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
-            attrs["buy_debug"] = buy_strategy.get("buy_debug", "Нет данных")
             
             self.manager.current_inverter_mode = mode
 
@@ -2928,10 +2991,13 @@ class InverterOperationModeSensor(SensorEntity):
             if has_changed:
                 log_tag = "[Inverter Status]" if now.hour != self._last_logged_hour and curr_params["mode"] == self._last_logged_params.get("mode") else "[Inverter Change]"
                 old_mode = self._last_logged_params.get("mode", "initial")
-                _LOGGER.warning(
-                    "%s %s %s -> %s | Power: %.1f kW | Target SOC: %.1f%% | Amps: %.1f A | Reason: %s",
-                    now.strftime("%Y-%m-%d %H:%M:%S"), log_tag, old_mode, mode, p_val, t_soc, attrs.get("charge_amps", 0.0), reason
-                )
+                
+                log_msg = f"{log_tag} {old_mode} -> {mode} | SOC: {batt_soc:.1f}% | Power: {p_val:.1f} kW | Target SOC: {t_soc:.1f}% | Amps: {attrs.get('charge_amps', 0.0):.1f} A | Reason: {reason}"
+                
+                # Double logging: to HA log (warning) and to our dedicated file
+                _LOGGER.warning(log_msg)
+                self.manager.log_to_file(log_msg)
+                
                 self._last_logged_params = curr_params
                 self._last_logged_hour = now.hour
 
@@ -3013,14 +3079,15 @@ class InverterOperationModeSensor(SensorEntity):
         # SOC and Capacity
         _, batt_cap, _ = self.manager.get_battery_state(soc_default=100.0)
 
-        # Peak preparation logic (only for current time or relative forecast window)
+        # Peak preparation logic
         is_preparing_for_peak = False
         target_hours_sell = sell_strategy.get("active_hours", [])
-        peak_start_abs = None
-        for h in sorted(target_hours_sell):
-            if h > check_h_abs:
-                peak_start_abs = h
-                break
+        peak_start_abs = sell_strategy.get("next_peak_h") # v11.9.104 fix
+        if peak_start_abs is None:
+            for h in sorted(target_hours_sell):
+                if h > check_h_abs:
+                    peak_start_abs = h
+                    break
         
         bms_debug = {"status": "Ожидание" if not is_forecast else "Прогноз"}
         
@@ -3136,8 +3203,11 @@ class InverterOperationModeSensor(SensorEntity):
                     is_waiting_for_neg = True
 
         # State Machine Ladder
-        if is_buying_active:
-            # v11.6.32 - Priority 1: Buying (Strictly restricted to active AI strategy)
+        # v11.9.106: Differentiate forecast vs live for buying priority
+        _is_buy_priority = is_buying_active and (buy_strategy.get("is_charging_now") or is_forecast)
+        
+        if _is_buy_priority:
+            # v11.6.32/v11.9.97 - Priority 1: Buying (Strictly restricted to active charging window)
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ"
         
@@ -3174,19 +3244,26 @@ class InverterOperationModeSensor(SensorEntity):
                 mode = "sale_pv"
                 reason = "Ожидание отриц. цен (ночь): Стандартная работа"
 
+        # v11.9.106: Global Price Floor (TS 4.1 Priority 3)
+        # Moved above AI and Morning logic to ensure it works even without peaks.
+        elif cur_price is not None and cur_price < price_stop_sell:
+            mode = "stop_sale"
+            reason = f"Продажа заблокирована: Цена ({cur_price:.2f}) < Порога ({price_stop_sell:.2f})"
+
         elif is_selling_active:
             # Active AI / Arbitrage strategy
             mode = "sale_pv_bat"
             reason = "Активна стратегия ПРОДАЖИ (AI)"
             
-        elif cur_price is not None and cur_price >= price_sell_only_pv and (has_surplus or is_selling_active):
+        # v11.9.106: Day/Morning analysis works even without surplus or peaks to provide Gatekeeper protection visibility.
+        elif cur_price is not None and cur_price >= price_sell_only_pv:
             # SAFE MORNING MODE (User's 4 conditions)
             # 1. Price >= Threshold
             # 2. Before user limit hour
             # 3. Averaged Surplus > 0
-            # 4. Simulation shows we will be full enough for evening/peak
+            # 4. Energy reserve check: full enough for next peak OR Gatekeeper floor at next sunrise
             
-            # v7.9 - Morning Survival Guard
+            # v7.9 - Morning Survival Guard (v11.9.106: Extended for Gatekeeper floor)
             # We don't just check for "Preparing for Peak Today", we also check 
             # if we have enough energy to reach tomorrow morning (Sunrise).
             man = self.manager
@@ -3207,6 +3284,7 @@ class InverterOperationModeSensor(SensorEntity):
                 if (peak_p - deg_cost) > cur_p and (sim_soc if 'sim_soc' in locals() else batt_soc) < 90.0:
                     is_profitable_to_save = True
             
+            # v11.9.106: Protect energy for either a future peak OR the morning Gatekeeper floor (survival)
             is_energy_low_for_evening = bool((is_preparing_for_peak or is_low_for_morning or is_profitable_to_save) and not hit_full_before)
             
             # Smart Deficit Throttling Awareness
@@ -3224,10 +3302,6 @@ class InverterOperationModeSensor(SensorEntity):
             if is_before_limit_hour and has_surplus and not is_energy_low_for_evening and cur_price > 0:
                 mode = "sale_pv_no_bat"
                 reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f}), утро, есть излишек и запас энергии"
-            elif cur_price < price_stop_sell:
-                # If specific morning conditions not met, we must STILL respect the global stop_sell floor
-                mode = "stop_sale"
-                reason = f"Продажа заблокирована: Цена ({cur_price or 0.0:.2f}) < Порога ({price_stop_sell or 0.0:.2f})"
             else:
                 # If conditions for sale_pv_no_bat not met, fallback to standard or charge
                 mode = "sale_pv"
@@ -3237,22 +3311,28 @@ class InverterOperationModeSensor(SensorEntity):
                          reason = "Продажа АКБ ограничена AI"
                     elif is_low_for_morning:
                          mode = "sale_pv"
-                         reason = f"Защита лимита: Завтра {morning_soc_proj:.1f}% < {target_morning:.1f}%"
+                         reason = f"Защита Gatekeeper: Рассвет {morning_soc_proj:.1f}% < {target_morning:.1f}%"
                     elif is_energy_low_for_evening and sell_strategy.get("morning_autopilot_active"):
                          mode = "sale_pv"
                          prefix = "Продажа" if mode == "sale_pv_bat" else "Питание дома"
                          sun_note = " (мало солнца)" if not hit_full_before else ""
-                         reason = f"{prefix} до {sell_strategy.get('morning_autopilot_floor')}% (защита утра{sun_note})"
+                         reason = f"{prefix} до {sell_strategy.get('morning_autopilot_floor')}% (защита Gatekeeper{sun_note})"
                     elif peak_start_abs is not None and peak_start_abs < 48:
                          mode = "sale_pv"
-                         reason = f"Подготовка к {self.manager.strategy_engine._format_h(peak_start_abs)}"
+                         reason = f"Подготовка к Пику {self.manager.strategy_engine._format_h(peak_start_abs)}"
+                    elif is_profitable_to_save:
+                         mode = "sale_pv"
+                         reason = "Сохранение заряда: Пик выгоднее текущей цены"
                     else:
                          mode = "sale_pv"
-                         reason = "Экономия заряда (дефицит)"
+                         reason = "Экономия заряда: Дефицит до рассвета"
                 elif not is_before_limit_hour:
                     reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f})"
                 elif not has_surplus:
-                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f}), но нет излишка солнца"
+                    if is_forecast:
+                         reason = "По прогнозу нет излишков солнца (генерация < потребления)"
+                    else:
+                         reason = f"Ожидание солнца: тек. генерация ({avg_gen:.2f}) < тек. потребления ({avg_load:.2f})"
                 else:
                     reason = "Цена выше порога, но условия продажи PV+АКБ не соблюдены"
             
@@ -3260,11 +3340,6 @@ class InverterOperationModeSensor(SensorEntity):
             # v11.6.65: Handle missing future prices gracefully
             mode = "sale_pv"
             reason = "Нет данных о цене (завтра?)"
-            
-        elif cur_price < price_stop_sell:
-            # Global price floor for ANY selling
-            mode = "stop_sale"
-            reason = f"Продажа заблокирована: Цена ({cur_price:.2f}) < Порога ({price_stop_sell:.2f})"
             
         else:
             # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
@@ -3476,24 +3551,11 @@ class EnergyBudgetSensor(SensorEntity):
                 "forecast_coefficient": _sr(res.get("forecast_coefficient", 1.0), 1.0),
                 "forecast_coefficient_today": _sr(res.get("forecast_today_coefficient", 1.0), 1.0),
                 "occupancy_coefficient": _sr(res.get("occupancy_coefficient", 1.0), 1.0),
-                "debug_occ_home_hours": int(res.get("debug_occ_home_hours", 0)),
-                "debug_occ_away_hours": int(res.get("debug_occ_away_hours", 0)),
-                "debug_occ_current": int(res.get("debug_occ_current", 0)),
-                "debug_occ_sensors_home": res.get("debug_occ_sensors", []),
-                "debug_occ_avg_home": _sr(res.get("debug_occ_avg_home", 0.0)),
-                "debug_occ_avg_away": _sr(res.get("debug_occ_avg_away", 0.0)),
                 "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
-                "debug_actual_today": _sr(res.get("debug_actual_today")),
-                "debug_expected_today_total": _sr(res.get("debug_expected_today_total")),
-                "debug_expected_today_so_far": _sr(res.get("debug_expected_today_so_far")),
-                "debug_h_acc_cur": _sr(res.get("debug_h_acc_cur", 1.0)),
-                "debug_h_count_cur": int(res.get("debug_h_count_cur", 0)),
-                "debug_hist_coeff_rem": _sr(res.get("debug_hist_coeff_rem", 1.0)),
-                "forecast_distribution": res.get("forecast_distribution", {}),
-                "forecast_dist_source": res.get("forecast_dist_source", "historical"),
-                "projected_morning_soc": _sr(res.get("projected_morning_soc")),
-                "survival_threshold": _sr(res.get("survival_threshold")),
-                "battery_capacity_kwh": _sr(res.get("battery_capacity_kwh"))
+                # survival_floor = Raw (No buffer)
+                "survival_floor": self.manager.strategy_engine.get_survival_floor(dt_util.now().hour, (self.manager.get_sunrise_hour() or 8) + (24 if dt_util.now().hour >= 4 else 0)),
+                "current_battery_soc": _sr(self.manager.get_battery_state()[0]),
+                "projected_morning_soc": _sr(res.get("projected_morning_soc"))
             }
         except Exception as e:
             _LOGGER.error("Error calculating EnergyBudgetSensor: %s", e)
@@ -3576,12 +3638,12 @@ class MarketStrategySensor(SensorEntity):
                 "arbitrage_gatekeeper_floor": res.get("gatekeeper_floor", 0.0)
             })
         else: # buy
-            attrs["buy_debug"] = res.get("buy_debug", "Нет данных")
             attrs.update({
                 "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
                 "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
                 "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
-                "gatekeeper_floor": res.get("gatekeeper_floor", 0.0)
+                "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
+                "buy_debug": res.get("buy_debug", "Нет данных")
             })
 
         return attrs
@@ -4241,6 +4303,8 @@ class EnergyDPAdviceSensor(SensorEntity):
         self.entity_id = f"{DOMAIN}.energy_dp_advice"
         self._state = "Calculating..."
         self._advice = {}
+        self._last_run_time = 0
+        self._is_calculating = False
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
@@ -4265,18 +4329,23 @@ class EnergyDPAdviceSensor(SensorEntity):
 
     async def async_added_to_hass(self):
         if self.manager:
-            self.manager.update_listeners.append(self._async_trigger_update)
+            self.manager.update_listeners.append(self._trigger_update)
             # Initial run
-            await self._async_trigger_update()
+            self._trigger_update()
 
     async def async_will_remove_from_hass(self):
-        if self.manager and self._async_trigger_update in self.manager.update_listeners:
-            self.manager.update_listeners.remove(self._async_trigger_update)
+        if self.manager and self._trigger_update in self.manager.update_listeners:
+            self.manager.update_listeners.remove(self._trigger_update)
 
-    async def _async_trigger_update(self):
+    def _trigger_update(self):
         """Prepare snapshot in main thread and trigger background worker."""
         if not self.hass: return
         
+        t_now = time.time()
+        # v11.9.74: Prevent parallel calculations and excessive spam
+        if self._is_calculating: return
+        if (t_now - self._last_run_time) < 60: return
+
         # Capture critical data in main thread where it's safe
         soc, cap, _ = self.manager.get_battery_state()
         snapshot = {
@@ -4290,10 +4359,14 @@ class EnergyDPAdviceSensor(SensorEntity):
 
     def _update_advice_threaded(self, snapshot):
         """Threaded DP computation using pre-captured snapshot."""
+        self._is_calculating = True
         try:
             res = self.planner.get_dp_advice(snapshot)
             self._advice = res
+            self._last_run_time = time.time()
             if self.hass:
                 self.hass.add_job(self.async_write_ha_state)
         except Exception as e:
             _LOGGER.error(f"DP Update error: {e}")
+        finally:
+            self._is_calculating = False

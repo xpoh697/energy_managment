@@ -129,6 +129,35 @@ class StrategyEngine:
         # Never allow less than 85% or more than 99%
         return float(max(0.85, min(0.99, eff_ratio)))
 
+    def get_survival_floor(self, start_h_abs: int, end_h_abs: int) -> float:
+        """Calculate required SOC floor to survive home consumption between two points (Raw, No Buffer)."""
+        man: Any = self.manager
+        _, b_cap, _ = man.get_battery_state()
+        b_cap = float(b_cap or 10.0)
+        eff = float(self.get_efficiency_coefficient() or 0.95)
+        
+        min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+        
+        # 1. Integrate house net load (Consumption - Generation)
+        prof_gen = dict(man.get_predicted_profile("generation"))
+        prof_cons = dict(man.get_predicted_profile("consumption_base"))
+        
+        house_kwh_needed = 0.0
+        for h_abs in range(start_h_abs, end_h_abs):
+            h_rel = str(h_abs % 24)
+            l_val = float(normalize_float(prof_cons.get(h_rel, 0.4)))
+            g_val = float(normalize_float(prof_gen.get(h_rel, 0.0)))
+            house_kwh_needed += max(0.0, l_val - g_val)
+            
+        # 2. Convert kWh to SOC pct (considering efficiency)
+        house_soc_pct = (house_kwh_needed / eff / b_cap * 100.0) if b_cap > 0 else 0
+        return round_f(min_soc + house_soc_pct, 1)
+
+    def get_gatekeeper_floor(self, start_h_abs: int, end_h_abs: int) -> float:
+        """Calculate buffered survival floor (Gatekeeper = Survival + SOC Buffer). Used for Strategy Limits."""
+        soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 5.0))
+        return round_f(self.get_survival_floor(start_h_abs, end_h_abs) + soc_buffer, 1)
+
     # --- REFACTOR v6.2 MODULAR HELPERS ---
 
     def _get_sunrise_baseline_soc(self, current_soc, now, sunrise_h, best_buy_pair, all_buy_prices, threshold, eff, deg_cost, max_p):
@@ -757,50 +786,29 @@ class StrategyEngine:
                 "battery_capacity_kwh": float(b_cap_f or 0.0),
                 "projected_morning_soc": float(round_f(projected_morning_soc, 1)),
                 "survival_threshold": float(round_f(survival_threshold, 1)),
-                "battery_energy_kwh": round_f(b_energy_f, 3),
-                "expected_consumption_kwh": round_f(expected_base_consumption, 3),
+                "batt_energy_val": float(b_energy_f or 0.0),
+                "expected_consumption": float(essential_house_consumption or 0.0),
                 "sun_overflow_kwh": round_f(overflow_today, 3),
                 "battery_surplus_kwh": round_f(batt_surplus, 3),
                 "potential_export_kwh": round_f(overflow_today + batt_surplus, 3),
                 "permissions": permissions or {},
                 "permissions_reasons": permissions_reasons or {},
                 "forecast_val": float(forecast_val_adjusted or 0.0),
-                "forecast_raw": float(forecast_val or 0.0),
                 "forecast_coefficient": float(blended_coeff or 1.0),
-                "forecast_hist_coefficient": float(hist_coeff or 1.0),
                 "forecast_today_coefficient": float(today_coeff or 1.0),
                 "efficiency_coefficient": float(eff_coeff or 1.0),
+                "occupancy_coefficient": float(occ_coeff or 1.0),
                 "degradation_cost": float(self.get_battery_degradation_cost() or 0.0),
-                "debug_actual_today": float(actual_today or 0.0),
-                "debug_expected_today_total": float(expected_today_total),
-                "debug_expected_today_so_far": float(hist_gen_so_far),
-                "debug_h_acc_cur": float(h_acc_cur),
-                "debug_h_count_cur": int(h_count_cur),
-                "debug_hist_coeff_rem": float(hist_coeff),
-                "debug_occ_home_hours": int(occ_home),
-                "debug_occ_away_hours": int(occ_away),
-                "debug_occ_current": int(occ_cur),
-                "debug_occ_sensors": occ_sensors,
-                "debug_occ_avg_home": float(occ_avg_home),
-                "debug_occ_avg_away": float(occ_avg_away),
+                "solar_actual_today": float(actual_today or 0.0),
+                "solar_expected_total": float(expected_today_total),
+                "solar_expected_so_far": float(hist_gen_so_far),
+                "solar_fraction_so_far": float(external_progress if 'external_progress' in locals() else fraction_so_far),
                 "forecast_distribution": active_dist,
                 "forecast_dist_source": dist_source,
-                "debug_sample_keys": [],
-                "debug_interval_sample": "",
-                "debug_raw_attributes_sample": "",
-                "debug_forecast_sensors": [],
-                "debug_fraction_so_far": float(external_progress if 'external_progress' in locals() else fraction_so_far),
-                "batt_energy_val": float(b_energy_f or 0.0),
-                "expected_consumption": float(essential_house_consumption or 0.0),
-                "occupancy_coefficient": float(occ_coeff or 1.0),
-                "efficiency_coefficient": float(eff_coeff or 1.0),
                 "available_power_total_kw": float(initial_power_kw or 0.0),
-                "available_gen_kw": float(available_gen_kw or 0.0), # Remaining surplus after loop
-                "available_gen_surplus_initial": float(gen_surplus_initial or 0.0),
+                "available_gen_kw": float(available_gen_kw or 0.0),
                 "reserved_by": reserved_by,
                 "sunrise_hour": int(res_sunrise if 'res_sunrise' in locals() else 8),
-                "waste_compensation_kw": float(waste_kw or 0.0),
-                "battery_flexible_kw": float(batt_p_flexible or 0.0),
                 "battery_discharge_budget_kw": float(batt_discharge_allowed or 0.0)
             }
             self._strategy_cache["budget_permissions"] = {"time": now, "res": return_res}

@@ -38,6 +38,24 @@ class StrategyBuy(StrategyEngine):
     """Specialized engine for BUY-mode energy management strategies."""
     
     def get_market_strategy(self, mode="buy"):
+        """Standardized Buying Strategy v11.9.89+"""
+        def group_h(hours):
+            if not hours: return ""
+            sorted_h = sorted(list(hours))
+            groups = []
+            if not sorted_h: return ""
+            start = sorted_h[0]
+            prev = sorted_h[0]
+            for h in sorted_h[1:]:
+                if h == prev + 1:
+                    prev = h
+                else:
+                    groups.append(f"{start%24:02d}-{prev%24:02d}" if start != prev else f"{start%24:02d}")
+                    start = h
+                    prev = h
+            groups.append(f"{start%24:02d}-{prev%24:02d}" if start != prev else f"{start%24:02d}")
+            return ", ".join(groups)
+
         now = dt_util.now()
         man: Any = self.manager
         
@@ -70,12 +88,17 @@ class StrategyBuy(StrategyEngine):
             "buy_simulation": {"projected_soc_at_start_pct": b_soc, "projected_soc_at_end_pct": b_soc, "projected_soc_morning_pct": b_soc},
             "arbitrage_decision": "Нет данных",
             "charge_reason": "Нет",
+            "is_charging_now": False,
             "strategy_candidates": [],
             "raw_commands": {}
         }
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
+        
+        # v11.9.106: Set the active buy limit for debug transparency
+        price_buy_limit = float(man.get_setting(CONF_PRICE_BUY_LIMIT, 0.05))
+        res["limit_used"] = price_buy_limit
         
         try:
             cur_hour = int(now.hour)
@@ -121,7 +144,7 @@ class StrategyBuy(StrategyEngine):
             if not all_buy_prices: return res
 
             cur_p_f = all_buy_prices.get(cur_hour, 0.0)
-            buy_limit = float(man.get_setting(CONF_PRICE_BUY_LIMIT, 2.0))
+            buy_limit = price_buy_limit
             eff = float(self.get_efficiency_coefficient() or 1.0)
             
             negative_hours = [h for h, p in all_buy_prices.items() if p < 0.0]
@@ -164,60 +187,60 @@ class StrategyBuy(StrategyEngine):
                     res["charge_reason"] = "Нет"
                     res["state"] = "price_limit_not_met"
 
-            # Survival Bridge Logic
-            min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
-            if b_cap > 0 and dynamic_buy:
+                # v11.9.98: Optimized Survival Bridge Logic
+                min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+                # Instead of searching ONLY before violation, we search globally for the cheapest hours
+                # but only if SOC is actually critical or it's a cheap window.
                 survival_hours = set(target_hours)
+                avg_price = sum(all_buy_prices.values()) / len(all_buy_prices) if all_buy_prices else 0.0
+                
                 for _ in range(5): # Max 5 bridges
                     added = False
                     sim_range = list(range(cur_hour, max(all_buy_prices.keys()) + 1))
                     sim_cmds = {h: max_p for h in survival_hours}
-                    _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds)
+                    # v11.9.99: Use consumption_base for survival checks (don't panic due to car chargers)
+                    _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds, house_profile_override="consumption_base")
                     
+                    first_violation_h = None
                     for h_step in sim_range:
                         h_key = f"{h_step % 24:02d}:59" + (" (Завтра)" if h_step >= 24 else "")
                         soc_h = self._get_soc_from_log(log, h_key, 100.0)
                         if soc_h < min_soc:
-                            res["survival_violation_hour"] = h_step
-                            # Add cheapest hour before violation
-                            search = [sh for sh in range(cur_hour, h_step + 1) if sh not in survival_hours and sh in all_buy_prices]
-                            if search:
-                                cheapest = min(search, key=lambda x: all_buy_prices[x])
+                            first_violation_h = h_step
+                            break
+                    
+                    if first_violation_h is not None:
+                        res["survival_violation_hour"] = first_violation_h
+                        candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours]
+                        if candidates_global:
+                            cheapest = min(candidates_global, key=lambda x: all_buy_prices[x])
+                            c_price = all_buy_prices[cheapest]
+                            
+                            # Panic Brake v2: Strict Price Ceiling
+                            # If SOC > 25%, don't buy if price > 3x buy_limit
+                            is_too_expensive = bool(c_price > buy_limit * 3.0 and b_soc > 25.0)
+                            is_peak = bool(c_price > avg_price)
+                            is_urgent = bool(first_violation_h <= cur_hour + 2)
+                            
+                            if (not is_peak and not is_too_expensive) or is_urgent or b_soc < 20.0:
                                 survival_hours.add(cheapest)
                                 added = True
-                                break
+                    
                     if not added: break
+                
                 target_hours = sorted(list(survival_hours))
-                if any(h not in (negative_hours or candidates if 'candidates' in locals() else []) for h in target_hours):
+                if any(h not in (negative_hours or (candidates if 'candidates' in locals() else [])) for h in target_hours):
                     res["charge_reason"] = "Выживание"
 
-            # Power Allocation
-            charge_commands = {}
-            target_soc = b_soc
-            if target_hours:
-                # v12.1.0: Gatekeeper Floor Calculation (House load until sunrise)
-                # This ensures we account for what the house WILL eat after the buy window
+                # v12.3.0: Standardized Survival Floor (Gatekeeper)
                 morning_h = man.get_sunrise_hour() or 8
                 morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
                 
-                prof_cons_cur = dict(man.get_average_profile("consumption_base", 7, now.weekday()))
-                prof_cons_tom = dict(man.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7))
-                
-                house_kwh_until_sunrise = 0.0
                 last_h = max(target_hours) if target_hours else cur_hour
-                for h_abs in range(last_h + 1, morning_h_abs):
-                    h_rel = h_abs % 24
-                    p_prof = prof_cons_tom if h_abs >= 24 else prof_cons_cur
-                    h_load = p_prof.get(f"{h_rel:02d}") or p_prof.get(str(h_rel))
-                    # Fallback to 0.4 kWh/h if profile is missing
-                    house_kwh_until_sunrise += float(normalize_float(h_load if h_load is not None else 0.4))
-
-                # v12.2.0: Optimized Survival Target (TS 4.2.3)
-                # Don't charge to 100% if price is high and we only need to survive
+                # Gatekeeper includes SOC Buffer
+                survival_target = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
+                
                 base_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
-                house_load_pct = (house_kwh_until_sunrise / b_cap * 100.0) if b_cap > 0 else 0
-                soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 5.0))
-                survival_target = min_soc + house_load_pct + soc_buffer
                 
                 if res["charge_reason"] in ["Отрицательная цена", "Арбитраж"]:
                     target_soc = 100.0
@@ -226,29 +249,42 @@ class StrategyBuy(StrategyEngine):
                 else:
                     target_soc = base_limit
                 
-                res["survival_target"] = round_f(survival_target, 1)
-                res["soc_buffer"] = soc_buffer
+                res["survival_target"] = survival_target
                 res["target_soc"] = round_f(target_soc, 1)
                 
-                # Pre-sim to find SOC at start of window
-                first_h = min(target_hours)
-                soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=False)
-                
-                needed_kwh_dc = (target_soc - soc_at_start_plan) * b_cap / 100.0
-                accum_kwh_dc = 0.0
-                for h in sorted(target_hours):
-                    if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0: break
-                    h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
+                # Power Allocation
+                charge_commands = {}
+                soc_at_start_plan = b_soc
+                soc_end = b_soc
+                soc_morning = b_soc
+
+                if target_hours:
+                    first_h = min(target_hours)
+                    soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=False)
                     
-                    # v12.2.1: Throttle power to reach exactly target_soc
-                    remaining_kwh_needed = max(0.0, (needed_kwh_dc - accum_kwh_dc))
-                    p_needed = remaining_kwh_needed / (h_factor * eff) if h_factor > 0 else 0
+                    needed_kwh_dc = (target_soc - soc_at_start_plan) * b_cap / 100.0
+                    accum_kwh_dc = 0.0
+                    for h in sorted(target_hours):
+                        if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0: break
+                        h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
+                        
+                        # v12.2.1: Throttle power to reach exactly target_soc
+                        remaining_kwh_needed = max(0.0, (needed_kwh_dc - accum_kwh_dc))
+                        p_needed = remaining_kwh_needed / (h_factor * eff) if h_factor > 0 else 0
+                        
+                        cc_cv = self.get_cc_cv_ratio(soc_at_start_plan + (accum_kwh_dc/b_cap*100.0))
+                        p_charge = min(max_p, max_p * cc_cv, p_needed)
+                        
+                        charge_commands[h] = round_f(p_charge, 3)
+                        accum_kwh_dc += (p_charge * h_factor * eff)
                     
-                    cc_cv = self.get_cc_cv_ratio(soc_at_start_plan + (accum_kwh_dc/b_cap*100.0))
-                    p_charge = min(max_p, max_p * cc_cv, p_needed)
-                    
-                    charge_commands[h] = round_f(p_charge, 3)
-                    accum_kwh_dc += (p_charge * h_factor * eff)
+                    # UI Reporting for active window
+                    res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
+                    res["active_periods"] = group_h(target_hours)
+                    res["limit_used"] = buy_limit
+                else:
+                    res["analyzed_window"] = "Нет окон"
+                    res["active_periods"] = ""
                 
                 # Final Simulation
                 sim_range = list(range(cur_hour, cur_hour + 48))
@@ -256,9 +292,9 @@ class StrategyBuy(StrategyEngine):
                 
                 soc_end = self._get_soc_from_log(sim_log, f"{max(target_hours)%24:02d}:59" if target_hours else f"{cur_hour%24:02d}:59", b_soc)
                 
-                gatekeeper_floor = min_soc + (house_kwh_until_sunrise / b_cap * 100.0)
-                res["gatekeeper_floor"] = round_f(gatekeeper_floor, 1)
-                res["house_kwh_until_sunrise"] = round_f(house_kwh_until_sunrise, 2)
+                res["gatekeeper_floor"] = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
+                res["survival_floor"] = self.get_survival_floor(last_h + 1, morning_h_abs)
+                
                 soc_morning = self._get_soc_from_log(sim_log, f"{(morning_h-1)%24:02d}:59 (Завтра)", soc_end)
                 res["buy_simulation"] = {
                     "projected_soc_at_start_pct": round_f(soc_at_start_plan, 1),
@@ -268,19 +304,22 @@ class StrategyBuy(StrategyEngine):
                 res["charge_commands"] = charge_commands
                 res["recommended_power_kw"] = charge_commands.get(cur_hour, 0.0)
                 
+                # v11.9.97: Set definitive flag for current hour activity
+                is_neg = bool(all_buy_prices.get(cur_hour, 1.0) <= 0.0)
+                res["is_charging_now"] = bool(res["recommended_power_kw"] > 0.05 or is_neg)
+                
                 # recommended_amps
                 v_val = 52.0
                 if man.battery_voltage_sensor:
                     v_val = float(man.get_sensor_float(man.battery_voltage_sensor) or 52.0)
                 res["recommended_amps"] = round_f((charge_commands.get(cur_hour, 0.0) * 1000.0) / v_val, 1) if v_val > 0 else 0.0
                 
-                def group_h(hours):
-                    if not hours: return ""
-                    periods = self._group_contiguous(hours)
-                    groups = []
-                    for p in periods:
-                        groups.append(f"{p[0]%24:02d}:00-{p[-1]%24:02d}:59")
-                    return ", ".join(groups)
+                # v11.9.101: Log significant strategy updates (added SOC and Power)
+                strat_log = f"[Strategy Buy] SOC: {b_soc:.1f}% | Power: {res['recommended_power_kw']:.1f} kW | Reason: {res['charge_reason']} | Target: {target_soc:.1f}% | Now Charging: {res['is_charging_now']} | Windows: {res.get('active_periods','')}"
+                if str(strat_log) != str(getattr(self, "_last_strat_log", "")):
+                    man.log_to_file(strat_log)
+                    self._last_strat_log = strat_log
+                
 
                 # v11.7.2: Build the hourly plan with both power and target SOC from simulation
                 planned_results = {}
@@ -298,9 +337,6 @@ class StrategyBuy(StrategyEngine):
                     }
                 res["planned_power_per_h"] = planned_results
                 res["target_soc"] = planned_results.get(f"{cur_hour%24:02d}:00", {}).get("soc", round_f(b_soc, 1))
-                res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
-                res["active_periods"] = group_h(target_hours)
-                res["limit_used"] = buy_limit
 
                 # v12.0.1: Synchronize with Inverter Mode Command sensor
                 res["active_hours"] = [int(h) for h, v in charge_commands.items() if v > 0.05]
@@ -309,9 +345,9 @@ class StrategyBuy(StrategyEngine):
                     # v12.0.2: Always allow waiting if negative prices are coming
                     res["can_wait_for_negative"] = True
 
-                if charge_commands.get(cur_hour, 0.0) > 0.05: 
+                if charge_commands.get(cur_hour, 0.0) > 0.05 or cur_p_f <= 0: 
                     res["state"] = "active"
-                    res["power"] = charge_commands[cur_hour]
+                    res["power"] = charge_commands.get(cur_hour, 0.0)
 
             # v12.0.3: Detailed diagnostics for UI (as per Section 4.2.5 of TZ)
             # Moved outside if-block to ensure visibility even when not buying
@@ -332,24 +368,18 @@ class StrategyBuy(StrategyEngine):
                 "summary": f"{_neg_tag} | Цена: {cur_p_f:.2f} | Цель: {target_soc:.1f}%".strip(" | "),
                 "current_price": cur_p_f,
                 "target_soc": round_f(target_soc, 1),
-                "base_limit_soc": round_f(base_limit if 'base_limit' in locals() else b_soc, 1),
-                "needed_kwh_dc": round_f(needed_kwh_dc if 'needed_kwh_dc' in locals() else 0.0, 2),
                 "is_arbitrage_profitable": _is_arb,
                 "best_sell_later": round_f(_best_s, 2),
                 "best_buy_later": round_f(_best_b, 2),
                 "arbitrage_gain": round_f(_gain, 3),
-                "profit_threshold": round_f(threshold, 3),
                 "negative_prices_upcoming": bool(negative_hours),
-                "can_wait": res.get("can_wait_for_negative", False),
-                    "charge_reason": res.get("charge_reason", "Нет"),
-                    "target_soc": res.get("target_soc", 0.0),
-                    "survival_target": res.get("survival_target", 0.0),
-                    "soc_buffer": res.get("soc_buffer", 0.0),
-                    "survival_violation_hour": res.get("survival_violation_hour"),
-                    "house_kwh_until_sunrise": res.get("house_kwh_until_sunrise", 0.0),
-                    "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
-                    "commands": {f"{h}h": p for h, p in charge_commands.items() if p > 0}
-                }
+                "charge_reason": res.get("charge_reason", "Нет"),
+                "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
+                "survival_floor": res.get("survival_floor", 0.0),
+                "target_hours": target_hours,
+                "candidates": candidates if 'candidates' in locals() else [],
+                "commands": {f"{h}h": p for h, p in charge_commands.items() if p > 0}
+            }
 
             # Mode text
             txt = "Ожидание"
