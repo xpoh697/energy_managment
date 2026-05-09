@@ -267,12 +267,25 @@ class StrategyBuy(StrategyEngine):
                 else:
                     needed_kwh_dc = max(0.0, (target_soc - soc_with_sun_only) * b_cap / 100.0)
                 accum_kwh_dc = 0.0
-                for h in sorted(target_hours):
-                    if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0: break
+                # v11.9.195: Advanced Allocator (Price-Priority with progressive SOC)
+                # 1. Sort by price to fill cheapest hours first
+                sorted_by_price = sorted(target_hours, key=lambda x: all_buy_prices.get(int(x), 100.0))
+                
+                # 2. Fill energy budget based on price attractiveness
+                accum_kwh_dc = 0.0
+                for h in sorted_by_price:
+                    if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0:
+                        charge_commands[h] = 0.0
+                        continue
+                        
                     h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
-                    remaining_kwh_needed = max(0.0, (needed_kwh_dc - accum_kwh_dc))
-                    p_needed = remaining_kwh_needed / (h_factor * eff) if h_factor > 0 else 0
-                    cc_cv = self.get_cc_cv_ratio(soc_at_start_plan + (accum_kwh_dc/b_cap*100.0))
+                    rem_needed = max(0.0, (needed_kwh_dc - accum_kwh_dc))
+                    p_needed = rem_needed / (h_factor * eff) if h_factor > 0 else 0
+                    
+                    # Estimate CC/CV based on projected SOC at this point (rough estimate for allocation)
+                    est_soc = soc_at_start_plan + (accum_kwh_dc / b_cap * 100.0)
+                    cc_cv = self.get_cc_cv_ratio(est_soc)
+                    
                     p_charge = min(max_p, max_p * cc_cv, p_needed)
                     charge_commands[h] = round_f(p_charge, 3)
                     accum_kwh_dc += (p_charge * h_factor * eff)
@@ -283,8 +296,9 @@ class StrategyBuy(StrategyEngine):
                 res["analyzed_window"] = "Нет окон"
                 res["active_periods"] = ""
             
+            # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
             sim_range = list(range(cur_hour, cur_hour + 48))
-            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True)
+            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True)
             
             last_h = max(target_hours) if target_hours else cur_hour
             soc_end = self._get_soc_from_log(sim_log, get_h_log_key(last_h), b_soc)
@@ -315,7 +329,8 @@ class StrategyBuy(StrategyEngine):
                 self._last_strat_log = strat_log
             
             planned_results = {}
-            for h, p in charge_commands.items():
+            for h in sorted(charge_commands.keys()):
+                p = charge_commands[h]
                 if p <= 0.05: continue
                 h_fmt = f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")
                 h_soc = self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc)

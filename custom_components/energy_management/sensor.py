@@ -3625,7 +3625,7 @@ class MarketStrategySensor(SensorEntity):
             "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
-            "planned_power": {h: f"{d['power']} (Target SOC: {d['soc']}%)" if isinstance(d, dict) else d for h, d in res.get("planned_power_per_h", {}).items()},
+            "planned_power": {h: f"{d['power']} кВт (Цель: {d['soc']}%)" if isinstance(d, dict) else d for h, d in res.get("planned_power_per_h", {}).items()},
             "power_decision": res.get("power_decision", "Ожидание")
         }
 
