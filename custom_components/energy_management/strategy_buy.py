@@ -331,10 +331,10 @@ class StrategyBuy(StrategyEngine):
                     self._last_strat_log = strat_log
                 
 
-                # v11.7.2: Build the hourly plan with both power and target SOC from simulation
+                # v11.9.128: Build the hourly plan using the same sim_log as soc_end
                 planned_results = {}
                 for h, p in charge_commands.items():
-                    if p <= 0: continue
+                    if p <= 0.05: continue
                     h_fmt = f"{h%24:02d}:00"
                     if h >= 24: h_fmt += " (Завтра)"
                     
@@ -346,7 +346,8 @@ class StrategyBuy(StrategyEngine):
                         "soc": round_f(h_soc, 1)
                     }
                 res["planned_power_per_h"] = planned_results
-                res["target_soc"] = planned_results.get(f"{cur_hour%24:02d}:00", {}).get("soc", round_f(b_soc, 1))
+                # v11.9.128: target_soc should show the INTENDED target for the window, not current hour's progress
+                res["target_soc"] = round_f(target_soc, 1)
 
                 # v12.0.1: Synchronize with Inverter Mode Command sensor
                 res["active_hours"] = [int(h) for h, v in charge_commands.items() if v > 0.05]
