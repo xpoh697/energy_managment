@@ -222,8 +222,12 @@ class StrategySell(StrategyEngine):
                 # Filter by profitability or surplus
                 surplus_dc = max(0.0, (b_soc - float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))) * b_cap / 100.0)
                 
-                # v11.9.230: Account for tomorrow's forecast too to allow deeper discharge tonight
+                # v11.7.270: Solar Saturation Awareness (TS 198)
+                f_today_val = float(man.get_sensor_float(man.forecast_today_sensor) or 0.0)
                 f_tom_v = float(man.get_sensor_float(man.forecast_tomorrow_sensor) or 0.0)
+                energy_to_full = (100.0 - b_soc) * b_cap / 100.0
+                
+                # v11.9.230: Account for tomorrow's forecast too to allow deeper discharge tonight
                 is_solar_surplus = (f_today_val > energy_to_full + 2.0) or (f_tom_v > (energy_to_full + 5.0))
                 
                 # v11.9.240: Explicit debug components
