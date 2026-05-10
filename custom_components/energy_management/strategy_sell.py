@@ -524,8 +524,9 @@ class StrategySell(StrategyEngine):
                     surplus_soc = final_soc - target_final
                     surplus_kwh = (surplus_soc * b_cap / 100.0) * eff
                     target_budget_ac += (surplus_kwh * 0.4) # Damped 0.4
-                elif total_deficit_kwh > 0.1:
-                    # v11.9.280: If NO extra energy, and power is failing - DECREASE budget
+                elif total_deficit_kwh > 0.1 and not is_solar_surplus:
+                    # v11.9.285: Only decrease budget by power deficit if NOT in surplus mode.
+                    # In surplus, we want to dump as much as possible even if we hit the 6.6kW ceiling.
                     drop_val = total_deficit_kwh * 0.4
                     max_drop = target_budget_ac * 0.5
                     target_budget_ac = max(0.0, target_budget_ac - min(drop_val, max_drop))
