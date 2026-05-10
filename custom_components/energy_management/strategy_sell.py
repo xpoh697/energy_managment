@@ -499,13 +499,14 @@ class StrategySell(StrategyEngine):
                     p_house = max(0.0, float(normalize_float(h_load)) - float(normalize_float(h_gen)))
                     
                     h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
-                    p_real = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
+                    sim_entry = trial_log.get(h_sim_key, {})
                     
-                    # Target discharge power was p_req + p_house (limited by max_batt_p)
-                    p_target = min(max_batt_p, p_req + p_house)
+                    # v11.9.260: Compare target total export (p_req) vs real total export (p_inv_ac)
+                    p_real_export = sim_entry.get("p_inv_ac", sim_entry.get("p_bat", 0.0))
+                    p_target = p_req
                     
-                    if p_real < p_target - 0.05:
-                        total_deficit_kwh += (p_target - p_real) * duration
+                    if p_real_export < p_target - 0.05:
+                        total_deficit_kwh += (p_target - p_real_export) * duration
                 
                 # Check SOC at sunrise to find surplus/deficit
                 sunrise_key = f"{sunrise_h:02d}:59"
@@ -567,13 +568,13 @@ class StrategySell(StrategyEngine):
                 # (to avoid showing base house-load coverage in the strategic plan)
                 if sell_commands.get(h, 0.0) <= 0.05: continue
                 
-                real_p = float(sim_entry.get("p_bat", 0.0))
-                if real_p <= 0.05: continue
+                real_p_export = float(sim_entry.get("p_inv_ac", sim_entry.get("p_bat", 0.0)))
+                if real_p_export <= 0.05: continue
                 
                 sim_soc = float(sim_entry.get("soc", b_soc))
                 
                 # Diagnostics: Determine why we aren't selling at max_p
-                if real_p < sell_commands.get(h, 0.0) - 0.1:
+                if real_p_export < sell_commands.get(h, 0.0) - 0.1:
                     h_floor = floors_anchored.get(h, emergency_soc + 2.0)
                     if abs(sim_soc - user_limit) < 0.2:
                         limit_reason_h = "Лимит пользователя"
@@ -589,7 +590,7 @@ class StrategySell(StrategyEngine):
                 # v11.9.230: Use raw command for UI display as requested by user
                 p_val_ui = sell_commands.get(h, 0.0)
                 limit_reason_h = "Max" if p_val_ui >= max_batt_p - 0.01 else "AI"
-                if real_p < p_val_ui - 0.05:
+                if real_p_export < p_val_ui - 0.05:
                     h_floor = floors_anchored.get(h, emergency_soc + 2.0)
                     if abs(sim_soc - user_limit) < 0.2:
                         limit_reason_h = "Лимит пользователя"

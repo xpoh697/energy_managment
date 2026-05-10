@@ -1106,6 +1106,7 @@ class StrategyEngine:
                     "gen_kw": round_f(float(expected_gen_kw), 2),
                     "load_kw": round_f(float(expected_cons_kw), 2),
                     "p_bat": round_f(float(sim_p_bat), 3),
+                    "p_inv_ac": round_f(float(sim_p_bat + expected_gen_kw), 3), # v11.9.260
                     "p_grid": round_f(float(sim_p_bat + rem_gen - rem_cons), 2),
                     "trust": round_f(float(tom_coeff if is_tom else blended_coeff), 2)
                 }
