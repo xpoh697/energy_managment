@@ -222,12 +222,18 @@ class StrategySell(StrategyEngine):
                 # Filter by profitability or surplus
                 surplus_dc = max(0.0, (b_soc - float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))) * b_cap / 100.0)
                 
-                # v11.7.270: Solar Saturation Awareness (TS 198)
-                f_today_val = float(man.get_sensor_float(man.forecast_today_sensor) or 0.0)
-                f_tom_v = float(man.get_sensor_float(man.forecast_tomorrow_sensor) or 0.0)
-                energy_to_full = (100.0 - b_soc) * b_cap / 100.0
                 # v11.9.230: Account for tomorrow's forecast too to allow deeper discharge tonight
+                f_tom_v = float(man.get_sensor_float(man.forecast_tomorrow_sensor) or 0.0)
                 is_solar_surplus = (f_today_val > energy_to_full + 2.0) or (f_tom_v > (energy_to_full + 5.0))
+                
+                # v11.9.240: Explicit debug components
+                _debug_surplus = {
+                    "f_today": round_f(f_today_val, 1),
+                    "f_tom": round_f(f_tom_v, 1),
+                    "e_to_full": round_f(energy_to_full, 1),
+                    "is_surplus": is_solar_surplus
+                }
+                _sell_debug["debug_surplus"] = _debug_surplus
                 
                 safe_peaks = []
                 # v11.7.296: Floodgate Mode - if surplus is huge, include all hours above limit
@@ -327,8 +333,8 @@ class StrategySell(StrategyEngine):
                 active_safety_floor = max(user_limit, gatekeeper)
                 limit_reason = "Safe Mode"
 
-            available_sell_dc = max(0.0, (b_soc - active_safety_floor) * b_cap / 100.0)
-            available_sell_ac = max(0.0, available_sell_dc * eff)
+            available_sell_dc_pre = max(0.0, (b_soc - active_safety_floor) * b_cap / 100.0)
+            available_sell_ac = max(0.0, available_sell_dc_pre * eff)
             
             # --- Stage 1: Projection & Saturation Awareness ---
             sim_range = list(range(cur_hour, cur_hour + 48))
@@ -427,7 +433,8 @@ class StrategySell(StrategyEngine):
             available_sell_dc = max(0.0, (soc_at_start - start_floor) * b_cap / 100.0)
             target_budget_ac = available_sell_dc * eff
             if is_solar_surplus:
-                target_budget_ac = max(target_budget_ac, b_cap * 2.0)
+                # v11.9.240: Conservative jump (1.2 instead of 2.0) to prevent controller crash
+                target_budget_ac = max(target_budget_ac, b_cap * 1.2)
             
             sell_commands = {}
             sim_log = {}
@@ -498,8 +505,10 @@ class StrategySell(StrategyEngine):
                 target_final = emergency_soc + 2.0
                 
                 if total_deficit_kwh > 0.005:
-                    # Point 4 TS 107: Decrease global budget by energy deficit (with damping 0.7)
-                    target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.7)
+                    # v11.9.240: Cap the budget drop to 50% per iteration to prevent collapse
+                    drop_val = total_deficit_kwh * 0.7
+                    max_drop = target_budget_ac * 0.5
+                    target_budget_ac = max(0.0, target_budget_ac - min(drop_val, max_drop))
                 elif "soc" in trial_log.get(sunrise_key, {}) and final_soc > target_final + 0.1:
                     # Point 4 TS 108: Increase budget by surplus (damped 0.5)
                     surplus_soc = final_soc - target_final
