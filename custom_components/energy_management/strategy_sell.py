@@ -484,9 +484,10 @@ class StrategySell(StrategyEngine):
                     if p_real_bat < p_req - 0.1:
                         total_deficit_kwh += (p_req - p_real_bat) * duration
                 
-                sunrise_key = f"{sunrise_h:02d}:59"
-                if cur_hour >= sunrise_h: sunrise_key += " (Завтра)"
-                final_soc = trial_log.get(sunrise_key, {}).get("soc", 100.0)
+                # v11.9.325: Target the LOWEST SOC point in the morning pool
+                # to prevent budget bloat from early solar charging.
+                morning_sim_hours = [h for h in trial_log.keys() if ":" in h and (cur_hour <= int(h.split(":")[0]) <= sunrise_h)]
+                final_soc = min([trial_log[h]["soc"] for h in morning_sim_hours], default=100.0)
                 target_final = emergency_soc + 2.0
                 
                 # v11.9.320: Unified Refinement
