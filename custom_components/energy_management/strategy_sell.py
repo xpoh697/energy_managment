@@ -440,10 +440,9 @@ class StrategySell(StrategyEngine):
             if is_solar_surplus:
                 start_floor = emergency_soc + 2.0
                 
-            # v11.9.300: Standard budget calculation based on current energy above target.
-            # The iterative allocator will naturally increase this if solar surplus keeps the SOC high.
+            # v11.9.320: Use DC budget (no eff here) as per user request to avoid under-selling.
             available_sell_dc = max(0.0, (soc_at_start - start_floor) * b_cap / 100.0)
-            target_budget_ac = available_sell_dc * eff
+            target_budget_ac = available_sell_dc # DC kwh equivalent
             
             _sell_debug["initial_budget"] = round_f(target_budget_ac, 2)
             _sell_debug["target_floors"] = {f"{h%24:02d}h": round_f(floors_sliding.get(h, 0.0), 1) for h in target_hours}
@@ -491,10 +490,9 @@ class StrategySell(StrategyEngine):
                 target_final = emergency_soc + 2.0
                 
                 # v11.9.315: Unified Refinement
-                soc_err = final_soc - target_final
                 if abs(soc_err) > 0.2:
-                    # Adjust budget to hit SOC target (Damped 0.5)
-                    target_budget_ac += (soc_err * b_cap / 100.0) * eff * 0.5
+                    # Adjust budget to hit SOC target (DC units)
+                    target_budget_ac += (soc_err * b_cap / 100.0) * 0.5
                 elif total_deficit_kwh > 0.15:
                     # Shrink budget to eliminate the impossible part.
                     target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
@@ -571,8 +569,10 @@ class StrategySell(StrategyEngine):
                     limit_reason = limit_reason_h
 
                 h_key = f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")
-                # v11.9.295: Show REAL projected battery power (accounting for SOC floor)
-                planned_results[h_key] = f"{real_p_bat:.3f} кВт (SOC: {sim_soc:.1f}%) [{real_p_export:.1f} Exp] ({limit_reason_h})"
+                # v11.9.320: Show DC battery power (divide AC back by eff) as requested by user.
+                # Inverter script needs to know how much to pull from the battery.
+                p_bat_dc = real_p_bat / max(0.1, eff)
+                planned_results[h_key] = f"{p_bat_dc:.3f} кВт (SOC: {sim_soc:.1f}%) [{real_p_export:.1f} Exp] ({limit_reason_h})"
 
             # 5. UI Diagnostics (v11.7.137: Restored missing variables)
             morning_h_abs = morning_h + (24 if cur_hour < morning_h else 0)
