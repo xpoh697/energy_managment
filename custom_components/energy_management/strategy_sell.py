@@ -498,6 +498,7 @@ class StrategySell(StrategyEngine):
                     except: continue
                 
                 min_soc = min(valid_socs) if valid_socs else 100.0
+                target_final = emergency_soc + 2.0
                 soc_err = min_soc - target_final
                 
                 # v11.9.330: Priority-Based Refinement
