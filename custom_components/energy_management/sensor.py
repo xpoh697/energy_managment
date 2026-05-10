@@ -2782,7 +2782,9 @@ class InverterOperationModeSensor(SensorEntity):
             # Emergency bypass: if battery is in emergency or critical state, ignore lock
             is_emergency = (raw_mode == "bat_emergency" or batt_soc <= (min_soc - 0.5))
             
-            if not is_emergency and self._mode_lock_until and now < self._mode_lock_until:
+            is_strategic_exit = self._locked_mode in ["buy", "sale_pv_bat"] and raw_mode != self._locked_mode
+            
+            if not is_emergency and not is_strategic_exit and self._mode_lock_until and now < self._mode_lock_until:
                 # Keep the locked mode if it's still valid or if we're in the window
                 if self._locked_mode:
                     return self._locked_mode

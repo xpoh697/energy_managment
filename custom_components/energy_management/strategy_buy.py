@@ -151,7 +151,7 @@ class StrategyBuy(StrategyEngine):
 
             if not all_buy_prices: return res
 
-            cur_p_f = all_buy_prices.get(cur_hour, 0.0)
+            cur_p_f = all_buy_prices.get(cur_hour, 99.0)
             buy_limit = price_buy_limit
             eff = float(self.get_efficiency_coefficient() or 1.0)
             
