@@ -182,7 +182,7 @@ class StrategySell(StrategyEngine):
                 w_vals = [float(v) for v in window.values()]
                 if not w_vals: return []
                 target = max(w_vals)
-                if target < limit: return []
+                if target < limit - 0.001: return []
                 peak_hours = [int(h) for h, p in window.items() if float(p) == target]
                 peaks = set()
                 for peak_h in peak_hours:
@@ -232,7 +232,7 @@ class StrategySell(StrategyEngine):
                 if is_solar_surplus:
                     for h in range(cur_hour, cur_hour + 12):
                         p = all_sell_prices.get(h, 0.0)
-                        if p >= sell_limit:
+                        if p >= sell_limit - 0.001:
                             safe_peaks.append((h, p))
                 
                 for h, p in tech_peaks:
@@ -240,7 +240,7 @@ class StrategySell(StrategyEngine):
                     if any(x[0] == h for x in safe_peaks): continue
                     
                     is_ok, _ = is_profitable(p, h)
-                    if p >= sell_limit or is_ok or surplus_dc > 0.1:
+                    if p >= sell_limit - 0.001 or is_ok or surplus_dc > 0.1:
                         safe_peaks.append((h, p))
                 
                 # Convert back to just hours for target_hours
@@ -414,7 +414,10 @@ class StrategySell(StrategyEngine):
                 h_by_priority = sorted(target_hours, key=lambda h: (all_sell_prices.get(h, 0.0), h), reverse=True)
             max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             # 1. Initial Budget (Initial Guess as per TS 103)
-            available_sell_dc = max(0.0, (soc_at_start - active_safety_floor) * b_cap / 100.0)
+            # v11.9.225: Synchronized start floor (use floor of the first target hour)
+            first_sell_h_abs = target_hours[0] if target_hours else cur_hour
+            start_floor = floors_sliding.get(first_sell_h_abs, active_safety_floor)
+            available_sell_dc = max(0.0, (soc_at_start - start_floor) * b_cap / 100.0)
             target_budget_ac = available_sell_dc * eff
             if is_solar_surplus:
                 target_budget_ac = max(target_budget_ac, b_cap * 2.0)
@@ -488,18 +491,18 @@ class StrategySell(StrategyEngine):
                 target_final = emergency_soc + 2.0
                 
                 if total_deficit_kwh > 0.005:
-                    # Point 4 TS 107: Decrease global budget by energy deficit
-                    target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 1.05)
-                elif final_soc > target_final + 0.1:
-                    # Point 4 TS 108: Increase budget by surplus to allow "overflow" into secondary windows
+                    # Point 4 TS 107: Decrease global budget by energy deficit (with damping 0.7)
+                    target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.7)
+                elif "soc" in trial_log.get(sunrise_key, {}) and final_soc > target_final + 0.1:
+                    # Point 4 TS 108: Increase budget by surplus (damped 0.5)
                     surplus_soc = final_soc - target_final
                     surplus_kwh = (surplus_soc * b_cap / 100.0) * eff
-                    target_budget_ac += (surplus_kwh * 0.8)
-                elif final_soc < target_final - 0.1:
-                    # Decrease budget if below target at sunrise
+                    target_budget_ac += (surplus_kwh * 0.5)
+                elif "soc" in trial_log.get(sunrise_key, {}) and final_soc < target_final - 0.1:
+                    # Decrease budget if below target at sunrise (damped 0.7)
                     deficit_soc = target_final - final_soc
                     deficit_kwh = (deficit_soc * b_cap / 100.0) * eff
-                    target_budget_ac = max(0.0, target_budget_ac - deficit_kwh * 1.1)
+                    target_budget_ac = max(0.0, target_budget_ac - deficit_kwh * 0.7)
                 else:
                     # Convergence!
                     break
