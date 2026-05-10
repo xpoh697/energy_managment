@@ -440,11 +440,10 @@ class StrategySell(StrategyEngine):
             if is_solar_surplus:
                 start_floor = emergency_soc + 2.0
                 
+            # v11.9.300: Standard budget calculation based on current energy above target.
+            # The iterative allocator will naturally increase this if solar surplus keeps the SOC high.
             available_sell_dc = max(0.0, (soc_at_start - start_floor) * b_cap / 100.0)
             target_budget_ac = available_sell_dc * eff
-            if is_solar_surplus:
-                # v11.9.240: Conservative jump (1.2 instead of 2.0) to prevent controller crash
-                target_budget_ac = max(target_budget_ac, b_cap * 1.2)
             
             _sell_debug["initial_budget"] = round_f(target_budget_ac, 2)
             _sell_debug["target_floors"] = {f"{h%24:02d}h": round_f(floors_sliding.get(h, 0.0), 1) for h in target_hours}
