@@ -379,8 +379,8 @@ class StrategySell(StrategyEngine):
                 is_turbo = (4 <= h_rel < 10)
                 
                 if is_turbo:
-                    # Turbo mode allows discharging deeper (close to emergency reserve) to maximize morning profit
-                    h_floor = emergency_soc + 1.0 
+                    # v11.9.285: Turbo mode strictly MinSOC + 2% as per TS 1.1
+                    h_floor = emergency_soc + 2.0 
                 else:
                     # Survival Bridge to next sunrise
                     next_sr = get_next_sunrise(h_abs)
@@ -394,9 +394,10 @@ class StrategySell(StrategyEngine):
                     survival_floor = (emergency_soc + soc_buffer) + (h_bridge_kwh / b_cap * 100.0 / eff)
                     h_floor = max(user_limit, survival_floor)
                     
-                    # v11.9.255: In surplus mode, force floor to user_limit for all hours until sunrise
+                    # v11.9.285: In surplus mode, force floor to MinSOC + 2.0% (TS 1.1)
+                    # This allows morning squeeze but respects the survival boundary.
                     if is_solar_surplus:
-                        h_floor = user_limit
+                        h_floor = emergency_soc + 2.0
                 
                 floors_sliding[h_abs] = h_floor 
                 floors_anchored[h_abs] = h_floor
@@ -434,9 +435,10 @@ class StrategySell(StrategyEngine):
             first_sell_h_abs = target_hours[0] if target_hours else cur_hour
             start_floor = floors_sliding.get(first_sell_h_abs, active_safety_floor)
             
-            # v11.9.230: In surplus mode, allow initial budget to ignore heavy nocturnal floors
+            # v11.9.285: In surplus mode, allow initial budget to ignore heavy nocturnal floors
+            # but stay strictly above Turbo Mode limit (MinSOC + 2%)
             if is_solar_surplus:
-                start_floor = user_limit
+                start_floor = emergency_soc + 2.0
                 
             available_sell_dc = max(0.0, (soc_at_start - start_floor) * b_cap / 100.0)
             target_budget_ac = available_sell_dc * eff
@@ -513,8 +515,9 @@ class StrategySell(StrategyEngine):
                 if cur_hour >= sunrise_h: sunrise_key += " (Завтра)"
                 final_soc = trial_log.get(sunrise_key, {}).get("soc", 100.0)
                 
-                # v11.8.561: Target floor is user_limit (20%) in surplus mode, else safety floor
-                target_final = user_limit if is_solar_surplus else (emergency_soc + 2.0)
+                # v11.9.285: Target floor is strictly emergency_soc + 2.0 (20%) as per TS 1.1 (Turbo Mode)
+                # User limit and consumption are ignored for this morning squeeze.
+                target_final = emergency_soc + 2.0
                 
                 if "soc" in trial_log.get(sunrise_key, {}) and final_soc > target_final + 0.1:
                     # v11.9.280: If we have extra energy, INCREASE budget (Priority 1)
