@@ -513,21 +513,21 @@ class StrategySell(StrategyEngine):
                 if cur_hour >= sunrise_h: sunrise_key += " (Завтра)"
                 final_soc = trial_log.get(sunrise_key, {}).get("soc", 100.0)
                 
-                # v11.8.561: Safety check to not drop below reserve + 2% at sunrise
-                target_final = emergency_soc + 2.0
+                # v11.8.561: Target floor is user_limit (20%) in surplus mode, else safety floor
+                target_final = user_limit if is_solar_surplus else (emergency_soc + 2.0)
                 
-                if total_deficit_kwh > 0.005:
-                    # v11.9.255: Damped drop (0.4 instead of 0.7) to prevent collapse
+                if "soc" in trial_log.get(sunrise_key, {}) and final_soc > target_final + 0.1:
+                    # v11.9.280: If we have extra energy, INCREASE budget (Priority 1)
+                    surplus_soc = final_soc - target_final
+                    surplus_kwh = (surplus_soc * b_cap / 100.0) * eff
+                    target_budget_ac += (surplus_kwh * 0.4) # Damped 0.4
+                elif total_deficit_kwh > 0.1:
+                    # v11.9.280: If NO extra energy, and power is failing - DECREASE budget
                     drop_val = total_deficit_kwh * 0.4
                     max_drop = target_budget_ac * 0.5
                     target_budget_ac = max(0.0, target_budget_ac - min(drop_val, max_drop))
-                elif "soc" in trial_log.get(sunrise_key, {}) and final_soc > target_final + 0.1:
-                    # Point 4 TS 108: Increase budget by surplus (damped 0.5)
-                    surplus_soc = final_soc - target_final
-                    surplus_kwh = (surplus_soc * b_cap / 100.0) * eff
-                    target_budget_ac += (surplus_kwh * 0.5)
                 elif "soc" in trial_log.get(sunrise_key, {}) and final_soc < target_final - 0.1:
-                    # Decrease budget if below target at sunrise (damped 0.7)
+                    # If SOC is too low at sunrise - DECREASE budget
                     deficit_soc = target_final - final_soc
                     deficit_kwh = (deficit_soc * b_cap / 100.0) * eff
                     target_budget_ac = max(0.0, target_budget_ac - deficit_kwh * 0.7)
