@@ -484,20 +484,32 @@ class StrategySell(StrategyEngine):
                     if p_real_bat < p_req - 0.1:
                         total_deficit_kwh += (p_req - p_real_bat) * duration
                 
-                # v11.9.325: Target the LOWEST SOC point in the morning pool
-                # to prevent budget bloat from early solar charging.
-                morning_sim_hours = [h for h in trial_log.keys() if ":" in h and (cur_hour <= int(h.split(":")[0]) <= sunrise_h)]
-                final_soc = min([trial_log[h]["soc"] for h in morning_sim_hours], default=100.0)
-                target_final = emergency_soc + 2.0
+                # v11.9.330: Robust Min-SOC tracking (Handles "Tomorrow" suffixes)
+                sunrise_h_abs = sunrise_h + (24 if cur_hour > sunrise_h else 0)
+                valid_socs = []
+                for k, v in trial_log.items():
+                    if ":" not in k: continue
+                    try:
+                        h_idx = int(k.split(":")[0])
+                        if "Завтра" in k: h_idx += 24
+                        if "Через день" in k: h_idx += 48
+                        if cur_hour <= h_idx <= sunrise_h_abs:
+                            valid_socs.append(float(v.get("soc", 100.0)))
+                    except: continue
                 
-                # v11.9.320: Unified Refinement
-                soc_err = final_soc - target_final
-                if abs(soc_err) > 0.2:
-                    # Adjust budget to hit SOC target (DC units)
-                    target_budget_ac += (soc_err * b_cap / 100.0) * 0.5
-                elif total_deficit_kwh > 0.15:
-                    # Shrink budget to eliminate the impossible part.
+                min_soc = min(valid_socs) if valid_socs else 100.0
+                soc_err = min_soc - target_final
+                
+                # v11.9.330: Priority-Based Refinement
+                if total_deficit_kwh > 0.15:
+                    # Priority 1: Eliminate physical impossibility (Budget too high for inverter limits)
                     target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
+                elif soc_err > 0.2:
+                    # Priority 2: Increase budget if we have surplus and NO power deficit
+                    target_budget_ac += (soc_err * b_cap / 100.0) * 0.4
+                elif soc_err < -0.2:
+                    # Priority 3: Decrease budget if SOC is too low
+                    target_budget_ac = max(0.0, target_budget_ac + (soc_err * b_cap / 100.0) * 0.7)
                 else:
                     # Convergence!
                     _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
