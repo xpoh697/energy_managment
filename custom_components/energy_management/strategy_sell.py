@@ -224,8 +224,10 @@ class StrategySell(StrategyEngine):
                 
                 # v11.7.270: Solar Saturation Awareness (TS 198)
                 f_today_val = float(man.get_sensor_float(man.forecast_today_sensor) or 0.0)
+                f_tom_v = float(man.get_sensor_float(man.forecast_tomorrow_sensor) or 0.0)
                 energy_to_full = (100.0 - b_soc) * b_cap / 100.0
-                is_solar_surplus = (f_today_val > energy_to_full + 2.0) # 2kWh buffer
+                # v11.9.230: Account for tomorrow's forecast too to allow deeper discharge tonight
+                is_solar_surplus = (f_today_val > energy_to_full + 2.0) or (f_tom_v > (energy_to_full + 5.0))
                 
                 safe_peaks = []
                 # v11.7.296: Floodgate Mode - if surplus is huge, include all hours above limit
@@ -417,6 +419,11 @@ class StrategySell(StrategyEngine):
             # v11.9.225: Synchronized start floor (use floor of the first target hour)
             first_sell_h_abs = target_hours[0] if target_hours else cur_hour
             start_floor = floors_sliding.get(first_sell_h_abs, active_safety_floor)
+            
+            # v11.9.230: In surplus mode, allow initial budget to ignore heavy nocturnal floors
+            if is_solar_surplus:
+                start_floor = user_limit
+                
             available_sell_dc = max(0.0, (soc_at_start - start_floor) * b_cap / 100.0)
             target_budget_ac = available_sell_dc * eff
             if is_solar_surplus:
@@ -425,7 +432,7 @@ class StrategySell(StrategyEngine):
             sell_commands = {}
             sim_log = {}
             
-            for attempt in range(7): # Iterative refinement ( п. 6 ТЗ)
+            for attempt in range(12): # Iterative refinement ( п. 6 ТЗ)
                 sell_commands = {}
                 rem_budget = target_budget_ac
                 
@@ -553,8 +560,10 @@ class StrategySell(StrategyEngine):
                         limit_reason = limit_reason_h
                 
                 # v11.8.610: Detailed reason for each hour
-                limit_reason_h = "Max"
-                if real_p < sell_commands.get(h, 0.0) - 0.1:
+                # v11.9.230: Use raw command for UI display as requested by user
+                p_val_ui = sell_commands.get(h, 0.0)
+                limit_reason_h = "Max" if p_val_ui >= max_batt_p - 0.01 else "AI"
+                if real_p < p_val_ui - 0.05:
                     h_floor = floors_anchored.get(h, emergency_soc + 2.0)
                     if abs(sim_soc - user_limit) < 0.2:
                         limit_reason_h = "Лимит пользователя"
@@ -562,9 +571,9 @@ class StrategySell(StrategyEngine):
                         limit_reason_h = "Gatekeeper"
                     else:
                         limit_reason_h = "Утренний лимит"
-                
+
                 planned_results[f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")] = {
-                    "power": round_f(real_p, 3), # v11.8.550: Show actual predicted discharge
+                    "power": round_f(p_val_ui, 3),
                     "soc": round_f(sim_soc, 1),
                     "reason": limit_reason_h
                 }
