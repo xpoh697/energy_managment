@@ -3240,6 +3240,10 @@ class InverterOperationModeSensor(SensorEntity):
         elif is_waiting_for_neg:
             # v11.6.567 - Priority 3: Wait for negative price
             # We ONLY wait if there's actually something to wait for (solar presence or daytime)
+            # v11.9.108/v11.9.109: Added 500W hysteresis for wait mode to avoid toggling
+            # Drop to sale_pv ONLY if house has significant deficit (load > gen + 0.5kW)
+            has_significant_deficit = bool(avg_load > (avg_gen + 0.5))
+            
             can_sell_pv = False
             if cur_price is not None and cur_price >= price_sell_only_pv and has_surplus:
                 if is_before_limit_hour and cur_price > 0:
@@ -3248,14 +3252,14 @@ class InverterOperationModeSensor(SensorEntity):
             if can_sell_pv:
                 mode = "sale_pv_no_bat"
                 reason = f"Продажа только солнца: Цена ({cur_price:.2f}) >= Порога ({price_sell_only_pv:.2f}) (Ожидаем отриц. цену)"
-            elif has_surplus:
+            elif not has_significant_deficit:
                 mode = "no_pv_sale_no_bat"
                 neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
                 reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
             else:
-                # v11.6.567: No surplus at night? Fallback to standard daytime/night logic
+                # v11.6.567/v11.9.109: Fallback to sale_pv if house needs significant power
                 mode = "sale_pv"
-                reason = "Ожидание отриц. цен (ночь): Стандартная работа"
+                reason = "Ожидание отриц. цен: Нагрузка > генерации на 500Вт (sale_pv)"
 
         # v11.9.106: Global Price Floor (TS 4.1 Priority 3)
         # Moved above AI and Morning logic to ensure it works even without peaks.

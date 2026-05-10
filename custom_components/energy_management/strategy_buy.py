@@ -299,6 +299,7 @@ class StrategyBuy(StrategyEngine):
             else:
                 res["analyzed_window"] = "Нет окон"
                 res["active_periods"] = ""
+                needed_kwh_dc = max(0.0, (target_soc - b_soc) * b_cap / 100.0)
             
             # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
             sim_range = list(range(cur_hour, cur_hour + 48))

@@ -1016,15 +1016,17 @@ class StrategyEngine:
                 rem_cons = expected_cons_kw - p_for_house
                 
                 # 2. Total Net Power for battery
-                if not allow_discharge:
-                    total_net_kw = (0.0 if no_solar_to_bat else rem_gen) + cmd_p
-                else:
-                    # v11.7.68: Solar Bypass during Sale
-                    # If selling (cmd_p < -0.01), solar (rem_gen) does NOT help the battery discharge
-                    if cmd_p < -0.01:
-                        total_net_kw = -rem_cons + cmd_p
-                    else:
-                        total_net_kw = (0.0 if no_solar_to_bat else rem_gen) - rem_cons + cmd_p
+                # 2. Total Net Power for battery
+                total_net_kw = float((0.0 if no_solar_to_bat else rem_gen) - rem_cons + cmd_p)
+                
+                # v11.7.68: Solar Bypass during Sale
+                if cmd_p < -0.01:
+                    total_net_kw = float(-rem_cons + cmd_p)
+                
+                # v11.9.215: Battery charge commands should be additive to positive solar, 
+                # but NOT reduced by house load (house is powered by grid anyway during Buy)
+                if cmd_p > 0.05:
+                    total_net_kw = float(cmd_p + max(0.0, rem_gen))
 
             
                 sim_eff = float(max(0.85, eff_coeff))
@@ -1133,7 +1135,7 @@ class StrategyEngine:
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.185",
+            "strategy_version": "v11.9.215",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -1169,8 +1171,8 @@ class StrategyEngine:
         natural_soc_after_sale = b_soc
         
         # v11.6.228: Ensure VERSION is defined for the response object
-        VERSION = "v11.9.185"
-        VERSION_CODE = 1109185
+        VERSION = "v11.9.215"
+        VERSION_CODE = 1109215
         res["strategy_version"] = VERSION
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
