@@ -405,7 +405,13 @@ class StrategySell(StrategyEngine):
             # Sort by Price (Primary) and Hour (Secondary). 
             # If prices are equal, prioritize the LATER hour to protect SOC for earlier peaks
             # and follow the natural flow of evening discharge.
-            h_by_priority = sorted(target_hours, key=lambda h: (all_sell_prices.get(h, 0.0), h), reverse=True)
+            # v11.8.558: Saturation-Aware Sorting
+            # If price is the same, prioritize EARLIER hours during solar surplus
+            # to make room for incoming solar and maximize immediate revenue.
+            if is_solar_surplus:
+                h_by_priority = sorted(target_hours, key=lambda h: (all_sell_prices.get(h, 0.0), -h), reverse=True)
+            else:
+                h_by_priority = sorted(target_hours, key=lambda h: (all_sell_prices.get(h, 0.0), h), reverse=True)
             max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             # 1. Initial Budget (Initial Guess as per TS 103)
             available_sell_dc = max(0.0, (soc_at_start - active_safety_floor) * b_cap / 100.0)
@@ -543,9 +549,21 @@ class StrategySell(StrategyEngine):
                     if h == cur_hour:
                         limit_reason = limit_reason_h
                 
+                # v11.8.610: Detailed reason for each hour
+                limit_reason_h = "Max"
+                if real_p < sell_commands.get(h, 0.0) - 0.1:
+                    h_floor = floors_anchored.get(h, emergency_soc + 2.0)
+                    if abs(sim_soc - user_limit) < 0.2:
+                        limit_reason_h = "Лимит пользователя"
+                    elif h_floor > emergency_soc + 2.0 + 0.5:
+                        limit_reason_h = "Gatekeeper"
+                    else:
+                        limit_reason_h = "Утренний лимит"
+                
                 planned_results[f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")] = {
                     "power": round_f(real_p, 3), # v11.8.550: Show actual predicted discharge
-                    "soc": round_f(sim_soc, 1)
+                    "soc": round_f(sim_soc, 1),
+                    "reason": limit_reason_h
                 }
 
             # 5. UI Diagnostics (v11.7.137: Restored missing variables)
