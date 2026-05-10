@@ -392,8 +392,11 @@ class StrategySell(StrategyEngine):
                     
                     # Survival floor includes SOC buffer and predicted house need adjusted by efficiency
                     survival_floor = (emergency_soc + soc_buffer) + (h_bridge_kwh / b_cap * 100.0 / eff)
-                    # Absolute floor is the higher of survival needs or user-defined AI limit
                     h_floor = max(user_limit, survival_floor)
+                    
+                    # v11.9.255: In surplus mode, force floor to user_limit for all hours until sunrise
+                    if is_solar_surplus:
+                        h_floor = user_limit
                 
                 floors_sliding[h_abs] = h_floor 
                 floors_anchored[h_abs] = h_floor
@@ -440,6 +443,9 @@ class StrategySell(StrategyEngine):
             if is_solar_surplus:
                 # v11.9.240: Conservative jump (1.2 instead of 2.0) to prevent controller crash
                 target_budget_ac = max(target_budget_ac, b_cap * 1.2)
+            
+            _sell_debug["initial_budget"] = round_f(target_budget_ac, 2)
+            _sell_debug["target_floors"] = {f"{h%24:02d}h": round_f(floors_sliding.get(h, 0.0), 1) for h in target_hours}
             
             sell_commands = {}
             sim_log = {}
@@ -510,8 +516,8 @@ class StrategySell(StrategyEngine):
                 target_final = emergency_soc + 2.0
                 
                 if total_deficit_kwh > 0.005:
-                    # v11.9.240: Cap the budget drop to 50% per iteration to prevent collapse
-                    drop_val = total_deficit_kwh * 0.7
+                    # v11.9.255: Damped drop (0.4 instead of 0.7) to prevent collapse
+                    drop_val = total_deficit_kwh * 0.4
                     max_drop = target_budget_ac * 0.5
                     target_budget_ac = max(0.0, target_budget_ac - min(drop_val, max_drop))
                 elif "soc" in trial_log.get(sunrise_key, {}) and final_soc > target_final + 0.1:
@@ -526,7 +532,13 @@ class StrategySell(StrategyEngine):
                     target_budget_ac = max(0.0, target_budget_ac - deficit_kwh * 0.7)
                 else:
                     # Convergence!
+                    _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
+                    _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
                     break
+                
+                # v11.9.255: Update diagnostics for next iteration
+                _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
+                _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
             
             # Final Pass: Use the best sim_log we found
 
