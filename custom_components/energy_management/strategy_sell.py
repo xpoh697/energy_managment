@@ -451,32 +451,18 @@ class StrategySell(StrategyEngine):
             sell_commands = {}
             sim_log = {}
             
-            for attempt in range(12): # Iterative refinement ( п. 6 ТЗ)
+            for attempt in range(20): # v11.9.315: Increased iterations for complex cases
                 sell_commands = {}
                 rem_budget = target_budget_ac
                 
                 # 2. Distribution: Strict price-hour priority (TS 104)
-                # v11.8.558: Maximum Export Strategy (No pre-throttling by house load)
                 for h in h_by_priority:
                     duration = 1.0
                     if h == cur_hour:
                         duration = max(0.01, 1.0 - (now.minute / 60.0))
                     
-                    # Calculate net house load for budget tracking
-                    h_load = _sim_cons_profile.get(str(h % 24), 0.4)
-                    h_gen = _sim_gen_profile.get(str(h % 24), 0.0)
-                    p_house = max(0.0, float(normalize_float(h_load)) - float(normalize_float(h_gen)))
-                    
-                    # Sell command is greedy: take as much as possible for export
                     p_export = min(max_batt_p, rem_budget / duration)
-                    
-                    if p_export > 0.05:
-                        sell_commands[h] = round_f(p_export, 3)
-                    else:
-                        sell_commands[h] = 0.0
-                    
-                    # v11.8.568: Correct budget depletion (Export ONLY)
-                    # House load is already accounted for in active_safety_floor (Gatekeeper)
+                    sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
                     rem_budget -= p_export * duration
                 
                 # 3. Simulation Check (TS 105)
@@ -490,51 +476,28 @@ class StrategySell(StrategyEngine):
                 # 4. Bidirectional Refinement (TS 106)
                 total_deficit_kwh = 0.0
                 for h_cmd, p_req in sell_commands.items():
-                    # v11.8.557: Correct deficit tracking (Export + House vs Real p_bat)
+                    if p_req <= 0: continue
                     duration = 1.0
-                    if h_cmd == cur_hour:
-                        duration = max(0.01, 1.0 - (now.minute / 60.0))
-                    
-                    h_load = _sim_cons_profile.get(str(h_cmd % 24), 0.4)
-                    h_gen = _sim_gen_profile.get(str(h_cmd % 24), 0.0)
-                    p_house = max(0.0, float(normalize_float(h_load)) - float(normalize_float(h_gen)))
+                    if h_cmd == cur_hour: duration = max(0.01, 1.0 - (now.minute / 60.0))
                     
                     h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
-                    sim_entry = trial_log.get(h_sim_key, {})
-                    
-                    # v11.9.265: Deficit is strictly about Battery's ability to fulfill the command
-                    p_real_bat = sim_entry.get("p_bat", 0.0)
-                    p_target_bat = p_req
-                    
-                    if p_real_bat < p_target_bat - 0.05:
-                        total_deficit_kwh += (p_target_bat - p_real_bat) * duration
+                    p_real_bat = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
+                    if p_real_bat < p_req - 0.1:
+                        total_deficit_kwh += (p_req - p_real_bat) * duration
                 
-                # Check SOC at sunrise to find surplus/deficit
                 sunrise_key = f"{sunrise_h:02d}:59"
                 if cur_hour >= sunrise_h: sunrise_key += " (Завтра)"
                 final_soc = trial_log.get(sunrise_key, {}).get("soc", 100.0)
-                
-                # v11.9.285: Target floor is strictly emergency_soc + 2.0 (20%) as per TS 1.1 (Turbo Mode)
-                # User limit and consumption are ignored for this morning squeeze.
                 target_final = emergency_soc + 2.0
                 
-                if "soc" in trial_log.get(sunrise_key, {}) and final_soc > target_final + 0.1:
-                    # v11.9.280: If we have extra energy, INCREASE budget (Priority 1)
-                    surplus_soc = final_soc - target_final
-                    surplus_kwh = (surplus_soc * b_cap / 100.0) * eff
-                    target_budget_ac += (surplus_kwh * 0.4) # Damped 0.4
-                elif total_deficit_kwh > 0.1:
-                    # v11.9.310: If NO extra energy, and power is failing - DECREASE budget.
-                    # Reverted the 'not is_solar_surplus' check as it caused budget bloat
-                    # which prioritized chronologically earlier hours over expensive later ones.
-                    drop_val = total_deficit_kwh * 0.4
-                    max_drop = target_budget_ac * 0.5
-                    target_budget_ac = max(0.0, target_budget_ac - min(drop_val, max_drop))
-                elif "soc" in trial_log.get(sunrise_key, {}) and final_soc < target_final - 0.1:
-                    # If SOC is too low at sunrise - DECREASE budget
-                    deficit_soc = target_final - final_soc
-                    deficit_kwh = (deficit_soc * b_cap / 100.0) * eff
-                    target_budget_ac = max(0.0, target_budget_ac - deficit_kwh * 0.7)
+                # v11.9.315: Unified Refinement
+                soc_err = final_soc - target_final
+                if abs(soc_err) > 0.2:
+                    # Adjust budget to hit SOC target (Damped 0.5)
+                    target_budget_ac += (soc_err * b_cap / 100.0) * eff * 0.5
+                elif total_deficit_kwh > 0.15:
+                    # Shrink budget to eliminate the impossible part.
+                    target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
                 else:
                     # Convergence!
                     _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
