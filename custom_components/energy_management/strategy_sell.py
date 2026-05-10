@@ -489,7 +489,8 @@ class StrategySell(StrategyEngine):
                 final_soc = trial_log.get(sunrise_key, {}).get("soc", 100.0)
                 target_final = emergency_soc + 2.0
                 
-                # v11.9.315: Unified Refinement
+                # v11.9.320: Unified Refinement
+                soc_err = final_soc - target_final
                 if abs(soc_err) > 0.2:
                     # Adjust budget to hit SOC target (DC units)
                     target_budget_ac += (soc_err * b_cap / 100.0) * 0.5
