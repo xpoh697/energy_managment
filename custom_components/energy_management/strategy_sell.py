@@ -501,12 +501,12 @@ class StrategySell(StrategyEngine):
                     h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
                     sim_entry = trial_log.get(h_sim_key, {})
                     
-                    # v11.9.260: Compare target total export (p_req) vs real total export (p_inv_ac)
-                    p_real_export = sim_entry.get("p_inv_ac", sim_entry.get("p_bat", 0.0))
-                    p_target = p_req
+                    # v11.9.265: Deficit is strictly about Battery's ability to fulfill the command
+                    p_real_bat = sim_entry.get("p_bat", 0.0)
+                    p_target_bat = p_req
                     
-                    if p_real_export < p_target - 0.05:
-                        total_deficit_kwh += (p_target - p_real_export) * duration
+                    if p_real_bat < p_target_bat - 0.05:
+                        total_deficit_kwh += (p_target_bat - p_real_bat) * duration
                 
                 # Check SOC at sunrise to find surplus/deficit
                 sunrise_key = f"{sunrise_h:02d}:59"
@@ -564,11 +564,10 @@ class StrategySell(StrategyEngine):
             for h in sorted_h:
                 h_sim_key = f"{h%24:02d}:59" + (" (Завтра)" if h >= 24 else "")
                 sim_entry = sim_log.get(h_sim_key, {})
-                # v11.8.555: Only show hours where we actually HAVE a sell command
-                # (to avoid showing base house-load coverage in the strategic plan)
-                if sell_commands.get(h, 0.0) <= 0.05: continue
-                
+                # v11.9.265: Diagnostics show TOTAL export (Solar + Battery)
                 real_p_export = float(sim_entry.get("p_inv_ac", sim_entry.get("p_bat", 0.0)))
+                real_p_bat = float(sim_entry.get("p_bat", 0.0))
+                
                 if real_p_export <= 0.05: continue
                 
                 sim_soc = float(sim_entry.get("soc", b_soc))
@@ -586,11 +585,12 @@ class StrategySell(StrategyEngine):
                     if h == cur_hour:
                         limit_reason = limit_reason_h
                 
-                # v11.8.610: Detailed reason for each hour
-                # v11.9.230: Use raw command for UI display as requested by user
-                p_val_ui = sell_commands.get(h, 0.0)
-                limit_reason_h = "Max" if p_val_ui >= max_batt_p - 0.01 else "AI"
-                if real_p_export < p_val_ui - 0.05:
+                # UI displays total export for the user, but we mark "Max" based on battery target
+                p_bat_req = sell_commands.get(h, 0.0)
+                p_val_ui = real_p_export
+                
+                limit_reason_h = "Max" if p_bat_req >= max_batt_p - 0.05 else "AI"
+                if real_p_bat < p_bat_req - 0.05:
                     h_floor = floors_anchored.get(h, emergency_soc + 2.0)
                     if abs(sim_soc - user_limit) < 0.2:
                         limit_reason_h = "Лимит пользователя"
