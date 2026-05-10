@@ -112,6 +112,7 @@ class StrategySell(StrategyEngine):
             cur_hour = int(now.hour)
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+            _sell_debug = {} # v11.9.250: Diagnostics container
             
             p_sell_st = dict(man.data.get("prices_sell", {}))
             today_prices = dict(p_sell_st.get(today_str, {}))
@@ -762,6 +763,7 @@ class StrategySell(StrategyEngine):
                 "house_profile_debug": h_prof_debug,
                 "commands": {f"{h}h": p for h, p in sell_commands.items()}
             }
+            if '_sell_debug' in locals(): res["arbitrage_sell_debug"].update(_sell_debug)
 
             if sell_commands.get(cur_hour, 0.0) > 0.05:
                 res["state"] = "active"
