@@ -608,8 +608,8 @@ class StrategySell(StrategyEngine):
                     limit_reason = limit_reason_h
 
                 h_key = f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")
-                # v11.9.275: Strict technical format for inverter automation (Restored SOC)
-                planned_results[h_key] = f"{p_bat_req:.3f} кВт (SOC: {sim_soc:.1f}%) [{real_p_export:.1f} Exp] ({limit_reason_h})"
+                # v11.9.295: Show REAL projected battery power (accounting for SOC floor)
+                planned_results[h_key] = f"{real_p_bat:.3f} кВт (SOC: {sim_soc:.1f}%) [{real_p_export:.1f} Exp] ({limit_reason_h})"
 
             # 5. UI Diagnostics (v11.7.137: Restored missing variables)
             morning_h_abs = morning_h + (24 if cur_hour < morning_h else 0)
