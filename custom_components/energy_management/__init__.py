@@ -93,9 +93,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_ai_mode(call):
         manager.async_set_manual_override("ai_mode")
 
+    async def handle_set_hourly_override(call):
+        timestamp = call.data.get("timestamp")
+        mode = call.data.get("mode")
+        soc_limit = call.data.get("soc_limit", 100.0)
+        await manager.async_set_hourly_override(timestamp, mode, soc_limit)
+
     hass.services.async_register(DOMAIN, "force_buy", handle_force_buy)
     hass.services.async_register(DOMAIN, "stop_sale", handle_stop_sale)
     hass.services.async_register(DOMAIN, "ai_mode", handle_ai_mode)
+    hass.services.async_register(DOMAIN, "set_hourly_override", handle_set_hourly_override)
     
     # Reload integration on options change
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
