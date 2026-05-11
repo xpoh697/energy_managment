@@ -2786,9 +2786,7 @@ class InverterOperationModeSensor(SensorEntity):
             "mode": None,
             "power": 0.0,
             "target_soc": 0.0,
-            "charge_amps": 0.0,
         }
-        self._last_logged_hour = None
         self._mode_lock_until = None
         self._locked_mode = None
         self._attr_device_info = DeviceInfo(
@@ -2811,23 +2809,19 @@ class InverterOperationModeSensor(SensorEntity):
             # 1. Calculate raw mode from current strategy/conditions
             raw_mode, reason, _, _ = self._get_mode_at(now, batt_soc)
             
-            # 2. Hysteresis / Lock Logic
-            # Emergency bypass: if battery is in emergency or critical state, ignore lock
+            # 2. Mode Lock Logic (Relaxed v11.9.361)
+            # Only apply strict locking for critical transitions: buy <-> sale_pv_bat
             is_emergency = (raw_mode == "bat_emergency" or batt_soc <= (min_soc - 0.5))
             
-            is_strategic_exit = self._locked_mode in ["buy", "sale_pv_bat"] and raw_mode != self._locked_mode
-            
-            # v11.9.333: Soft lock bypass for similar selling modes (avoid UI mismatch)
-            is_similar_sell = (
-                (self._locked_mode == "sale_pv" and raw_mode == "sale_pv_no_bat") or
-                (self._locked_mode == "sale_pv_no_bat" and raw_mode == "sale_pv")
+            is_critical_pair = (
+                (self._locked_mode == "buy" and raw_mode == "sale_pv_bat") or
+                (self._locked_mode == "sale_pv_bat" and raw_mode == "buy")
             )
             
-            if not is_emergency and not is_strategic_exit and not is_similar_sell and self._mode_lock_until and now < self._mode_lock_until:
-                # Keep the locked mode if it's still valid or if we're in the window
+            if is_critical_pair and not is_emergency and self._mode_lock_until and now < self._mode_lock_until:
                 if self._locked_mode:
                     return self._locked_mode
-
+            
             # 3. Mode Change Detection
             if raw_mode != self._locked_mode:
                 # Lock for 10 minutes
@@ -2958,10 +2952,21 @@ class InverterOperationModeSensor(SensorEntity):
                         # Extract first word before space or parenthesis
                         f_mode = planned_log.split(' ')[0].split('(')[0].strip()
                     
+                    # Get projected SOC from simulation logs
+                    f_h_key = f_dt.strftime("%H:59") + (" (Завтра)" if is_tom else "")
+                    f_sim_data = buy_sim_log.get(f_h_key) or sell_sim_log.get(f_h_key)
+                    
+                    p_soc = batt_soc
+                    if isinstance(f_sim_data, dict):
+                        p_soc = f_sim_data.get("soc", batt_soc)
+                    elif isinstance(f_sim_data, (int, float)):
+                        p_soc = float(f_sim_data)
+                    
                     hourly_data[h_key] = {
                         "sell_price": round_f(s_price, 2) if s_price is not None else 0.0,
                         "buy_price": round_f(b_price, 2) if b_price is not None else 0.0,
-                        "mode": f_mode
+                        "mode": f_mode,
+                        "soc": round_f(p_soc, 2)
                     }
             attrs["hourly_data"] = hourly_data
 

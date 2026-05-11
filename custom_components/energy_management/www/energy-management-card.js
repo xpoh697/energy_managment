@@ -28,7 +28,7 @@ const MODE_ICONS = {
 const MODE_LABELS = {
   'sale_pv': 'Normal',
   'sale_pv_no_bat': 'Export PV',
-  'sale_pv_bat': 'Export Battery',
+  'sale_pv_bat': 'Discharge',
   'buy': 'Grid Charging',
   'stop_sale': 'Stop Sale',
   'bat_emergency': 'Emergency',
@@ -136,6 +136,7 @@ class EnergyManagementCard extends HTMLElement {
           white-space: nowrap;
         }
         .btn:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(3, 169, 244, 0.3); }
+        .btn.active { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); }
         .btn ha-icon { --mdc-icon-size: 20px; }
       </style>
       <ha-card>
@@ -164,9 +165,9 @@ class EnergyManagementCard extends HTMLElement {
         </div>
 
         <div class="controls">
-          <button class="btn" onclick="this.getRootNode().host._callService('force_buy')"><ha-icon icon="mdi:lightning-bolt"></ha-icon> Force Buy</button>
-          <button class="btn" onclick="this.getRootNode().host._callService('stop_sale')"><ha-icon icon="mdi:hand-back-right"></ha-icon> Stop Sale</button>
-          <button class="btn" onclick="this.getRootNode().host._callService('ai_mode')"><ha-icon icon="mdi:robot"></ha-icon> AI Mode</button>
+          <button class="btn ${this._state.state === 'buy' ? 'active' : ''}" onclick="this.getRootNode().host._callService('force_buy')"><ha-icon icon="mdi:lightning-bolt"></ha-icon> Force Buy</button>
+          <button class="btn ${this._state.state === 'stop_sale' ? 'active' : ''}" onclick="this.getRootNode().host._callService('stop_sale')"><ha-icon icon="mdi:hand-back-right"></ha-icon> Stop Sale</button>
+          <button class="btn ${(['buy', 'stop_sale'].indexOf(this._state.state) === -1) ? 'active' : ''}" onclick="this.getRootNode().host._callService('ai_mode')"><ha-icon icon="mdi:robot"></ha-icon> AI Mode</button>
         </div>
 
         <div id="timeline-container">
@@ -252,8 +253,8 @@ class EnergyManagementCard extends HTMLElement {
             <span class="price-sell">${hourData.sell_price.toFixed(2)}</span>
           </div>
           <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
-          <div style="display:flex; flex-direction:column; align-items:center">
-            <span class="h-soc">${hourData.soc !== undefined ? 'SOC ' + Math.round(hourData.soc) + '%' : ''}</span>
+          <div style="display:flex; flex-direction:column; align-items:center; margin-top:4px">
+            <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
           </div>
         </div>
       `;
