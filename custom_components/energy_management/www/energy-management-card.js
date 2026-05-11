@@ -80,17 +80,17 @@ class EnergyManagementCard extends HTMLElement {
         .title { font-size: 1.4rem; font-weight: 800; }
         .status-badge { padding: 8px 16px; border-radius: 16px; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; border: 2px solid rgba(255,255,255,0.1); }
 
-        .hero-section { display: flex; align-items: center; justify-content: space-between; gap: 40px; margin-bottom: 32px; background: rgba(255,255,255,0.03); padding: 32px; border-radius: 28px; overflow: visible; }
-        .gauge-wrap { position: relative; width: 280px; height: 280px; flex-shrink: 0; }
-        .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; }
+        .hero-section { display: flex; align-items: stretch; justify-content: space-between; gap: 24px; margin-bottom: 32px; background: rgba(255,255,255,0.03); padding: 24px; border-radius: 28px; min-height: 300px; }
+        .gauge-wrap { position: relative; width: 250px; height: 250px; flex-shrink: 0; }
+        .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; overflow: visible; }
         .gauge-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 10; }
         .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 16; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
         .gauge-label { position: absolute; top: 53%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
         .soc-value { font-size: 4rem; font-weight: 900; line-height: 0.7; letter-spacing: -0.04em; }
         .soc-unit { font-size: 1rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 4px; }
         
-        .stats-grid { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
-        .stat-card { background: rgba(255,255,255,0.02); padding: 8px 14px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.05); min-width: 140px; }
+        .stats-grid { display: flex; flex-direction: column; gap: 8px; justify-content: center; max-width: 160px; }
+        .stat-card { background: rgba(255,255,255,0.02); padding: 10px 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.05); }
         .stat-label { font-size: 0.6rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 2px; display: block; opacity: 0.8; }
         .stat-value { font-size: 1rem; font-weight: 800; color: white; }
 
@@ -146,9 +146,9 @@ class EnergyManagementCard extends HTMLElement {
 
         <div class="hero-section">
           <div class="gauge-wrap">
-            <svg class="gauge-svg" viewBox="0 0 180 180">
-              <circle class="gauge-track" cx="90" cy="90" r="85"></circle>
-              <circle id="gauge-bar" class="gauge-bar" cx="90" cy="90" r="85" stroke-dasharray="534" stroke-dashoffset="534"></circle>
+            <svg class="gauge-svg" viewBox="0 0 160 160">
+              <circle class="gauge-track" cx="80" cy="80" r="72"></circle>
+              <circle id="gauge-bar" class="gauge-bar" cx="80" cy="80" r="72" stroke-dasharray="452" stroke-dashoffset="452"></circle>
             </svg>
             <div class="gauge-label">
               <span id="soc-val" class="soc-value">--</span>
