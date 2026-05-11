@@ -99,15 +99,15 @@ class EnergyManagementCard extends HTMLElement {
         .timeline-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 8px; margin-bottom: 8px; }
         
         .hour-bar {
-          border-radius: 12px;
+          border-radius: 10px;
           padding: 0;
-          min-height: 90px;
+          aspect-ratio: 1 / 1;
           cursor: pointer;
           position: relative;
           background: transparent;
         }
         .bar-content {
-          padding: 8px 2px;
+          padding: 4px 2px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -360,7 +360,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.394';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.395';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
