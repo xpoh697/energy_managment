@@ -3328,6 +3328,7 @@ class InverterOperationModeSensor(SensorEntity):
             hys = 0.5 if mode == "sale_pv_no_bat" else 0.0
             is_low_for_morning = bool(morning_soc_proj < (target_morning + hys))
             
+            bms_debug["v"] = VERSION
             bms_debug["limit_h"] = limit_hour
             bms_debug["proj_morning"] = round_f(morning_soc_proj, 1)
             
