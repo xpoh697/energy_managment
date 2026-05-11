@@ -734,7 +734,7 @@ class EnergyProfileManager:
         return False
 
     def async_set_manual_override(self, mode: str):
-        """Set manual override for the current hour."""
+        """Set manual override for the current hour (legacy buttons)."""
         now_h = self.now.hour
         if mode == "ai_mode":
             self.manual_mode_overrides = {}
@@ -744,6 +744,27 @@ class EnergyProfileManager:
             self._last_override_hour = now_h
             _LOGGER.warning("[Manual Override] Forced mode: %s for hour %s:00", mode, now_h)
         self._notify_update()
+
+    async def async_set_hourly_override(self, timestamp: str, mode: str, soc_limit: float):
+        """Set a manual override for a specific hour (modal window)."""
+        if not self.hourly_manual_overrides:
+            self.hourly_manual_overrides = {}
+            
+        if mode == "ai":
+            if timestamp in self.hourly_manual_overrides:
+                del self.hourly_manual_overrides[timestamp]
+        else:
+            self.hourly_manual_overrides[timestamp] = {
+                "mode": mode,
+                "soc_limit": soc_limit,
+                "created_at": datetime.now().isoformat()
+            }
+        
+        # Persistent storage
+        self.data["hourly_manual_overrides"] = self.hourly_manual_overrides
+        await self.store.async_save(self.data)
+        self._notify_update()
+        _LOGGER.info(f"Hourly override set for {timestamp}: {mode} (SOC {soc_limit}%)")
 
     async def async_stop(self):
         """Cleanup all listeners and tasks."""
@@ -3655,6 +3676,7 @@ class TodayProfileSensor(SensorEntity):
 
 class EnergyBudgetSensor(SensorEntity):
     """Calculates if there is expected energy surplus until tomorrow morning (08:00)."""
+
     def __init__(self, manager, name, days_for_profile):
         self.manager = manager
         self.days_for_profile = days_for_profile
@@ -3664,7 +3686,6 @@ class EnergyBudgetSensor(SensorEntity):
         self._attr_icon = "mdi:scale-balance"
         self._state = 0.0
         self._attrs = {}
-        self.entity_id = f"{DOMAIN}.energy_management_surplus"
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
