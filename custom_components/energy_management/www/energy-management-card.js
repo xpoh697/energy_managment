@@ -85,9 +85,9 @@ class EnergyManagementCard extends HTMLElement {
         .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; }
         .gauge-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 8; }
         .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
-        .gauge-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
-        .soc-value { font-size: 2.8rem; font-weight: 900; line-height: 0.8; letter-spacing: -0.03em; }
-        .soc-unit { font-size: 0.7rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 4px; }
+        .gauge-label { position: absolute; top: 53%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
+        .soc-value { font-size: 2.8rem; font-weight: 900; line-height: 0.7; letter-spacing: -0.03em; }
+        .soc-unit { font-size: 0.7rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 0; }
         
         .stats-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         .stat-card { background: rgba(255,255,255,0.02); padding: 14px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.05); }
