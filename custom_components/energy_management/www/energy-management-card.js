@@ -102,9 +102,9 @@ class EnergyManagementCard extends HTMLElement {
           border-radius: 14px;
           padding: 0;
           min-height: 105px;
-          transition: all 0.2s ease;
           cursor: pointer;
           position: relative;
+          background: transparent;
         }
         .bar-content {
           padding: 10px 4px;
