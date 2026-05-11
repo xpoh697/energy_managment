@@ -121,10 +121,11 @@ class EnergyManagementCard extends HTMLElement {
           box-sizing: border-box;
         }
         .hour-bar:hover .bar-content {
-          transform: translateY(-5px) scale(1.02);
-          box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-          filter: brightness(1.2);
+          transform: scale(1.05);
+          box-shadow: 0 12px 30px rgba(0,0,0,0.7);
+          filter: brightness(1.3);
           z-index: 10;
+          border-color: rgba(255,255,255,0.4);
         }
         .hour-bar.active .bar-content { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.1); }
         .h-icon { --mdc-icon-size: 22px; margin-bottom: 4px; }
