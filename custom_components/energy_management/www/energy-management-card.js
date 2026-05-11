@@ -220,6 +220,13 @@ class EnergyManagementCard extends HTMLElement {
     let html = '';
     let currentDayLabel = '';
 
+    const hexToRgba = (hex, alpha) => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    };
+
     windowKeys.forEach((key, idx) => {
       const isTomorrow = !key.includes(todayStr);
       const label = isTomorrow ? 'TOMORROW' : 'TODAY';
@@ -233,8 +240,9 @@ class EnergyManagementCard extends HTMLElement {
       }
 
       const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
+      const bgColor = hexToRgba(modeColor, 0.5);
       html += `
-        <div class="hour-bar ${idx === 0 ? 'active' : ''}" style="border-color: ${modeColor}; background-color: ${modeColor}80;">
+        <div class="hour-bar ${idx === 0 ? 'active' : ''}" style="border-color: ${modeColor}; background-color: ${bgColor};">
           <ha-icon class="h-icon" style="color:white" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
           <span class="h-time">${timeOnly}</span>
           <div class="h-prices">
