@@ -2953,7 +2953,7 @@ class InverterOperationModeSensor(SensorEntity):
                     
                     # Search for this hour in the logs to get the exact strategy mode
                     h_log_key = f_dt.strftime("%H:00")
-                    planned_log = self._planned_modes.get(h_log_key, "")
+                    planned_log = forecast.get(h_log_key, "")
                     if planned_log:
                         # Extract first word before space or parenthesis
                         f_mode = planned_log.split(' ')[0].split('(')[0].strip()
