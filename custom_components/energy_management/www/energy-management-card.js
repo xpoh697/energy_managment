@@ -271,22 +271,26 @@ class EnergyManagementCard extends HTMLElement {
   }
 
   _updateUI() {
-    const entityId = this._config.entity || 'sensor.inverter_operation_mode';
+    const entityId = this._config.entity || 'sensor.energy_management';
     const stateObj = this._hass.states[entityId];
-    if (!stateObj) return;
+    
+    if (!stateObj) {
+      console.warn(`EnergyManagementCard: Entity ${entityId} not found`);
+      return;
+    }
 
     const attrs = stateObj.attributes;
-    const soc = attrs.battery_soc || 0;
-    const projMorning = (attrs.bms_status && attrs.bms_status.proj_morning) || '--';
-    const limitH = (attrs.bms_status && attrs.bms_status.limit_h) || '--';
+    const soc = parseFloat(attrs.battery_soc) || 0;
+    const projMorning = attrs.bms_status ? attrs.bms_status.proj_morning : (attrs.morning_soc_projected || '--');
+    const limitH = attrs.bms_status ? attrs.bms_status.limit_h : '--';
     const currentMode = stateObj.state;
     const plannedModes = attrs.planned_modes_24h || {};
-    const power = attrs.power || 0;
+    const power = parseFloat(attrs.power) || 0;
 
     // Update Gauge
     const bar = this.shadowRoot.getElementById('gauge-bar');
     if (bar) {
-      const offset = 264 - (264 * soc) / 100;
+      const offset = 264 - (264 * Math.min(100, Math.max(0, soc))) / 100;
       bar.style.strokeDashoffset = offset;
     }
     
@@ -296,17 +300,21 @@ class EnergyManagementCard extends HTMLElement {
     // Update Status
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
-      badge.innerText = currentMode.replace(/_/g, ' ');
+      badge.innerText = (currentMode || 'Unknown').replace(/_/g, ' ');
       badge.style.color = MODE_COLORS[currentMode] || MODE_COLORS.default;
-      badge.style.borderColor = (MODE_COLORS[currentMode] || MODE_COLORS.default).replace('50%', '30%');
+      const baseColor = MODE_COLORS[currentMode] || MODE_COLORS.default;
+      badge.style.borderColor = baseColor.replace('50%', '30%');
     }
 
     // Update Stats
     const projText = this.shadowRoot.getElementById('proj-morning');
-    if (projText) projText.innerText = typeof projMorning === 'number' ? projMorning.toFixed(1) + '%' : projMorning;
+    if (projText) {
+      const val = parseFloat(projMorning);
+      projText.innerText = isNaN(val) ? projMorning : val.toFixed(1) + '%';
+    }
 
     const limitText = this.shadowRoot.getElementById('limit-h');
-    if (limitText) limitText.innerText = limitH !== '--' ? limitH + ':00' : '--';
+    if (limitText) limitText.innerText = limitH !== 'N/A' && limitH !== '--' ? limitH + ':00' : '--';
 
     const powerText = this.shadowRoot.getElementById('power-now');
     if (powerText) powerText.innerText = power.toFixed(1) + ' kW';
