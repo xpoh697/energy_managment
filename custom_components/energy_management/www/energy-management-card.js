@@ -406,7 +406,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.stroke = this._getBatteryColor(soc);
     }
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.411';
+    if (vTag) vTag.innerText = 'v11.9.412';
     
     const socVal = this.shadowRoot.getElementById('soc-val');
     if (socVal) socVal.innerText = Math.round(soc);
@@ -441,26 +441,39 @@ class EnergyManagementCard extends HTMLElement {
     const container = this.shadowRoot.getElementById('stats-container');
     if (!container || !this._hass) return;
 
-    // Remove old extra cards (keep morning projection at index 0)
-    while (container.children.length > 1) {
-      container.removeChild(container.lastChild);
-    }
-
     const extras = this._config.extra_indicators || [];
+    const currentEntityIds = extras.map(item => item.entity);
+
+    // 1. Remove cards that are no longer in config
+    Array.from(container.querySelectorAll('.stat-card[data-entity]')).forEach(card => {
+      if (!currentEntityIds.includes(card.getAttribute('data-entity'))) {
+        card.remove();
+      }
+    });
+
+    // 2. Add or Update cards
     extras.forEach(item => {
       const stateObj = this._hass.states[item.entity];
-      if (stateObj) {
-        const card = document.createElement('div');
+      if (!stateObj) return;
+
+      let card = container.querySelector(`.stat-card[data-entity="${item.entity}"]`);
+      if (!card) {
+        card = document.createElement('div');
         card.className = 'stat-card';
+        card.setAttribute('data-entity', item.entity);
         card.onclick = () => this._handleMoreInfo(item.entity);
-        const val = stateObj.state;
-        const unit = stateObj.attributes.unit_of_measurement || '';
-        card.innerHTML = `
-          <span class="stat-label">${item.name || stateObj.attributes.friendly_name || 'Sensor'}</span>
-          <div class="stat-value">${val} ${unit}</div>
-        `;
+        card.innerHTML = `<span class="stat-label"></span><div class="stat-value"></div>`;
         container.appendChild(card);
       }
+
+      const label = card.querySelector('.stat-label');
+      const value = card.querySelector('.stat-value');
+      
+      const newLabel = item.name || stateObj.attributes.friendly_name || 'Sensor';
+      const newVal = `${stateObj.state} ${stateObj.attributes.unit_of_measurement || ''}`;
+
+      if (label.innerText !== newLabel) label.innerText = newLabel;
+      if (value.innerText !== newVal) value.innerText = newVal;
     });
   }
 
