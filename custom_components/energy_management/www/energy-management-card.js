@@ -90,7 +90,7 @@ class EnergyManagementCard extends HTMLElement {
         .soc-unit { font-size: 1rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 4px; }
         .hero-section { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; margin-bottom: 32px; background: rgba(255,255,255,0.03); padding: 32px; border-radius: 32px; }
         
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; width: 100%; max-width: 400px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px; width: 100%; max-width: 400px; }
         .stat-card { background: rgba(255,255,255,0.02); padding: 12px 16px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); }
         .stat-label { font-size: 0.65rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 4px; display: block; opacity: 0.8; }
         .stat-value { font-size: 1.1rem; font-weight: 800; color: white; }
@@ -359,7 +359,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.399';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.400';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
