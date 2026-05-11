@@ -2802,7 +2802,13 @@ class InverterOperationModeSensor(SensorEntity):
             
             is_strategic_exit = self._locked_mode in ["buy", "sale_pv_bat"] and raw_mode != self._locked_mode
             
-            if not is_emergency and not is_strategic_exit and self._mode_lock_until and now < self._mode_lock_until:
+            # v11.9.333: Soft lock bypass for similar selling modes (avoid UI mismatch)
+            is_similar_sell = (
+                (self._locked_mode == "sale_pv" and raw_mode == "sale_pv_no_bat") or
+                (self._locked_mode == "sale_pv_no_bat" and raw_mode == "sale_pv")
+            )
+            
+            if not is_emergency and not is_strategic_exit and not is_similar_sell and self._mode_lock_until and now < self._mode_lock_until:
                 # Keep the locked mode if it's still valid or if we're in the window
                 if self._locked_mode:
                     return self._locked_mode
@@ -2849,7 +2855,7 @@ class InverterOperationModeSensor(SensorEntity):
             buy_sim_log = buy_strategy.get("buy_simulation", {}).get("log", {})
             sell_sim_log = sell_strategy.get("sell_simulation", {}).get("log", {})
             
-            for i in range(1, 25):
+            for i in range(0, 24):
                 f_dt = now + timedelta(hours=i)
                 is_tom = f_dt.date() > now.date()
                 h_abs = now.hour + i
@@ -3317,7 +3323,13 @@ class InverterOperationModeSensor(SensorEntity):
             min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
             morning_soc_proj = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
             target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", (min_soc + 5.0))
-            is_low_for_morning = bool(morning_soc_proj < target_morning)
+            
+            # v11.9.333: SOC Hysteresis for Morning Guard (avoid toggling on the edge)
+            hys = 0.5 if mode == "sale_pv_no_bat" else 0.0
+            is_low_for_morning = bool(morning_soc_proj < (target_morning + hys))
+            
+            bms_debug["limit_h"] = limit_hour
+            bms_debug["proj_morning"] = round_f(morning_soc_proj, 1)
             
             hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
             
