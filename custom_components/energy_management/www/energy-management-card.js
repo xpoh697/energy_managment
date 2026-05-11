@@ -81,13 +81,13 @@ class EnergyManagementCard extends HTMLElement {
         .status-badge { padding: 8px 16px; border-radius: 16px; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; border: 2px solid rgba(255,255,255,0.1); }
 
         .hero-section { display: flex; align-items: center; gap: 32px; margin-bottom: 32px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: 24px; }
-        .gauge-wrap { position: relative; width: 200px; height: 200px; }
+        .gauge-wrap { position: relative; width: 240px; height: 240px; }
         .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; }
-        .gauge-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 8; }
-        .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 12; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+        .gauge-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 10; }
+        .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
         .gauge-label { position: absolute; top: 53%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
         .soc-value { font-size: 3.5rem; font-weight: 900; line-height: 0.7; letter-spacing: -0.04em; }
-        .soc-unit { font-size: 0.8rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 0; }
+        .soc-unit { font-size: 0.9rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 2px; }
         
         .stats-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: center; }
         .stat-card { background: rgba(255,255,255,0.02); padding: 10px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); }
@@ -146,9 +146,9 @@ class EnergyManagementCard extends HTMLElement {
 
         <div class="hero-section">
           <div class="gauge-wrap">
-            <svg class="gauge-svg" viewBox="0 0 130 130">
-              <circle class="gauge-track" cx="65" cy="65" r="60"></circle>
-              <circle id="gauge-bar" class="gauge-bar" cx="65" cy="65" r="60" stroke-dasharray="377" stroke-dashoffset="377"></circle>
+            <svg class="gauge-svg" viewBox="0 0 160 160">
+              <circle class="gauge-track" cx="80" cy="80" r="75"></circle>
+              <circle id="gauge-bar" class="gauge-bar" cx="80" cy="80" r="75" stroke-dasharray="471" stroke-dashoffset="471"></circle>
             </svg>
             <div class="gauge-label">
               <span id="soc-val" class="soc-value">--</span>
