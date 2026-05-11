@@ -320,8 +320,9 @@ class EnergyManagementCard extends HTMLElement {
     const mode = this.shadowRoot.getElementById('modal-mode').value;
     const socGroup = this.shadowRoot.getElementById('soc-group');
     if (socGroup) {
-      // Show only for Buy and Sale_PV_BAT (Discharge) - v11.9.388
-      socGroup.style.display = (mode === 'buy' || mode === 'sale_pv_bat') ? 'flex' : 'none';
+      // STRICT: Show ONLY for Buy and Sale_PV_BAT. Hide for AI and everything else.
+      const isVisible = (mode === 'buy' || mode === 'sale_pv_bat');
+      socGroup.style.display = isVisible ? 'flex' : 'none';
     }
   }
 
@@ -359,7 +360,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.388';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.389';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
