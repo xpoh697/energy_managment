@@ -293,7 +293,7 @@ class EnergyManagementCard extends HTMLElement {
   _openModal(timestamp, currentMode) {
     const data = this._hass.states[this._config.entity].attributes.hourly_data || {};
     const hourData = data[timestamp] || {};
-    const currentSocLimit = hourData.soc_limit !== undefined ? hourData.soc_limit : 100;
+    const currentSocLimit = hourData.soc_limit !== undefined ? hourData.soc_limit : (hourData.soc || 100);
 
     this._editingTimestamp = timestamp;
     this.shadowRoot.getElementById('modal-title').innerText = timestamp;
@@ -357,7 +357,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.386';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.387';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
