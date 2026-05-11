@@ -2989,7 +2989,8 @@ class InverterOperationModeSensor(SensorEntity):
                     
                     # Get manual override for this specific timestamp
                     h_override = self.manager.hourly_manual_overrides.get(h_key)
-                    soc_limit = h_override.get("soc_limit", 100.0) if h_override else 100.0
+                    # v11.9.386: Initialize with AI predicted SOC if no manual limit set yet
+                    soc_limit = h_override.get("soc_limit", round_f(p_soc, 0)) if h_override else round_f(p_soc, 0)
 
                     hourly_data[h_key] = {
                         "sell_price": round_f(s_price, 2) if s_price is not None else 0.0,
