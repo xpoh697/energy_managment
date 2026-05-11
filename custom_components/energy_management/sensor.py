@@ -1352,6 +1352,9 @@ class EnergyProfileManager:
         record_total = self.current_consumption_total
         healed_flag = 0
 
+        # Check if this hour has a manual override
+        is_manual = str(past_hour) in self.hourly_manual_overrides
+
         if should_heal:
              _LOGGER.info("Energy Management: Healing consumption profile for hour %s (Price: %s, Mode: %s). Recording average %s instead of actual %s", past_hour, p_buy, "buy" if is_buy_mode else "cheap", avg_cons_val, record_base)
              record_base = avg_cons_val
@@ -2997,7 +3000,8 @@ class InverterOperationModeSensor(SensorEntity):
                         "buy_price": round_f(b_price, 2) if b_price is not None else 0.0,
                         "mode": f_mode,
                         "soc": round_f(p_soc, 2),
-                        "soc_limit": soc_limit
+                        "soc_limit": soc_limit,
+                        "is_manual": h_override is not None
                     }
             attrs["hourly_data"] = hourly_data
 

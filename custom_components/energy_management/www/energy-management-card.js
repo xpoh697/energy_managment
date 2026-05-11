@@ -3,6 +3,12 @@
  * Sliding Window UI: Today/Tomorrow grouping and large buttons
  */
 
+console.info(
+  "%c ENERGY MANAGEMENT %c v11.9.412 ",
+  "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
+  "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
+);
+
 const MODE_COLORS = {
   'sale_pv': '#4caf50',            // Green (Normal)
   'sale_pv_no_bat': '#ff8c00',     // Orange (Export PV)
@@ -129,7 +135,25 @@ class EnergyManagementCard extends HTMLElement {
           z-index: 10;
           border-color: rgba(255,255,255,0.4);
         }
-        .hour-bar.active .bar-content { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.1); }
+        .hour-bar.active .bar-content {
+          border-width: 2px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .hour-bar.manual-glow .bar-content {
+          box-shadow: inset 0 0 8px rgba(255, 255, 255, 0.4);
+        }
+
+        .manual-indicator {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          color: white;
+          --mdc-icon-size: 14px;
+          background: rgba(0,0,0,0.3);
+          border-radius: 50%;
+          padding: 2px;
+        }
         .h-icon { --mdc-icon-size: 18px; margin-bottom: 1px; }
         .h-time { font-size: 0.85rem; font-weight: 900; color: white; line-height: 1; }
         .h-prices { display: flex; gap: 4px; margin: 2px 0; }
@@ -441,6 +465,9 @@ class EnergyManagementCard extends HTMLElement {
   }
 
   _renderTimeline(data) {
+    if (data && Object.keys(data).length > 0) {
+      console.log("[Energy Management] Rendering timeline with data:", data);
+    }
     const container = this.shadowRoot.getElementById('timeline-container');
     if (!container) return;
 
@@ -480,9 +507,11 @@ class EnergyManagementCard extends HTMLElement {
         }
         const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
         const bgColor = hexToRgba(modeColor, 0.1);
+        const isManual = hourData.is_manual;
         html += `
-          <div class="hour-bar ${idx === 0 ? 'active' : ''}" data-ts="${key}" data-mode="${hourData.mode}" id="hb-${key.replace(/[: ]/g, '-')}">
+          <div class="hour-bar ${idx === 0 ? 'active' : ''} ${isManual ? 'manual-glow' : ''}" data-ts="${key}" data-mode="${hourData.mode}" id="hb-${key.replace(/[: ]/g, '-')}">
             <div class="bar-content" style="border-color: ${modeColor}; background-color: ${bgColor};">
+              ${isManual ? `<ha-icon class="manual-indicator" icon="mdi:hand-back-right"></ha-icon>` : ''}
               <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
               <span class="h-time">${key.split(' ')[1]}</span>
               <div class="h-prices">
@@ -513,7 +542,22 @@ class EnergyManagementCard extends HTMLElement {
         if (!bar) return;
 
         const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
+        const isManual = hourData.is_manual;
         const content = bar.querySelector('.bar-content');
+        if (isManual) {
+          bar.classList.add('manual-glow');
+          if (!bar.querySelector('.manual-indicator')) {
+            const ind = document.createElement('ha-icon');
+            ind.className = 'manual-indicator';
+            ind.icon = 'mdi:hand-back-right';
+            content.appendChild(ind);
+          }
+        } else {
+          bar.classList.remove('manual-glow');
+          const ind = bar.querySelector('.manual-indicator');
+          if (ind) ind.remove();
+        }
+
         const icon = bar.querySelector('.h-icon');
         const modeLabel = bar.querySelector('.h-mode');
         const socLabel = bar.querySelector('.h-soc');
