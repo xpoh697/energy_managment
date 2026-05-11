@@ -212,6 +212,7 @@ class EnergyManagementCard extends HTMLElement {
         .btn-save { background: #03a9f4; color: white; border: none; box-shadow: 0 4px 15px rgba(3,169,244,0.3); }
         .btn-clear { background: rgba(255,255,255,0.05); color: #ff5252; border: 1px solid rgba(255,82,82,0.2); }
         .btn:active { transform: scale(0.95); }
+        .version-tag { position: absolute; bottom: 4px; right: 8px; font-size: 0.5rem; opacity: 0.3; color: var(--secondary-text); pointer-events: none; }
       </style>
       <ha-card>
         <div class="header">
@@ -294,6 +295,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
+        <div id="v-tag" class="version-tag">v11.9.404</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -400,7 +402,7 @@ class EnergyManagementCard extends HTMLElement {
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
       const modeLabel = MODE_LABELS[stateObj.state] || stateObj.state.toUpperCase();
-      badge.innerHTML = `<div>${modeLabel}</div><div style="font-size: 0.6rem; opacity: 0.8; margin-top: 2px;">v11.9.403</div>`;
+      badge.innerText = modeLabel;
       const color = MODE_COLORS[stateObj.state] || MODE_COLORS.default;
       badge.style.color = color;
       badge.style.borderColor = color;
