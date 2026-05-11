@@ -239,7 +239,7 @@ class EnergyManagementCard extends HTMLElement {
             <div class="modal-body">
               <div class="form-group">
                 <span class="form-label">Mode Override</span>
-                <select id="modal-mode">
+                <select id="modal-mode" onchange="this.getRootNode().host._toggleSocVisibility()">
                   <option value="ai">AI (Automatic)</option>
                   <option value="buy">Grid Charging</option>
                   <option value="sale_pv_bat">Discharge Battery</option>
@@ -247,7 +247,7 @@ class EnergyManagementCard extends HTMLElement {
                   <option value="sale_pv">Normal (PV Only)</option>
                 </select>
               </div>
-              <div class="form-group">
+              <div class="form-group" id="soc-group">
                 <span class="form-label">SOC Target: <span id="modal-soc-label">100</span>%</span>
                 <input type="range" id="modal-soc" min="0" max="100" value="100" oninput="this.getRootNode().host._updateSocLabel(this.value)">
               </div>
@@ -271,7 +271,17 @@ class EnergyManagementCard extends HTMLElement {
     this._editingTimestamp = timestamp;
     this.shadowRoot.getElementById('modal-title').innerText = timestamp;
     this.shadowRoot.getElementById('modal-mode').value = currentMode === 'ai' ? 'ai' : currentMode;
+    this._toggleSocVisibility();
     this.shadowRoot.getElementById('modal').classList.add('open');
+  }
+
+  _toggleSocVisibility() {
+    const mode = this.shadowRoot.getElementById('modal-mode').value;
+    const socGroup = this.shadowRoot.getElementById('soc-group');
+    if (socGroup) {
+      // Show only for Buy and Sale_PV_BAT (Discharge)
+      socGroup.style.display = (mode === 'buy' || mode === 'sale_pv_bat') ? 'flex' : 'none';
+    }
   }
 
   _closeModal() {
