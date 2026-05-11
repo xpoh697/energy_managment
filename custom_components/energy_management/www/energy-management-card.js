@@ -89,34 +89,34 @@ class EnergyManagementCard extends HTMLElement {
         .soc-value { font-size: 2.8rem; font-weight: 900; line-height: 0.7; letter-spacing: -0.03em; }
         .soc-unit { font-size: 0.7rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 0; }
         
-        .stats-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-        .stat-card { background: rgba(255,255,255,0.02); padding: 14px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.05); }
-        .stat-label { font-size: 0.65rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 4px; display: block; }
-        .stat-value { font-size: 1.1rem; font-weight: 800; }
+        .stats-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-content: stretch; }
+        .stat-card { background: rgba(255,255,255,0.02); padding: 18px; border-radius: 22px; border: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; justify-content: center; }
+        .stat-label { font-size: 0.75rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 6px; display: block; letter-spacing: 0.02em; }
+        .stat-value { font-size: 1.3rem; font-weight: 800; color: white; }
 
         .section-header { font-size: 0.9rem; font-weight: 900; color: #4dabf5; margin: 20px 0 12px; letter-spacing: 0.05em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
         .timeline-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
         
         .hour-bar {
-          border-radius: 14px;
-          padding: 8px 4px;
+          border-radius: 20px;
+          padding: 16px 10px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          min-height: 90px;
+          min-height: 130px;
           transition: all 0.2s;
           border: 2px solid transparent;
-          text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+          text-shadow: 0 1px 3px rgba(0,0,0,0.6);
         }
-        .hour-bar.active { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
-        .h-icon { --mdc-icon-size: 22px; margin-bottom: 2px; }
-        .h-time { font-size: 1rem; font-weight: 900; color: white; line-height: 1; }
-        .h-prices { display: flex; gap: 6px; margin: 4px 0; }
-        .price-buy { font-size: 0.7rem; font-weight: 800; color: #90caf9; }
-        .price-sell { font-size: 0.7rem; font-weight: 800; color: #a5d6a7; }
-        .h-mode { font-size: 0.6rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; color: white; }
-        .h-soc { font-size: 0.5rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-top: 1px; }
+        .hour-bar.active { border-style: dashed; border-color: white; box-shadow: 0 0 20px rgba(255,255,255,0.2); transform: scale(1.02); }
+        .h-icon { --mdc-icon-size: 28px; margin-bottom: 6px; }
+        .h-time { font-size: 1.3rem; font-weight: 900; color: white; line-height: 1; }
+        .h-prices { display: flex; gap: 10px; margin: 8px 0; }
+        .price-buy { font-size: 0.85rem; font-weight: 800; color: #90caf9; }
+        .price-sell { font-size: 0.85rem; font-weight: 800; color: #a5d6a7; }
+        .h-mode { font-size: 0.75rem; font-weight: 800; text-align: center; line-height: 1.1; margin-top: 4px; color: white; text-transform: uppercase; letter-spacing: 0.05em; }
+        .h-soc { font-size: 0.65rem; font-weight: 700; color: rgba(255,255,255,0.9); margin-top: 4px; }
 
         .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-top: 24px; }
         .btn {
