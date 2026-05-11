@@ -14,6 +14,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Energy Profile from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
+    # v11.9.333: Register static path for the UI card
+    hass.http.register_static_path(
+        "/api/energy_management/static",
+        hass.config.path("custom_components/energy_management/www"),
+        cache_headers=False
+    )
+    
     # We delay import to avoid circular dependency
     from .sensor import EnergyProfileManager
     manager = EnergyProfileManager(hass, entry)
