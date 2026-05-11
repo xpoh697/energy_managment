@@ -48,6 +48,11 @@ from .const import (
     CONF_MIN_SELL_PRICE,
     CONF_MAX_ARBITRAGE_HOURS,
     CONF_MIN_DISCHARGE_KWH,
+    CONF_PROFIT_SENSOR,
+    CONF_EXTRA_SENSOR_1,
+    CONF_EXTRA_SENSOR_1_NAME,
+    CONF_EXTRA_SENSOR_2,
+    CONF_EXTRA_SENSOR_2_NAME,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -313,5 +318,12 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_BATTERY_COST, default=float(bc if bc is not None else 0.0)): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(CONF_BATTERY_RATED_CYCLES, default=int(br if br is not None else 6000)): vol.All(vol.Coerce(int), vol.Range(min=1)),
             vol.Optional(CONF_ANOMALY_THRESHOLD, default=float(at if at is not None else 2.0)): vol.All(vol.Coerce(float), vol.Range(min=1.1, max=10.0)),
+            
+            # v11.9.401: Custom Indicators
+            vol.Optional(CONF_PROFIT_SENSOR, default=self._user_input.get(CONF_PROFIT_SENSOR) or vol.UNDEFINED): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+            vol.Optional(CONF_EXTRA_SENSOR_1, default=self._user_input.get(CONF_EXTRA_SENSOR_1) or vol.UNDEFINED): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+            vol.Optional(CONF_EXTRA_SENSOR_1_NAME, default=self._user_input.get(CONF_EXTRA_SENSOR_1_NAME, "Sensor 1")): str,
+            vol.Optional(CONF_EXTRA_SENSOR_2, default=self._user_input.get(CONF_EXTRA_SENSOR_2) or vol.UNDEFINED): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+            vol.Optional(CONF_EXTRA_SENSOR_2_NAME, default=self._user_input.get(CONF_EXTRA_SENSOR_2_NAME, "Sensor 2")): str,
         })
         return self.async_show_form(step_id="investment_settings", data_schema=schema)

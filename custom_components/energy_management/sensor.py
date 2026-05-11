@@ -36,6 +36,11 @@ from .const import (
     CONF_PRICE_BUY,
     CONF_PRICE_SELL,
     CONF_MIN_SOC_BAT,
+    CONF_PROFIT_SENSOR,
+    CONF_EXTRA_SENSOR_1,
+    CONF_EXTRA_SENSOR_1_NAME,
+    CONF_EXTRA_SENSOR_2,
+    CONF_EXTRA_SENSOR_2_NAME,
     CONF_AI_CHARGE_LIMIT,
     CONF_AI_DISCHARGE_LIMIT,
     CONF_BATTERY_MAX_POWER,
@@ -3000,6 +3005,23 @@ class InverterOperationModeSensor(SensorEntity):
                         "soc_limit": soc_limit
                     }
             attrs["hourly_data"] = hourly_data
+            
+            # v11.9.401: Custom Indicator Data
+            def get_s_data(conf_key, name_key=None):
+                entity_id = self._entry.options.get(conf_key)
+                if not entity_id: return None
+                state = self.hass.states.get(entity_id)
+                val = state.state if state else "unknown"
+                unit = state.attributes.get("unit_of_measurement", "") if state else ""
+                name = self._entry.options.get(name_key) if name_key else None
+                if not name and state: name = state.attributes.get("friendly_name")
+                return {"value": val, "unit": unit, "name": name or "Sensor"}
+
+            attrs["custom_indicators"] = {
+                "profit": get_s_data(CONF_PROFIT_SENSOR),
+                "extra1": get_s_data(CONF_EXTRA_SENSOR_1, CONF_EXTRA_SENSOR_1_NAME),
+                "extra2": get_s_data(CONF_EXTRA_SENSOR_2, CONF_EXTRA_SENSOR_2_NAME)
+            }
 
             # v11.9.331: Persist mode overrides on manager for use in all simulation calls
             self.manager.planned_mode_overrides = _planned_mode_overrides

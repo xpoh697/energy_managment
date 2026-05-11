@@ -231,10 +231,22 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
           <div class="stats-grid">
-            <div class="stat-card"><span class="stat-label">Morning Projection</span><span id="proj-morning" class="stat-value">-- %</span></div>
-            <div class="stat-card"><span class="stat-label">Safe Export Until</span><span id="limit-h" class="stat-value">--:00</span></div>
-            <div class="stat-card"><span class="stat-label">Power Dispatch</span><span id="power-now" class="stat-value">0.0 kW</span></div>
-            <div class="stat-card"><span class="stat-label">System State</span><span id="v-code" class="stat-value">v11.9.370</span></div>
+            <div class="stat-card">
+              <span class="stat-label">Morning Projection</span>
+              <div class="stat-value" id="proj-morning">-</div>
+            </div>
+            <div class="stat-card" id="card-profit" style="display: none">
+              <span class="stat-label" id="label-profit">Profit</span>
+              <div class="stat-value" id="val-profit">-</div>
+            </div>
+            <div class="stat-card" id="card-extra1" style="display: none">
+              <span class="stat-label" id="label-extra1">Extra 1</span>
+              <div class="stat-value" id="val-extra1">-</div>
+            </div>
+            <div class="stat-card" id="card-extra2" style="display: none">
+              <span class="stat-label" id="label-extra2">Extra 2</span>
+              <div class="stat-value" id="val-extra2">-</div>
+            </div>
           </div>
         </div>
 
@@ -357,13 +369,27 @@ class EnergyManagementCard extends HTMLElement {
     if (bar) bar.style.strokeDashoffset = 452 - (452 * Math.min(100, Math.max(0, soc))) / 100;
     this.shadowRoot.getElementById('soc-val').innerText = Math.round(soc);
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
-    this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
-    this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.400';
+    
+    // v11.9.401: Custom Indicators Logic
+    const indicators = attrs.custom_indicators || {};
+    const updateIndicator = (key, id) => {
+      const data = indicators[key];
+      const card = this.shadowRoot.getElementById(`card-${id}`);
+      if (data && data.value !== null && data.value !== undefined) {
+        card.style.display = 'block';
+        this.shadowRoot.getElementById(`label-${id}`).innerText = data.name || 'Sensor';
+        this.shadowRoot.getElementById(`val-${id}`).innerText = `${data.value} ${data.unit}`;
+      } else if (card) {
+        card.style.display = 'none';
+      }
+    };
+    updateIndicator('profit', 'profit');
+    updateIndicator('extra1', 'extra1');
+    updateIndicator('extra2', 'extra2');
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
-      badge.innerText = stateObj.state.replace(/_/g, ' ');
+      badge.innerText = `System v11.9.401`;
       const color = MODE_COLORS[stateObj.state] || MODE_COLORS.default;
       badge.style.color = color;
       badge.style.borderColor = color;
