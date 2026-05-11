@@ -2948,8 +2948,15 @@ class InverterOperationModeSensor(SensorEntity):
                     s_price = sell_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
                     b_price = buy_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
                     
-                    # Mode logic
+                    # Mode logic: Try to sync with planned_modes log if possible
                     f_mode, _, _, _ = self._get_mode_at(f_dt, batt_soc, is_forecast=True, abs_hour=(h + (24 if is_tom else 0)))
+                    
+                    # Search for this hour in the logs to get the exact strategy mode
+                    h_log_key = f_dt.strftime("%H:00")
+                    planned_log = self._planned_modes.get(h_log_key, "")
+                    if planned_log:
+                        # Extract first word before space or parenthesis
+                        f_mode = planned_log.split(' ')[0].split('(')[0].strip()
                     
                     hourly_data[h_key] = {
                         "sell_price": round_f(s_price, 2) if s_price is not None else 0.0,
