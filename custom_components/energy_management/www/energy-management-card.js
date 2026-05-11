@@ -389,7 +389,8 @@ class EnergyManagementCard extends HTMLElement {
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
-      badge.innerText = `System v11.9.401`;
+      const modeLabel = MODE_LABELS[stateObj.state] || stateObj.state.toUpperCase();
+      badge.innerHTML = `<div>${modeLabel}</div><div style="font-size: 0.6rem; opacity: 0.8; margin-top: 2px;">v11.9.402</div>`;
       const color = MODE_COLORS[stateObj.state] || MODE_COLORS.default;
       badge.style.color = color;
       badge.style.borderColor = color;
