@@ -1,16 +1,26 @@
 import logging
 from pathlib import Path
+from aiohttp import web
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.components import frontend
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.components import frontend, websocket_api
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.loader import async_get_integration
+import voluptuous as vol
+
 from .const import DOMAIN, VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "binary_sensor", "number", "switch"]
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Energy Management component."""
+    hass.data.setdefault(DOMAIN, {})
+    _async_register_ws_version(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -116,6 +126,28 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .sensor import STORAGE_VERSION
     store = Store(hass, STORAGE_VERSION, f"energy_management_{entry.entry_id}")
     await store.async_remove()
+
+
+@callback
+def _async_register_ws_version(hass: HomeAssistant) -> None:
+    """Register a WebSocket command that reports the current integration version."""
+
+    @callback
+    def _ws_version(hass_: HomeAssistant, connection, msg) -> None:
+        async def _send() -> None:
+            connection.send_result(msg["id"], {"version": VERSION})
+
+        hass_.async_create_task(_send())
+
+    websocket_api.async_register_command(
+        hass,
+        f"{DOMAIN}/version",
+        _ws_version,
+        websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend(
+            {vol.Required("type"): f"{DOMAIN}/version"}
+        ),
+    )
+
 async def _async_register_card(hass: HomeAssistant) -> None:
     """Register the Lovelace card with a cache-busting version query string."""
     www_path = Path(__file__).parent / "www"
@@ -200,7 +232,6 @@ class CardStaticView(HomeAssistantView):
 
             hass = request.app["hass"]
             content = await hass.async_add_executor_job(read_file)
-            from aiohttp import web
             return web.Response(
                 text=content,
                 content_type="application/javascript",
