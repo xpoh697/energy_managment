@@ -346,9 +346,6 @@ class EnergyManagementCard extends HTMLElement {
     // Fallback: if not found, show all (though it should be found)
     const windowKeys = startIndex !== -1 ? sortedKeys.slice(startIndex, startIndex + 24) : sortedKeys.slice(0, 24);
 
-    let html = '';
-    let currentDayLabel = '';
-
     const hexToRgba = (hex, alpha) => {
       const r = parseInt(hex.slice(1, 3), 16);
       const g = parseInt(hex.slice(3, 5), 16);
@@ -356,50 +353,79 @@ class EnergyManagementCard extends HTMLElement {
       return `rgba(${r}, ${g}, ${b}, ${alpha})`;
     };
 
-    windowKeys.forEach((key, idx) => {
-      const isTomorrow = !key.includes(todayStr);
-      const label = isTomorrow ? 'TOMORROW' : 'TODAY';
-      const timeOnly = key.split(' ')[1];
-      const hourData = data[key];
-
-      if (label !== currentDayLabel) {
-        if (currentDayLabel !== '') html += '</div>';
-        html += `<div class="section-header">${label}</div><div class="timeline-grid">`;
-        currentDayLabel = label;
-      }
-
-      const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
-      const bgColor = hexToRgba(modeColor, 0.1);
-      html += `
-        <div class="hour-bar ${idx === 0 ? 'active' : ''}" 
-             data-ts="${key}" data-mode="${hourData.mode}">
-          <div class="bar-content" style="border-color: ${modeColor}; background-color: ${bgColor};">
-            <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
-            <span class="h-time">${timeOnly}</span>
-            <div class="h-prices">
-              <span class="price-buy">${hourData.buy_price.toFixed(2)}</span>
-              <span class="price-sell">${hourData.sell_price.toFixed(2)}</span>
-            </div>
-            <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
-            <div style="display:flex; flex-direction:column; align-items:center; margin-top:4px">
-              <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
+    // Smart DOM Update Logic
+    const currentKeysStr = windowKeys.join(',');
+    if (container._lastKeys !== currentKeysStr) {
+      // Structure changed (e.g., new hour started) -> Full rebuild
+      let html = '';
+      let currentDayLabel = '';
+      windowKeys.forEach((key, idx) => {
+        const isTomorrow = !key.includes(todayStr);
+        const label = isTomorrow ? 'TOMORROW' : 'TODAY';
+        const hourData = data[key];
+        if (label !== currentDayLabel) {
+          if (currentDayLabel !== '') html += '</div>';
+          html += `<div class="section-header">${label}</div><div class="timeline-grid">`;
+          currentDayLabel = label;
+        }
+        const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
+        const bgColor = hexToRgba(modeColor, 0.1);
+        html += `
+          <div class="hour-bar ${idx === 0 ? 'active' : ''}" data-ts="${key}" data-mode="${hourData.mode}" id="hb-${key.replace(/[: ]/g, '-')}">
+            <div class="bar-content" style="border-color: ${modeColor}; background-color: ${bgColor};">
+              <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
+              <span class="h-time">${key.split(' ')[1]}</span>
+              <div class="h-prices">
+                <span class="price-buy">${hourData.buy_price.toFixed(2)}</span>
+                <span class="price-sell">${hourData.sell_price.toFixed(2)}</span>
+              </div>
+              <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
+              <div style="display:flex; flex-direction:column; align-items:center; margin-top:4px">
+                <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
+              </div>
             </div>
           </div>
-        </div>
-      `;
-    });
-    html += '</div>';
-
-    if (container.innerHTML !== html) {
+        `;
+      });
+      html += '</div>';
       container.innerHTML = html;
+      container._lastKeys = currentKeysStr;
       
-      // Programmatic click binding for better Shadow DOM compatibility
+      // Re-bind listeners
       container.querySelectorAll('.hour-bar').forEach(bar => {
-        bar.addEventListener('click', (e) => {
-          const ts = bar.getAttribute('data-ts');
-          const mode = bar.getAttribute('data-mode');
-          this._openModal(ts, mode);
-        });
+        bar.addEventListener('click', () => this._openModal(bar.getAttribute('data-ts'), bar.getAttribute('data-mode')));
+      });
+    } else {
+      // Structure same -> Point update to preserve hover states
+      windowKeys.forEach(key => {
+        const hourData = data[key];
+        const bar = container.querySelector(`#hb-${key.replace(/[: ]/g, '-')}`);
+        if (!bar) return;
+        
+        const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
+        const content = bar.querySelector('.bar-content');
+        const icon = bar.querySelector('.h-icon');
+        const modeLabel = bar.querySelector('.h-mode');
+        const socLabel = bar.querySelector('.h-soc');
+        const buyPrice = bar.querySelector('.price-buy');
+        const sellPrice = bar.querySelector('.price-sell');
+
+        if (content) content.style.borderColor = modeColor;
+        if (icon) {
+          icon.style.color = modeColor;
+          icon.icon = MODE_ICONS[hourData.mode] || MODE_ICONS.default;
+        }
+        if (modeLabel) {
+          modeLabel.style.color = modeColor;
+          modeLabel.innerText = MODE_LABELS[hourData.mode] || hourData.mode;
+        }
+        if (socLabel) {
+          socLabel.style.color = modeColor;
+          socLabel.innerText = hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : '';
+        }
+        if (buyPrice) buyPrice.innerText = hourData.buy_price.toFixed(2);
+        if (sellPrice) sellPrice.innerText = hourData.sell_price.toFixed(2);
+        bar.setAttribute('data-mode', hourData.mode);
       });
     }
   }
