@@ -284,7 +284,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.407</div>
+        <div id="v-tag" class="version-tag">v11.9.408</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -369,9 +369,14 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.strokeDashoffset = 452 - (452 * Math.min(100, Math.max(0, soc))) / 100;
       bar.style.stroke = this._getBatteryColor(soc);
     }
-    this.shadowRoot.getElementById('v-tag').innerText = 'v11.9.407';
-    this.shadowRoot.getElementById('soc-val').innerText = Math.round(soc);
-    this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
+    const vTag = this.shadowRoot.getElementById('v-tag');
+    if (vTag) vTag.innerText = 'v11.9.408';
+    
+    const socVal = this.shadowRoot.getElementById('soc-val');
+    if (socVal) socVal.innerText = Math.round(soc);
+    
+    const projM = this.shadowRoot.getElementById('proj-morning');
+    if (projM) projM.innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     
     // v11.9.405: Dynamic Extra Indicators from Config
     this._updateExtraIndicators();
@@ -398,7 +403,7 @@ class EnergyManagementCard extends HTMLElement {
 
   _updateExtraIndicators() {
     const container = this.shadowRoot.getElementById('stats-container');
-    if (!container) return;
+    if (!container || !this._hass) return;
 
     // Remove old extra cards (keep morning projection at index 0)
     while (container.children.length > 1) {
