@@ -420,7 +420,10 @@ class EnergyManagementCard extends HTMLElement {
         const buyPrice = bar.querySelector('.price-buy');
         const sellPrice = bar.querySelector('.price-sell');
 
-        if (content) content.style.borderColor = modeColor;
+        if (content) {
+          content.style.borderColor = modeColor;
+          content.style.backgroundColor = hexToRgba(modeColor, 0.1);
+        }
         if (icon) {
           icon.style.color = modeColor;
           icon.icon = MODE_ICONS[hourData.mode] || MODE_ICONS.default;
