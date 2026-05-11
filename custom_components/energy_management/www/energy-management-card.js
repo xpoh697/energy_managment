@@ -84,7 +84,7 @@ class EnergyManagementCard extends HTMLElement {
         .gauge-wrap { position: relative; width: 250px; height: 250px; flex-shrink: 0; margin-bottom: 24px; }
         .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; overflow: visible; }
         .gauge-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 10; }
-        .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 16; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+        .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 16; stroke-linecap: round; transition: stroke-dashoffset 1s ease, stroke 1s ease; }
         .gauge-label { position: absolute; top: 53%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
         .soc-value { font-size: 4rem; font-weight: 900; line-height: 0.7; letter-spacing: -0.04em; }
         .soc-unit { font-size: 1rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 4px; }
@@ -354,6 +354,13 @@ class EnergyManagementCard extends HTMLElement {
     this._closeModal();
   }
 
+  _getBatteryColor(soc) {
+    if (soc < 20) return '#f44336'; // Red
+    if (soc < 50) return '#ff9800'; // Orange
+    if (soc < 80) return '#ffeb3b'; // Yellow
+    return '#4caf50'; // Green
+  }
+
   _updateUI() {
     const entityId = this._config.entity || 'sensor.energy_management';
     const stateObj = this._hass.states[entityId];
@@ -366,7 +373,10 @@ class EnergyManagementCard extends HTMLElement {
 
     // Update Gauge & Stats
     const bar = this.shadowRoot.getElementById('gauge-bar');
-    if (bar) bar.style.strokeDashoffset = 452 - (452 * Math.min(100, Math.max(0, soc))) / 100;
+    if (bar) {
+      bar.style.strokeDashoffset = 452 - (452 * Math.min(100, Math.max(0, soc))) / 100;
+      bar.style.stroke = this._getBatteryColor(soc);
+    }
     this.shadowRoot.getElementById('soc-val').innerText = Math.round(soc);
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     
@@ -390,7 +400,7 @@ class EnergyManagementCard extends HTMLElement {
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
       const modeLabel = MODE_LABELS[stateObj.state] || stateObj.state.toUpperCase();
-      badge.innerHTML = `<div>${modeLabel}</div><div style="font-size: 0.6rem; opacity: 0.8; margin-top: 2px;">v11.9.402</div>`;
+      badge.innerHTML = `<div>${modeLabel}</div><div style="font-size: 0.6rem; opacity: 0.8; margin-top: 2px;">v11.9.403</div>`;
       const color = MODE_COLORS[stateObj.state] || MODE_COLORS.default;
       badge.style.color = color;
       badge.style.borderColor = color;
