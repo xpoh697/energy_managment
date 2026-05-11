@@ -259,8 +259,6 @@ class EnergyManagementCard extends HTMLElement {
               <div class="modal-info-grid">
                 <div class="info-row"><span>Buy:</span><b id="info-buy">-</b></div>
                 <div class="info-row"><span>Sell:</span><b id="info-sell">-</b></div>
-                <div class="info-row"><span>Export:</span><b id="info-export">-</b></div>
-                <div class="info-row"><span>PV Input:</span><b id="info-pv">-</b></div>
               </div>
               <div class="form-group">
                 <span class="form-label">Mode Override</span>
@@ -311,14 +309,6 @@ class EnergyManagementCard extends HTMLElement {
     const currency = this._hass.states[this._config.entity].attributes.unit_of_measurement || 'PLN';
     this.shadowRoot.getElementById('info-buy').innerText = `${hourData.buy_price || 0} ${currency}`;
     this.shadowRoot.getElementById('info-sell').innerText = `${hourData.sell_price || 0} ${currency}`;
-    
-    const canExport = hourData.sell_price > 0 || currentMode === 'sell';
-    this.shadowRoot.getElementById('info-export').innerText = canExport ? 'ON' : 'OFF';
-    this.shadowRoot.getElementById('info-export').style.color = canExport ? '#4caf50' : '#f44336';
-    
-    const hasPv = hourData.mode !== 'buy' && hourData.mode !== 'stop_sale'; 
-    this.shadowRoot.getElementById('info-pv').innerText = hasPv ? 'ON' : 'OFF';
-    this.shadowRoot.getElementById('info-pv').style.color = hasPv ? '#4caf50' : '#aaa';
 
     this._toggleSocVisibility();
     this.shadowRoot.getElementById('modal').classList.add('open');
@@ -367,7 +357,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.384';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.385';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
