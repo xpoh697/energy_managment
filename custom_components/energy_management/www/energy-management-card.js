@@ -4,13 +4,13 @@
  */
 
 const MODE_COLORS = {
-  'sale_pv': '#ffd700',            // Gold (Normal)
+  'sale_pv': '#4caf50',            // Green (Normal)
   'sale_pv_no_bat': '#ff8c00',     // Orange (Export PV)
   'sale_pv_bat': '#ff4500',         // Red (Export Bat)
-  'buy': '#32cd32',                 // Lime Green (Charging)
+  'buy': '#2196f3',                 // Blue (Charging)
   'stop_sale': '#808080',           // Grey
   'bat_emergency': '#9400d3',      // Dark Violet
-  'no_pv_sale_no_bat': '#ffd700',   // Gold (Wait)
+  'no_pv_sale_no_bat': '#4caf50',   // Green (Wait)
   'default': '#727272'
 };
 
@@ -81,13 +81,13 @@ class EnergyManagementCard extends HTMLElement {
         .status-badge { padding: 8px 16px; border-radius: 16px; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; border: 2px solid rgba(255,255,255,0.1); }
 
         .hero-section { display: flex; align-items: center; gap: 32px; margin-bottom: 32px; background: rgba(255,255,255,0.03); padding: 20px; border-radius: 24px; }
-        .gauge-wrap { position: relative; width: 140px; height: 140px; }
+        .gauge-wrap { position: relative; width: 160px; height: 160px; }
         .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; }
         .gauge-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 8; }
         .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
-        .gauge-label { position: absolute; top: 47%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
-        .soc-value { font-size: 2.5rem; font-weight: 900; line-height: 0.8; letter-spacing: -0.03em; }
-        .soc-unit { font-size: 0.65rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 2px; }
+        .gauge-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
+        .soc-value { font-size: 2.8rem; font-weight: 900; line-height: 0.8; letter-spacing: -0.03em; }
+        .soc-unit { font-size: 0.7rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 4px; }
         
         .stats-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         .stat-card { background: rgba(255,255,255,0.02); padding: 14px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.05); }
@@ -99,25 +99,25 @@ class EnergyManagementCard extends HTMLElement {
         
         .hour-bar {
           background: rgba(0,0,0,0.4);
-          border-radius: 18px;
-          padding: 14px 8px;
+          border-radius: 14px;
+          padding: 8px 4px;
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: space-between;
-          min-height: 105px;
+          justify-content: center;
+          min-height: 90px;
           transition: all 0.2s;
           border: 2px solid transparent;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
-        .hour-bar.active { border-style: dashed; border-color: white; background: rgba(255,255,255,0.05); }
-        .h-icon { --mdc-icon-size: 24px; margin-bottom: 4px; }
-        .h-time { font-size: 1.1rem; font-weight: 900; color: white; }
-        .h-prices { display: flex; gap: 8px; margin: 6px 0; }
-        .price-buy { font-size: 0.75rem; font-weight: 800; color: #4dabf5; }
-        .price-sell { font-size: 0.75rem; font-weight: 800; color: #69f0ae; }
-        .h-mode { font-size: 0.65rem; font-weight: 800; text-align: center; line-height: 1.1; }
-
-        .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; }
+        .hour-bar.active { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.2); }
+        .h-icon { --mdc-icon-size: 22px; margin-bottom: 2px; }
+        .h-time { font-size: 1rem; font-weight: 900; color: white; line-height: 1; }
+        .h-prices { display: flex; gap: 6px; margin: 4px 0; }
+        .price-buy { font-size: 0.7rem; font-weight: 800; color: #90caf9; }
+        .price-sell { font-size: 0.7rem; font-weight: 800; color: #a5d6a7; }
+        .h-mode { font-size: 0.6rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; color: white; }
+        .h-soc { font-size: 0.5rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-top: 1px; }
         .btn {
           height: 64px;
           background: rgba(255,255,255,0.05);
@@ -145,8 +145,8 @@ class EnergyManagementCard extends HTMLElement {
         <div class="hero-section">
           <div class="gauge-wrap">
             <svg class="gauge-svg" viewBox="0 0 100 100">
-              <circle class="gauge-track" cx="50" cy="50" r="42"></circle>
-              <circle id="gauge-bar" class="gauge-bar" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="264"></circle>
+              <circle class="gauge-track" cx="50" cy="50" r="46"></circle>
+              <circle id="gauge-bar" class="gauge-bar" cx="50" cy="50" r="46" stroke-dasharray="289" stroke-dashoffset="289"></circle>
             </svg>
             <div class="gauge-label">
               <span id="soc-val" class="soc-value">--</span>
@@ -234,9 +234,9 @@ class EnergyManagementCard extends HTMLElement {
 
       const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
       html += `
-        <div class="hour-bar ${idx === 0 ? 'active' : ''}" style="border-color: ${modeColor}; color: ${modeColor}">
-          <ha-icon class="h-icon" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
-          <span class="h-time" style="color:white">${timeOnly}</span>
+        <div class="hour-bar ${idx === 0 ? 'active' : ''}" style="border-color: ${modeColor}; background-color: ${modeColor}80;">
+          <ha-icon class="h-icon" style="color:white" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
+          <span class="h-time">${timeOnly}</span>
           <div class="h-prices">
             <span class="price-buy">${hourData.buy_price.toFixed(2)}</span>
             <span class="price-sell">${hourData.sell_price.toFixed(2)}</span>
