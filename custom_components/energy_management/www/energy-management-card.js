@@ -99,15 +99,15 @@ class EnergyManagementCard extends HTMLElement {
         .timeline-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 8px; margin-bottom: 8px; }
         
         .hour-bar {
-          border-radius: 14px;
+          border-radius: 12px;
           padding: 0;
-          min-height: 105px;
+          min-height: 90px;
           cursor: pointer;
           position: relative;
           background: transparent;
         }
         .bar-content {
-          padding: 10px 4px;
+          padding: 8px 2px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -128,13 +128,13 @@ class EnergyManagementCard extends HTMLElement {
           border-color: rgba(255,255,255,0.4);
         }
         .hour-bar.active .bar-content { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.1); }
-        .h-icon { --mdc-icon-size: 22px; margin-bottom: 4px; }
-        .h-time { font-size: 1.1rem; font-weight: 900; color: white; line-height: 1; }
-        .h-prices { display: flex; gap: 8px; margin: 6px 0; }
-        .price-buy { font-size: 0.75rem; font-weight: 800; color: #90caf9; }
-        .price-sell { font-size: 0.75rem; font-weight: 800; color: #a5d6a7; }
-        .h-mode { font-size: 0.65rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .h-soc { font-size: 0.55rem; font-weight: 700; color: rgba(255,255,255,0.7); margin-top: 2px; }
+        .h-icon { --mdc-icon-size: 20px; margin-bottom: 2px; }
+        .h-time { font-size: 1rem; font-weight: 900; color: white; line-height: 1; }
+        .h-prices { display: flex; gap: 6px; margin: 4px 0; }
+        .price-buy { font-size: 0.7rem; font-weight: 800; color: #90caf9; }
+        .price-sell { font-size: 0.7rem; font-weight: 800; color: #a5d6a7; }
+        .h-mode { font-size: 0.6rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .h-soc { font-size: 0.5rem; font-weight: 700; color: rgba(255,255,255,0.6); margin-top: 1px; }
 
         .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-top: 24px; }
         .btn {
@@ -300,7 +300,7 @@ class EnergyManagementCard extends HTMLElement {
     this._editingTimestamp = timestamp;
     this.shadowRoot.getElementById('modal-title').innerText = timestamp;
     this.shadowRoot.getElementById('modal-mode').value = currentMode === 'ai' ? 'ai' : currentMode;
-    
+
     const socSlider = this.shadowRoot.getElementById('modal-soc');
     if (socSlider) {
       socSlider.value = currentSocLimit;
@@ -333,13 +333,13 @@ class EnergyManagementCard extends HTMLElement {
   async _saveOverride(forcedMode) {
     const mode = forcedMode || this.shadowRoot.getElementById('modal-mode').value;
     const soc = this.shadowRoot.getElementById('modal-soc').value;
-    
+
     await this._hass.callService('energy_management', 'set_hourly_override', {
       timestamp: this._editingTimestamp,
       mode: mode,
       soc_limit: parseFloat(soc)
     });
-    
+
     this._closeModal();
   }
 
@@ -360,20 +360,20 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.392';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.394';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
-        badge.innerText = stateObj.state.replace(/_/g, ' ');
-        const color = MODE_COLORS[stateObj.state] || MODE_COLORS.default;
-        badge.style.color = color;
-        badge.style.borderColor = color;
+      badge.innerText = stateObj.state.replace(/_/g, ' ');
+      const color = MODE_COLORS[stateObj.state] || MODE_COLORS.default;
+      badge.style.color = color;
+      badge.style.borderColor = color;
     }
 
     const btnBuy = this.shadowRoot.getElementById('btn-buy');
     const btnStop = this.shadowRoot.getElementById('btn-stop');
     const btnAi = this.shadowRoot.getElementById('btn-ai');
-    
+
     if (btnBuy) btnBuy.classList.toggle('active', stateObj.state === 'buy');
     if (btnStop) btnStop.classList.toggle('active', stateObj.state === 'stop_sale');
     if (btnAi) btnAi.classList.toggle('active', ['buy', 'stop_sale'].indexOf(stateObj.state) === -1);
@@ -384,7 +384,7 @@ class EnergyManagementCard extends HTMLElement {
   _renderTimeline(data) {
     const container = this.shadowRoot.getElementById('timeline-container');
     if (!container) return;
-    
+
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
 
@@ -394,7 +394,7 @@ class EnergyManagementCard extends HTMLElement {
 
     // Find the index of the current hour for the "Sliding Window"
     const startIndex = sortedKeys.findIndex(k => k.includes(todayStr) && k.includes(`${currentHour < 10 ? '0' + currentHour : currentHour}:00`));
-    
+
     // Fallback: if not found, show all (though it should be found)
     const windowKeys = startIndex !== -1 ? sortedKeys.slice(startIndex, startIndex + 24) : sortedKeys.slice(0, 24);
 
@@ -442,7 +442,7 @@ class EnergyManagementCard extends HTMLElement {
       html += '</div>';
       container.innerHTML = html;
       container._lastKeys = currentKeysStr;
-      
+
       // Re-bind listeners
       container.querySelectorAll('.hour-bar').forEach(bar => {
         bar.addEventListener('click', () => this._openModal(bar.getAttribute('data-ts'), bar.getAttribute('data-mode')));
@@ -453,7 +453,7 @@ class EnergyManagementCard extends HTMLElement {
         const hourData = data[key];
         const bar = container.querySelector(`#hb-${key.replace(/[: ]/g, '-')}`);
         if (!bar) return;
-        
+
         const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
         const content = bar.querySelector('.bar-content');
         const icon = bar.querySelector('.h-icon');
