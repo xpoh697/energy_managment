@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v11.9.412 ",
+  "%c ENERGY MANAGEMENT %c v11.9.413 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -162,7 +162,7 @@ class EnergyManagementCard extends HTMLElement {
         .h-mode { font-size: 0.55rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.02em; }
         .h-soc { font-size: 0.45rem; font-weight: 700; color: rgba(255,255,255,0.5); margin-top: 0; }
 
-        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-top: 24px; }
+
         .btn {
           height: 52px;
           background: rgba(255,255,255,0.06);
@@ -266,11 +266,7 @@ class EnergyManagementCard extends HTMLElement {
           </div>
         </div>
 
-        <div class="controls">
-          <button id="btn-buy" class="btn" onclick="this.getRootNode().host._callService('force_buy')"><ha-icon icon="mdi:lightning-bolt"></ha-icon> Force Buy</button>
-          <button id="btn-stop" class="btn" onclick="this.getRootNode().host._callService('stop_sale')"><ha-icon icon="mdi:hand-back-right"></ha-icon> Stop Sale</button>
-          <button id="btn-ai" class="btn" onclick="this.getRootNode().host._callService('ai_mode')"><ha-icon icon="mdi:robot"></ha-icon> AI Mode</button>
-        </div>
+
 
         <div id="timeline-container">
           <!-- Dynamic sections TODAY / TOMORROW will be here -->
@@ -406,7 +402,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.stroke = this._getBatteryColor(soc);
     }
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.412';
+    if (vTag) vTag.innerText = 'v11.9.413';
     
     const socVal = this.shadowRoot.getElementById('soc-val');
     if (socVal) socVal.innerText = Math.round(soc);
@@ -426,13 +422,7 @@ class EnergyManagementCard extends HTMLElement {
       badge.style.borderColor = color;
     }
 
-    const btnBuy = this.shadowRoot.getElementById('btn-buy');
-    const btnStop = this.shadowRoot.getElementById('btn-stop');
-    const btnAi = this.shadowRoot.getElementById('btn-ai');
 
-    if (btnBuy) btnBuy.classList.toggle('active', stateObj.state === 'buy');
-    if (btnStop) btnStop.classList.toggle('active', stateObj.state === 'stop_sale');
-    if (btnAi) btnAi.classList.toggle('active', ['buy', 'stop_sale'].indexOf(stateObj.state) === -1);
 
     this._renderTimeline(hourlyData);
   }
