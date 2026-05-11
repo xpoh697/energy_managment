@@ -263,13 +263,13 @@ class EnergyManagementCard extends HTMLElement {
               <div class="form-group">
                 <span class="form-label">Mode Override</span>
                 <select id="modal-mode" onchange="this.getRootNode().host._toggleSocVisibility()">
-                   <option value="ai">AI (Automatic)</option>
+                  <option value="ai">AI (Automatic)</option>
                   <option value="buy">Grid Charging</option>
-                  <option value="sale_pv_bat">Discharge Battery</option>
-                  <option value="sale_pv_no_bat">Export PV Only</option>
-                  <option value="no_pv_sale_no_bat">System Wait (Idle)</option>
+                  <option value="sale_pv_bat">Discharge</option>
+                  <option value="sale_pv_no_bat">Export PV</option>
+                  <option value="no_pv_sale_no_bat">Wait</option>
                   <option value="stop_sale">Stop Sale</option>
-                  <option value="sale_pv">Normal (PV Only)</option>
+                  <option value="sale_pv">Normal</option>
                 </select>
               </div>
               <div class="form-group" id="soc-group">
@@ -360,7 +360,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.389';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.391';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
