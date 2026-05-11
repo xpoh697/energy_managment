@@ -1,6 +1,6 @@
 /**
- * Energy Management Card (v11.9.337+)
- * Premium UI with Detailed Schedule (4x6 Grid)
+ * Energy Management Card (v11.9.338+)
+ * Final Premium UI: Detailed 4x6 Grid with Prices & Icons
  */
 
 const MODE_COLORS = {
@@ -8,7 +8,7 @@ const MODE_COLORS = {
   'sale_pv_no_bat': 'hsl(35, 90%, 50%)',  // Orange
   'sale_pv_bat': 'hsl(5, 80%, 55%)',      // Red/Coral
   'buy': 'hsl(210, 80%, 50%)',            // Blue
-  'stop_sale': 'hsl(0, 0%, 40%)',          // Dark Grey
+  'stop_sale': 'hsl(0, 0%, 40%)',          // Grey
   'bat_emergency': 'hsl(280, 70%, 50%)',   // Purple
   'no_pv_sale_no_bat': 'hsl(210, 10%, 30%)',// Slate
   'default': 'var(--secondary-text-color)'
@@ -26,13 +26,13 @@ const MODE_ICONS = {
 };
 
 const MODE_LABELS = {
-  'sale_pv': 'sale_pv',
-  'sale_pv_no_bat': 'sale_pv_no_bat',
-  'sale_pv_bat': 'sale_pv_bat',
-  'buy': 'buy',
-  'stop_sale': 'stop_sale',
-  'bat_emergency': 'emergency',
-  'no_pv_sale_no_bat': 'night_wait'
+  'sale_pv': 'Normal',
+  'sale_pv_no_bat': 'Export PV',
+  'sale_pv_bat': 'Export Battery',
+  'buy': 'Grid Charging',
+  'stop_sale': 'Stop Sale',
+  'bat_emergency': 'Emergency',
+  'no_pv_sale_no_bat': 'Wait'
 };
 
 class EnergyManagementCard extends HTMLElement {
@@ -76,7 +76,7 @@ class EnergyManagementCard extends HTMLElement {
           font-family: var(--font-family);
           position: relative;
           overflow: hidden;
-          min-width: 360px;
+          min-width: 380px;
         }
         .header {
           display: flex;
@@ -144,13 +144,13 @@ class EnergyManagementCard extends HTMLElement {
         }
         .hour-bar {
           background: rgba(0,0,0,0.03);
-          border-radius: 18px;
-          padding: 12px 8px;
+          border-radius: 20px;
+          padding: 14px 8px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: space-between;
-          min-height: 90px;
+          min-height: 105px;
           transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
           border: 2px solid transparent;
           cursor: help;
@@ -158,12 +158,12 @@ class EnergyManagementCard extends HTMLElement {
         .hour-bar:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 2; }
         .hour-bar.active { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(3, 169, 244, 0.2); transform: scale(1.02); }
         
-        .h-icon { --mdc-icon-size: 24px; color: white; margin-bottom: 4px; }
-        .h-time { font-size: 0.9rem; font-weight: 900; color: white; line-height: 1; }
-        .h-prices { display: flex; gap: 6px; margin: 6px 0; }
-        .price-buy { font-size: 0.65rem; font-weight: 800; color: #90caf9; }
-        .price-sell { font-size: 0.65rem; font-weight: 800; color: #a5d6a7; }
-        .h-mode { font-size: 0.52rem; font-weight: 800; text-transform: uppercase; color: rgba(255,255,255,0.9); text-align: center; word-break: break-all; }
+        .h-icon { --mdc-icon-size: 26px; color: white; margin-bottom: 6px; }
+        .h-time { font-size: 1rem; font-weight: 900; color: white; line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+        .h-prices { display: flex; gap: 8px; margin: 8px 0; }
+        .price-buy { font-size: 0.7rem; font-weight: 800; color: #90caf9; }
+        .price-sell { font-size: 0.7rem; font-weight: 800; color: #a5d6a7; }
+        .h-mode { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; color: rgba(255,255,255,0.95); text-align: center; line-height: 1.1; }
 
         .controls { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
         .controls::-webkit-scrollbar { display: none; }
@@ -280,7 +280,7 @@ class EnergyManagementCard extends HTMLElement {
     const currentMode = stateObj.state;
     const hourlyData = attrs.hourly_data || {};
     const power = parseFloat(attrs.power) || 0;
-    const version = bms.v || 'v11.9.337';
+    const version = bms.v || 'v11.9.338';
 
     // Update Gauge
     const bar = this.shadowRoot.getElementById('gauge-bar');
@@ -347,7 +347,7 @@ class EnergyManagementCard extends HTMLElement {
     this._hass.callService('energy_management', action, {});
   }
 
-  getCardSize() { return 8; }
+  getCardSize() { return 10; }
 }
 
 customElements.define('energy-management-card', EnergyManagementCard);
