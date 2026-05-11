@@ -85,8 +85,9 @@ class EnergyManagementCard extends HTMLElement {
         .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; }
         .gauge-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 8; }
         .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
-        .gauge-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
-        .soc-value { font-size: 2.5rem; font-weight: 900; }
+        .gauge-label { position: absolute; top: 47%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
+        .soc-value { font-size: 2.5rem; font-weight: 900; line-height: 0.8; letter-spacing: -0.03em; }
+        .soc-unit { font-size: 0.65rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 2px; }
         
         .stats-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         .stat-card { background: rgba(255,255,255,0.02); padding: 14px; border-radius: 18px; border: 1px solid rgba(255,255,255,0.05); }
@@ -149,7 +150,7 @@ class EnergyManagementCard extends HTMLElement {
             </svg>
             <div class="gauge-label">
               <span id="soc-val" class="soc-value">--</span>
-              <span style="font-size:0.8rem; font-weight:700; color:var(--secondary-text)">SOC %</span>
+              <span class="soc-unit">SOC %</span>
             </div>
           </div>
           <div class="stats-grid">
@@ -183,7 +184,7 @@ class EnergyManagementCard extends HTMLElement {
     const soc = parseFloat(attrs.battery_soc) || 0;
     const bms = attrs.bms_status || {};
     const hourlyData = attrs.hourly_data || {};
-    
+
     // Update Gauge & Stats
     const bar = this.shadowRoot.getElementById('gauge-bar');
     if (bar) bar.style.strokeDashoffset = 264 - (264 * Math.min(100, Math.max(0, soc))) / 100;
@@ -209,10 +210,10 @@ class EnergyManagementCard extends HTMLElement {
     const now = new Date();
     const currentHour = now.getHours();
     const todayStr = now.toISOString().split('T')[0];
-    
+
     const sortedKeys = Object.keys(data).sort();
-    const startIndex = sortedKeys.findIndex(k => k.includes(todayStr) && k.includes(`${currentHour < 10 ? '0'+currentHour : currentHour}:00`));
-    
+    const startIndex = sortedKeys.findIndex(k => k.includes(todayStr) && k.includes(`${currentHour < 10 ? '0' + currentHour : currentHour}:00`));
+
     if (startIndex === -1) return;
 
     const windowKeys = sortedKeys.slice(startIndex, startIndex + 24);
