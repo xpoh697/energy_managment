@@ -98,7 +98,6 @@ class EnergyManagementCard extends HTMLElement {
         .timeline-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
         
         .hour-bar {
-          background: rgba(0,0,0,0.4);
           border-radius: 14px;
           padding: 8px 4px;
           display: flex;
@@ -118,23 +117,26 @@ class EnergyManagementCard extends HTMLElement {
         .price-sell { font-size: 0.7rem; font-weight: 800; color: #a5d6a7; }
         .h-mode { font-size: 0.6rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; color: white; }
         .h-soc { font-size: 0.5rem; font-weight: 700; color: rgba(255,255,255,0.8); margin-top: 1px; }
+
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-top: 24px; }
         .btn {
-          height: 64px;
-          background: rgba(255,255,255,0.05);
-          border: 2px solid rgba(255,255,255,0.1);
-          border-radius: 20px;
-          font-size: 1rem;
+          height: 52px;
+          background: rgba(255,255,255,0.06);
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 16px;
+          font-size: 0.85rem;
           font-weight: 800;
           cursor: pointer;
           transition: all 0.2s;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 12px;
+          gap: 8px;
           color: white;
+          white-space: nowrap;
         }
-        .btn:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-2px); }
-        .btn ha-icon { --mdc-icon-size: 26px; }
+        .btn:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(3, 169, 244, 0.3); }
+        .btn ha-icon { --mdc-icon-size: 20px; }
       </style>
       <ha-card>
         <div class="header">
@@ -240,7 +242,7 @@ class EnergyManagementCard extends HTMLElement {
       }
 
       const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
-      const bgColor = hexToRgba(modeColor, 0.5);
+      const bgColor = hexToRgba(modeColor, 0.2);
       html += `
         <div class="hour-bar ${idx === 0 ? 'active' : ''}" style="border-color: ${modeColor}; background-color: ${bgColor};">
           <ha-icon class="h-icon" style="color:white" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
