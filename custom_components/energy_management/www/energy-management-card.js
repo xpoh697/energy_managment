@@ -95,28 +95,28 @@ class EnergyManagementCard extends HTMLElement {
         .stat-value { font-size: 1rem; font-weight: 800; color: white; }
 
         .section-header { font-size: 0.9rem; font-weight: 900; color: #4dabf5; margin: 20px 0 12px; letter-spacing: 0.05em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
-        .timeline-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+        .timeline-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 8px; }
         
         .hour-bar {
-          border-radius: 20px;
-          padding: 16px 10px;
+          border-radius: 14px;
+          padding: 10px 4px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          min-height: 130px;
+          min-height: 105px;
           transition: all 0.2s;
-          border: 2px solid transparent;
-          text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+          border: 1px solid transparent;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
-        .hour-bar.active { border-style: dashed; border-color: white; box-shadow: 0 0 20px rgba(255,255,255,0.2); transform: scale(1.02); }
-        .h-icon { --mdc-icon-size: 28px; margin-bottom: 6px; }
-        .h-time { font-size: 1.3rem; font-weight: 900; color: white; line-height: 1; }
-        .h-prices { display: flex; gap: 10px; margin: 8px 0; }
-        .price-buy { font-size: 0.85rem; font-weight: 800; color: #90caf9; }
-        .price-sell { font-size: 0.85rem; font-weight: 800; color: #a5d6a7; }
-        .h-mode { font-size: 0.75rem; font-weight: 800; text-align: center; line-height: 1.1; margin-top: 4px; color: white; text-transform: uppercase; letter-spacing: 0.05em; }
-        .h-soc { font-size: 0.65rem; font-weight: 700; color: rgba(255,255,255,0.9); margin-top: 4px; }
+        .hour-bar.active { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.1); }
+        .h-icon { --mdc-icon-size: 22px; margin-bottom: 4px; }
+        .h-time { font-size: 1.1rem; font-weight: 900; color: white; line-height: 1; }
+        .h-prices { display: flex; gap: 8px; margin: 6px 0; }
+        .price-buy { font-size: 0.75rem; font-weight: 800; color: #90caf9; }
+        .price-sell { font-size: 0.75rem; font-weight: 800; color: #a5d6a7; }
+        .h-mode { font-size: 0.65rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .h-soc { font-size: 0.55rem; font-weight: 700; color: rgba(255,255,255,0.7); margin-top: 2px; }
 
         .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-top: 24px; }
         .btn {
@@ -242,7 +242,7 @@ class EnergyManagementCard extends HTMLElement {
       }
 
       const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
-      const bgColor = hexToRgba(modeColor, 0.2);
+      const bgColor = hexToRgba(modeColor, 0.1);
       html += `
         <div class="hour-bar ${idx === 0 ? 'active' : ''}" style="border-color: ${modeColor}; background-color: ${bgColor};">
           <ha-icon class="h-icon" style="color:white" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
@@ -251,7 +251,10 @@ class EnergyManagementCard extends HTMLElement {
             <span class="price-buy">${hourData.buy_price.toFixed(2)}</span>
             <span class="price-sell">${hourData.sell_price.toFixed(2)}</span>
           </div>
-          <span class="h-mode">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
+          <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
+          <div style="display:flex; flex-direction:column; align-items:center">
+            <span class="h-soc">${hourData.soc !== undefined ? 'SOC ' + Math.round(hourData.soc) + '%' : ''}</span>
+          </div>
         </div>
       `;
     });
