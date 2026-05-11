@@ -1,10 +1,12 @@
 import logging
+from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-
-from homeassistant.components.http import StaticPathConfig
-from .const import DOMAIN
+from homeassistant.components import frontend
+from homeassistant.components.http import HomeAssistantView
+from homeassistant.loader import async_get_integration
+from .const import DOMAIN, VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -15,14 +17,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Energy Profile from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # v11.9.333: Register static path for the UI card (Modern async method)
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(
-            "/api/energy_management/static",
-            hass.config.path("custom_components/energy_management/www"),
-            False
-        )
-    ])
+    # v11.9.333: Register Lovelace card using the premium pattern
+    await _async_register_card(hass)
     
     # We delay import to avoid circular dependency
     from .sensor import EnergyProfileManager
@@ -120,3 +116,99 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .sensor import STORAGE_VERSION
     store = Store(hass, STORAGE_VERSION, f"energy_management_{entry.entry_id}")
     await store.async_remove()
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Register the Lovelace card with a cache-busting version query string."""
+    www_path = Path(__file__).parent / "www"
+    
+    # Register the static view for serving the JS file
+    hass.http.register_view(CardStaticView(www_path))
+    
+    card_url = f"/api/{DOMAIN}/static/energy-management-card.js?v={VERSION}"
+
+    # Try to register as a Lovelace resource (Storage Mode)
+    registered_as_resource = await _async_register_lovelace_resource(hass, card_url)
+    if not registered_as_resource:
+        # Fallback for YAML mode
+        frontend.add_extra_js_url(hass, card_url)
+        _LOGGER.debug("Registered card via extra_js_url fallback: %s", card_url)
+    else:
+        _LOGGER.debug("Registered card via Lovelace resource: %s", card_url)
+
+async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bool:
+    """Create or update the Lovelace resource entry for the card."""
+    lovelace_data = hass.data.get("lovelace")
+    if lovelace_data is None:
+        return False
+
+    resources = getattr(lovelace_data, "resources", None)
+    if resources is None:
+        return False
+
+    if not hasattr(resources, "async_create_item") or not hasattr(resources, "async_update_item"):
+        return False
+
+    try:
+        if hasattr(resources, "async_load"):
+            await resources.async_load()
+    except Exception:
+        return False
+
+    existing = None
+    try:
+        for item in resources.async_items():
+            if "energy-management-card.js" in item.get("url", ""):
+                existing = item
+                break
+    except Exception:
+        return False
+
+    try:
+        if existing is not None:
+            if existing.get("url") != url:
+                await resources.async_update_item(existing["id"], {"res_type": "module", "url": url})
+                _LOGGER.info("Updated Lovelace resource: %s", url)
+        else:
+            await resources.async_create_item({"res_type": "module", "url": url})
+            _LOGGER.info("Created Lovelace resource: %s", url)
+    except Exception as err:
+        _LOGGER.warning("Failed to register Lovelace resource: %s", err)
+        return False
+
+    return True
+
+class CardStaticView(HomeAssistantView):
+    """View to serve static card files with cache control."""
+    url = f"/api/{DOMAIN}/static/{{filename}}"
+    name = f"api:{DOMAIN}:static"
+    requires_auth = False
+
+    def __init__(self, www_path: Path) -> None:
+        self._www_path = www_path
+
+    async def get(self, request, filename: str):
+        """Handle GET request for static files."""
+        if filename != "energy-management-card.js":
+            return web.Response(status=404)
+
+        file_path = self._www_path / filename
+        if not file_path.exists():
+            return web.Response(status=404)
+
+        try:
+            def read_file():
+                return file_path.read_text(encoding="utf-8")
+
+            hass = request.app["hass"]
+            content = await hass.async_add_executor_job(read_file)
+            from aiohttp import web
+            return web.Response(
+                text=content,
+                content_type="application/javascript",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0"
+                },
+            )
+        except Exception:
+            return web.Response(status=500)
