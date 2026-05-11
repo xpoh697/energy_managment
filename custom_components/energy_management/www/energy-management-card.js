@@ -100,24 +100,33 @@ class EnergyManagementCard extends HTMLElement {
         
         .hour-bar {
           border-radius: 14px;
+          padding: 0;
+          min-height: 105px;
+          transition: all 0.2s ease;
+          cursor: pointer;
+          position: relative;
+        }
+        .bar-content {
           padding: 10px 4px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          min-height: 105px;
-          transition: all 0.2s ease;
+          height: 100%;
+          width: 100%;
+          border-radius: 14px;
           border: 1px solid transparent;
           text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-          cursor: pointer;
+          transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+          box-sizing: border-box;
         }
-        .hour-bar:hover {
-          transform: translateY(-4px) scale(1.02);
-          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        .hour-bar:hover .bar-content {
+          transform: translateY(-5px) scale(1.02);
+          box-shadow: 0 10px 25px rgba(0,0,0,0.5);
           filter: brightness(1.2);
           z-index: 10;
         }
-        .hour-bar.active { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.1); }
+        .hour-bar.active .bar-content { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.1); }
         .h-icon { --mdc-icon-size: 22px; margin-bottom: 4px; }
         .h-time { font-size: 1.1rem; font-weight: 900; color: white; line-height: 1; }
         .h-prices { display: flex; gap: 8px; margin: 6px 0; }
@@ -362,17 +371,18 @@ class EnergyManagementCard extends HTMLElement {
       const bgColor = hexToRgba(modeColor, 0.1);
       html += `
         <div class="hour-bar ${idx === 0 ? 'active' : ''}" 
-             data-ts="${key}" data-mode="${hourData.mode}"
-             style="border-color: ${modeColor}; background-color: ${bgColor}; cursor: pointer">
-          <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
-          <span class="h-time">${timeOnly}</span>
-          <div class="h-prices">
-            <span class="price-buy">${hourData.buy_price.toFixed(2)}</span>
-            <span class="price-sell">${hourData.sell_price.toFixed(2)}</span>
-          </div>
-          <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
-          <div style="display:flex; flex-direction:column; align-items:center; margin-top:4px">
-            <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
+             data-ts="${key}" data-mode="${hourData.mode}">
+          <div class="bar-content" style="border-color: ${modeColor}; background-color: ${bgColor};">
+            <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
+            <span class="h-time">${timeOnly}</span>
+            <div class="h-prices">
+              <span class="price-buy">${hourData.buy_price.toFixed(2)}</span>
+              <span class="price-sell">${hourData.sell_price.toFixed(2)}</span>
+            </div>
+            <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
+            <div style="display:flex; flex-direction:column; align-items:center; margin-top:4px">
+              <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
+            </div>
           </div>
         </div>
       `;
