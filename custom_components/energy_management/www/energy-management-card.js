@@ -10,7 +10,7 @@ const MODE_COLORS = {
   'buy': '#2196f3',                 // Blue (Charging)
   'stop_sale': '#808080',           // Grey
   'bat_emergency': '#9400d3',      // Dark Violet
-  'no_pv_sale_no_bat': '#4caf50',   // Green (Wait)
+  'no_pv_sale_no_bat': '#808080',   // Grey (Wait)
   'default': '#727272'
 };
 
@@ -360,7 +360,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.395';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.396';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
