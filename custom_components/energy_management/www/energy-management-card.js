@@ -4,18 +4,20 @@
  */
 
 const MODE_COLORS = {
-  'sale_pv': 'hsl(45, 100%, 50%)',         // Gold
-  'sale_pv_no_bat': 'hsl(30, 100%, 50%)',  // Orange
-  'buy': 'hsl(210, 100%, 50%)',            // Blue
-  'stop_sale': 'hsl(0, 100%, 50%)',         // Red
-  'bat_emergency': 'hsl(280, 100%, 50%)',   // Purple
-  'no_pv_sale_no_bat': 'hsl(200, 15%, 50%)',// Slate
+  'sale_pv': 'hsl(140, 60%, 45%)',         // Green
+  'sale_pv_no_bat': 'hsl(35, 90%, 50%)',  // Orange
+  'sale_pv_bat': 'hsl(5, 80%, 55%)',      // Red/Coral
+  'buy': 'hsl(210, 80%, 50%)',            // Blue
+  'stop_sale': 'hsl(0, 0%, 40%)',          // Dark Grey
+  'bat_emergency': 'hsl(280, 70%, 50%)',   // Purple
+  'no_pv_sale_no_bat': 'hsl(210, 10%, 30%)',// Slate
   'default': 'var(--secondary-text-color)'
 };
 
 const MODE_LABELS = {
   'sale_pv': 'Sale PV',
   'sale_pv_no_bat': 'Export PV (No Bat)',
+  'sale_pv_bat': 'Export Bat',
   'buy': 'Grid Charging',
   'stop_sale': 'Stop Sale',
   'bat_emergency': 'Emergency',
@@ -145,26 +147,34 @@ class EnergyManagementCard extends HTMLElement {
         .stat-value { font-size: 1rem; font-weight: 700; color: var(--primary-text); }
         
         .timeline-section { margin-bottom: 24px; }
-        .timeline-info { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.85rem; font-weight: 600; }
+        .timeline-info { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 0.85rem; font-weight: 700; color: var(--secondary-text); }
         .timeline-grid {
           display: grid;
-          grid-template-columns: repeat(24, 1fr);
-          gap: 3px;
-          height: 16px;
-          background: rgba(0,0,0,0.03);
-          border-radius: 8px;
-          padding: 4px;
+          grid-template-columns: repeat(6, 1fr);
+          gap: 8px;
+          background: rgba(0,0,0,0.02);
+          border-radius: 16px;
+          padding: 10px;
         }
         .hour-bar {
-          border-radius: 4px;
-          transition: all 0.3s ease;
+          height: 32px;
+          border-radius: 8px;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.7rem;
+          font-weight: 800;
+          color: white;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.3);
           position: relative;
+          opacity: 0.85;
         }
-        .hour-bar:hover { transform: scaleY(1.4); filter: brightness(1.1); z-index: 10; }
+        .hour-bar:hover { transform: scale(1.05); opacity: 1; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
         .hour-bar.active {
-          box-shadow: 0 0 8px rgba(0,0,0,0.2);
-          transform: scaleY(1.2);
-          animation: pulse 2s infinite;
+          opacity: 1;
+          box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--accent);
+          z-index: 1;
         }
 
         .controls {
@@ -247,7 +257,7 @@ class EnergyManagementCard extends HTMLElement {
             <span id="now-time">--:--</span>
           </div>
           <div id="timeline-grid" class="timeline-grid">
-            ${Array(24).fill().map((_, i) => `<div class="hour-bar" data-hour="${i}"></div>`).join('')}
+            ${Array(24).fill().map((_, i) => `<div class="hour-bar" data-hour="${i}">${i}</div>`).join('')}
           </div>
         </div>
 
