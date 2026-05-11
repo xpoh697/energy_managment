@@ -255,7 +255,7 @@ class EnergyManagementCard extends HTMLElement {
       const bgColor = hexToRgba(modeColor, 0.1);
       html += `
         <div class="hour-bar ${idx === 0 ? 'active' : ''}" style="border-color: ${modeColor}; background-color: ${bgColor};">
-          <ha-icon class="h-icon" style="color:white" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
+          <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
           <span class="h-time">${timeOnly}</span>
           <div class="h-prices">
             <span class="price-buy">${hourData.buy_price.toFixed(2)}</span>
