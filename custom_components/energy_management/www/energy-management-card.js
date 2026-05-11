@@ -88,12 +88,12 @@ class EnergyManagementCard extends HTMLElement {
         .gauge-label { position: absolute; top: 53%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
         .soc-value { font-size: 4rem; font-weight: 900; line-height: 0.7; letter-spacing: -0.04em; }
         .soc-unit { font-size: 1rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 4px; }
-        .hero-section { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; margin-bottom: 32px; background: rgba(255,255,255,0.03); padding: 32px; border-radius: 32px; }
+        .hero-section { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; margin-bottom: 24px; background: rgba(255,255,255,0.03); padding: 16px; border-radius: 24px; }
         
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 12px; width: 100%; max-width: 400px; }
-        .stat-card { background: rgba(255,255,255,0.02); padding: 12px 16px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); }
-        .stat-label { font-size: 0.65rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 4px; display: block; opacity: 0.8; }
-        .stat-value { font-size: 1.1rem; font-weight: 800; color: white; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 8px; width: 100%; max-width: 450px; }
+        .stat-card { background: rgba(255,255,255,0.02); padding: 6px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); text-align: center; }
+        .stat-label { font-size: 0.55rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 2px; display: block; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .stat-value { font-size: 0.9rem; font-weight: 800; color: white; line-height: 1.1; }
 
         .section-header { font-size: 0.8rem; font-weight: 900; color: #4dabf5; margin: 12px 0 6px; letter-spacing: 0.05em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 3px; }
         .timeline-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px; margin-bottom: 6px; }
@@ -284,7 +284,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.406</div>
+        <div id="v-tag" class="version-tag">v11.9.407</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -369,7 +369,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.strokeDashoffset = 452 - (452 * Math.min(100, Math.max(0, soc))) / 100;
       bar.style.stroke = this._getBatteryColor(soc);
     }
-    this.shadowRoot.getElementById('v-tag').innerText = 'v11.9.406';
+    this.shadowRoot.getElementById('v-tag').innerText = 'v11.9.407';
     this.shadowRoot.getElementById('soc-val').innerText = Math.round(soc);
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     
