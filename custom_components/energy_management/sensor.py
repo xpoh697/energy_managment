@@ -2789,6 +2789,7 @@ class InverterOperationModeSensor(SensorEntity):
         }
         self._mode_lock_until = None
         self._locked_mode = None
+        self._last_logged_hour = None
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
             name=manager.entry.data.get("name", "Energy Management"),
