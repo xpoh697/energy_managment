@@ -326,8 +326,15 @@ class EnergyManagementCard extends HTMLElement {
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
 
+    const currentHour = now.getHours();
     const sortedKeys = Object.keys(data).sort();
     if (sortedKeys.length === 0) return;
+
+    // Find the index of the current hour for the "Sliding Window"
+    const startIndex = sortedKeys.findIndex(k => k.includes(todayStr) && k.includes(`${currentHour < 10 ? '0' + currentHour : currentHour}:00`));
+    
+    // Fallback: if not found, show all (though it should be found)
+    const windowKeys = startIndex !== -1 ? sortedKeys.slice(startIndex, startIndex + 24) : sortedKeys.slice(0, 24);
 
     let html = '';
     let currentDayLabel = '';
@@ -339,7 +346,7 @@ class EnergyManagementCard extends HTMLElement {
       return `rgba(${r}, ${g}, ${b}, ${alpha})`;
     };
 
-    sortedKeys.forEach((key, idx) => {
+    windowKeys.forEach((key, idx) => {
       const isTomorrow = !key.includes(todayStr);
       const label = isTomorrow ? 'TOMORROW' : 'TODAY';
       const timeOnly = key.split(' ')[1];
