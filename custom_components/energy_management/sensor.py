@@ -2927,6 +2927,25 @@ class InverterOperationModeSensor(SensorEntity):
                 forecast[h_full_key] = f_display
                 
             attrs["planned_modes_24h"] = forecast
+            
+            # v11.9.337: Provide structured hourly data for the premium detailed card
+            hourly_data = {}
+            for i in range(24):
+                f_dt = now.replace(hour=i, minute=0, second=0, microsecond=0)
+                # Use same logic as in forecast loop to get prices and modes
+                s_price = sell_strategy.get("today_prices", {}).get(str(i))
+                b_price = buy_strategy.get("today_prices", {}).get(str(i))
+                
+                # Get mode for this hour (re-using simulated state if possible)
+                f_mode, f_reason, _, _ = self._get_mode_at(f_dt, batt_soc, is_forecast=True, abs_hour=i)
+                
+                hourly_data[f"{i:02d}:00"] = {
+                    "sell_price": round_f(s_price, 2) if s_price is not None else 0.0,
+                    "buy_price": round_f(b_price, 2) if b_price is not None else 0.0,
+                    "mode": f_mode
+                }
+            attrs["hourly_data"] = hourly_data
+
             # v11.9.331: Persist mode overrides on manager for use in all simulation calls
             self.manager.planned_mode_overrides = _planned_mode_overrides
             

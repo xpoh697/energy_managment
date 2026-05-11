@@ -1,6 +1,6 @@
 /**
- * Energy Management Card (v11.9.333+)
- * Premium UI for Home Assistant Energy Management Integration
+ * Energy Management Card (v11.9.337+)
+ * Premium UI with Detailed Schedule (4x6 Grid)
  */
 
 const MODE_COLORS = {
@@ -14,14 +14,25 @@ const MODE_COLORS = {
   'default': 'var(--secondary-text-color)'
 };
 
+const MODE_ICONS = {
+  'sale_pv': 'mdi:sun-wireless',
+  'sale_pv_no_bat': 'mdi:solar-power',
+  'sale_pv_bat': 'mdi:battery-arrow-up',
+  'buy': 'mdi:battery-arrow-down',
+  'stop_sale': 'mdi:hand-back-right',
+  'bat_emergency': 'mdi:alert-decagram',
+  'no_pv_sale_no_bat': 'mdi:moon-waning-crescent',
+  'default': 'mdi:help-circle'
+};
+
 const MODE_LABELS = {
-  'sale_pv': 'Sale PV',
-  'sale_pv_no_bat': 'Export PV (No Bat)',
-  'sale_pv_bat': 'Export Bat',
-  'buy': 'Grid Charging',
-  'stop_sale': 'Stop Sale',
-  'bat_emergency': 'Emergency',
-  'no_pv_sale_no_bat': 'Night Wait'
+  'sale_pv': 'sale_pv',
+  'sale_pv_no_bat': 'sale_pv_no_bat',
+  'sale_pv_bat': 'sale_pv_bat',
+  'buy': 'buy',
+  'stop_sale': 'stop_sale',
+  'bat_emergency': 'emergency',
+  'no_pv_sale_no_bat': 'night_wait'
 };
 
 class EnergyManagementCard extends HTMLElement {
@@ -58,65 +69,49 @@ class EnergyManagementCard extends HTMLElement {
           --font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         ha-card {
-          padding: 20px;
-          border-radius: 24px;
+          padding: 24px;
+          border-radius: 28px;
           background: var(--card-bg);
-          box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+          box-shadow: 0 12px 48px rgba(0,0,0,0.12);
           font-family: var(--font-family);
           position: relative;
           overflow: hidden;
-        }
-        .glass-overlay {
-          position: absolute;
-          top: -50%; left: -50%; width: 200%; height: 200%;
-          background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
-          pointer-events: none;
+          min-width: 360px;
         }
         .header {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          margin-bottom: 24px;
+          margin-bottom: 28px;
         }
-        .title-group {
-          display: flex;
-          flex-direction: column;
-        }
-        .title {
-          font-size: 1.25rem;
-          font-weight: 700;
-          letter-spacing: -0.02em;
-          color: var(--primary-text);
-        }
-        .subtitle {
-          font-size: 0.8rem;
-          color: var(--secondary-text);
-          font-weight: 500;
-        }
+        .title-group { display: flex; flex-direction: column; }
+        .title { font-size: 1.4rem; font-weight: 800; letter-spacing: -0.03em; color: var(--primary-text); }
+        .subtitle { font-size: 0.85rem; color: var(--secondary-text); font-weight: 600; opacity: 0.8; }
         .status-badge {
-          background: rgba(0,0,0,0.04);
-          padding: 6px 14px;
-          border-radius: 14px;
-          font-size: 0.75rem;
-          font-weight: 700;
-          letter-spacing: 0.05em;
+          background: rgba(0,0,0,0.03);
+          padding: 8px 16px;
+          border-radius: 16px;
+          font-size: 0.8rem;
+          font-weight: 800;
           text-transform: uppercase;
-          border: 1px solid rgba(0,0,0,0.05);
+          border: 2px solid rgba(0,0,0,0.05);
         }
 
         .hero-section {
           display: flex;
           align-items: center;
-          gap: 24px;
-          margin-bottom: 28px;
+          gap: 32px;
+          margin-bottom: 32px;
+          background: rgba(0,0,0,0.02);
+          padding: 20px;
+          border-radius: 24px;
         }
         .gauge-wrap {
           position: relative;
-          width: 130px; height: 130px;
-          filter: drop-shadow(0 4px 12px rgba(3, 169, 244, 0.2));
+          width: 140px; height: 140px;
         }
         .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; }
-        .gauge-track { fill: none; stroke: rgba(0,0,0,0.05); stroke-width: 10; }
+        .gauge-track { fill: none; stroke: rgba(0,0,0,0.05); stroke-width: 8; }
         .gauge-bar { 
           fill: none; stroke: var(--accent); stroke-width: 10; 
           stroke-linecap: round; transition: stroke-dashoffset 1.5s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -126,95 +121,76 @@ class EnergyManagementCard extends HTMLElement {
           top: 50%; left: 50%; transform: translate(-50%, -50%);
           display: flex; flex-direction: column; align-items: center;
         }
-        .soc-value { font-size: 2.2rem; font-weight: 800; line-height: 1; color: var(--primary-text); }
-        .soc-unit { font-size: 0.8rem; font-weight: 600; color: var(--secondary-text); margin-top: 2px; }
+        .soc-value { font-size: 2.5rem; font-weight: 900; line-height: 1; color: var(--primary-text); }
+        .soc-unit { font-size: 0.8rem; font-weight: 700; color: var(--secondary-text); }
 
-        .stats-grid {
-          flex: 1;
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-        }
+        .stats-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         .stat-card {
-          background: rgba(0,0,0,0.02);
-          padding: 12px;
-          border-radius: 16px;
-          border: 1px solid rgba(0,0,0,0.03);
-          display: flex;
-          flex-direction: column;
+          background: var(--card-bg);
+          padding: 14px;
+          border-radius: 18px;
+          border: 1px solid rgba(0,0,0,0.04);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.02);
         }
-        .stat-label { font-size: 0.65rem; font-weight: 700; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 4px; }
-        .stat-value { font-size: 1rem; font-weight: 700; color: var(--primary-text); }
+        .stat-label { font-size: 0.65rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 4px; display: block; }
+        .stat-value { font-size: 1.1rem; font-weight: 800; color: var(--primary-text); }
         
-        .timeline-section { margin-bottom: 24px; }
-        .timeline-info { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 0.85rem; font-weight: 700; color: var(--secondary-text); }
+        .timeline-section { margin-bottom: 32px; }
+        .timeline-info { display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 0.9rem; font-weight: 800; }
         .timeline-grid {
           display: grid;
-          grid-template-columns: repeat(6, 1fr);
-          gap: 8px;
-          background: rgba(0,0,0,0.02);
-          border-radius: 16px;
-          padding: 10px;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 12px;
         }
         .hour-bar {
-          height: 32px;
-          border-radius: 8px;
-          transition: all 0.2s ease;
+          background: rgba(0,0,0,0.03);
+          border-radius: 18px;
+          padding: 12px 8px;
           display: flex;
+          flex-direction: column;
           align-items: center;
-          justify-content: center;
-          font-size: 0.7rem;
-          font-weight: 800;
-          color: white;
-          text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-          position: relative;
-          opacity: 0.85;
+          justify-content: space-between;
+          min-height: 90px;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          border: 2px solid transparent;
+          cursor: help;
         }
-        .hour-bar:hover { transform: scale(1.05); opacity: 1; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .hour-bar.active {
-          opacity: 1;
-          box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--accent);
-          z-index: 1;
-        }
+        .hour-bar:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 2; }
+        .hour-bar.active { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(3, 169, 244, 0.2); transform: scale(1.02); }
+        
+        .h-icon { --mdc-icon-size: 24px; color: white; margin-bottom: 4px; }
+        .h-time { font-size: 0.9rem; font-weight: 900; color: white; line-height: 1; }
+        .h-prices { display: flex; gap: 6px; margin: 6px 0; }
+        .price-buy { font-size: 0.65rem; font-weight: 800; color: #90caf9; }
+        .price-sell { font-size: 0.65rem; font-weight: 800; color: #a5d6a7; }
+        .h-mode { font-size: 0.52rem; font-weight: 800; text-transform: uppercase; color: rgba(255,255,255,0.9); text-align: center; word-break: break-all; }
 
-        .controls {
-          display: flex;
-          gap: 10px;
-          overflow-x: auto;
-          padding-bottom: 4px;
-          scrollbar-width: none;
-        }
+        .controls { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
         .controls::-webkit-scrollbar { display: none; }
         .btn {
-          flex: 0 0 auto;
+          flex: 1 0 auto;
           background: rgba(0,0,0,0.03);
-          border: 1px solid rgba(0,0,0,0.05);
-          border-radius: 14px;
-          padding: 10px 16px;
-          font-size: 0.85rem;
-          font-weight: 700;
+          border: 2px solid rgba(0,0,0,0.05);
+          border-radius: 18px;
+          padding: 14px 20px;
+          font-size: 0.9rem;
+          font-weight: 800;
           cursor: pointer;
           transition: all 0.2s;
           display: flex;
           align-items: center;
-          gap: 8px;
+          justify-content: center;
+          gap: 10px;
           color: var(--primary-text);
         }
-        .btn:hover { background: rgba(0,0,0,0.08); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        .btn ha-icon { --mdc-icon-size: 20px; }
-
-        @keyframes pulse {
-          0% { box-shadow: 0 0 0 0 rgba(0,0,0,0.1); }
-          70% { box-shadow: 0 0 0 6px rgba(0,0,0,0); }
-          100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); }
-        }
+        .btn:hover { background: var(--accent); color: white; border-color: var(--accent); transform: translateY(-2px); }
+        .btn ha-icon { --mdc-icon-size: 22px; }
       </style>
       <ha-card>
-        <div class="glass-overlay"></div>
         <div class="header">
           <div class="title-group">
             <div class="title">Energy Management</div>
-            <div class="subtitle">Smart Inverter Controller</div>
+            <div class="subtitle">Next-Gen Hybrid Controller</div>
           </div>
           <div id="status-badge" class="status-badge">AI Operational</div>
         </div>
@@ -245,19 +221,29 @@ class EnergyManagementCard extends HTMLElement {
               <span id="power-now" class="stat-value">0.0 kW</span>
             </div>
             <div class="stat-card">
-              <span class="stat-label">System State</span>
-              <span id="v-code" class="stat-value">v11.9.333</span>
+              <span class="stat-label">Version</span>
+              <span id="v-code" class="stat-value">--</span>
             </div>
           </div>
         </div>
 
         <div class="timeline-section">
           <div class="timeline-info">
-            <span>24h Mode Schedule</span>
+            <span>24h Advanced Schedule</span>
             <span id="now-time">--:--</span>
           </div>
           <div id="timeline-grid" class="timeline-grid">
-            ${Array(24).fill().map((_, i) => `<div class="hour-bar" data-hour="${i}">${i}</div>`).join('')}
+            ${Array(24).fill().map((_, i) => `
+              <div class="hour-bar" id="h-bar-${i}">
+                <ha-icon class="h-icon" id="h-icon-${i}" icon="mdi:help-circle"></ha-icon>
+                <span class="h-time">${i < 10 ? '0'+i : i}:00</span>
+                <div class="h-prices">
+                  <span class="price-buy" id="h-buy-${i}">0.00</span>
+                  <span class="price-sell" id="h-sell-${i}">0.00</span>
+                </div>
+                <span class="h-mode" id="h-mode-${i}">--</span>
+              </div>
+            `).join('')}
           </div>
         </div>
 
@@ -270,9 +256,6 @@ class EnergyManagementCard extends HTMLElement {
           </button>
           <button class="btn" onclick="this.getRootNode().host._callService('ai_mode')">
             <ha-icon icon="mdi:robot"></ha-icon> AI Mode
-          </button>
-          <button class="btn" onclick="this.getRootNode().host._callService('reset_bms_profile')">
-            <ha-icon icon="mdi:refresh"></ha-icon> Reset BMS
           </button>
         </div>
       </ha-card>
@@ -291,11 +274,13 @@ class EnergyManagementCard extends HTMLElement {
 
     const attrs = stateObj.attributes;
     const soc = parseFloat(attrs.battery_soc) || 0;
-    const projMorning = attrs.bms_status ? attrs.bms_status.proj_morning : (attrs.morning_soc_projected || '--');
-    const limitH = attrs.bms_status ? attrs.bms_status.limit_h : '--';
+    const bms = attrs.bms_status || {};
+    const projMorning = bms.proj_morning || attrs.morning_soc_projected || '--';
+    const limitH = bms.limit_h || '--';
     const currentMode = stateObj.state;
-    const plannedModes = attrs.planned_modes_24h || {};
+    const hourlyData = attrs.hourly_data || {};
     const power = parseFloat(attrs.power) || 0;
+    const version = bms.v || 'v11.9.337';
 
     // Update Gauge
     const bar = this.shadowRoot.getElementById('gauge-bar');
@@ -311,8 +296,8 @@ class EnergyManagementCard extends HTMLElement {
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
       badge.innerText = (currentMode || 'Unknown').replace(/_/g, ' ');
-      badge.style.color = MODE_COLORS[currentMode] || MODE_COLORS.default;
       const baseColor = MODE_COLORS[currentMode] || MODE_COLORS.default;
+      badge.style.color = baseColor;
       badge.style.borderColor = baseColor.replace('50%', '30%');
     }
 
@@ -324,29 +309,37 @@ class EnergyManagementCard extends HTMLElement {
     }
 
     const limitText = this.shadowRoot.getElementById('limit-h');
-    if (limitText) limitText.innerText = limitH !== 'N/A' && limitH !== '--' ? limitH + ':00' : '--';
+    if (limitText) limitText.innerText = (limitH !== 'N/A' && limitH !== '--') ? limitH + ':00' : '--';
 
     const powerText = this.shadowRoot.getElementById('power-now');
     if (powerText) powerText.innerText = power.toFixed(1) + ' kW';
 
-    // Update Timeline
-    const grid = this.shadowRoot.getElementById('timeline-grid');
-    const nowHour = new Date().getHours();
-    
-    const timeText = this.shadowRoot.getElementById('now-time');
-    if (timeText) timeText.innerText = `Now: ${nowHour}:00`;
+    const vText = this.shadowRoot.getElementById('v-code');
+    if (vText) vText.innerText = version;
 
-    // Map 24h forecast dictionary to grid
+    // Update Timeline
+    const nowHour = new Date().getHours();
+    const timeText = this.shadowRoot.getElementById('now-time');
+    if (timeText) timeText.innerText = `Current Time: ${nowHour}:00`;
+
     for (let i = 0; i < 24; i++) {
-      const hourStr = (i < 10 ? '0' + i : i) + ':00';
-      const cell = grid.children[i];
-      const modeStr = plannedModes[hourStr] || 'default';
-      // extract actual mode name from "sale_pv (SP: 0.12): ..."
-      const actualMode = modeStr.split(' ')[0].split(':')[0];
+      const hStr = `${i < 10 ? '0'+i : i}:00`;
+      const data = hourlyData[hStr] || { mode: 'default', buy_price: 0, sell_price: 0 };
       
-      cell.style.background = MODE_COLORS[actualMode] || MODE_COLORS.default;
-      cell.className = 'hour-bar' + (i === nowHour ? ' active' : '');
-      cell.title = `Time: ${hourStr}\nMode: ${actualMode}\nDetails: ${modeStr}`;
+      const cell = this.shadowRoot.getElementById(`h-bar-${i}`);
+      const icon = this.shadowRoot.getElementById(`h-icon-${i}`);
+      const buyText = this.shadowRoot.getElementById(`h-buy-${i}`);
+      const sellText = this.shadowRoot.getElementById(`h-sell-${i}`);
+      const modeText = this.shadowRoot.getElementById(`h-mode-${i}`);
+
+      if (cell) {
+        cell.style.background = MODE_COLORS[data.mode] || MODE_COLORS.default;
+        cell.className = 'hour-bar' + (i === nowHour ? ' active' : '');
+      }
+      if (icon) icon.icon = MODE_ICONS[data.mode] || MODE_ICONS.default;
+      if (buyText) buyText.innerText = data.buy_price.toFixed(2);
+      if (sellText) sellText.innerText = data.sell_price.toFixed(2);
+      if (modeText) modeText.innerText = MODE_LABELS[data.mode] || data.mode;
     }
   }
 
@@ -354,9 +347,7 @@ class EnergyManagementCard extends HTMLElement {
     this._hass.callService('energy_management', action, {});
   }
 
-  getCardSize() {
-    return 4;
-  }
+  getCardSize() { return 8; }
 }
 
 customElements.define('energy-management-card', EnergyManagementCard);
