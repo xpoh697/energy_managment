@@ -4,31 +4,31 @@
  */
 
 const MODE_COLORS = {
-  'sale_pv': 'hsl(140, 60%, 45%)',         // Green
-  'sale_pv_no_bat': 'hsl(35, 90%, 50%)',  // Orange
-  'sale_pv_bat': 'hsl(5, 80%, 55%)',      // Red/Coral
-  'buy': 'hsl(210, 80%, 50%)',            // Blue
-  'stop_sale': 'hsl(0, 0%, 40%)',          // Grey
-  'bat_emergency': 'hsl(280, 70%, 50%)',   // Purple
-  'no_pv_sale_no_bat': 'hsl(210, 10%, 30%)',// Slate
-  'default': 'var(--secondary-text-color)'
+  'sale_pv': '#ffd700',            // Gold (Normal)
+  'sale_pv_no_bat': '#ff8c00',     // Orange (Export PV)
+  'sale_pv_bat': '#ff4500',         // Red (Export Bat)
+  'buy': '#32cd32',                 // Lime Green (Charging)
+  'stop_sale': '#808080',           // Grey
+  'bat_emergency': '#9400d3',      // Dark Violet
+  'no_pv_sale_no_bat': '#ffd700',   // Gold (Wait)
+  'default': '#727272'
 };
 
 const MODE_ICONS = {
-  'sale_pv': 'mdi:sun-wireless',
-  'sale_pv_no_bat': 'mdi:solar-power',
+  'sale_pv': 'mdi:home-lightning-bolt',
+  'sale_pv_no_bat': 'mdi:solar-power-variant',
   'sale_pv_bat': 'mdi:battery-arrow-up',
   'buy': 'mdi:battery-arrow-down',
   'stop_sale': 'mdi:hand-back-right',
   'bat_emergency': 'mdi:alert-decagram',
-  'no_pv_sale_no_bat': 'mdi:moon-waning-crescent',
+  'no_pv_sale_no_bat': 'mdi:home-clock',
   'default': 'mdi:help-circle'
 };
 
 const MODE_LABELS = {
   'sale_pv': 'Normal',
   'sale_pv_no_bat': 'Export PV',
-  'sale_pv_bat': 'Export Battery',
+  'sale_pv_bat': 'Export Bat',
   'buy': 'Grid Charging',
   'stop_sale': 'Stop Sale',
   'bat_emergency': 'Emergency',
@@ -143,27 +143,27 @@ class EnergyManagementCard extends HTMLElement {
           gap: 12px;
         }
         .hour-bar {
-          background: rgba(0,0,0,0.03);
-          border-radius: 20px;
-          padding: 14px 8px;
+          background: rgba(0,0,0,0.25);
+          border-radius: 16px;
+          padding: 12px 6px;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: space-between;
-          min-height: 105px;
+          min-height: 100px;
           transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
           border: 2px solid transparent;
           cursor: help;
         }
-        .hour-bar:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 2; }
-        .hour-bar.active { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(3, 169, 244, 0.2); transform: scale(1.02); }
+        .hour-bar:hover { transform: scale(1.03); z-index: 2; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .hour-bar.active { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.1); border-style: dashed; }
         
-        .h-icon { --mdc-icon-size: 26px; color: white; margin-bottom: 6px; }
-        .h-time { font-size: 1rem; font-weight: 900; color: white; line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
-        .h-prices { display: flex; gap: 8px; margin: 8px 0; }
-        .price-buy { font-size: 0.7rem; font-weight: 800; color: #90caf9; }
-        .price-sell { font-size: 0.7rem; font-weight: 800; color: #a5d6a7; }
-        .h-mode { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; color: rgba(255,255,255,0.95); text-align: center; line-height: 1.1; }
+        .h-icon { --mdc-icon-size: 24px; margin-bottom: 4px; }
+        .h-time { font-size: 1.1rem; font-weight: 900; color: white; line-height: 1; }
+        .h-prices { display: flex; gap: 8px; margin: 6px 0; }
+        .price-buy { font-size: 0.7rem; font-weight: 800; color: #4dabf5; }
+        .price-sell { font-size: 0.7rem; font-weight: 800; color: #69f0ae; }
+        .h-mode { font-size: 0.65rem; font-weight: 800; text-transform: capitalize; text-align: center; line-height: 1.1; }
 
         .controls { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
         .controls::-webkit-scrollbar { display: none; }
@@ -236,7 +236,7 @@ class EnergyManagementCard extends HTMLElement {
             ${Array(24).fill().map((_, i) => `
               <div class="hour-bar" id="h-bar-${i}">
                 <ha-icon class="h-icon" id="h-icon-${i}" icon="mdi:help-circle"></ha-icon>
-                <span class="h-time">${i < 10 ? '0'+i : i}:00</span>
+                <span class="h-time">${i < 10 ? '0' + i : i}:00</span>
                 <div class="h-prices">
                   <span class="price-buy" id="h-buy-${i}">0.00</span>
                   <span class="price-sell" id="h-sell-${i}">0.00</span>
@@ -266,7 +266,7 @@ class EnergyManagementCard extends HTMLElement {
   _updateUI() {
     const entityId = this._config.entity || 'sensor.energy_management';
     const stateObj = this._hass.states[entityId];
-    
+
     if (!stateObj) {
       console.warn(`EnergyManagementCard: Entity ${entityId} not found`);
       return;
@@ -288,7 +288,7 @@ class EnergyManagementCard extends HTMLElement {
       const offset = 264 - (264 * Math.min(100, Math.max(0, soc))) / 100;
       bar.style.strokeDashoffset = offset;
     }
-    
+
     const socText = this.shadowRoot.getElementById('soc-val');
     if (socText) socText.innerText = Math.round(soc);
 
@@ -323,9 +323,9 @@ class EnergyManagementCard extends HTMLElement {
     if (timeText) timeText.innerText = `Current Time: ${nowHour}:00`;
 
     for (let i = 0; i < 24; i++) {
-      const hStr = `${i < 10 ? '0'+i : i}:00`;
+      const hStr = `${i < 10 ? '0' + i : i}:00`;
       const data = hourlyData[hStr] || { mode: 'default', buy_price: 0, sell_price: 0 };
-      
+
       const cell = this.shadowRoot.getElementById(`h-bar-${i}`);
       const icon = this.shadowRoot.getElementById(`h-icon-${i}`);
       const buyText = this.shadowRoot.getElementById(`h-buy-${i}`);
@@ -333,10 +333,16 @@ class EnergyManagementCard extends HTMLElement {
       const modeText = this.shadowRoot.getElementById(`h-mode-${i}`);
 
       if (cell) {
-        cell.style.background = MODE_COLORS[data.mode] || MODE_COLORS.default;
+        const color = MODE_COLORS[data.mode] || MODE_COLORS.default;
+        cell.style.borderColor = color;
+        cell.style.color = color;
         cell.className = 'hour-bar' + (i === nowHour ? ' active' : '');
+        if (i === nowHour) cell.style.borderColor = 'white';
       }
-      if (icon) icon.icon = MODE_ICONS[data.mode] || MODE_ICONS.default;
+      if (icon) {
+        icon.icon = MODE_ICONS[data.mode] || MODE_ICONS.default;
+        icon.style.color = MODE_COLORS[data.mode] || MODE_COLORS.default;
+      }
       if (buyText) buyText.innerText = data.buy_price.toFixed(2);
       if (sellText) sellText.innerText = data.sell_price.toFixed(2);
       if (modeText) modeText.innerText = MODE_LABELS[data.mode] || data.mode;
