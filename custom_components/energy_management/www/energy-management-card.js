@@ -286,7 +286,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.409</div>
+        <div id="v-tag" class="version-tag">v11.9.410</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -382,7 +382,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.stroke = this._getBatteryColor(soc);
     }
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.409';
+    if (vTag) vTag.innerText = 'v11.9.410';
     
     const socVal = this.shadowRoot.getElementById('soc-val');
     if (socVal) socVal.innerText = Math.round(soc);
