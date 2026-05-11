@@ -105,9 +105,16 @@ class EnergyManagementCard extends HTMLElement {
           align-items: center;
           justify-content: center;
           min-height: 105px;
-          transition: all 0.2s;
+          transition: all 0.2s ease;
           border: 1px solid transparent;
           text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+          cursor: pointer;
+        }
+        .hour-bar:hover {
+          transform: translateY(-4px) scale(1.02);
+          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+          filter: brightness(1.2);
+          z-index: 10;
         }
         .hour-bar.active { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.1); }
         .h-icon { --mdc-icon-size: 22px; margin-bottom: 4px; }
@@ -138,6 +145,31 @@ class EnergyManagementCard extends HTMLElement {
         .btn:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(3, 169, 244, 0.3); }
         .btn.active { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); }
         .btn ha-icon { --mdc-icon-size: 20px; }
+
+        /* Modal Styles */
+        .modal-overlay {
+          position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+          background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+          display: none; align-items: center; justify-content: center; z-index: 1000;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-card {
+          background: #1a1a1a; width: 90%; max-width: 360px;
+          border-radius: 28px; padding: 24px; border: 1px solid rgba(255,255,255,0.1);
+          box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .modal-header { font-size: 1.2rem; font-weight: 800; margin-bottom: 20px; display: flex; justify-content: space-between; }
+        .modal-close { cursor: pointer; opacity: 0.5; }
+        .modal-body { display: flex; flex-direction: column; gap: 16px; }
+        .form-group { display: flex; flex-direction: column; gap: 8px; }
+        .form-label { font-size: 0.75rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; }
+        select, input[type="range"] {
+          background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 12px; padding: 12px; color: white; font-family: inherit; font-size: 1rem;
+        }
+        .modal-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 24px; }
+        .btn-save { background: var(--accent); color: white; border: none; }
+        .btn-clear { background: rgba(255,255,255,0.1); color: white; border: none; }
       </style>
       <ha-card>
         <div class="header">
@@ -160,7 +192,7 @@ class EnergyManagementCard extends HTMLElement {
             <div class="stat-card"><span class="stat-label">Morning Projection</span><span id="proj-morning" class="stat-value">-- %</span></div>
             <div class="stat-card"><span class="stat-label">Safe Export Until</span><span id="limit-h" class="stat-value">--:00</span></div>
             <div class="stat-card"><span class="stat-label">Power Dispatch</span><span id="power-now" class="stat-value">0.0 kW</span></div>
-            <div class="stat-card"><span class="stat-label">System State</span><span id="v-code" class="stat-value">--</span></div>
+            <div class="stat-card"><span class="stat-label">System State</span><span id="v-code" class="stat-value">v11.9.370</span></div>
           </div>
         </div>
 
@@ -173,9 +205,67 @@ class EnergyManagementCard extends HTMLElement {
         <div id="timeline-container">
           <!-- Dynamic sections TODAY / TOMORROW will be here -->
         </div>
+
+        <!-- Hourly Modal -->
+        <div id="modal" class="modal-overlay">
+          <div class="modal-card">
+            <div class="modal-header">
+              <span id="modal-title">Edit Hour</span>
+              <span class="modal-close" onclick="this.getRootNode().host._closeModal()"><ha-icon icon="mdi:close"></ha-icon></span>
+            </div>
+            <div class="modal-body">
+              <div class="form-group">
+                <span class="form-label">Mode Override</span>
+                <select id="modal-mode">
+                  <option value="ai">AI (Automatic)</option>
+                  <option value="buy">Grid Charging</option>
+                  <option value="sale_pv_bat">Discharge Battery</option>
+                  <option value="stop_sale">Stop Sale</option>
+                  <option value="sale_pv">Normal (PV Only)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <span class="form-label">SOC Target: <span id="modal-soc-label">100</span>%</span>
+                <input type="range" id="modal-soc" min="0" max="100" value="100" oninput="this.getRootNode().host._updateSocLabel(this.value)">
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-clear" onclick="this.getRootNode().host._saveOverride('ai')">Reset to AI</button>
+              <button class="btn btn-save" onclick="this.getRootNode().host._saveOverride()">Save Changes</button>
+            </div>
+          </div>
+        </div>
       </ha-card>
     `;
     this._initialized = true;
+  }
+
+  _updateSocLabel(val) {
+    this.shadowRoot.getElementById('modal-soc-label').innerText = val;
+  }
+
+  _openModal(timestamp, currentMode) {
+    this._editingTimestamp = timestamp;
+    this.shadowRoot.getElementById('modal-title').innerText = timestamp;
+    this.shadowRoot.getElementById('modal-mode').value = currentMode === 'ai' ? 'ai' : currentMode;
+    this.shadowRoot.getElementById('modal').classList.add('open');
+  }
+
+  _closeModal() {
+    this.shadowRoot.getElementById('modal').classList.remove('open');
+  }
+
+  async _saveOverride(forcedMode) {
+    const mode = forcedMode || this.shadowRoot.getElementById('modal-mode').value;
+    const soc = this.shadowRoot.getElementById('modal-soc').value;
+    
+    await this._hass.callService('energy_management', 'set_hourly_override', {
+      timestamp: this._editingTimestamp,
+      mode: mode,
+      soc_limit: parseFloat(soc)
+    });
+    
+    this._closeModal();
   }
 
   _updateUI() {
@@ -190,12 +280,12 @@ class EnergyManagementCard extends HTMLElement {
 
     // Update Gauge & Stats
     const bar = this.shadowRoot.getElementById('gauge-bar');
-    if (bar) bar.style.strokeDashoffset = 264 - (264 * Math.min(100, Math.max(0, soc))) / 100;
+    if (bar) bar.style.strokeDashoffset = 452 - (452 * Math.min(100, Math.max(0, soc))) / 100;
     this.shadowRoot.getElementById('soc-val').innerText = Math.round(soc);
-    this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(bms.proj_morning) || 0).toFixed(1) + '%';
-    this.shadowRoot.getElementById('limit-h').innerText = bms.limit_h ? bms.limit_h + ':00' : '--';
+    this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
+    this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = bms.v || 'v11.9.341';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.370';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
@@ -213,22 +303,19 @@ class EnergyManagementCard extends HTMLElement {
     if (btnStop) btnStop.classList.toggle('active', stateObj.state === 'stop_sale');
     if (btnAi) btnAi.classList.toggle('active', ['buy', 'stop_sale'].indexOf(stateObj.state) === -1);
 
-    // Update Sliding Timeline
     this._renderTimeline(hourlyData);
   }
 
   _renderTimeline(data) {
     const container = this.shadowRoot.getElementById('timeline-container');
+    if (!container) return;
+    
     const now = new Date();
-    const currentHour = now.getHours();
     const todayStr = now.toISOString().split('T')[0];
 
     const sortedKeys = Object.keys(data).sort();
-    const startIndex = sortedKeys.findIndex(k => k.includes(todayStr) && k.includes(`${currentHour < 10 ? '0' + currentHour : currentHour}:00`));
+    if (sortedKeys.length === 0) return;
 
-    if (startIndex === -1) return;
-
-    const windowKeys = sortedKeys.slice(startIndex, startIndex + 24);
     let html = '';
     let currentDayLabel = '';
 
@@ -239,14 +326,14 @@ class EnergyManagementCard extends HTMLElement {
       return `rgba(${r}, ${g}, ${b}, ${alpha})`;
     };
 
-    windowKeys.forEach((key, idx) => {
+    sortedKeys.forEach((key, idx) => {
       const isTomorrow = !key.includes(todayStr);
       const label = isTomorrow ? 'TOMORROW' : 'TODAY';
       const timeOnly = key.split(' ')[1];
       const hourData = data[key];
 
       if (label !== currentDayLabel) {
-        if (currentDayLabel !== '') html += '</div>'; // close previous grid
+        if (currentDayLabel !== '') html += '</div>';
         html += `<div class="section-header">${label}</div><div class="timeline-grid">`;
         currentDayLabel = label;
       }
@@ -254,7 +341,9 @@ class EnergyManagementCard extends HTMLElement {
       const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
       const bgColor = hexToRgba(modeColor, 0.1);
       html += `
-        <div class="hour-bar ${idx === 0 ? 'active' : ''}" style="border-color: ${modeColor}; background-color: ${bgColor};">
+        <div class="hour-bar ${idx === 0 ? 'active' : ''}" 
+             data-ts="${key}" data-mode="${hourData.mode}"
+             style="border-color: ${modeColor}; background-color: ${bgColor}; cursor: pointer">
           <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
           <span class="h-time">${timeOnly}</span>
           <div class="h-prices">
@@ -272,6 +361,15 @@ class EnergyManagementCard extends HTMLElement {
 
     if (container.innerHTML !== html) {
       container.innerHTML = html;
+      
+      // Programmatic click binding for better Shadow DOM compatibility
+      container.querySelectorAll('.hour-bar').forEach(bar => {
+        bar.addEventListener('click', (e) => {
+          const ts = bar.getAttribute('data-ts');
+          const mode = bar.getAttribute('data-mode');
+          this._openModal(ts, mode);
+        });
+      });
     }
   }
 

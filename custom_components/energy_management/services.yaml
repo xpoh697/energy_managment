@@ -46,3 +46,42 @@ ai_mode:
   name: Вернуть AI управление
   description: Снимает все ручные переопределения и возвращает систему в полностью автоматический режим.
   fields: {}
+
+set_hourly_override:
+  name: Установить ручной режим для часа
+  description: Переопределяет решение ИИ для конкретного часа.
+  fields:
+    timestamp:
+      name: Временная метка
+      description: Дата и час в формате YYYY-MM-DD HH:00
+      required: true
+      example: "2026-05-11 15:00"
+      selector:
+        text:
+    mode:
+      name: Режим
+      description: Название режима (например, buy, sale_pv_bat, stop_sale)
+      required: true
+      selector:
+        select:
+          options:
+            - label: "Auto (AI)"
+              value: "ai"
+            - label: "Grid Charging (Buy)"
+              value: "buy"
+            - label: "Discharge (Battery)"
+              value: "sale_pv_bat"
+            - label: "Stop Sale"
+              value: "stop_sale"
+            - label: "Normal (PV)"
+              value: "sale_pv"
+    soc_limit:
+      name: Лимит SOC (%)
+      description: Целевой уровень заряда для этого часа.
+      required: false
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"

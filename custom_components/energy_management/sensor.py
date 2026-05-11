@@ -397,6 +397,7 @@ class EnergyProfileManager:
         self.planned_mode_overrides = {}
         # v11.9.333: Manual mode overrides (from UI)
         self.manual_mode_overrides = {}
+        self.hourly_manual_overrides = self.data.get("hourly_manual_overrides", {})
         self._last_override_hour = -1
 
         self.all_active_sensors = set()
@@ -544,6 +545,7 @@ class EnergyProfileManager:
         self.learned_avg_cycle_power = self.data.get("learned_avg_cycle_power", {})
         self.learned_cycle_total_kwh = self.data.get("learned_cycle_total_kwh", {})
         self.learned_avg_cycle_duration = self.data.get("learned_avg_cycle_duration", {})
+        self.hourly_manual_overrides = self.data.get("hourly_manual_overrides", {})
         
         # Restore BMS learned profile safely
         bms_raw = self.data.get("bms_learned_profile", {})
@@ -661,6 +663,7 @@ class EnergyProfileManager:
         }
         self.data["bms_learned_profile"] = self.bms_learned_profile
         self.data["sensor_last_values"] = self.sensor_last_values
+        self.data["hourly_manual_overrides"] = self.hourly_manual_overrides
         self.data["daily_deduct_consumption"] = dict(self.daily_deduct_consumption)
         self.data["hourly_accumulators"] = {
             "consumption_total": self.current_consumption_total,
@@ -3117,6 +3120,12 @@ class InverterOperationModeSensor(SensorEntity):
         # instead of the correct active_hours lookup → is_selling_active always False → sale_pv.
         now_wall = dt_util.now()
         now_h_wall = now_wall.hour
+
+        # 0. Check for HOURLY Manual Overrides (v11.9.370 Premium)
+        ts_key = dt_now.strftime("%Y-%m-%d %H:00")
+        h_override = self.manager.hourly_manual_overrides.get(ts_key)
+        if h_override:
+            return h_override["mode"], f"Manual Override ({ts_key})", None, None
 
         # v11.9.333: Manual Overrides support (Auto-reset at hour change)
         if not is_forecast:
