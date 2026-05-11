@@ -1,6 +1,6 @@
 DOMAIN = "energy_management"
-VERSION = "v11.9.404"
-VERSION_CODE = 1109404
+VERSION = "v11.9.405"
+VERSION_CODE = 1109405
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"
@@ -35,11 +35,6 @@ CONF_SALE_PV_NO_BAT_MAX_HOUR = "sale_pv_no_bat_max_hour"
 CONF_FORCE_MARKET_SELL = "force_market_sell"
 CONF_EMERGENCY_SOC_LIMIT = "emergency_soc_limit"
 CONF_ARBITRAGE_PROFIT_THRESHOLD = "arbitrage_profit_threshold"
-CONF_PROFIT_SENSOR = "profit_sensor"
-CONF_EXTRA_SENSOR_1 = "extra_sensor_1"
-CONF_EXTRA_SENSOR_1_NAME = "extra_sensor_1_name"
-CONF_EXTRA_SENSOR_2 = "extra_sensor_2"
-CONF_EXTRA_SENSOR_2_NAME = "extra_sensor_2_name"
 
 CONF_PRESENCE_SENSORS = "presence_sensors"
 CONF_INVERTER_LOSSES_SENSOR = "inverter_losses_sensor"

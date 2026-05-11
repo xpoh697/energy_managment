@@ -231,23 +231,12 @@ class EnergyManagementCard extends HTMLElement {
               <span class="soc-unit">SOC %</span>
             </div>
           </div>
-          <div class="stats-grid">
+          <div class="stats-grid" id="stats-container">
             <div class="stat-card">
               <span class="stat-label">Morning Projection</span>
               <div class="stat-value" id="proj-morning">-</div>
             </div>
-            <div class="stat-card" id="card-profit" style="display: none">
-              <span class="stat-label" id="label-profit">Profit</span>
-              <div class="stat-value" id="val-profit">-</div>
-            </div>
-            <div class="stat-card" id="card-extra1" style="display: none">
-              <span class="stat-label" id="label-extra1">Extra 1</span>
-              <div class="stat-value" id="val-extra1">-</div>
-            </div>
-            <div class="stat-card" id="card-extra2" style="display: none">
-              <span class="stat-label" id="label-extra2">Extra 2</span>
-              <div class="stat-value" id="val-extra2">-</div>
-            </div>
+            <!-- Extra indicators will be injected here -->
           </div>
         </div>
 
@@ -382,22 +371,8 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('soc-val').innerText = Math.round(soc);
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     
-    // v11.9.401: Custom Indicators Logic
-    const indicators = attrs.custom_indicators || {};
-    const updateIndicator = (key, id) => {
-      const data = indicators[key];
-      const card = this.shadowRoot.getElementById(`card-${id}`);
-      if (data && data.value !== null && data.value !== undefined) {
-        card.style.display = 'block';
-        this.shadowRoot.getElementById(`label-${id}`).innerText = data.name || 'Sensor';
-        this.shadowRoot.getElementById(`val-${id}`).innerText = `${data.value} ${data.unit}`;
-      } else if (card) {
-        card.style.display = 'none';
-      }
-    };
-    updateIndicator('profit', 'profit');
-    updateIndicator('extra1', 'extra1');
-    updateIndicator('extra2', 'extra2');
+    // v11.9.405: Dynamic Extra Indicators from Config
+    this._updateExtraIndicators();
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
@@ -417,6 +392,32 @@ class EnergyManagementCard extends HTMLElement {
     if (btnAi) btnAi.classList.toggle('active', ['buy', 'stop_sale'].indexOf(stateObj.state) === -1);
 
     this._renderTimeline(hourlyData);
+  }
+
+  _updateExtraIndicators() {
+    const container = this.shadowRoot.getElementById('stats-container');
+    if (!container) return;
+
+    // Remove old extra cards (keep morning projection at index 0)
+    while (container.children.length > 1) {
+      container.removeChild(container.lastChild);
+    }
+
+    const extras = this._config.extra_indicators || [];
+    extras.forEach(item => {
+      const stateObj = this._hass.states[item.entity];
+      if (stateObj) {
+        const card = document.createElement('div');
+        card.className = 'stat-card';
+        const val = stateObj.state;
+        const unit = stateObj.attributes.unit_of_measurement || '';
+        card.innerHTML = `
+          <span class="stat-label">${item.name || stateObj.attributes.friendly_name || 'Sensor'}</span>
+          <div class="stat-value">${val} ${unit}</div>
+        `;
+        container.appendChild(card);
+      }
+    });
   }
 
   _renderTimeline(data) {
