@@ -3328,10 +3328,6 @@ class InverterOperationModeSensor(SensorEntity):
             hys = 0.5 if mode == "sale_pv_no_bat" else 0.0
             is_low_for_morning = bool(morning_soc_proj < (target_morning + hys))
             
-            bms_debug["v"] = VERSION
-            bms_debug["limit_h"] = limit_hour
-            bms_debug["proj_morning"] = round_f(morning_soc_proj, 1)
-            
             hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
             
             # v11.8.529: Arbitrage Protection Rule
@@ -3414,7 +3410,11 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv"
             reason = f"Стандартная работа: Цена ({cur_price:.2f}) выше порога остановки ({price_stop_sell:.2f})"
 
-        # v11.8.527: Finalize debug attributes (always visible if peak exists)
+        # v11.9.333: Finalize debug attributes for always-on visibility (TS 199)
+        bms_debug["v"] = VERSION
+        bms_debug["limit_h"] = limit_hour if 'limit_hour' in locals() else "N/A"
+        bms_debug["proj_morning"] = round_f(morning_soc_proj, 1) if 'morning_soc_proj' in locals() else "N/A"
+
         if peak_start_abs is not None:
             h_disp = f"{peak_start_abs % 24:02d}:00" + (" (Завтра)" if peak_start_abs >= 24 else "")
             bms_debug["next_peak"] = h_disp
