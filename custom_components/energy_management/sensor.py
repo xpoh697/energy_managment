@@ -2928,22 +2928,34 @@ class InverterOperationModeSensor(SensorEntity):
                 
             attrs["planned_modes_24h"] = forecast
             
-            # v11.9.337: Provide structured hourly data for the premium detailed card
+            # v11.9.341: Provide 48-hour structured data (Today + Tomorrow) for sliding window UI
             hourly_data = {}
-            for i in range(24):
-                f_dt = now.replace(hour=i, minute=0, second=0, microsecond=0)
-                # Use same logic as in forecast loop to get prices and modes
-                s_price = sell_strategy.get("today_prices", {}).get(str(i))
-                b_price = buy_strategy.get("today_prices", {}).get(str(i))
+            tomorrow = now + timedelta(days=1)
+            
+            for dt_target in [now, tomorrow]:
+                d_str = dt_target.strftime("%Y-%m-%d")
+                is_tom = (dt_target.date() > now.date())
                 
-                # Get mode for this hour (re-using simulated state if possible)
-                f_mode, f_reason, _, _ = self._get_mode_at(f_dt, batt_soc, is_forecast=True, abs_hour=i)
+                # Get strategy data for specific day
+                s_strat = sell_strategy if not is_tom else sell_strategy.get("tomorrow_simulation", sell_strategy)
+                b_strat = buy_strategy if not is_tom else buy_strategy.get("tomorrow_simulation", buy_strategy)
                 
-                hourly_data[f"{i:02d}:00"] = {
-                    "sell_price": round_f(s_price, 2) if s_price is not None else 0.0,
-                    "buy_price": round_f(b_price, 2) if b_price is not None else 0.0,
-                    "mode": f_mode
-                }
+                for h in range(24):
+                    f_dt = dt_target.replace(hour=h, minute=0, second=0, microsecond=0)
+                    h_key = f"{d_str} {h:02d}:00"
+                    
+                    # Prices logic
+                    s_price = sell_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
+                    b_price = buy_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
+                    
+                    # Mode logic
+                    f_mode, _, _, _ = self._get_mode_at(f_dt, batt_soc, is_forecast=True, abs_hour=(h + (24 if is_tom else 0)))
+                    
+                    hourly_data[h_key] = {
+                        "sell_price": round_f(s_price, 2) if s_price is not None else 0.0,
+                        "buy_price": round_f(b_price, 2) if b_price is not None else 0.0,
+                        "mode": f_mode
+                    }
             attrs["hourly_data"] = hourly_data
 
             # v11.9.331: Persist mode overrides on manager for use in all simulation calls
