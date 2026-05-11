@@ -286,7 +286,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.410</div>
+        <div id="v-tag" class="version-tag">v11.9.411</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -382,7 +382,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.stroke = this._getBatteryColor(soc);
     }
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.410';
+    if (vTag) vTag.innerText = 'v11.9.411';
     
     const socVal = this.shadowRoot.getElementById('soc-val');
     if (socVal) socVal.innerText = Math.round(soc);
@@ -451,11 +451,10 @@ class EnergyManagementCard extends HTMLElement {
     const sortedKeys = Object.keys(data).sort();
     if (sortedKeys.length === 0) return;
 
-    // Find the index of the current hour for the "Sliding Window"
-    const startIndex = sortedKeys.findIndex(k => k.includes(todayStr) && k.includes(`${currentHour < 10 ? '0' + currentHour : currentHour}:00`));
+    const currentHourStr = `${todayStr} ${currentHour < 10 ? '0' + currentHour : currentHour}:00`;
 
-    // Fallback: if not found, show all (though it should be found)
-    const windowKeys = startIndex !== -1 ? sortedKeys.slice(startIndex, startIndex + 24) : sortedKeys.slice(0, 24);
+    // Filter to show from NOW until the end of available data (Today + Tomorrow)
+    const windowKeys = sortedKeys.filter(k => k >= currentHourStr);
 
     const hexToRgba = (hex, alpha) => {
       const r = parseInt(hex.slice(1, 3), 16);
