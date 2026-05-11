@@ -29,7 +29,8 @@ from .const import (
     CONF_SOC_BUFFER,
     CONF_SALE_PV_NO_BAT_MAX_HOUR,
     DOMAIN,
-    VERSION
+    VERSION,
+    INVERTER_MODES
 )
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
 
@@ -837,7 +838,7 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else default
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None, no_solar_to_bat=False):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None, no_solar_to_bat=False, mode_overrides=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -1007,17 +1008,29 @@ class StrategyEngine:
                 # 4. Inverter Command (AI Buying/Selling)
                 cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
     
+                # v11.9.331: Apply InverterModeClass rules from mode_overrides map.
+                # mode_overrides is a dict {abs_hour: mode_name_str} pre-computed by _get_mode_at.
+                _h_mode_name = (mode_overrides or {}).get(int(h_abs))
+                _h_mode_cls = INVERTER_MODES.get(_h_mode_name) if _h_mode_name else None
+
                 # Balance = (Solar - Load) + Grid_Command
                 _expected_gen_kw_sim = 0.0 if no_solar else expected_gen_kw
                 
+                # v11.9.331: If mode curtails PV (e.g. no_pv_sale_no_bat), cap solar to house load.
+                if _h_mode_cls is not None and _h_mode_cls.curtail_pv:
+                    _expected_gen_kw_sim = min(_expected_gen_kw_sim, expected_cons_kw)
+
                 # 1. House Load Balance (Solar covers load first)
                 p_for_house = min(_expected_gen_kw_sim, expected_cons_kw)
                 rem_gen = _expected_gen_kw_sim - p_for_house
                 rem_cons = expected_cons_kw - p_for_house
                 
+                # v11.9.331: If mode does not allow PV to charge battery (e.g. sale_pv_no_bat),
+                # surplus solar goes to grid, not battery.
+                _pv_to_bat = rem_gen if (_h_mode_cls is None or _h_mode_cls.charge_from_pv) else 0.0
+
                 # 2. Total Net Power for battery
-                # 2. Total Net Power for battery
-                total_net_kw = float((0.0 if no_solar_to_bat else rem_gen) - rem_cons + cmd_p)
+                total_net_kw = float((0.0 if no_solar_to_bat else _pv_to_bat) - rem_cons + cmd_p)
                 
                 # v11.7.68: Solar Bypass during Sale
                 if cmd_p < -0.01:
@@ -1026,7 +1039,7 @@ class StrategyEngine:
                 # v11.9.215: Battery charge commands should be additive to positive solar, 
                 # but NOT reduced by house load (house is powered by grid anyway during Buy)
                 if cmd_p > 0.05:
-                    total_net_kw = float(cmd_p + max(0.0, rem_gen))
+                    total_net_kw = float(cmd_p + max(0.0, _pv_to_bat))
 
             
                 sim_eff = float(max(0.85, eff_coeff))

@@ -58,6 +58,7 @@ from .const import (
     VERSION
 )
 from .const import CONF_BATTERY_VOLTAGE
+from .const import INVERTER_MODES
 from .strategy import StrategyEngine
 from .strategy_dp import DPPlanner
 from .utils import get_kwh_val, normalize_float, get_price_from_store, round_f
@@ -392,6 +393,8 @@ class EnergyProfileManager:
         # Adaptive BMS Model: "SOC" -> Max Charge Power (kW)
         self.bms_learned_profile = {}
         self.current_inverter_mode = "sale_pv"
+        # v11.9.331: Mode overrides map {abs_hour -> mode_name} for simulation engine
+        self.planned_mode_overrides = {}
 
         self.all_active_sensors = set()
         raw_deduct_2 = config_data.get(CONF_DEDUCT_SETTINGS, {})
@@ -1066,11 +1069,19 @@ class EnergyProfileManager:
             # 2. Battery is full (>= 95%) 
             # 3. We are NOT exporting (throttled/limited)
             # 4. We are NOT importing (House load is fully covered by PV)
-            is_stop_sale = getattr(self, "current_inverter_mode", "") == "stop_sale"
+            # v11.9.331: Use InverterModeClass to determine if PV may be curtailed.
+            # Any mode with curtail_pv=True is a candidate for solar waste tracking.
+            _cur_mode_name = getattr(self, "current_inverter_mode", "")
+            _cur_mode_cls = INVERTER_MODES.get(_cur_mode_name)
+            is_pv_capped = (
+                _cur_mode_cls is not None and
+                _cur_mode_cls.curtail_pv and
+                soc_f >= _cur_mode_cls.calibration_limit_soc
+            )
             is_exporting = float(grid_p) > 0.1 if self.grid_power_sensor else False
             is_importing = float(grid_p) < -0.1 if self.grid_power_sensor else False
             
-            if is_stop_sale and soc_f >= 95.0 and not is_exporting and not is_importing and potential_kw > (current_gen + 0.1):
+            if is_pv_capped and not is_exporting and not is_importing and potential_kw > (current_gen + 0.1):
                 waste_kw = float(max(0.0, potential_kw - current_gen))
                 # Sanity check: cap waste at 20kW
                 waste_kw = float(min(waste_kw, 20.0))
@@ -1273,13 +1284,19 @@ class EnergyProfileManager:
         p_buy = self.get_price("buy", now.strftime("%Y-%m-%d"), past_hour)
         
         cur_mode = getattr(self, "current_inverter_mode", "")
-        is_stop_sale = bool(cur_mode == "stop_sale")
-        is_no_pv_sale = bool(cur_mode == "no_pv_sale_no_bat")
         b_soc, _, _ = self.get_battery_state()
         
-        # v11.1.65 - Enhanced Curtailment Detection: include wait-for-pit mode
-        # v11.6.60 - Lowered threshold to 90% based on user request
-        is_curtailed = bool((is_stop_sale and b_soc > 90) or (p_buy is not None and p_buy <= 0) or is_no_pv_sale)
+        # v11.9.331: Use InverterModeClass to determine curtailment instead of hardcoded mode names.
+        # curtail_pv=True means the mode POTENTIALLY limits generation.
+        # calibration_limit_soc defines the SOC threshold above which the limitation actually kicks in.
+        # Example: stop_sale curtails only when SOC >= 90%, no_pv_sale_no_bat always curtails (limit=0.0).
+        _mode_cls = INVERTER_MODES.get(cur_mode)
+        _is_mode_curtailed = (
+            _mode_cls is not None and
+            _mode_cls.curtail_pv and
+            b_soc >= _mode_cls.calibration_limit_soc
+        )
+        is_curtailed = bool(_is_mode_curtailed or (p_buy is not None and p_buy <= 0))
         
         # v11.1.21 - Solar "Healing" logic: if curtailed, record forecast instead of actual zero/low gen
         gen_to_record = self.current_generation
@@ -2641,7 +2658,8 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             batt_soc, sim_hours, now,
             commands=merged_commands,
             no_battery_charge_until=no_battery_charge_until,
-            pv_curtail_hours=pv_curtail_hours
+            pv_curtail_hours=pv_curtail_hours,
+            mode_overrides=getattr(self.manager, "planned_mode_overrides", None)
         )
         
         # v11.3.63: Inject Budget Diagnostics for transparency
@@ -2822,6 +2840,8 @@ class InverterOperationModeSensor(SensorEntity):
             
             # Forecast 24h
             forecast = {}
+            # v11.9.331: Build mode_overrides map {abs_hour -> mode_name} for run_soc_simulation
+            _planned_mode_overrides = {}
             sell_strategy = self.manager.get_market_strategy("sell")
             buy_strategy = self.manager.get_market_strategy("buy")
             
@@ -2851,6 +2871,9 @@ class InverterOperationModeSensor(SensorEntity):
                     f_dt, f_soc, is_forecast=True, abs_hour=h_abs,
                     avg_gen_override=f_gen, avg_load_override=f_load
                 )
+                
+                # v11.9.331: Accumulate mode overrides for simulation engine
+                _planned_mode_overrides[int(h_abs)] = f_mode
                 
                 # Add price info if applicable (v11.4.15 UI Polish)
                 p_suffix = ""
@@ -2882,6 +2905,8 @@ class InverterOperationModeSensor(SensorEntity):
                 forecast[h_full_key] = f_display
                 
             attrs["planned_modes_24h"] = forecast
+            # v11.9.331: Persist mode overrides on manager for use in all simulation calls
+            self.manager.planned_mode_overrides = _planned_mode_overrides
             
             # v11.1.22/58: Synchronize with dynamic strategy results
             chg_reason = ""
@@ -3122,7 +3147,10 @@ class InverterOperationModeSensor(SensorEntity):
         if not is_forecast and batt_cap > 0:
             end_h = peak_start_abs if peak_start_abs is not None else (now_h_wall + 24)
             sim_range = [h for h in range(now_h_wall, end_h) if h < 48]
-            sim_soc, sim_log, _ = self.manager.strategy_engine.run_soc_simulation(batt_soc, sim_range, now_wall)
+            sim_soc, sim_log, _ = self.manager.strategy_engine.run_soc_simulation(
+                batt_soc, sim_range, now_wall,
+                mode_overrides=getattr(self.manager, "planned_mode_overrides", None)
+            )
             
             if batt_soc >= (active_target - 0.5):
                 bms_debug["status"] = "Батарея уже заряжена"
@@ -3316,9 +3344,17 @@ class InverterOperationModeSensor(SensorEntity):
             if is_throttled or is_energy_low_for_evening:
                 is_preparing_for_peak = True
 
-            # v11.7.77 - Priority check: price must be > 0 at least
-            # We allow sale_pv_no_bat even if throttled by AI, as long as there is surplus PV to sell
-            if is_before_limit_hour and has_surplus and not is_energy_low_for_evening and cur_price > 0:
+            # Условия блокировки sale_pv_no_bat (все 4 из ТЗ):
+            # 1. Симуляция показывает что утренний уровень gatekeeper не будет достигнут
+            # 2. Вечерняя цена выше текущей И батарея не достигнет 100% за день (пик)
+            # 3. Цена ниже порога — обрабатывается выше (elif cur_price >= price_sell_only_pv)
+            # 4. Время позже лимита — обрабатывается выше (is_before_limit_hour)
+            _need_charge_for_morning = bool(is_low_for_morning)
+            _need_charge_for_peak = bool(
+                (is_preparing_for_peak or is_profitable_to_save) and not hit_full_before
+            )
+            _block_sale_pv_no_bat = _need_charge_for_morning or _need_charge_for_peak
+            if is_before_limit_hour and has_surplus and not _block_sale_pv_no_bat and cur_price > 0:
                 mode = "sale_pv_no_bat"
                 reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f}), утро, есть излишек и запас энергии"
             else:

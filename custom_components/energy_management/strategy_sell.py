@@ -223,9 +223,9 @@ class StrategySell(StrategyEngine):
                 # Filter by profitability or surplus
                 surplus_dc = max(0.0, (b_soc - float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))) * b_cap / 100.0)
                 
-                # v11.7.270: Solar Saturation Awareness (TS 198)
-                f_today_val = float(man.get_sensor_float(man.forecast_today_sensor) or 0.0)
-                f_tom_v = float(man.get_sensor_float(man.forecast_tomorrow_sensor) or 0.0)
+                # v11.9.270: Solar Saturation Awareness (TS 198) - Unified forecast fetch
+                f_today_val = float(man.get_forecast_value(man.forecast_today_sensor) or 0.0)
+                f_tom_v = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
                 energy_to_full = (100.0 - b_soc) * b_cap / 100.0
                 
                 # v11.9.230: Account for tomorrow's forecast too to allow deeper discharge tonight
@@ -262,7 +262,8 @@ class StrategySell(StrategyEngine):
             if not target_hours:
                 res["state"] = "price_limit_not_met"
                 res["current_mode_text"] = "Нет будущих окон"
-                return res
+                # v11.9.332: DO NOT return early. We must proceed to simulation to get morning SOC projection.
+                # return res 
 
             # v11.8.521: UI Bugfix - Target price should be the maximum of all candidates, not just the first hour.
             target_price = max([all_sell_prices.get(th, 0.0) for th in target_hours], default=0.0) if target_hours else 0.0
@@ -449,8 +450,10 @@ class StrategySell(StrategyEngine):
             
             sell_commands = {}
             sim_log = {}
+            total_deficit_kwh = 0.0
             
-            for attempt in range(20): # v11.9.315: Increased iterations for complex cases
+            if target_hours:
+                for attempt in range(20): # v11.9.315: Increased iterations for complex cases
                 sell_commands = {}
                 rem_budget = target_budget_ac
                 
@@ -516,10 +519,17 @@ class StrategySell(StrategyEngine):
                     _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
                     _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
                     break
-                
-                # v11.9.255: Update diagnostics for next iteration
-                _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
-                _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
+            else:
+                # v11.9.332: No sell windows found. Run natural flow simulation.
+                _, sim_log, _ = self.run_soc_simulation(
+                    b_soc, sim_range, now, commands={}, 
+                    b_min_soc=emergency_soc, ignore_blended=True, 
+                    house_profile_override="consumption_base", dynamic_floors=floors_sliding
+                )
+            
+            # v11.9.255: Update diagnostics
+            _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
+            _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
             
             # Final Pass: Use the best sim_log we found
 
@@ -590,7 +600,7 @@ class StrategySell(StrategyEngine):
                 planned_results[h_key] = f"{p_bat_dc:.3f} кВт (SOC: {sim_soc:.1f}%) [{real_p_export:.1f} Exp] ({limit_reason_h})"
 
             # 5. UI Diagnostics (v11.7.137: Restored missing variables)
-            morning_h_abs = morning_h + (24 if cur_hour < morning_h else 0)
+            morning_h_abs = morning_h if cur_hour < morning_h else (morning_h + 24)
             morning_key = f"{morning_h%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
             soc_morning = self._get_soc_from_log(sim_log, morning_key, b_soc)
             
@@ -612,7 +622,10 @@ class StrategySell(StrategyEngine):
                 "target_morning": round_f(target_morning, 1),
                 "gatekeeper_after_sale": round_f(gatekeeper, 1) if not is_turbo_win else "Turbo",
                 "projected_soc_morning": round_f(soc_morning, 1),
-                "projected_soc_after_sale": round_f(soc_end, 1)
+                "projected_soc_after_sale": round_f(soc_end, 1),
+                "arbitrage_buyback": {
+                    "target_morning_soc_pct": round_f(floors_sliding.get(morning_h_abs, emergency_soc + 2.0), 1)
+                }
             })
             
             # --- Stage 4: Final Simulation for UI (Projection) ---
@@ -714,7 +727,7 @@ class StrategySell(StrategyEngine):
                     debug_log_parts.append(f"{h_rel}: ---")
 
             # v11.7.397: Saturation Awareness for UI
-            morning_h_abs = sunrise_h if cur_hour < sunrise_h else (sunrise_h + 24)
+            # morning_h_abs already defined above correctly
             first_sell_h = min(active_h) if active_h else cur_hour
             last_sell_h = max(active_h) if active_h else cur_hour
             

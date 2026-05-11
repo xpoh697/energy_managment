@@ -1,6 +1,6 @@
 DOMAIN = "energy_management"
-VERSION = "v11.9.330"
-VERSION_CODE = 1109330
+VERSION = "v11.9.331"
+VERSION_CODE = 1109331
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"
@@ -69,3 +69,107 @@ CONF_MIN_SELL_POWER = "min_sell_power"
 CONF_MIN_SELL_PRICE = "min_sell_price"
 CONF_MAX_ARBITRAGE_HOURS = "max_arbitrage_hours"
 CONF_MIN_DISCHARGE_KWH = "min_discharge_kwh"
+
+from dataclasses import dataclass
+
+@dataclass
+class InverterModeClass:
+    """Defines algorithmic behavior for a specific inverter mode."""
+    name: str
+    pv_to_house: bool         # Солнце идет на покрытие потребления дома
+    charge_from_pv: bool      # Заряд АКБ от солнечных панелей
+    charge_from_grid: bool    # Заряд АКБ напрямую из сети
+    discharge_to_house: bool  # Разряд АКБ для покрытия потребления дома
+    discharge_to_grid: bool   # Разряд АКБ на продажу в сеть (Арбитраж)
+    export_pv_to_grid: bool   # Продажа излишков солнца в сеть
+    is_grid_bypass: bool      # Питание дома напрямую из сети (байпас)
+    curtail_pv: bool          # Принудительное ограничение (зажим) генерации панелей
+    calibration_limit_soc: float # Лимит SOC, выше которого генерация не используется для калибровки точности
+
+# Глобальный реестр режимов для симуляции и логики
+INVERTER_MODES = {
+    "buy": InverterModeClass(
+        name="buy",
+        pv_to_house=True,
+        charge_from_pv=True,
+        charge_from_grid=True,
+        discharge_to_house=False,
+        discharge_to_grid=False,
+        export_pv_to_grid=False,
+        is_grid_bypass=True,
+        curtail_pv=False,
+        calibration_limit_soc=100.0  # В байпасе калибровка затруднена, но 100% — безопасный дефолт
+    ),
+    "no_pv_sale_no_bat": InverterModeClass(
+        name="no_pv_sale_no_bat",
+        pv_to_house=True,
+        charge_from_pv=False,
+        charge_from_grid=False,
+        discharge_to_house=False,
+        discharge_to_grid=False,
+        export_pv_to_grid=False,
+        is_grid_bypass=False,
+        curtail_pv=True,
+        calibration_limit_soc=0.0    # Зажим всегда — калибровка невозможна
+    ),
+    "sale_pv_no_bat": InverterModeClass(
+        name="sale_pv_no_bat",
+        pv_to_house=True,
+        charge_from_pv=False,
+        charge_from_grid=False,
+        discharge_to_house=False,
+        discharge_to_grid=False,
+        export_pv_to_grid=True,
+        is_grid_bypass=False,
+        curtail_pv=False,
+        calibration_limit_soc=100.0
+    ),
+    "sale_pv_bat": InverterModeClass(
+        name="sale_pv_bat",
+        pv_to_house=True,
+        charge_from_pv=False,
+        charge_from_grid=False,
+        discharge_to_house=True,
+        discharge_to_grid=True,
+        export_pv_to_grid=True,
+        is_grid_bypass=False,
+        curtail_pv=False,
+        calibration_limit_soc=100.0
+    ),
+    "stop_sale": InverterModeClass(
+        name="stop_sale",
+        pv_to_house=True,
+        charge_from_pv=True,
+        charge_from_grid=False,
+        discharge_to_house=True,
+        discharge_to_grid=False,
+        export_pv_to_grid=False,
+        is_grid_bypass=False,
+        curtail_pv=True,
+        calibration_limit_soc=90.0    # Калибруем только пока АКБ может принимать ток (до 90%)
+    ),
+    "sale_pv": InverterModeClass(
+        name="sale_pv",
+        pv_to_house=True,
+        charge_from_pv=True,
+        charge_from_grid=False,
+        discharge_to_house=True,
+        discharge_to_grid=False,
+        export_pv_to_grid=True,
+        is_grid_bypass=False,
+        curtail_pv=False,
+        calibration_limit_soc=100.0
+    ),
+    "bat_emergency": InverterModeClass(
+        name="bat_emergency",
+        pv_to_house=True,
+        charge_from_pv=True,
+        charge_from_grid=False,
+        discharge_to_house=False,
+        discharge_to_grid=False,
+        export_pv_to_grid=False,
+        is_grid_bypass=True,
+        curtail_pv=False,
+        calibration_limit_soc=100.0
+    )
+}
