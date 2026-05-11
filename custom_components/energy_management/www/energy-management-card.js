@@ -163,14 +163,14 @@ class EnergyManagementCard extends HTMLElement {
           </div>
         </div>
 
-        <div id="timeline-container">
-          <!-- Dynamic sections TODAY / TOMORROW will be here -->
-        </div>
-
         <div class="controls">
           <button class="btn" onclick="this.getRootNode().host._callService('force_buy')"><ha-icon icon="mdi:lightning-bolt"></ha-icon> Force Buy</button>
           <button class="btn" onclick="this.getRootNode().host._callService('stop_sale')"><ha-icon icon="mdi:hand-back-right"></ha-icon> Stop Sale</button>
           <button class="btn" onclick="this.getRootNode().host._callService('ai_mode')"><ha-icon icon="mdi:robot"></ha-icon> AI Mode</button>
+        </div>
+
+        <div id="timeline-container">
+          <!-- Dynamic sections TODAY / TOMORROW will be here -->
         </div>
       </ha-card>
     `;
