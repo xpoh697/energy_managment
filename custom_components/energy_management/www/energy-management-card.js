@@ -67,6 +67,7 @@ class EnergyManagementCard extends HTMLElement {
           --secondary-text: var(--secondary-text-color, #aaaaaa);
           --accent: #03a9f4;
           --font-family: 'Outfit', 'Inter', sans-serif;
+          color-scheme: dark;
         }
         ha-card {
           padding: 24px;
@@ -154,22 +155,34 @@ class EnergyManagementCard extends HTMLElement {
         }
         .modal-overlay.open { display: flex; }
         .modal-card {
-          background: #1a1a1a; width: 90%; max-width: 360px;
-          border-radius: 28px; padding: 24px; border: 1px solid rgba(255,255,255,0.1);
-          box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+          background: #1e1e1e; width: 95%; max-width: 380px;
+          border-radius: 32px; padding: 32px; border: 1px solid rgba(255,255,255,0.1);
+          box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+          color: white;
         }
-        .modal-header { font-size: 1.2rem; font-weight: 800; margin-bottom: 20px; display: flex; justify-content: space-between; }
-        .modal-close { cursor: pointer; opacity: 0.5; }
-        .modal-body { display: flex; flex-direction: column; gap: 16px; }
-        .form-group { display: flex; flex-direction: column; gap: 8px; }
-        .form-label { font-size: 0.75rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; }
-        select, input[type="range"] {
-          background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-          border-radius: 12px; padding: 12px; color: white; font-family: inherit; font-size: 1rem;
+        .modal-header { font-size: 1.4rem; font-weight: 900; margin-bottom: 28px; display: flex; justify-content: space-between; align-items: center; }
+        .modal-close { cursor: pointer; opacity: 0.6; transition: opacity 0.2s; }
+        .modal-close:hover { opacity: 1; }
+        .modal-body { display: flex; flex-direction: column; gap: 24px; }
+        .form-group { display: flex; flex-direction: column; gap: 10px; }
+        .form-label { font-size: 0.8rem; font-weight: 900; color: #4dabf5; text-transform: uppercase; letter-spacing: 0.05em; }
+        
+        select {
+          background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+          border-radius: 16px; padding: 14px; color: white; font-family: inherit; font-size: 1.1rem;
+          cursor: pointer; outline: none; appearance: none;
+          background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22white%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E");
+          background-repeat: no-repeat; background-position: right 14px center; background-size: 18px;
         }
-        .modal-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 24px; }
-        .btn-save { background: var(--accent); color: white; border: none; }
-        .btn-clear { background: rgba(255,255,255,0.1); color: white; border: none; }
+        select option { background: #2a2a2a; color: white; padding: 10px; }
+        
+        input[type="range"] { width: 100%; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.1); outline: none; -webkit-appearance: none; margin-top: 10px; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; background: #03a9f4; border-radius: 50%; cursor: pointer; box-shadow: 0 0 10px rgba(3,169,244,0.5); }
+
+        .modal-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 32px; }
+        .btn-save { background: #03a9f4; color: white; border: none; box-shadow: 0 4px 15px rgba(3,169,244,0.3); }
+        .btn-clear { background: rgba(255,255,255,0.05); color: #ff5252; border: 1px solid rgba(255,82,82,0.2); }
+        .btn:active { transform: scale(0.95); }
       </style>
       <ha-card>
         <div class="header">
