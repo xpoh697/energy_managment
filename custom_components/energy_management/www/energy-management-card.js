@@ -90,16 +90,16 @@ class EnergyManagementCard extends HTMLElement {
         .soc-unit { font-size: 1rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 4px; }
         .hero-section { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; margin-bottom: 32px; background: rgba(255,255,255,0.03); padding: 32px; border-radius: 32px; }
         
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; max-width: 400px; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; width: 100%; max-width: 400px; }
         .stat-card { background: rgba(255,255,255,0.02); padding: 12px 16px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); }
         .stat-label { font-size: 0.65rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 4px; display: block; opacity: 0.8; }
         .stat-value { font-size: 1.1rem; font-weight: 800; color: white; }
 
-        .section-header { font-size: 0.9rem; font-weight: 900; color: #4dabf5; margin: 20px 0 12px; letter-spacing: 0.05em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
-        .timeline-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 8px; margin-bottom: 8px; }
+        .section-header { font-size: 0.8rem; font-weight: 900; color: #4dabf5; margin: 12px 0 6px; letter-spacing: 0.05em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 3px; }
+        .timeline-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px; margin-bottom: 6px; }
         
         .hour-bar {
-          border-radius: 10px;
+          border-radius: 8px;
           padding: 0;
           aspect-ratio: 1 / 1;
           cursor: pointer;
@@ -107,7 +107,7 @@ class EnergyManagementCard extends HTMLElement {
           background: transparent;
         }
         .bar-content {
-          padding: 4px 2px;
+          padding: 2px 1px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -128,13 +128,13 @@ class EnergyManagementCard extends HTMLElement {
           border-color: rgba(255,255,255,0.4);
         }
         .hour-bar.active .bar-content { border-style: dashed; border-color: white; box-shadow: 0 0 15px rgba(255,255,255,0.1); }
-        .h-icon { --mdc-icon-size: 20px; margin-bottom: 2px; }
-        .h-time { font-size: 1rem; font-weight: 900; color: white; line-height: 1; }
-        .h-prices { display: flex; gap: 6px; margin: 4px 0; }
-        .price-buy { font-size: 0.7rem; font-weight: 800; color: #90caf9; }
-        .price-sell { font-size: 0.7rem; font-weight: 800; color: #a5d6a7; }
-        .h-mode { font-size: 0.6rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .h-soc { font-size: 0.5rem; font-weight: 700; color: rgba(255,255,255,0.6); margin-top: 1px; }
+        .h-icon { --mdc-icon-size: 18px; margin-bottom: 1px; }
+        .h-time { font-size: 0.85rem; font-weight: 900; color: white; line-height: 1; }
+        .h-prices { display: flex; gap: 4px; margin: 2px 0; }
+        .price-buy { font-size: 0.6rem; font-weight: 800; color: #90caf9; }
+        .price-sell { font-size: 0.6rem; font-weight: 800; color: #a5d6a7; }
+        .h-mode { font-size: 0.55rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.02em; }
+        .h-soc { font-size: 0.45rem; font-weight: 700; color: rgba(255,255,255,0.5); margin-top: 0; }
 
         .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; margin-top: 24px; }
         .btn {
@@ -359,7 +359,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.398';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.399';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
