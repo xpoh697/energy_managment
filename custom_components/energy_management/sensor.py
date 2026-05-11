@@ -2857,6 +2857,7 @@ class InverterOperationModeSensor(SensorEntity):
             attrs = {}
             attrs["mode_reason"] = reason
             attrs["mode_lock_until"] = self._mode_lock_until.isoformat() if self._mode_lock_until else "None"
+            attrs["battery_soc"] = round_f(batt_soc, 1)
             attrs["bms_status"] = bms_debug
             
             # Forecast 24h
@@ -3082,9 +3083,9 @@ class InverterOperationModeSensor(SensorEntity):
             
             manual_override = self.manager.manual_mode_overrides.get(now_h_wall)
             if manual_override:
-                # Return manual mode immediately. We still need bms_debug and peak_start_abs for UI consistency.
-                # Let's run a quick minimal setup for them if needed, but for now just fallback.
-                return manual_override, f"Manual Override: {manual_override}", {"status": "Manual Control"}, None
+                # v11.9.334: Don't return early, just remember the override and continue 
+                # to calculate bms_debug/diagnostics for the UI card.
+                pass
         
         # v11.4.21: Fix date and hour alignment for forecast
         # today_str MUST be relative to the simulated time (dt_now)
@@ -3434,10 +3435,17 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "sale_pv"
             reason = "Нет данных о цене (завтра?)"
             
+        # Standard daytime operation
         else:
-            # Standard daytime operation (Sun is shining, prices are moderate, battery is okay)
             mode = "sale_pv"
             reason = f"Стандартная работа: Цена ({cur_price:.2f}) выше порога остановки ({price_stop_sell:.2f})"
+
+        # v11.9.334: Apply manual override if active
+        manual_override = self.manager.manual_mode_overrides.get(now_h_wall) if not is_forecast else None
+        if manual_override:
+            mode = manual_override
+            reason = f"Manual Override: {manual_override}"
+            bms_debug["status"] = "Ручное управление"
 
         # v11.9.333: Finalize debug attributes for always-on visibility (TS 199)
         bms_debug["v"] = VERSION
