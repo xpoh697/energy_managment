@@ -66,6 +66,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Learned BMS profile has been reset.")
 
     hass.services.async_register(DOMAIN, "reset_bms_profile", handle_reset_bms)
+
+    # v11.9.333: Manual Override Services
+    async def handle_force_buy(call):
+        manager.async_set_manual_override("buy")
+    
+    async def handle_stop_sale(call):
+        manager.async_set_manual_override("stop_sale")
+
+    async def handle_ai_mode(call):
+        manager.async_set_manual_override("ai_mode")
+
+    hass.services.async_register(DOMAIN, "force_buy", handle_force_buy)
+    hass.services.async_register(DOMAIN, "stop_sale", handle_stop_sale)
+    hass.services.async_register(DOMAIN, "ai_mode", handle_ai_mode)
     
     # Reload integration on options change
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))

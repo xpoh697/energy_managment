@@ -395,6 +395,9 @@ class EnergyProfileManager:
         self.current_inverter_mode = "sale_pv"
         # v11.9.331: Mode overrides map {abs_hour -> mode_name} for simulation engine
         self.planned_mode_overrides = {}
+        # v11.9.333: Manual mode overrides (from UI)
+        self.manual_mode_overrides = {}
+        self._last_override_hour = -1
 
         self.all_active_sensors = set()
         raw_deduct_2 = config_data.get(CONF_DEDUCT_SETTINGS, {})
@@ -726,6 +729,18 @@ class EnergyProfileManager:
             _LOGGER.error(f"Failed to import data: {e}")
 
         return False
+
+    def async_set_manual_override(self, mode: str):
+        """Set manual override for the current hour."""
+        now_h = self.now.hour
+        if mode == "ai_mode":
+            self.manual_mode_overrides = {}
+            _LOGGER.info("[Manual Override] Cleared all overrides. AI mode restored.")
+        else:
+            self.manual_mode_overrides[now_h] = mode
+            self._last_override_hour = now_h
+            _LOGGER.warning("[Manual Override] Forced mode: %s for hour %s:00", mode, now_h)
+        self._notify_update()
 
     async def async_stop(self):
         """Cleanup all listeners and tasks."""
@@ -3057,6 +3072,19 @@ class InverterOperationModeSensor(SensorEntity):
         # instead of the correct active_hours lookup → is_selling_active always False → sale_pv.
         now_wall = dt_util.now()
         now_h_wall = now_wall.hour
+
+        # v11.9.333: Manual Overrides support (Auto-reset at hour change)
+        if not is_forecast:
+            # Clear old overrides if hour changed
+            if self.manager._last_override_hour != -1 and self.manager._last_override_hour != now_h_wall:
+                self.manager.manual_mode_overrides = {}
+                self.manager._last_override_hour = -1
+            
+            manual_override = self.manager.manual_mode_overrides.get(now_h_wall)
+            if manual_override:
+                # Return manual mode immediately. We still need bms_debug and peak_start_abs for UI consistency.
+                # Let's run a quick minimal setup for them if needed, but for now just fallback.
+                return manual_override, f"Manual Override: {manual_override}", {"status": "Manual Control"}, None
         
         # v11.4.21: Fix date and hour alignment for forecast
         # today_str MUST be relative to the simulated time (dt_now)
@@ -3208,6 +3236,7 @@ class InverterOperationModeSensor(SensorEntity):
         avg_gen = self.manager.avg_gen_5m_kw if not is_forecast else (avg_gen_override if avg_gen_override is not None else 0.0)
         has_surplus = bool(avg_gen > (avg_load + 0.05))
         is_before_limit_hour = bool(sim_h < sale_pv_no_bat_max_hour) # v11.4.20: Fixed limit comparison
+        limit_hour = int(sale_pv_no_bat_max_hour)
 
         # State Machine Ladder
         # v11.1.22: For Negative Prices, always use 'buy' mode to power house from grid

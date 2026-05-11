@@ -454,71 +454,71 @@ class StrategySell(StrategyEngine):
             
             if target_hours:
                 for attempt in range(20): # v11.9.315: Increased iterations for complex cases
-                sell_commands = {}
-                rem_budget = target_budget_ac
+                    sell_commands = {}
+                    rem_budget = target_budget_ac
                 
-                # 2. Distribution: Strict price-hour priority (TS 104)
-                for h in h_by_priority:
-                    duration = 1.0
-                    if h == cur_hour:
-                        duration = max(0.01, 1.0 - (now.minute / 60.0))
+                    # 2. Distribution: Strict price-hour priority (TS 104)
+                    for h in h_by_priority:
+                        duration = 1.0
+                        if h == cur_hour:
+                            duration = max(0.01, 1.0 - (now.minute / 60.0))
+                        
+                        p_export = min(max_batt_p, rem_budget / duration)
+                        sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
+                        rem_budget -= p_export * duration
+                
+                    # 3. Simulation Check (TS 105)
+                    _, trial_log, _ = self.run_soc_simulation(
+                        b_soc, sim_range, now, commands={h: -p for h, p in sell_commands.items()}, 
+                        b_min_soc=emergency_soc, ignore_blended=True, 
+                        house_profile_override="consumption_base", dynamic_floors=floors_sliding
+                    )
+                    sim_log = trial_log
                     
-                    p_export = min(max_batt_p, rem_budget / duration)
-                    sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
-                    rem_budget -= p_export * duration
-                
-                # 3. Simulation Check (TS 105)
-                _, trial_log, _ = self.run_soc_simulation(
-                    b_soc, sim_range, now, commands={h: -p for h, p in sell_commands.items()}, 
-                    b_min_soc=emergency_soc, ignore_blended=True, 
-                    house_profile_override="consumption_base", dynamic_floors=floors_sliding
-                )
-                sim_log = trial_log
-                
-                # 4. Bidirectional Refinement (TS 106)
-                total_deficit_kwh = 0.0
-                for h_cmd, p_req in sell_commands.items():
-                    if p_req <= 0: continue
-                    duration = 1.0
-                    if h_cmd == cur_hour: duration = max(0.01, 1.0 - (now.minute / 60.0))
+                    # 4. Bidirectional Refinement (TS 106)
+                    total_deficit_kwh = 0.0
+                    for h_cmd, p_req in sell_commands.items():
+                        if p_req <= 0: continue
+                        duration = 1.0
+                        if h_cmd == cur_hour: duration = max(0.01, 1.0 - (now.minute / 60.0))
+                        
+                        h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
+                        p_real_bat = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
+                        if p_real_bat < p_req - 0.1:
+                            total_deficit_kwh += (p_req - p_real_bat) * duration
                     
-                    h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
-                    p_real_bat = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
-                    if p_real_bat < p_req - 0.1:
-                        total_deficit_kwh += (p_req - p_real_bat) * duration
-                
-                # v11.9.330: Robust Min-SOC tracking (Handles "Tomorrow" suffixes)
-                sunrise_h_abs = sunrise_h + (24 if cur_hour > sunrise_h else 0)
-                valid_socs = []
-                for k, v in trial_log.items():
-                    if ":" not in k: continue
-                    try:
-                        h_idx = int(k.split(":")[0])
-                        if "Завтра" in k: h_idx += 24
-                        if "Через день" in k: h_idx += 48
-                        if cur_hour <= h_idx <= sunrise_h_abs:
-                            valid_socs.append(float(v.get("soc", 100.0)))
-                    except: continue
-                
-                min_soc = min(valid_socs) if valid_socs else 100.0
-                target_final = emergency_soc + 2.0
-                soc_err = min_soc - target_final
-                
-                # v11.9.330: Priority-Based Refinement
-                if total_deficit_kwh > 0.15:
-                    # Priority 1: Eliminate physical impossibility (Budget too high for inverter limits)
-                    target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
-                elif soc_err > 0.2:
-                    # Priority 2: Increase budget if we have surplus and NO power deficit
-                    target_budget_ac += (soc_err * b_cap / 100.0) * 0.4
-                elif soc_err < -0.2:
-                    # Priority 3: Decrease budget if SOC is too low
-                    target_budget_ac = max(0.0, target_budget_ac + (soc_err * b_cap / 100.0) * 0.7)
-                else:
-                    # Convergence!
-                    _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
-                    _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
-                    break
+                    # v11.9.330: Robust Min-SOC tracking (Handles "Tomorrow" suffixes)
+                    sunrise_h_abs = sunrise_h + (24 if cur_hour > sunrise_h else 0)
+                    valid_socs = []
+                    for k, v in trial_log.items():
+                        if ":" not in k: continue
+                        try:
+                            h_idx = int(k.split(":")[0])
+                            if "Завтра" in k: h_idx += 24
+                            if "Через день" in k: h_idx += 48
+                            if cur_hour <= h_idx <= sunrise_h_abs:
+                                valid_socs.append(float(v.get("soc", 100.0)))
+                        except: continue
+                    
+                    min_soc = min(valid_socs) if valid_socs else 100.0
+                    target_final = emergency_soc + 2.0
+                    soc_err = min_soc - target_final
+                    
+                    # v11.9.330: Priority-Based Refinement
+                    if total_deficit_kwh > 0.15:
+                        # Priority 1: Eliminate physical impossibility (Budget too high for inverter limits)
+                        target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
+                    elif soc_err > 0.2:
+                        # Priority 2: Increase budget if we have surplus and NO power deficit
+                        target_budget_ac += (soc_err * b_cap / 100.0) * 0.4
+                    elif soc_err < -0.2:
+                        # Priority 3: Decrease budget if SOC is too low
+                        target_budget_ac = max(0.0, target_budget_ac + (soc_err * b_cap / 100.0) * 0.7)
+                    else:
+                        # Convergence!
+                        _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
+                        _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
+                        break
             else:
                 # v11.9.332: No sell windows found. Run natural flow simulation.
                 _, sim_log, _ = self.run_soc_simulation(
