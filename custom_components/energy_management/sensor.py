@@ -397,7 +397,7 @@ class EnergyProfileManager:
         self.planned_mode_overrides = {}
         # v11.9.333: Manual mode overrides (from UI)
         self.manual_mode_overrides = {}
-        self.hourly_manual_overrides = self.data.get("hourly_manual_overrides", {})
+        self.hourly_manual_overrides = {}
         self._last_override_hour = -1
 
         self.all_active_sensors = set()
