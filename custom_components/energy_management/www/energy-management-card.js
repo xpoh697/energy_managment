@@ -165,9 +165,9 @@ class EnergyManagementCard extends HTMLElement {
         </div>
 
         <div class="controls">
-          <button class="btn ${this._state.state === 'buy' ? 'active' : ''}" onclick="this.getRootNode().host._callService('force_buy')"><ha-icon icon="mdi:lightning-bolt"></ha-icon> Force Buy</button>
-          <button class="btn ${this._state.state === 'stop_sale' ? 'active' : ''}" onclick="this.getRootNode().host._callService('stop_sale')"><ha-icon icon="mdi:hand-back-right"></ha-icon> Stop Sale</button>
-          <button class="btn ${(['buy', 'stop_sale'].indexOf(this._state.state) === -1) ? 'active' : ''}" onclick="this.getRootNode().host._callService('ai_mode')"><ha-icon icon="mdi:robot"></ha-icon> AI Mode</button>
+          <button id="btn-buy" class="btn" onclick="this.getRootNode().host._callService('force_buy')"><ha-icon icon="mdi:lightning-bolt"></ha-icon> Force Buy</button>
+          <button id="btn-stop" class="btn" onclick="this.getRootNode().host._callService('stop_sale')"><ha-icon icon="mdi:hand-back-right"></ha-icon> Stop Sale</button>
+          <button id="btn-ai" class="btn" onclick="this.getRootNode().host._callService('ai_mode')"><ha-icon icon="mdi:robot"></ha-icon> AI Mode</button>
         </div>
 
         <div id="timeline-container">
@@ -197,12 +197,21 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
     this.shadowRoot.getElementById('v-code').innerText = bms.v || 'v11.9.341';
 
-    // Update Status Badge
     const badge = this.shadowRoot.getElementById('status-badge');
-    badge.innerText = stateObj.state.replace(/_/g, ' ');
-    const color = MODE_COLORS[stateObj.state] || MODE_COLORS.default;
-    badge.style.color = color;
-    badge.style.borderColor = color;
+    if (badge) {
+        badge.innerText = stateObj.state.replace(/_/g, ' ');
+        const color = MODE_COLORS[stateObj.state] || MODE_COLORS.default;
+        badge.style.color = color;
+        badge.style.borderColor = color;
+    }
+
+    const btnBuy = this.shadowRoot.getElementById('btn-buy');
+    const btnStop = this.shadowRoot.getElementById('btn-stop');
+    const btnAi = this.shadowRoot.getElementById('btn-ai');
+    
+    if (btnBuy) btnBuy.classList.toggle('active', stateObj.state === 'buy');
+    if (btnStop) btnStop.classList.toggle('active', stateObj.state === 'stop_sale');
+    if (btnAi) btnAi.classList.toggle('active', ['buy', 'stop_sale'].indexOf(stateObj.state) === -1);
 
     // Update Sliding Timeline
     this._renderTimeline(hourlyData);
