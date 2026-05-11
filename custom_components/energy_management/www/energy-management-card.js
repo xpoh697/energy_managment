@@ -95,7 +95,7 @@ class EnergyManagementCard extends HTMLElement {
         .stat-value { font-size: 1.1rem; font-weight: 800; color: white; }
 
         .section-header { font-size: 0.9rem; font-weight: 900; color: #4dabf5; margin: 20px 0 12px; letter-spacing: 0.05em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
-        .timeline-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 8px; }
+        .timeline-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 8px; margin-bottom: 8px; }
         
         .hour-bar {
           border-radius: 14px;
