@@ -263,9 +263,11 @@ class EnergyManagementCard extends HTMLElement {
               <div class="form-group">
                 <span class="form-label">Mode Override</span>
                 <select id="modal-mode" onchange="this.getRootNode().host._toggleSocVisibility()">
-                  <option value="ai">AI (Automatic)</option>
+                   <option value="ai">AI (Automatic)</option>
                   <option value="buy">Grid Charging</option>
                   <option value="sale_pv_bat">Discharge Battery</option>
+                  <option value="sale_pv_no_bat">Export PV Only</option>
+                  <option value="no_pv_sale_no_bat">System Wait (Idle)</option>
                   <option value="stop_sale">Stop Sale</option>
                   <option value="sale_pv">Normal (PV Only)</option>
                 </select>
@@ -318,7 +320,7 @@ class EnergyManagementCard extends HTMLElement {
     const mode = this.shadowRoot.getElementById('modal-mode').value;
     const socGroup = this.shadowRoot.getElementById('soc-group');
     if (socGroup) {
-      // Show only for Buy and Sale_PV_BAT (Discharge)
+      // Show only for Buy and Sale_PV_BAT (Discharge) - v11.9.388
       socGroup.style.display = (mode === 'buy' || mode === 'sale_pv_bat') ? 'flex' : 'none';
     }
   }
@@ -357,7 +359,7 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     this.shadowRoot.getElementById('limit-h').innerText = attrs.next_peak_start_hour || '--:00';
     this.shadowRoot.getElementById('power-now').innerText = (parseFloat(attrs.power) || 0).toFixed(1) + ' kW';
-    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.387';
+    this.shadowRoot.getElementById('v-code').innerText = 'v11.9.388';
 
     const badge = this.shadowRoot.getElementById('status-badge');
     if (badge) {
