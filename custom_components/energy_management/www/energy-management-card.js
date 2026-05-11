@@ -91,9 +91,11 @@ class EnergyManagementCard extends HTMLElement {
         .hero-section { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; margin-bottom: 24px; background: rgba(255,255,255,0.03); padding: 16px; border-radius: 24px; }
         
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 8px; width: 100%; max-width: 450px; }
-        .stat-card { background: rgba(255,255,255,0.02); padding: 6px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); text-align: center; }
-        .stat-label { font-size: 0.55rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 2px; display: block; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .stat-value { font-size: 0.9rem; font-weight: 800; color: white; line-height: 1.1; }
+        .stat-card { background: rgba(255,255,255,0.02); padding: 6px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); text-align: center; cursor: pointer; transition: background 0.2s, transform 0.1s; }
+        .stat-card:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
+        .stat-card:active { transform: scale(0.96); }
+        .stat-label { font-size: 0.55rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 2px; display: block; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+        .stat-value { font-size: 0.9rem; font-weight: 800; color: white; line-height: 1.1; pointer-events: none; }
 
         .section-header { font-size: 0.8rem; font-weight: 900; color: #4dabf5; margin: 12px 0 6px; letter-spacing: 0.05em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 3px; }
         .timeline-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px; margin-bottom: 6px; }
@@ -232,7 +234,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
           <div class="stats-grid" id="stats-container">
-            <div class="stat-card">
+            <div class="stat-card" onclick="this.getRootNode().host._handleMoreInfo()">
               <span class="stat-label">Morning Projection</span>
               <div class="stat-value" id="proj-morning">-</div>
             </div>
@@ -284,7 +286,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.408</div>
+        <div id="v-tag" class="version-tag">v11.9.409</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -346,6 +348,16 @@ class EnergyManagementCard extends HTMLElement {
     this._closeModal();
   }
 
+  _handleMoreInfo(entityId) {
+    const target = entityId || this._config.entity;
+    const event = new CustomEvent('hass-more-info', {
+      detail: { entityId: target },
+      bubbles: true,
+      composed: true
+    });
+    this.dispatchEvent(event);
+  }
+
   _getBatteryColor(soc) {
     if (soc < 20) return '#f44336'; // Red
     if (soc < 50) return '#ff9800'; // Orange
@@ -370,7 +382,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.stroke = this._getBatteryColor(soc);
     }
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.408';
+    if (vTag) vTag.innerText = 'v11.9.409';
     
     const socVal = this.shadowRoot.getElementById('soc-val');
     if (socVal) socVal.innerText = Math.round(soc);
@@ -416,6 +428,7 @@ class EnergyManagementCard extends HTMLElement {
       if (stateObj) {
         const card = document.createElement('div');
         card.className = 'stat-card';
+        card.onclick = () => this._handleMoreInfo(item.entity);
         const val = stateObj.state;
         const unit = stateObj.attributes.unit_of_measurement || '';
         card.innerHTML = `
