@@ -284,10 +284,11 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.404</div>
+        <div id="v-tag" class="version-tag">v11.9.406</div>
       </ha-card>
     `;
     this._initialized = true;
+    this._updateExtraIndicators();
   }
 
   _updateSocLabel(val) {
@@ -368,6 +369,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.strokeDashoffset = 452 - (452 * Math.min(100, Math.max(0, soc))) / 100;
       bar.style.stroke = this._getBatteryColor(soc);
     }
+    this.shadowRoot.getElementById('v-tag').innerText = 'v11.9.406';
     this.shadowRoot.getElementById('soc-val').innerText = Math.round(soc);
     this.shadowRoot.getElementById('proj-morning').innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
     
