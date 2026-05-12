@@ -70,8 +70,8 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.511"
-VERSION_CODE = 1109511
+VERSION = "v11.9.514"
+VERSION_CODE = 1109514
 
 STORAGE_VERSION = 1
 
@@ -3104,15 +3104,10 @@ class InverterOperationModeSensor(SensorEntity):
                         h_override = v
                         break
                 
-                # v11.9.513: Unified Real-time Power Sync (Manual OR Survival)
-                is_manual = h_override is not None and h_override.get("mode") == "buy"
-                is_survival = buy_strategy.get("charge_reason") == "Выживание"
-                
-                if is_manual or is_survival:
-                    if is_manual:
-                        t_soc = h_override.get("soc_limit", t_soc)
-                    else:
-                        t_soc = buy_strategy.get("target_soc", t_soc)
+                # v11.9.514: Instant Manual Power Sync ONLY
+                # We recalculate power in real-time ONLY for Manual mode to ensure UI responsiveness.
+                if h_override and h_override.get("mode") == "buy":
+                    t_soc = h_override.get("soc_limit", t_soc)
                         
                     if batt_soc < (t_soc - 0.1):
                         delta_soc = max(0.0, t_soc - batt_soc)
@@ -3126,7 +3121,7 @@ class InverterOperationModeSensor(SensorEntity):
                         man._manual_anchor_power = p_val
                         man._manual_anchor_amps = c_amps_fixed
                         man._manual_anchor_target_soc = t_soc
-                        _LOGGER.debug(f"[Real-time Sync] {p_val}kW for {t_soc}% (Mode: {'Manual' if is_manual else 'Survival'})")
+                        _LOGGER.debug(f"[Real-time Sync] Manual: {p_val}kW for {t_soc}%")
                     else:
                         p_val = 0.0
                         c_amps_fixed = 0.0
@@ -3925,7 +3920,7 @@ class MarketStrategySensor(SensorEntity):
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
         attrs = {
-            "strategy_version": "v11.9.511",
+            "strategy_version": "v11.9.514",
             "strategy_candidates": res.get("strategy_candidates", []),
             "deg_cost": res.get("deg_cost", 0.0),
             "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),

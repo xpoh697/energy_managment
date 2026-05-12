@@ -326,16 +326,13 @@ class StrategyBuy(StrategyEngine):
                 _dbg_log = f"[Strategy Buy Debug] Reason: {res.get('charge_reason')} | Target: {target_soc}% | StartSOC: {soc_at_start_plan:.1f}% | Need: {needed_kwh_dc:.3f} kWh | Cap: {b_cap:.1f} | Eff: {eff:.2f}"
                 man.log_to_file(_dbg_log)
                 
-                # v11.9.513: Priority Allocator (Survival = Chronological, Trade = Price)
-                if res.get("charge_reason") == "Выживание":
-                    sorted_by_priority = sorted(target_hours)
-                    _LOGGER.info(f"[Strategy Buy] Survival Mode: Using chronological allocation for {target_hours}")
-                else:
-                    sorted_by_priority = sorted(target_hours, key=lambda x: all_buy_prices.get(int(x), 100.0))
+                # v11.9.200: Advanced Allocator (Price-Priority with progressive SOC)
+                # 1. Sort by price to fill cheapest hours first
+                sorted_by_price = sorted(target_hours, key=lambda x: all_buy_prices.get(int(x), 100.0))
                 
                 # 2. Fill energy budget based on price attractiveness
                 accum_kwh_dc = 0.0
-                for h in sorted_by_priority:
+                for h in sorted_by_price:
                     if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0:
                         charge_commands[h] = 0.0
                         continue
