@@ -303,7 +303,10 @@ class StrategyBuy(StrategyEngine):
             
             # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
             sim_range = list(range(cur_hour, cur_hour + 48))
-            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True)
+            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc)
+            
+            # 3b. Survival-only simulation for debug (to see what 'Survival Bridge' sees)
+            _, sim_log_base, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc, house_profile_override="consumption_base")
             
             last_h = max(target_hours) if target_hours else cur_hour
             soc_end = self._get_soc_from_log(sim_log, get_h_log_key(last_h), b_soc)
@@ -311,11 +314,17 @@ class StrategyBuy(StrategyEngine):
             res["gatekeeper_floor"] = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
             res["survival_floor"] = self.get_survival_floor(last_h + 1, morning_h_abs)
             
-            soc_morning = self._get_soc_from_log(sim_log, get_h_log_key(morning_h_abs - 1), soc_end)
+            soc_morning = self._get_soc_from_log(sim_log, get_h_log_key(morning_h_abs - 1), None)
+            if soc_morning is None:
+                soc_morning = soc_end
+                
+            soc_morning_base = self._get_soc_from_log(sim_log_base, get_h_log_key(morning_h_abs - 1), soc_morning)
+                
             res["buy_simulation"] = {
                 "projected_soc_at_start_pct": round_f(soc_at_start_plan, 1),
                 "projected_soc_at_end_pct": round_f(soc_end, 1),
                 "projected_soc_morning_pct": round_f(soc_morning, 1),
+                "projected_soc_morning_base_pct": round_f(soc_morning_base, 1),
                 "eff": 0.98,
                 "b_cap": round_f(b_cap, 2),
                 "needed_kwh_dc": round_f(needed_kwh_dc, 3),
@@ -355,8 +364,12 @@ class StrategyBuy(StrategyEngine):
                 res["first_negative_hour"] = min(negative_hours)
                 res["last_negative_hour"] = max(negative_hours)
                 res["can_wait_for_negative"] = True
+            
+            # v11.9.421: Expanded Survival Debug
+            v_hour = res.get("survival_violation_hour")
+            v_text = f"Пробой в {v_hour%24:02d}:00" if v_hour is not None else "Без пробоев"
 
-            if charge_commands.get(cur_hour, 0.0) > 0.05 or cur_p_f <= 0: 
+            if res["state"] == "active":
                 res["state"] = "active"
                 res["power"] = charge_commands.get(cur_hour, 0.0)
 
@@ -375,7 +388,9 @@ class StrategyBuy(StrategyEngine):
                 "summary": f"{_neg_tag} | Цена: {cur_p_f:.2f} | Цель: {target_soc:.1f}%".strip(" | "),
                 "current_price": cur_p_f,
                 "target_soc": round_f(target_soc, 1),
-                "projected_soc_morning_pct": round_f(soc_morning, 1),
+                "morning_soc_total": round_f(soc_morning, 1),
+                "morning_soc_base": round_f(soc_morning_base, 1),
+                "survival_status": v_text,
                 "is_arbitrage_profitable": _is_arb,
                 "best_sell_later": round_f(_best_s, 2),
                 "best_buy_later": round_f(_best_b, 2),

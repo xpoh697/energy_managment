@@ -3843,6 +3843,7 @@ class MarketStrategySensor(SensorEntity):
                 "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
                 "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
                 "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
+                "projected_soc_morning_base": res.get("buy_simulation", {}).get("projected_soc_morning_base_pct", 0.0),
                 "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
                 "buy_debug": res.get("buy_debug", "Нет данных"),
                 "debug_eff": res.get("buy_simulation", {}).get("eff", 0.0),
