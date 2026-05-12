@@ -70,8 +70,8 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.515"
-VERSION_CODE = 1109515
+VERSION = "v11.9.516"
+VERSION_CODE = 1109516
 
 STORAGE_VERSION = 1
 
@@ -3104,23 +3104,26 @@ class InverterOperationModeSensor(SensorEntity):
                         h_override = v
                         break
                 
-                # v11.9.514: Instant Manual Power Sync ONLY
-                # We recalculate power in real-time ONLY for Manual mode to ensure UI responsiveness.
+                # v11.9.516: Bulletproof Manual Power Sync
                 if h_override and h_override.get("mode") == "buy":
-                    t_soc = h_override.get("soc_limit", t_soc)
+                    # Force float and local scope
+                    f_batt_soc = float(batt_soc)
+                    f_target_soc = float(h_override.get("soc_limit", t_soc))
                     
-                    # v11.9.515: Diagnostic Logging
-                    _LOGGER.error(f"[Real-time Sync Check] SOC: {batt_soc}%, Target: {t_soc}%, Cap: {b_cap}kWh, Eff: {eff}, Left: {hours_left}h")
+                    is_below = bool(f_batt_soc < (f_target_soc - 0.05))
+                    _LOGGER.error(f"[Real-time Sync Check] SOC: {f_batt_soc}%, Target: {f_target_soc}%, Below: {is_below}, Left: {hours_left}h")
                         
-                    if batt_soc < (t_soc - 0.1):
-                        delta_soc = max(0.0, t_soc - batt_soc)
-                        delta_kwh = (delta_soc / 100.0) * b_cap
-                        p_calc = (delta_kwh / hours_left) / max(0.1, eff)
-                        p_val = min(max_batt_p, round_f(p_calc, 2))
+                    if is_below:
+                        delta_soc = max(0.0, f_target_soc - f_batt_soc)
+                        delta_kwh = (delta_soc / 100.0) * float(b_cap)
+                        p_calc = (delta_kwh / float(hours_left)) / max(0.1, float(eff))
+                        p_val = min(float(max_batt_p), round_f(p_calc, 2))
                         
                         v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
                         c_amps_fixed = round_f((p_val * 1000.0) / max(10.0, v_val), 2)
                         
+                        # Sync variables for attributes
+                        t_soc = f_target_soc
                         man._manual_anchor_power = p_val
                         man._manual_anchor_amps = c_amps_fixed
                         man._manual_anchor_target_soc = t_soc
@@ -3130,7 +3133,7 @@ class InverterOperationModeSensor(SensorEntity):
                         c_amps_fixed = 0.0
                         man._manual_anchor_power = 0.0
                         man._manual_anchor_amps = 0.0
-                        _LOGGER.error(f"[Real-time Sync Result] SOC reached target. Power: 0")
+                        _LOGGER.error(f"[Real-time Sync Result] Comparison failed. Target reached. Power: 0")
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
@@ -3876,7 +3879,7 @@ class EnergyBudgetSensor(SensorEntity):
                 "forecast_coefficient_today": _sr(res.get("forecast_today_coefficient", 1.0), 1.0),
                 "occupancy_coefficient": _sr(res.get("occupancy_coefficient", 1.0), 1.0),
                 "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
-                # survival_floor = Raw (No buffer)
+                "target_soc": round_f(t_soc, 3),
                 "survival_floor": self.manager.strategy_engine.get_survival_floor(dt_util.now().hour, (self.manager.get_sunrise_hour() or 8) + (24 if dt_util.now().hour >= 4 else 0)),
                 "current_battery_soc": _sr(self.manager.get_battery_state()[0]),
                 "projected_morning_soc": _sr(res.get("projected_morning_soc"))
@@ -3924,7 +3927,7 @@ class MarketStrategySensor(SensorEntity):
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
         attrs = {
-            "strategy_version": "v11.9.514",
+            "strategy_version": "v11.9.516",
             "strategy_candidates": res.get("strategy_candidates", []),
             "deg_cost": res.get("deg_cost", 0.0),
             "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
