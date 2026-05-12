@@ -375,6 +375,7 @@ class StrategyBuy(StrategyEngine):
                 "summary": f"{_neg_tag} | Цена: {cur_p_f:.2f} | Цель: {target_soc:.1f}%".strip(" | "),
                 "current_price": cur_p_f,
                 "target_soc": round_f(target_soc, 1),
+                "projected_soc_morning_pct": round_f(soc_morning, 1),
                 "is_arbitrage_profitable": _is_arb,
                 "best_sell_later": round_f(_best_s, 2),
                 "best_buy_later": round_f(_best_b, 2),
