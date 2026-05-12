@@ -220,8 +220,8 @@ class StrategyBuy(StrategyEngine):
                 
                 if first_violation_h is not None:
                     res["survival_violation_hour"] = first_violation_h
-                    # v11.9.431: Only consider hours BEFORE or DURING the violation to fix the gap in time
-                    candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= first_violation_h]
+                    # v11.9.432: Allow any hour before SUNRISE to help survival, ignoring tomorrow afternoon
+                    candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh < morning_h_abs]
                     if candidates_global:
                         cheapest = min(candidates_global, key=lambda x: all_buy_prices[x])
                         c_price = all_buy_prices[cheapest]
