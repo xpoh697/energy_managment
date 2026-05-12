@@ -2982,15 +2982,8 @@ class InverterOperationModeSensor(SensorEntity):
                     s_price = sell_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
                     b_price = buy_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
                     
-                    # Mode logic: Try to sync with planned_modes log if possible
+                    # Mode logic: Clean calculation using _get_mode_at which respects dates and abs_hours
                     f_mode, _, _, _ = self._get_mode_at(f_dt, batt_soc, is_forecast=True, abs_hour=(h + (24 if is_tom else 0)))
-                    
-                    # Search for this hour in the logs to get the exact strategy mode
-                    h_log_key = f_dt.strftime("%H:00")
-                    planned_log = forecast.get(h_log_key, "")
-                    if planned_log:
-                        # Extract first word before space or parenthesis
-                        f_mode = planned_log.split(' ')[0].split('(')[0].strip()
                     
                     # Get projected SOC from simulation logs
                     f_h_key = f_dt.strftime("%H:59") + (" (Завтра)" if is_tom else "")
