@@ -1066,16 +1066,17 @@ class StrategyEngine:
 
                 # 2. Total Net Power for battery
                 _solar_charge = 0.0 if (no_solar_to_bat or _is_morning_export) else _pv_to_bat
-                total_net_kw = float(_solar_charge - rem_cons + cmd_p)
+                
+                # v11.9.479: Charging bypass at root level. 
+                # If we are charging from grid, house load is powered by grid, not battery.
+                if cmd_p > 0.01:
+                    total_net_kw = float(cmd_p + max(0.0, _solar_charge))
+                else:
+                    total_net_kw = float(_solar_charge - rem_cons + cmd_p)
                 
                 # v11.7.68: Solar Bypass during Sale
                 if cmd_p < -0.01:
                     total_net_kw = float(-rem_cons + cmd_p)
-                
-                # v11.9.215: Battery charge commands should be additive to positive solar, 
-                # but NOT reduced by house load (house is powered by grid anyway during Buy)
-                if cmd_p > 0.05:
-                    total_net_kw = float(cmd_p + max(0.0, _solar_charge))
 
             
                 sim_eff = float(max(0.85, eff_coeff))
