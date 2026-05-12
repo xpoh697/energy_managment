@@ -315,11 +315,12 @@ class StrategyBuy(StrategyEngine):
             # 3b. Survival-only simulation for debug (to see what 'Survival Bridge' sees)
             _, sim_log_base, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc, house_profile_override="consumption_base")
             
-            last_h = max(target_hours) if target_hours else cur_hour
-            soc_end = self._get_soc_from_log(sim_log, get_h_log_key(last_h), b_soc)
+            # v11.9.427: Use the last hour OF CHARGING for soc_end, to match Planned Power display
+            last_charge_h = max([h for h, p in charge_commands.items() if p > 0.05], default=cur_hour)
+            soc_end = self._get_soc_from_log(sim_log, get_h_log_key(last_charge_h), b_soc)
             
-            res["gatekeeper_floor"] = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
-            res["survival_floor"] = self.get_survival_floor(last_h + 1, morning_h_abs)
+            res["gatekeeper_floor"] = self.get_gatekeeper_floor(last_charge_h + 1, morning_h_abs)
+            res["survival_floor"] = self.get_survival_floor(last_charge_h + 1, morning_h_abs)
             
             soc_morning = self._get_soc_from_log(sim_log, get_h_log_key(morning_h_abs - 1), None)
             if soc_morning is None:
@@ -411,14 +412,16 @@ class StrategyBuy(StrategyEngine):
                 "commands": {f"{h}h": p for h, p in charge_commands.items() if p > 0}
             }
 
-            txt = "Ожидание"
+            txt = "Ожидание окна"
+            reason = res.get("charge_reason", "")
             if res["state"] == "active":
-                reason = res.get("charge_reason", "")
                 if reason == "Отрицательная цена": txt = "Зарядка (Отриц. цена)"
                 elif reason == "Арбитраж": txt = "Зарядка (Арбитраж)"
                 elif reason == "Выживание": txt = "Зарядка (Выживание)"
                 else: txt = "Зарядка (Дешево)"
-            elif res["charge_reason"] == "Нет":
+            elif reason == "Выживание":
+                txt = "Запланировано выживание"
+            elif reason == "Нет":
                 txt = "В покупке нет необходимости"
             res["current_mode_text"] = txt
             res["power_decision"] = txt if res["state"] == "active" else "Ожидание окна"
