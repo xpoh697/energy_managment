@@ -917,6 +917,16 @@ class StrategyEngine:
         price_sell_only_pv = float(man.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0))
         sale_pv_no_bat_max_hour = float(man.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0))
 
+        # v11.9.496: Command Key Normalization (Supports '1', 1, '1h')
+        norm_commands = {}
+        if commands:
+            for k, v in commands.items():
+                try:
+                    clean_k = str(k).replace("h", "")
+                    norm_commands[int(clean_k)] = float(v)
+                except: continue
+        commands = norm_commands
+
         try:
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
