@@ -70,6 +70,9 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
+VERSION = "v11.9.498"
+VERSION_CODE = 1109498
+
 STORAGE_VERSION = 1
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -2995,15 +2998,37 @@ class InverterOperationModeSensor(SensorEntity):
                     p_soc = batt_soc
                     sim_gen = 0.0
                     sim_load = 0.5
-                    if isinstance(f_sim_data, dict):
-                        p_soc = f_sim_data.get("soc", batt_soc)
+                    
+                    # v11.9.498: Inject strategy commands into UI projection
+                    cmd_p = 0.0
+                    # Check Buy Strategy first
+                    b_plan = buy_strategy.get("planned_power_per_h", {})
+                    h_cmd = b_plan.get(f"{h:02d}:00")
+                    if h_cmd:
+                        cmd_p = h_cmd.get("power", 0.0) if isinstance(h_cmd, dict) else h_cmd
+                    
+                    # If no buy, check Sell Strategy (for discharging)
+                    if cmd_p < 0.001:
+                        s_plan = sell_strategy.get("planned_power_per_h", {})
+                        h_cmd_s = s_plan.get(f"{h:02d}:00")
+                        if h_cmd_s:
+                            cmd_p = h_cmd_s.get("power", 0.0) if isinstance(h_cmd_s, dict) else h_cmd_s
+
+                    # Simplified simulation step for UI (v11.9.498)
+                    eff = float(man.get_efficiency_coefficient())
+                    net_p = cmd_p - 0.3 # Assume 300W base load if no better data
+                    if f_sim_data and isinstance(f_sim_data, dict):
                         sim_gen = f_sim_data.get("gen_kw", 0.0)
                         sim_load = f_sim_data.get("load_kw", 0.5)
-                        # v11.9.446: Keep track of SOC progression for the next hour in this loop
-                        batt_soc = p_soc
+                        p_soc = f_sim_data.get("soc", batt_soc)
+                        net_p = cmd_p + sim_gen - sim_load
                     elif isinstance(f_sim_data, (int, float)):
                         p_soc = float(f_sim_data)
-                        batt_soc = p_soc
+                    
+                    # Update SOC (0.98 eff for charging, 1.0 for discharging/load)
+                    if net_p > 0: net_p *= eff
+                    p_soc = min(100.0, max(min_soc, p_soc + (net_p / b_cap * 100.0)))
+                    batt_soc = p_soc
 
                     # Mode logic: Pass extracted forecasts to correctly trigger Morning Mode and other logic
                     f_mode, _, _, _ = self._get_mode_at(
