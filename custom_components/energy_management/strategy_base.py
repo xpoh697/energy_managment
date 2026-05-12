@@ -899,6 +899,12 @@ class StrategyEngine:
         man = self.manager
         all_prices = {}
         history_log = {}
+        
+        # v11.9.442: Pre-load Morning Mode settings for simulation accuracy
+        from .const import CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR
+        price_sell_only_pv = float(man.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0))
+        sale_pv_no_bat_max_hour = float(man.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0))
+
         try:
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -1029,8 +1035,17 @@ class StrategyEngine:
                 # surplus solar goes to grid, not battery.
                 _pv_to_bat = rem_gen if (_h_mode_cls is None or _h_mode_cls.charge_from_pv) else 0.0
 
+                # v11.9.442: Smart Morning Mode Resolution
+                # If mode is not explicitly provided, check if we should be in sale_pv_no_bat
+                # (Price > Threshold AND Hour < Limit AND Generation > 0)
+                _is_morning_export = False
+                if _h_mode_cls is None and not no_solar_to_bat:
+                    if _h_price >= price_sell_only_pv and real_h < sale_pv_no_bat_max_hour and expected_gen_kw > 0.05:
+                        _is_morning_export = True
+
                 # 2. Total Net Power for battery
-                total_net_kw = float((0.0 if no_solar_to_bat else _pv_to_bat) - rem_cons + cmd_p)
+                _solar_charge = 0.0 if (no_solar_to_bat or _is_morning_export) else _pv_to_bat
+                total_net_kw = float(_solar_charge - rem_cons + cmd_p)
                 
                 # v11.7.68: Solar Bypass during Sale
                 if cmd_p < -0.01:
@@ -1039,7 +1054,7 @@ class StrategyEngine:
                 # v11.9.215: Battery charge commands should be additive to positive solar, 
                 # but NOT reduced by house load (house is powered by grid anyway during Buy)
                 if cmd_p > 0.05:
-                    total_net_kw = float(cmd_p + max(0.0, _pv_to_bat))
+                    total_net_kw = float(cmd_p + max(0.0, _solar_charge))
 
             
                 sim_eff = float(max(0.85, eff_coeff))
