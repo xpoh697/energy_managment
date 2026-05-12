@@ -846,7 +846,7 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else default
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None, no_solar_to_bat=False, mode_overrides=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None, no_solar_to_bat=False, mode_overrides=None, current_mode=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -1052,14 +1052,21 @@ class StrategyEngine:
                 rem_gen = _expected_gen_kw_sim - p_for_house
                 rem_cons = expected_cons_kw - p_for_house
                 
-                # v11.9.482: Determine Mode Config for this simulation hour
-                # Use current_mode if provided, otherwise detect based on price/time
-                _h_mode_str = current_mode
+                # v11.9.484: Determine Mode Config for this simulation hour
+                # Use current_mode ONLY for the first hour of simulation.
+                # For future hours, detect based on price/time logic.
+                _h_mode_str = None
+                if h_abs == cur_hour:
+                    _h_mode_str = current_mode
+                
                 if _h_mode_str is None:
                     if _h_price >= price_sell_only_pv and real_h < sale_pv_no_bat_max_hour and expected_gen_kw > 0.05:
                         _h_mode_str = "sale_pv_no_bat"
                     else:
                         _h_mode_str = "standard"
+                
+                # Safety fallback for specific mode names like 'sale_pv' -> 'sale_pv_bat'
+                if _h_mode_str == "sale_pv": _h_mode_str = "sale_pv_bat"
                 
                 _mode_cfg = INVERTER_MODES.get(_h_mode_str, INVERTER_MODES["standard"])
                 
