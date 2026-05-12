@@ -221,7 +221,9 @@ class StrategyBuy(StrategyEngine):
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
                     
-                    h_survival = self.get_survival_floor(h_step, morning_h_abs)
+                    # v11.9.439: Aggressive Trigger (Survival - 5%)
+                    h_survival_raw = self.get_survival_floor(h_step, morning_h_abs)
+                    h_survival = max(h_survival_raw - 5.0, min_soc)
                     h_critical = min_soc + 5.0
                     
                     if first_violation_h is None and soc_h < h_survival:
@@ -253,12 +255,12 @@ class StrategyBuy(StrategyEngine):
 
                     if target_h not in survival_hours:
                         survival_hours.add(target_h)
-                        # Set target: Bridge means just enough to reach global min
+                        # v11.9.438: Target is now survival_floor + 5% for better economy
                         if target_type == "Bridge":
-                            # Target is the floor for the cheapest_global hour (the bridge target)
-                            survival_targets[target_h] = self.get_survival_floor(cheapest_global, morning_h_abs)
+                            # For bridge, we target the floor at the time of the cheapest_global hour
+                            survival_targets[target_h] = self.get_survival_floor(cheapest_global, morning_h_abs) + 5.0
                         else:
-                            survival_targets[target_h] = self.get_gatekeeper_floor(target_h + 1, morning_h_abs)
+                            survival_targets[target_h] = self.get_survival_floor(target_h + 1, morning_h_abs) + 5.0
                         added = True
                 if not added: break
             
@@ -275,7 +277,8 @@ class StrategyBuy(StrategyEngine):
                 survival_target = current_survival_target
             else:
                 last_h = max(target_hours) if target_hours else cur_hour
-                survival_target = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
+                # v11.9.438: Global fallback target is also survival_floor + 5%
+                survival_target = self.get_survival_floor(last_h + 1, morning_h_abs) + 5.0
             
             _buy_debug["survival_floor"] = round_f(self.get_survival_floor(cur_hour, morning_h_abs), 1)
             _buy_debug["gatekeeper_floor"] = round_f(self.get_gatekeeper_floor(cur_hour, morning_h_abs), 1)
