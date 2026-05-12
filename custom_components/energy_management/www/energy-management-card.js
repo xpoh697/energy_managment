@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v11.9.415 ",
+  "%c ENERGY MANAGEMENT %c v11.9.416 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -402,7 +402,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.stroke = this._getBatteryColor(soc);
     }
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.415';
+    if (vTag) vTag.innerText = 'v11.9.416';
     
     const socVal = this.shadowRoot.getElementById('soc-val');
     if (socVal) socVal.innerText = Math.round(soc);
@@ -494,35 +494,42 @@ class EnergyManagementCard extends HTMLElement {
     };
 
     // Smart DOM Update Logic
-    const currentKeysStr = windowKeys.join(',');
+    // Filter out hours with NO prices (0.00 0.00) unless they are manual or current
+    const filteredKeys = windowKeys.filter(key => {
+      const h = data[key];
+      return (h.buy_price > 0 || h.sell_price > 0 || h.is_manual);
+    });
+
+    const currentKeysStr = filteredKeys.join(',');
     if (container._lastKeys !== currentKeysStr) {
-      // Structure changed (e.g., new hour started) -> Full rebuild
+      // Structure changed -> Full rebuild
       let html = '';
       let currentDayLabel = '';
-      windowKeys.forEach((key, idx) => {
+      filteredKeys.forEach((key, idx) => {
         const isTomorrow = !key.includes(todayStr);
         const label = isTomorrow ? 'TOMORROW' : 'TODAY';
         const hourData = data[key];
+        
         if (label !== currentDayLabel) {
           if (currentDayLabel !== '') html += '</div>';
           html += `<div class="section-header">${label}</div><div class="timeline-grid">`;
           currentDayLabel = label;
         }
+
         const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
         const bgColor = hexToRgba(modeColor, 0.1);
         const isManual = hourData.is_manual;
+        
         html += `
           <div class="hour-bar ${idx === 0 ? 'active' : ''} ${isManual ? 'manual-glow' : ''}" data-ts="${key}" data-mode="${hourData.mode}" id="hb-${key.replace(/[: ]/g, '-')}">
             <div class="bar-content" style="border-color: ${modeColor}; background-color: ${bgColor};">
               ${isManual ? `<ha-icon class="manual-indicator" icon="mdi:hand-back-right"></ha-icon>` : ''}
               <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
               <span class="h-time">${key.split(' ')[1]}</span>
-              ${(hourData.buy_price > 0 || hourData.sell_price > 0) ? `
               <div class="h-prices">
                 <span class="price-buy">${(hourData.buy_price || 0).toFixed(2)}</span>
                 <span class="price-sell">${(hourData.sell_price || 0).toFixed(2)}</span>
               </div>
-              ` : '<div class="h-prices" style="height:14px"></div>'}
               <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
               <div style="display:flex; flex-direction:column; align-items:center; margin-top:4px">
                 <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
@@ -531,7 +538,7 @@ class EnergyManagementCard extends HTMLElement {
           </div>
         `;
       });
-      html += '</div>';
+      if (html !== '') html += '</div>'; // Close last grid
       container.innerHTML = html;
       container._lastKeys = currentKeysStr;
 
@@ -541,7 +548,7 @@ class EnergyManagementCard extends HTMLElement {
       });
     } else {
       // Structure same -> Point update to preserve hover states
-      windowKeys.forEach(key => {
+      filteredKeys.forEach(key => {
         const hourData = data[key];
         const bar = container.querySelector(`#hb-${key.replace(/[: ]/g, '-')}`);
         if (!bar) return;
@@ -587,13 +594,9 @@ class EnergyManagementCard extends HTMLElement {
           socLabel.innerText = hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : '';
         }
         if (priceContainer) {
-          if (hourData.buy_price > 0 || hourData.sell_price > 0) {
-            priceContainer.style.display = 'flex';
-            if (buyPrice) buyPrice.innerText = (hourData.buy_price || 0).toFixed(2);
-            if (sellPrice) sellPrice.innerText = (hourData.sell_price || 0).toFixed(2);
-          } else {
-            priceContainer.style.display = 'none';
-          }
+          priceContainer.style.display = 'flex';
+          if (buyPrice) buyPrice.innerText = (hourData.buy_price || 0).toFixed(2);
+          if (sellPrice) sellPrice.innerText = (hourData.sell_price || 0).toFixed(2);
         }
         bar.setAttribute('data-mode', hourData.mode);
       });
