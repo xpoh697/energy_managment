@@ -3104,11 +3104,16 @@ class InverterOperationModeSensor(SensorEntity):
                         h_override = v
                         break
                 
-                if h_override and h_override.get("mode") == "buy":
-                    # v11.9.510: Instant Manual Power Sync
-                    # We recalculate power in real-time if the Target SOC changes.
-                    t_soc = h_override.get("soc_limit", t_soc)
-                    
+                # v11.9.513: Unified Real-time Power Sync (Manual OR Survival)
+                is_manual = h_override is not None and h_override.get("mode") == "buy"
+                is_survival = buy_strategy.get("charge_reason") == "Выживание"
+                
+                if is_manual or is_survival:
+                    if is_manual:
+                        t_soc = h_override.get("soc_limit", t_soc)
+                    else:
+                        t_soc = buy_strategy.get("target_soc", t_soc)
+                        
                     if batt_soc < (t_soc - 0.1):
                         delta_soc = max(0.0, t_soc - batt_soc)
                         delta_kwh = (delta_soc / 100.0) * b_cap
@@ -3121,6 +3126,7 @@ class InverterOperationModeSensor(SensorEntity):
                         man._manual_anchor_power = p_val
                         man._manual_anchor_amps = c_amps_fixed
                         man._manual_anchor_target_soc = t_soc
+                        _LOGGER.debug(f"[Real-time Sync] {p_val}kW for {t_soc}% (Mode: {'Manual' if is_manual else 'Survival'})")
                     else:
                         p_val = 0.0
                         c_amps_fixed = 0.0
