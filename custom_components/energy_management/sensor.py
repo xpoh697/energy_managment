@@ -70,7 +70,7 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.502"
+VERSION = "v11.9.503"
 VERSION_CODE = 1109502
 
 STORAGE_VERSION = 1
@@ -679,7 +679,6 @@ class EnergyProfileManager:
             "grid_import": self.current_grid_import,
             "grid_export": self.current_grid_export,
             "losses": self.current_losses,
-            "hourly_deduct": self.current_hourly_deduct,
             "hourly_deduct": self.current_hourly_deduct
         }
         await self.store.async_save(self.data)
@@ -758,21 +757,32 @@ class EnergyProfileManager:
         if not self.hourly_manual_overrides:
             self.hourly_manual_overrides = {}
             
+        # v11.9.503: Normalize timestamp to ensure frontend-backend sync (YYYY-MM-DD HH:00)
+        try:
+            # If it's already a clean string, parse and re-format to be safe
+            if " " in timestamp:
+                dt_p = dt_util.parse_datetime(timestamp.replace(" ", "T"))
+                if dt_p:
+                    timestamp = dt_p.strftime("%Y-%m-%d %H:00")
+        except Exception as e:
+            _LOGGER.error(f"[Manual Override] Timestamp normalization failed for '{timestamp}': {e}")
+
         if mode == "ai":
             if timestamp in self.hourly_manual_overrides:
                 del self.hourly_manual_overrides[timestamp]
+                _LOGGER.info(f"[Manual Override] Cleared for {timestamp}")
         else:
             self.hourly_manual_overrides[timestamp] = {
                 "mode": mode,
                 "soc_limit": soc_limit,
                 "created_at": datetime.now().isoformat()
             }
+            _LOGGER.warning(f"[Manual Override] Set for {timestamp}: {mode} (SOC {soc_limit}%)")
         
         # Persistent storage
         self.data["hourly_manual_overrides"] = self.hourly_manual_overrides
         await self.store.async_save(self.data)
         self._notify_update()
-        _LOGGER.info(f"Hourly override set for {timestamp}: {mode} (SOC {soc_limit}%)")
 
     async def async_stop(self):
         """Cleanup all listeners and tasks."""
@@ -3912,7 +3922,7 @@ class MarketStrategySensor(SensorEntity):
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
         attrs = {
-            "strategy_version": VERSION,
+            "strategy_version": "v11.9.503",
             "strategy_candidates": res.get("strategy_candidates", []),
             "deg_cost": res.get("deg_cost", 0.0),
             "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
