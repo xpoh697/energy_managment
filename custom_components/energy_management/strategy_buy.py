@@ -264,21 +264,21 @@ class StrategyBuy(StrategyEngine):
             if any(h not in (negative_hours or (candidates if 'candidates' in locals() else [])) for h in target_hours):
                 res["charge_reason"] = "Выживание"
 
-             morning_h = man.get_sunrise_hour() or 8
-             morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
-             
-             # v11.9.434: Dynamic Target SOC based on Bridge/Gatekeeper status
-             current_survival_target = survival_targets.get(cur_hour)
-             if current_survival_target:
-                 survival_target = current_survival_target
-             else:
-                 last_h = max(target_hours) if target_hours else cur_hour
-                 survival_target = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
-             
-             _buy_debug["survival_floor"] = round_f(self.get_survival_floor(cur_hour, morning_h_abs), 1)
-             _buy_debug["gatekeeper_floor"] = round_f(self.get_gatekeeper_floor(cur_hour, morning_h_abs), 1)
-             _buy_debug["cheapest_global"] = f"{cheapest_global%24:02d}:00"
-             _buy_debug["survival_targets"] = {f"{h%24:02d}h": round_f(t, 1) for h, t in survival_targets.items()}
+            morning_h = man.get_sunrise_hour() or 8
+            morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
+            
+            # v11.9.434: Dynamic Target SOC based on Bridge/Gatekeeper status
+            current_survival_target = survival_targets.get(cur_hour)
+            if current_survival_target:
+                survival_target = current_survival_target
+            else:
+                last_h = max(target_hours) if target_hours else cur_hour
+                survival_target = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
+            
+            _buy_debug["survival_floor"] = round_f(self.get_survival_floor(cur_hour, morning_h_abs), 1)
+            _buy_debug["gatekeeper_floor"] = round_f(self.get_gatekeeper_floor(cur_hour, morning_h_abs), 1)
+            _buy_debug["cheapest_global"] = f"{cheapest_global%24:02d}:00"
+            _buy_debug["survival_targets"] = {f"{h%24:02d}h": round_f(t, 1) for h, t in survival_targets.items()}
 
              base_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
             
