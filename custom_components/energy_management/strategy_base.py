@@ -1080,7 +1080,7 @@ class StrategyEngine:
                 
                 # v11.9.480: Trace power for debugging
                 if abs(cmd_p) > 0.001 or abs(total_net_kw) > 0.1:
-                    _LOGGER.debug(f"[Sim] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} load:{rem_cons:.3f}")
+                    _LOGGER.debug(f"[Sim] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} floor:{b_min_soc:.1f}")
 
                 # v11.9.482: Export Logic integration
                 if _mode_cfg.export_pv_to_grid and not _mode_cfg.charge_from_pv:
