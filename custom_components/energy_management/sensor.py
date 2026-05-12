@@ -397,12 +397,10 @@ class EnergyProfileManager:
         self.planned_mode_overrides = {}
         self.manual_mode_overrides = {}
         self.hourly_manual_overrides = {}
-        self._last_override_hour = -1
-        
-        # v11.9.453: Manual mode anchoring for stable power commands
         self._manual_anchor_hour = -1
         self._manual_anchor_target_soc = -1.0
         self._manual_anchor_power = 0.0
+        self._manual_anchor_amps = 0.0
 
         self.all_active_sensors = set()
         raw_deduct_2 = config_data.get(CONF_DEDUCT_SETTINGS, {})
@@ -3078,12 +3076,19 @@ class InverterOperationModeSensor(SensorEntity):
                             delta_kwh = (delta_soc / 100.0) * b_cap
                             req_p = (delta_kwh / hours_left) / max(0.8, eff)
                             man._manual_anchor_power = min(max_batt_p, round_f(req_p, 2))
-                            _LOGGER.info("[Manual Anchor Buy] Recalculated Power: %.2fkW for Target: %.1f%% (%dmin left)", 
-                                         man._manual_anchor_power, t_soc, mins_left)
+                            
+                            # v11.9.454: Anchor Amps as well
+                            v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
+                            man._manual_anchor_amps = round_f((man._manual_anchor_power * 1000.0) / v_val, 2)
+                            
+                            _LOGGER.info("[Manual Anchor Buy] Recalculated Power: %.2fkW | Amps: %.1fA for Target: %.1f%% (%dmin left)", 
+                                         man._manual_anchor_power, man._manual_anchor_amps, t_soc, mins_left)
                         else:
                             man._manual_anchor_power = 0.0
+                            man._manual_anchor_amps = 0.0
                             
                     p_val = man._manual_anchor_power
+                    c_amps_fixed = man._manual_anchor_amps
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
@@ -3117,12 +3122,19 @@ class InverterOperationModeSensor(SensorEntity):
                             delta_kwh = (delta_soc / 100.0) * b_cap
                             req_p = (delta_kwh / hours_left) * max(0.8, eff)
                             man._manual_anchor_power = min(max_batt_p, round_f(req_p, 2))
-                            _LOGGER.info("[Manual Anchor Discharge] Recalculated Power: %.2fkW for Target: %.1f%% (%dmin left)", 
-                                         man._manual_anchor_power, t_soc, mins_left)
+                            
+                            # v11.9.454: Anchor Amps as well
+                            v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
+                            man._manual_anchor_amps = round_f((man._manual_anchor_power * 1000.0) / v_val, 2)
+                            
+                            _LOGGER.info("[Manual Anchor Discharge] Recalculated Power: %.2fkW | Amps: %.1fA for Target: %.1f%% (%dmin left)", 
+                                         man._manual_anchor_power, man._manual_anchor_amps, t_soc, mins_left)
                         else:
                             man._manual_anchor_power = 0.0
+                            man._manual_anchor_amps = 0.0
                             
                     p_val = man._manual_anchor_power
+                    c_amps_fixed = man._manual_anchor_amps
             else:
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
