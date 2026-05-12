@@ -70,8 +70,8 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.510"
-VERSION_CODE = 1109510
+VERSION = "v11.9.511"
+VERSION_CODE = 1109511
 
 STORAGE_VERSION = 1
 
@@ -3104,22 +3104,20 @@ class InverterOperationModeSensor(SensorEntity):
                         h_override = v
                         break
                 
+                if h_override and h_override.get("mode") == "buy":
                     # v11.9.510: Instant Manual Power Sync
-                    # We recalculate power in real-time if the Target SOC changes, 
-                    # ensuring the UI 'Power' attribute updates instantly with the slider.
+                    # We recalculate power in real-time if the Target SOC changes.
                     t_soc = h_override.get("soc_limit", t_soc)
                     
                     if batt_soc < (t_soc - 0.1):
                         delta_soc = max(0.0, t_soc - batt_soc)
                         delta_kwh = (delta_soc / 100.0) * b_cap
-                        # Calculate power needed for the REMAINING minutes of this hour
                         p_calc = (delta_kwh / hours_left) / max(0.1, eff)
                         p_val = min(max_batt_p, round_f(p_calc, 2))
                         
                         v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
                         c_amps_fixed = round_f((p_val * 1000.0) / max(10.0, v_val), 2)
                         
-                        # Update anchor only to keep logic consistent for other parts of the system
                         man._manual_anchor_power = p_val
                         man._manual_anchor_amps = c_amps_fixed
                         man._manual_anchor_target_soc = t_soc
@@ -3921,7 +3919,7 @@ class MarketStrategySensor(SensorEntity):
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
         attrs = {
-            "strategy_version": "v11.9.508",
+            "strategy_version": "v11.9.511",
             "strategy_candidates": res.get("strategy_candidates", []),
             "deg_cost": res.get("deg_cost", 0.0),
             "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
