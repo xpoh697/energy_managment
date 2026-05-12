@@ -92,6 +92,8 @@ class StrategyBuy(StrategyEngine):
             "raw_commands": {}
         }
         
+        _buy_debug = res.setdefault("buy_debug", {})
+        
         old_calc = bool(getattr(self, "_calculating_strategy", False))
         self._calculating_strategy = True
         
