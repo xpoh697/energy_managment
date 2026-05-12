@@ -2974,10 +2974,6 @@ class InverterOperationModeSensor(SensorEntity):
                 s_strat = sell_strategy if not is_tom else sell_strategy.get("tomorrow_simulation", sell_strategy)
                 b_strat = buy_strategy if not is_tom else buy_strategy.get("tomorrow_simulation", buy_strategy)
                 
-                # v11.9.445: Extract solar/load forecasts to ensure Morning Mode (sale_pv_no_bat) logic works on the card
-                f_gen = self.manager.get_generation_forecast()
-                f_load = self.manager.get_consumption_forecast()
-                
                 for h in range(24):
                     f_dt = dt_target.replace(hour=h, minute=0, second=0, microsecond=0)
                     h_key = f"{d_str} {h:02d}:00"
@@ -2986,23 +2982,31 @@ class InverterOperationModeSensor(SensorEntity):
                     s_price = sell_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
                     b_price = buy_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
                     
-                    # Mode logic: Pass forecasts to correctly trigger Morning Mode and other logic
-                    f_mode, _, _, _ = self._get_mode_at(
-                        f_dt, batt_soc, is_forecast=True, 
-                        abs_hour=(h + (24 if is_tom else 0)),
-                        avg_gen_override=float(f_gen.get(str(h), 0.0)),
-                        avg_load_override=float(f_load.get(str(h), 0.5))
-                    )
-                    
-                    # Get projected SOC from simulation logs
+                    # v11.9.446: Get projected data (SOC, gen, load) from simulation logs FIRST 
+                    # to use them for accurate mode resolution in the card view.
                     f_h_key = f_dt.strftime("%H:59") + (" (Завтра)" if is_tom else "")
                     f_sim_data = buy_sim_log.get(f_h_key) or sell_sim_log.get(f_h_key)
                     
                     p_soc = batt_soc
+                    sim_gen = 0.0
+                    sim_load = 0.5
                     if isinstance(f_sim_data, dict):
                         p_soc = f_sim_data.get("soc", batt_soc)
+                        sim_gen = f_sim_data.get("gen_kw", 0.0)
+                        sim_load = f_sim_data.get("load_kw", 0.5)
+                        # v11.9.446: Keep track of SOC progression for the next hour in this loop
+                        batt_soc = p_soc
                     elif isinstance(f_sim_data, (int, float)):
                         p_soc = float(f_sim_data)
+                        batt_soc = p_soc
+
+                    # Mode logic: Pass extracted forecasts to correctly trigger Morning Mode and other logic
+                    f_mode, _, _, _ = self._get_mode_at(
+                        f_dt, p_soc, is_forecast=True, 
+                        abs_hour=(h + (24 if is_tom else 0)),
+                        avg_gen_override=float(sim_gen),
+                        avg_load_override=float(sim_load)
+                    )
                     
                     # Get manual override for this specific timestamp
                     h_override = self.manager.hourly_manual_overrides.get(h_key)
