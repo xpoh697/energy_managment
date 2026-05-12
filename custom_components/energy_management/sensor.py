@@ -3040,7 +3040,7 @@ class InverterOperationModeSensor(SensorEntity):
             from .const import CONF_BATTERY_MAX_POWER
             max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             _, b_cap, _ = self.manager.get_battery_state(soc_default=100.0)
-            eff = float(self.manager.eff_coeff)
+            eff = float(man.get_efficiency_coefficient())
             
             # Minutes left in the hour (min 6 mins to avoid infinity power)
             mins_left = 60 - now.minute
