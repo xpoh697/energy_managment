@@ -1117,8 +1117,8 @@ class StrategyEngine:
                     overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
                     overflow_kwh += overflow_h
                 
-                # v11.9.489: Full trace for survival charging debugging
-                if commands and int(h_abs) in commands:
+                # v11.9.489/490: Targeted trace for survival charging debugging
+                if (commands and int(h_abs) in commands and abs(cmd_p) > 0.01) or int(h_abs) == 25:
                     _LOGGER.warning(f"[SimFull] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} soc:{_prev_soc_for_log:.1f}->{simulated_soc:.1f}")
                 
                 elif total_net_kw < -0.001 and allow_discharge: 
@@ -1220,7 +1220,7 @@ class StrategyEngine:
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.489",
+            "strategy_version": "v11.9.490",
             "state": "sale_pv",
             "mode": mode,
             "active_hours": [],
@@ -1256,8 +1256,8 @@ class StrategyEngine:
         natural_soc_after_sale = b_soc
         
         # v11.6.228: Ensure VERSION is defined for the response object
-        VERSION = "v11.9.489"
-        VERSION_CODE = 1109489
+        VERSION = "v11.9.490"
+        VERSION_CODE = 1109490
         res["strategy_version"] = VERSION
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
