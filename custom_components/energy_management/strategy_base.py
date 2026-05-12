@@ -1063,12 +1063,12 @@ class StrategyEngine:
                     if _h_price >= price_sell_only_pv and real_h < sale_pv_no_bat_max_hour and expected_gen_kw > 0.05:
                         _h_mode_str = "sale_pv_no_bat"
                     else:
-                        _h_mode_str = "standard"
+                        _h_mode_str = "sale_pv"
                 
                 # Safety fallback for specific mode names like 'sale_pv' -> 'sale_pv_bat'
-                if _h_mode_str == "sale_pv": _h_mode_str = "sale_pv_bat"
+                if _h_mode_str == "sale_pv": _h_mode_str = "sale_pv"
                 
-                _mode_cfg = INVERTER_MODES.get(_h_mode_str, INVERTER_MODES["standard"])
+                _mode_cfg = INVERTER_MODES.get(_h_mode_str, INVERTER_MODES["sale_pv"])
                 
                 # 2. Total Net Power for battery
                 # Solar charge depends on mode flag
@@ -1214,8 +1214,8 @@ class StrategyEngine:
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.486",
-            "state": "standard",
+            "strategy_version": "v11.9.487",
+            "state": "sale_pv",
             "mode": mode,
             "active_hours": [],
             "active_periods": "",
