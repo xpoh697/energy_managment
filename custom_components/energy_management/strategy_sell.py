@@ -439,6 +439,12 @@ class StrategySell(StrategyEngine):
                 
             # v11.9.320: Use DC budget (no eff here) as per user request to avoid under-selling.
             available_sell_dc = max(0.0, (soc_at_start - start_floor) * b_cap / 100.0)
+            
+            # v11.9.430: If no energy above floor, clear targets to avoid "phantom" plans in UI
+            if available_sell_dc <= 0.05:
+                target_hours = []
+                _sell_debug["limit_reason"] = "Недостаточно заряда"
+
             target_budget_ac = available_sell_dc # DC kwh equivalent
             
             _sell_debug["initial_budget"] = round_f(target_budget_ac, 2)
@@ -497,7 +503,10 @@ class StrategySell(StrategyEngine):
                         except: continue
                     
                     min_soc = min(valid_socs) if valid_socs else 100.0
-                    target_final = emergency_soc + 2.0
+                    
+                    # v11.9.430: Respect sliding floors (Gatekeeper) during refinement loop.
+                    # We target the most restrictive floor in our active window.
+                    target_final = max([floors_sliding.get(h, emergency_soc + 2.0) for h in target_hours], default=emergency_soc + 2.0)
                     soc_err = min_soc - target_final
                     
                     # v11.9.330: Priority-Based Refinement
@@ -544,6 +553,8 @@ class StrategySell(StrategyEngine):
                 limit_reason = "Ограничение (Цена > Порог, но бюджет на другие часы)"
             elif target_hours:
                 limit_reason = "Ожидание пика"
+            elif available_sell_dc <= 0.05:
+                limit_reason = "Недостаточно заряда"
             else:
                 limit_reason = "Нет ценового окна"
             
