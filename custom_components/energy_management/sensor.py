@@ -2713,6 +2713,10 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             mode_overrides=getattr(self.manager, "planned_mode_overrides", None),
             house_profile_override="consumption_base"
         )
+        
+        # v11.3.63: Inject Budget Diagnostics for transparency (FIX: Restored missing definition)
+        budget_data = self.manager.strategy_engine.get_budget_and_permissions(skip_strategy_check=True)
+        debug_attrs = {k: v for k, v in budget_data.items() if k.startswith("debug_")}
 
         f_raw = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
