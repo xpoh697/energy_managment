@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : wtorek, 12 maja 2026 11:28:06
+  Started : wtorek, 12 maja 2026 11:36:12
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -19,7 +19,7 @@
 	  *EXTRA File 		   31245	config_flow.cpython-314.pyc
 	  *EXTRA File 		    4915	const.cpython-314.pyc
 	  *EXTRA File 		    5891	number.cpython-314.pyc
-	  *EXTRA File 		  252502	sensor.cpython-314.pyc
+	  *EXTRA File 		  252540	sensor.cpython-314.pyc
 	  *EXTRA File 		    1653	strategy.cpython-314.pyc
 	  *EXTRA File 		  180386	strategy_base.cpython-314.pyc
 	  *EXTRA File 		   25304	strategy_buy.cpython-314.pyc
@@ -30,7 +30,7 @@
 	  *EXTRA File 		   17899	__init__.cpython-314.pyc
 	    Newer     		    6775	const.py100%  
 	    Newer     		     404	manifest.json100%  
-	    Newer     		  223416	sensor.py100%  
+	    Newer     		   42176	strategy_sell.py100%  
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
 	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\scratch\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
@@ -41,11 +41,11 @@
                Total    Copied   Skipped  Mismatch    FAILED    Extras
     Dirs :         5         0         5         0         0         1
    Files :        23         3        20         0         0        13
-   Bytes :    1.37 m   225.1 k    1.15 m         0         0   590.3 k
+   Bytes :    1.37 m    48.1 k    1.32 m         0         0   590.3 k
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :           1ÿ034ÿ058 Bytes/sec.
-   Speed :              59,169 MegaBytes/min.
-   Ended : wtorek, 12 maja 2026 11:28:07
+   Speed :             243ÿ128 Bytes/sec.
+   Speed :              13,912 MegaBytes/min.
+   Ended : wtorek, 12 maja 2026 11:36:13
 
