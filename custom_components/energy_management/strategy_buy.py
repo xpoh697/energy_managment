@@ -227,9 +227,9 @@ class StrategyBuy(StrategyEngine):
                     h_survival = max(h_survival_raw - 5.0, min_soc)
                     h_critical = min_soc + 5.0
                     
-                    if first_violation_h is None and soc_h < (h_survival + 0.2):
+                    if first_violation_h is None and soc_h <= h_survival:
                         first_violation_h = h_step
-                    if first_critical_h is None and soc_h < (h_critical + 0.2):
+                    if first_critical_h is None and soc_h <= h_critical:
                         first_critical_h = h_step
                     if first_violation_h is not None and first_critical_h is not None:
                         break
