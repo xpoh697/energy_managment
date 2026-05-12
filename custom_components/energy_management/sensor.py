@@ -70,8 +70,8 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.501"
-VERSION_CODE = 1109501
+VERSION = "v11.9.502"
+VERSION_CODE = 1109502
 
 STORAGE_VERSION = 1
 
@@ -3090,25 +3090,29 @@ class InverterOperationModeSensor(SensorEntity):
                 if h_override and h_override.get("mode") == "buy":
                     t_soc = h_override.get("soc_limit", t_soc)
                     
-                    # Check if we need to recalculate anchor (new hour or target changed)
-                    is_new_anchor = (man._manual_anchor_hour != now.hour or abs(man._manual_anchor_target_soc - t_soc) > 0.1)
+                    # v11.9.502: Recalculate anchor if hour, target, OR mode changed
+                    is_new_anchor = (
+                        man._manual_anchor_hour != now.hour or 
+                        abs(man._manual_anchor_target_soc - t_soc) > 0.05 or
+                        getattr(man, "_manual_anchor_last_mode", None) != mode
+                    )
                     
                     if is_new_anchor:
                         man._manual_anchor_hour = now.hour
                         man._manual_anchor_target_soc = t_soc
+                        man._manual_anchor_last_mode = mode
                         
-                        if batt_soc < (t_soc - 0.2):
+                        if batt_soc < (t_soc - 0.1):
                             delta_soc = max(0.0, t_soc - batt_soc)
                             delta_kwh = (delta_soc / 100.0) * b_cap
                             req_p = (delta_kwh / hours_left) / max(0.8, eff)
                             man._manual_anchor_power = min(max_batt_p, round_f(req_p, 2))
                             
-                            # v11.9.454: Anchor Amps as well
                             v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
                             man._manual_anchor_amps = round_f((man._manual_anchor_power * 1000.0) / v_val, 2)
                             
-                            _LOGGER.info("[Manual Anchor Buy] Recalculated Power: %.2fkW | Amps: %.1fA for Target: %.1f%% (%dmin left)", 
-                                         man._manual_anchor_power, man._manual_anchor_amps, t_soc, mins_left)
+                            _LOGGER.info("[Manual Anchor Buy] Recalculated Power: %.2fkW for Mode: %s", 
+                                         man._manual_anchor_power, mode)
                         else:
                             man._manual_anchor_power = 0.0
                             man._manual_anchor_amps = 0.0
