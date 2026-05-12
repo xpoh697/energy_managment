@@ -2974,6 +2974,10 @@ class InverterOperationModeSensor(SensorEntity):
                 s_strat = sell_strategy if not is_tom else sell_strategy.get("tomorrow_simulation", sell_strategy)
                 b_strat = buy_strategy if not is_tom else buy_strategy.get("tomorrow_simulation", buy_strategy)
                 
+                # v11.9.445: Extract solar/load forecasts to ensure Morning Mode (sale_pv_no_bat) logic works on the card
+                f_gen = self.manager.get_generation_forecast()
+                f_load = self.manager.get_consumption_forecast()
+                
                 for h in range(24):
                     f_dt = dt_target.replace(hour=h, minute=0, second=0, microsecond=0)
                     h_key = f"{d_str} {h:02d}:00"
@@ -2982,8 +2986,13 @@ class InverterOperationModeSensor(SensorEntity):
                     s_price = sell_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
                     b_price = buy_strategy.get("today_prices" if not is_tom else "tomorrow_prices", {}).get(str(h))
                     
-                    # Mode logic: Clean calculation using _get_mode_at which respects dates and abs_hours
-                    f_mode, _, _, _ = self._get_mode_at(f_dt, batt_soc, is_forecast=True, abs_hour=(h + (24 if is_tom else 0)))
+                    # Mode logic: Pass forecasts to correctly trigger Morning Mode and other logic
+                    f_mode, _, _, _ = self._get_mode_at(
+                        f_dt, batt_soc, is_forecast=True, 
+                        abs_hour=(h + (24 if is_tom else 0)),
+                        avg_gen_override=float(f_gen.get(str(h), 0.0)),
+                        avg_load_override=float(f_load.get(str(h), 0.5))
+                    )
                     
                     # Get projected SOC from simulation logs
                     f_h_key = f_dt.strftime("%H:59") + (" (Завтра)" if is_tom else "")
