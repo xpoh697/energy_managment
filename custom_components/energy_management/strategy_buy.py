@@ -298,6 +298,11 @@ class StrategyBuy(StrategyEngine):
             res["survival_target"] = survival_target
             res["target_soc"] = round_f(target_soc, 1)
             
+            # v11.9.475: CRITICAL - Ensure survival hours are included in the allocation window
+            # even if their price is above the market limit.
+            final_target_set = set(target_hours) | survival_hours
+            target_hours = sorted(list(final_target_set))
+            
             charge_commands = {}
             soc_at_start_plan = b_soc
             soc_end = b_soc
