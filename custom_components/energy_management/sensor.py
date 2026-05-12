@@ -3100,11 +3100,12 @@ class InverterOperationModeSensor(SensorEntity):
                 if h_override and h_override.get("mode") == "buy":
                     t_soc = h_override.get("soc_limit", t_soc)
                     
-                    # v11.9.502: Recalculate anchor if hour, target, OR mode changed
+                    # v11.9.505: Recalculate anchor if hour, target, mode changed OR SOC dropped below target
                     is_new_anchor = (
                         man._manual_anchor_hour != now.hour or 
                         abs(man._manual_anchor_target_soc - t_soc) > 0.05 or
-                        getattr(man, "_manual_anchor_last_mode", None) != mode
+                        getattr(man, "_manual_anchor_last_mode", None) != mode or
+                        (man._manual_anchor_power < 0.001 and batt_soc < t_soc - 0.5)
                     )
                     
                     if is_new_anchor:
@@ -3922,7 +3923,7 @@ class MarketStrategySensor(SensorEntity):
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
         attrs = {
-            "strategy_version": "v11.9.503",
+            "strategy_version": "v11.9.505",
             "strategy_candidates": res.get("strategy_candidates", []),
             "deg_cost": res.get("deg_cost", 0.0),
             "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
