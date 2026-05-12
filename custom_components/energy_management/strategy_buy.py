@@ -73,7 +73,7 @@ class StrategyBuy(StrategyEngine):
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.481",
+            "strategy_version": "v11.9.491",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -363,6 +363,10 @@ class StrategyBuy(StrategyEngine):
             # v11.9.481: Debug charge_commands integrity
             if charge_commands:
                 _LOGGER.warning(f"[Strategy Buy] Final Charge Commands: {charge_commands}")
+            
+            # v11.9.491: Final debug of command mapping
+            if charge_commands:
+                _LOGGER.warning(f"[Strategy Buy] FINAL Simulation Keys: {list(charge_commands.keys())} | Vals: {list(charge_commands.values())}")
             
             # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
             _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc, dynamic_floors=d_floors)
