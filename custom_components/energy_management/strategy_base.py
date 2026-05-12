@@ -1017,6 +1017,15 @@ class StrategyEngine:
                 # v11.9.331: Apply InverterModeClass rules from mode_overrides map.
                 # mode_overrides is a dict {abs_hour: mode_name_str} pre-computed by _get_mode_at.
                 _h_mode_name = (mode_overrides or {}).get(int(h_abs))
+                
+                # v11.9.443: Check for Manual Overrides in the Manager (Top Priority)
+                # This ensures that 'hand' icons on the dashboard are respected in ALL simulations.
+                _h_dt = (now + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
+                _h_ts_key = _h_dt.strftime("%Y-%m-%d %H:00")
+                _manual_m = man.hourly_manual_overrides.get(_h_ts_key)
+                if _manual_m:
+                    _h_mode_name = _manual_m.get("mode")
+
                 _h_mode_cls = INVERTER_MODES.get(_h_mode_name) if _h_mode_name else None
 
                 # Balance = (Solar - Load) + Grid_Command
