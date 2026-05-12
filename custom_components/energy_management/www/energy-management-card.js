@@ -479,7 +479,7 @@ class EnergyManagementCard extends HTMLElement {
     }
     
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.460';
+    if (vTag) vTag.innerText = attrs.strategy_version || 'v11.9.497';
     
     const projM = this.shadowRoot.getElementById('proj-morning');
     if (projM) projM.innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';

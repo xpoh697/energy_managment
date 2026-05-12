@@ -368,14 +368,17 @@ class StrategyBuy(StrategyEngine):
             if charge_commands:
                 _LOGGER.warning(f"[Strategy Buy] FINAL Simulation Keys: {list(charge_commands.keys())} | Vals: {list(charge_commands.values())}")
             
-            # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
-            soc_end, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=False, b_min_soc=min_soc, dynamic_floors=d_floors)
+            # v11.9.497: Synchronize all SOC sources (Tiles + Graph)
+            res["soc_simulation"] = {}
+            for h in sim_range:
+                h_key = get_h_log_key(h)
+                soc_val = self._get_soc_from_log(sim_log, h_key, b_soc)
+                res["soc_simulation"][h_key] = soc_val
+                
+                # Update hourly_data for tiles (v11.9.497)
+                if h_key in hourly_data:
+                    hourly_data[h_key]["soc"] = soc_val
             
-            # v11.9.492: Update morning SOC correctly
-            morning_key = get_h_log_key(morning_h_abs)
-            soc_morning = self._get_soc_from_log(sim_log, morning_key, soc_end)
-            
-            res["soc_simulation"] = {get_h_log_key(h): self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc) for h in sim_range}
             res["charge_commands_debug"] = charge_commands
             
             # 3b. Survival-only simulation for debug (to see what 'Survival Bridge' sees)
