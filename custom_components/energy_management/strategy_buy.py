@@ -200,7 +200,7 @@ class StrategyBuy(StrategyEngine):
             morning_h = man.get_sunrise_hour() or 8
             morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
 
-            for _ in range(5):
+            for _ in range(12):
                 added = False
                 sim_range = list(range(cur_hour, max(all_buy_prices.keys()) + 1))
                 sim_cmds = {h: max_p for h in survival_hours}
@@ -220,8 +220,14 @@ class StrategyBuy(StrategyEngine):
                 
                 if first_violation_h is not None:
                     res["survival_violation_hour"] = first_violation_h
-                    # v11.9.432: Allow any hour before SUNRISE to help survival, ignoring tomorrow afternoon
-                    candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh < morning_h_abs]
+                    # v11.9.433: Two-stage search: 
+                    # 1. First priority: Hours BEFORE or AT violation to prevent hitting MinSOC
+                    candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= first_violation_h]
+                    
+                    if not candidates_global:
+                        # 2. Fallback: Any hour before sunrise to reach the long-term morning goal
+                        candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh < morning_h_abs]
+
                     if candidates_global:
                         cheapest = min(candidates_global, key=lambda x: all_buy_prices[x])
                         c_price = all_buy_prices[cheapest]
