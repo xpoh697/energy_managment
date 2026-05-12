@@ -210,7 +210,8 @@ class StrategyBuy(StrategyEngine):
 
             for _ in range(12):
                 added = False
-                sim_range = list(range(cur_hour, max(all_buy_prices.keys()) + 1))
+                # v11.9.473: Use 48h horizon for planning to match UI simulation
+                sim_range = list(range(cur_hour, cur_hour + 48))
                 sim_cmds = {h: max_p for h in survival_hours}
                 _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds, house_profile_override="consumption_base")
                 
@@ -226,9 +227,9 @@ class StrategyBuy(StrategyEngine):
                     h_survival = max(h_survival_raw - 5.0, min_soc)
                     h_critical = min_soc + 5.0
                     
-                    if first_violation_h is None and soc_h < h_survival:
+                    if first_violation_h is None and soc_h < (h_survival + 0.2):
                         first_violation_h = h_step
-                    if first_critical_h is None and soc_h < h_critical:
+                    if first_critical_h is None and soc_h < (h_critical + 0.2):
                         first_critical_h = h_step
                     if first_violation_h is not None and first_critical_h is not None:
                         break
@@ -350,7 +351,7 @@ class StrategyBuy(StrategyEngine):
                 res["active_periods"] = ""
                 needed_kwh_dc = max(0.0, (target_soc - b_soc) * b_cap / 100.0)
             
-            # v11.9.467: Pass dynamic floors to final simulation to distinguish House vs Trade limits
+            # v11.9.473: Pass dynamic floors to final simulation to distinguish House vs Trade limits
             sim_range = list(range(cur_hour, cur_hour + 48))
             d_floors = {h: self.get_gatekeeper_floor(h, morning_h_abs) for h in sim_range}
             
