@@ -97,6 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         timestamp = call.data.get("timestamp")
         mode = call.data.get("mode")
         soc_limit = call.data.get("soc_limit", 100.0)
+        _LOGGER.warning(f"[Service Call] set_hourly_override: timestamp={timestamp}, mode={mode}, soc={soc_limit}")
         await manager.async_set_hourly_override(timestamp, mode, soc_limit)
 
     hass.services.async_register(DOMAIN, "force_buy", handle_force_buy)

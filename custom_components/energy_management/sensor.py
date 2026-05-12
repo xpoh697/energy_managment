@@ -3096,7 +3096,14 @@ class InverterOperationModeSensor(SensorEntity):
                     t_soc = buy_strategy.get("target_soc", 0.0)
                 c_amps_fixed = buy_strategy.get("recommended_amps", 0.0)
                 
-                # v11.9.453: Anchored Manual Fallback (Buy)
+                # v11.9.507: Robust Manual Mode Key Matching
+                h_override = None
+                search_prefix = now.strftime("%Y-%m-%d %H")
+                for k, v in self.manager.hourly_manual_overrides.items():
+                    if k.startswith(search_prefix):
+                        h_override = v
+                        break
+                
                 if h_override and h_override.get("mode") == "buy":
                     t_soc = h_override.get("soc_limit", t_soc)
                     
