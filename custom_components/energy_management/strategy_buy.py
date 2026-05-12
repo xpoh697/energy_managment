@@ -424,7 +424,7 @@ class StrategyBuy(StrategyEngine):
             elif reason == "Нет":
                 txt = "В покупке нет необходимости"
             res["current_mode_text"] = txt
-            res["power_decision"] = txt if res["state"] == "active" else "Ожидание окна"
+            res["power_decision"] = txt
             res["raw_commands"] = charge_commands
             res["strategy_candidates"] = [f"{h%24:02d}:00" for h in target_hours]
 
