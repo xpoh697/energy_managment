@@ -199,6 +199,12 @@ class StrategyBuy(StrategyEngine):
             
             morning_h = man.get_sunrise_hour() or 8
             morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
+            
+            # v11.9.434: Find the absolute cheapest hour before sunrise for optimal charging
+            all_pre_sunrise = [h for h in all_buy_prices.keys() if h < morning_h_abs]
+            cheapest_global = min(all_pre_sunrise, key=lambda h: all_buy_prices[h]) if all_pre_sunrise else cur_hour
+            
+            survival_targets = {} # {hour: target_soc}
 
             for _ in range(12):
                 added = False
@@ -207,50 +213,74 @@ class StrategyBuy(StrategyEngine):
                 _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds, house_profile_override="consumption_base")
                 
                 first_violation_h = None
+                first_critical_h = None
+                
                 for h_step in sim_range:
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
                     
-                    # v11.9.426: Dynamic Survival Trigger
-                    # Check if SOC at this hour is enough to survive until sunrise
                     h_survival = self.get_survival_floor(h_step, morning_h_abs)
-                    if soc_h < h_survival:
+                    h_critical = min_soc + 5.0
+                    
+                    if first_violation_h is None and soc_h < h_survival:
                         first_violation_h = h_step
+                    if first_critical_h is None and soc_h < h_critical:
+                        first_critical_h = h_step
+                    if first_violation_h is not None and first_critical_h is not None:
                         break
                 
                 if first_violation_h is not None:
-                    res["survival_violation_hour"] = first_violation_h
-                    # v11.9.433: Two-stage search: 
-                    # 1. First priority: Hours BEFORE or AT violation to prevent hitting MinSOC
-                    candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= first_violation_h]
+                    # We need to plan. Where?
+                    # Hour X is the critical deadline.
+                    hour_X = first_critical_h if first_critical_h is not None else morning_h_abs
                     
-                    if not candidates_global:
-                        # 2. Fallback: Any hour before sunrise to reach the long-term morning goal
-                        candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh < morning_h_abs]
+                    if cheapest_global <= hour_X:
+                        # Case A: Cheapest hour is safe to reach. Use it!
+                        target_h = cheapest_global
+                        target_type = "Gatekeeper"
+                    else:
+                        # Case B: We will hit critical SOC before cheapest hour. Need a Bridge.
+                        candidates_bridge = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= hour_X]
+                        if candidates_bridge:
+                            target_h = min(candidates_bridge, key=lambda x: all_buy_prices[x])
+                            target_type = "Bridge"
+                        else:
+                            # No hours before critical? Use the cheapest overall as fallback
+                            target_h = cheapest_global
+                            target_type = "Gatekeeper"
 
-                    if candidates_global:
-                        cheapest = min(candidates_global, key=lambda x: all_buy_prices[x])
-                        c_price = all_buy_prices[cheapest]
-                        is_too_expensive = bool(c_price > buy_limit * 3.0 and b_soc > 25.0)
-                        is_peak = bool(c_price > avg_price)
-                        is_urgent = bool(first_violation_h <= cur_hour + 2)
-                        
-                        if (not is_peak and not is_too_expensive) or is_urgent or b_soc < 20.0:
-                            survival_hours.add(cheapest)
-                            added = True
+                    if target_h not in survival_hours:
+                        survival_hours.add(target_h)
+                        # Set target: Bridge means just enough to reach global min
+                        if target_type == "Bridge":
+                            # Target is the floor for the cheapest_global hour (the bridge target)
+                            survival_targets[target_h] = self.get_survival_floor(cheapest_global, morning_h_abs)
+                        else:
+                            survival_targets[target_h] = self.get_gatekeeper_floor(target_h + 1, morning_h_abs)
+                        added = True
                 if not added: break
             
             target_hours = sorted(list(survival_hours))
             if any(h not in (negative_hours or (candidates if 'candidates' in locals() else [])) for h in target_hours):
                 res["charge_reason"] = "Выживание"
 
-            morning_h = man.get_sunrise_hour() or 8
-            morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
-            
-            last_h = max(target_hours) if target_hours else cur_hour
-            survival_target = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
-            
-            base_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
+             morning_h = man.get_sunrise_hour() or 8
+             morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
+             
+             # v11.9.434: Dynamic Target SOC based on Bridge/Gatekeeper status
+             current_survival_target = survival_targets.get(cur_hour)
+             if current_survival_target:
+                 survival_target = current_survival_target
+             else:
+                 last_h = max(target_hours) if target_hours else cur_hour
+                 survival_target = self.get_gatekeeper_floor(last_h + 1, morning_h_abs)
+             
+             _buy_debug["survival_floor"] = round_f(self.get_survival_floor(cur_hour, morning_h_abs), 1)
+             _buy_debug["gatekeeper_floor"] = round_f(self.get_gatekeeper_floor(cur_hour, morning_h_abs), 1)
+             _buy_debug["cheapest_global"] = f"{cheapest_global%24:02d}:00"
+             _buy_debug["survival_targets"] = {f"{h%24:02d}h": round_f(t, 1) for h, t in survival_targets.items()}
+
+             base_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
             
             if res.get("charge_reason") == "Отрицательная цена":
                 target_soc = 100.0
