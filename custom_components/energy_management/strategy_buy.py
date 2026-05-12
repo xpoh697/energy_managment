@@ -73,7 +73,7 @@ class StrategyBuy(StrategyEngine):
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.499",
+            "strategy_version": "v11.9.501",
             "state": "standard",
             "mode": mode,
             "active_hours": [],

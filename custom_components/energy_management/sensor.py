@@ -70,8 +70,8 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.498"
-VERSION_CODE = 1109498
+VERSION = "v11.9.501"
+VERSION_CODE = 1109501
 
 STORAGE_VERSION = 1
 
@@ -2885,9 +2885,12 @@ class InverterOperationModeSensor(SensorEntity):
     def extra_state_attributes(self):
         try:
             now = dt_util.now()
-            batt_soc, _, _ = self.manager.get_battery_state(soc_default=100.0)
+            batt_soc, b_cap, _ = self.manager.get_battery_state(soc_default=100.0)
             man = self.manager # Shorthand
             min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+            eff = float(man.get_efficiency_coefficient())
+            from .const import CONF_BATTERY_MAX_POWER
+            max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
             
             # Current state calculation
             mode, reason, bms_debug, peak_start_abs = self._get_mode_at(now, batt_soc)
@@ -3061,11 +3064,6 @@ class InverterOperationModeSensor(SensorEntity):
             # v11.9.452: Smart Manual Mode Injector (Dynamic Power Calculation)
             cur_h_key = now.strftime("%Y-%m-%d %H:00")
             h_override = self.manager.hourly_manual_overrides.get(cur_h_key)
-            
-            from .const import CONF_BATTERY_MAX_POWER
-            max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
-            _, b_cap, _ = self.manager.get_battery_state(soc_default=100.0)
-            eff = float(man.get_efficiency_coefficient())
             
             # Minutes left in the hour (min 6 mins to avoid infinity power)
             mins_left = 60 - now.minute
