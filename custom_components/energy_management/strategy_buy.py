@@ -280,7 +280,7 @@ class StrategyBuy(StrategyEngine):
             _buy_debug["cheapest_global"] = f"{cheapest_global%24:02d}:00"
             _buy_debug["survival_targets"] = {f"{h%24:02d}h": round_f(t, 1) for h, t in survival_targets.items()}
 
-             base_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
+            base_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
             
             if res.get("charge_reason") == "Отрицательная цена":
                 target_soc = 100.0
