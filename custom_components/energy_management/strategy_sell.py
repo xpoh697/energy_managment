@@ -304,33 +304,13 @@ class StrategySell(StrategyEngine):
                     else:
                         break
             
-            # 2. Calculate House Need AFTER the pool (until sunrise)
-            # This is the survival component of the gatekeeper.
-            house_after_kwh = 0.0
-            for h_f in range(h_end_pool + 1, next_sunrise_abs):
-                l_val = float(normalize_float(_sim_cons_profile.get(str(h_f % 24), 0.4)))
-                g_val = float(normalize_float(_sim_gen_profile.get(str(h_f % 24), 0.0)))
-                house_after_kwh += max(0.0, l_val - g_val)
-            house_after_pct = (house_after_kwh / b_cap * 100.0)
-
-            # 3. Calculate House Need DURING the pool (from now until h_end_pool)
-            # We must reserve this energy now so we don't "over-sell" in the evening.
-            house_during_kwh = 0.0
-            for h_f in range(cur_hour + 1, h_end_pool + 1):
-                l_val = float(normalize_float(_sim_cons_profile.get(str(h_f % 24), 0.4)))
-                g_val = float(normalize_float(_sim_gen_profile.get(str(h_f % 24), 0.0)))
-                house_during_kwh += max(0.0, l_val - g_val)
-            house_during_pct = (house_during_kwh / b_cap * 100.0)
+            # v11.9.447: Use unified Gatekeeper Floor from base class to ensure consistency
+            # This replaces the manual split-pool calculation which was prone to profile mismatches.
+            gatekeeper = self.get_gatekeeper_floor(cur_hour, next_sunrise_abs)
             
-            # v11.8.564: Combined house need for diagnostics
-            house_kwh_until_sunrise = house_after_kwh + house_during_kwh
-
-            # 4. Final Targets & Floor
-            # Target at the very end of the pool
-            target_at_end = max(user_limit, emergency_soc + soc_buffer + house_after_pct)
-            
-            # Current floor: Target at end + what the house will eat until that end
-            gatekeeper = target_at_end + house_during_pct
+            # Recalculate house percentages for diagnostic compatibility using the same engine
+            house_after_pct = round_f(self.get_survival_floor(h_end_pool, next_sunrise_abs) - emergency_soc, 1)
+            house_during_pct = round_f(self.get_survival_floor(cur_hour, h_end_pool) - emergency_soc, 1)
 
             # 3. Determine Active Safety Floor for Current Hour (Limit for SALE)
             if is_turbo_win:
@@ -384,16 +364,10 @@ class StrategySell(StrategyEngine):
                     # v11.9.285: Turbo mode strictly MinSOC + 2% as per TS 1.1
                     h_floor = emergency_soc + 2.0 
                 else:
-                    # Survival Bridge to next sunrise
+                    # v11.9.447: Unified Floor Logic (House Survival + User Limit)
+                    # Use centralized helper to avoid discrepancies in attributes/debug
                     next_sr = get_next_sunrise(h_abs)
-                    h_bridge_kwh = 0.0
-                    for h_future in range(h_abs + 1, next_sr):
-                        l_v = float(normalize_float(_sim_cons_profile.get(str(h_future % 24), 0.4)))
-                        g_v = float(normalize_float(_sim_gen_profile.get(str(h_future % 24), 0.0)))
-                        h_bridge_kwh += max(0.0, l_v - g_v)
-                    
-                    # Survival floor includes SOC buffer and predicted house need adjusted by efficiency
-                    survival_floor = (emergency_soc + soc_buffer) + (h_bridge_kwh / b_cap * 100.0 / eff)
+                    survival_floor = self.get_gatekeeper_floor(h_abs, next_sr)
                     h_floor = max(user_limit, survival_floor)
                 
                 floors_sliding[h_abs] = h_floor 
