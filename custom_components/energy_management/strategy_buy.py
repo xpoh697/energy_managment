@@ -221,7 +221,7 @@ class StrategyBuy(StrategyEngine):
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
                     
-                    # v11.9.449: Standardized logic - Trigger on (Survival - 5%), Target is (Gatekeeper)
+                    # v11.9.450: Standardized logic - Trigger on (Survival - 5%), Target is (Survival + 5%)
                     h_survival_raw = self.get_survival_floor(h_step, morning_h_abs)
                     h_survival = max(h_survival_raw - 5.0, min_soc)
                     h_critical = min_soc + 5.0
