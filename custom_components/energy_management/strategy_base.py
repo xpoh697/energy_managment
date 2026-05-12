@@ -1056,7 +1056,7 @@ class StrategyEngine:
                 # Use current_mode ONLY for the first hour of simulation.
                 # For future hours, detect based on price/time logic.
                 _h_mode_str = None
-                if h_abs == cur_hour:
+                if h_abs == now.hour:
                     _h_mode_str = current_mode
                 
                 if _h_mode_str is None:
@@ -1214,7 +1214,7 @@ class StrategyEngine:
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.482",
+            "strategy_version": "v11.9.486",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -1250,8 +1250,8 @@ class StrategyEngine:
         natural_soc_after_sale = b_soc
         
         # v11.6.228: Ensure VERSION is defined for the response object
-        VERSION = "v11.9.482"
-        VERSION_CODE = 1109482
+        VERSION = "v11.9.486"
+        VERSION_CODE = 1109486
         res["strategy_version"] = VERSION
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
