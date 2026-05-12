@@ -2704,9 +2704,15 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             mode_overrides=getattr(self.manager, "planned_mode_overrides", None)
         )
         
-        # v11.3.63: Inject Budget Diagnostics for transparency
-        budget_data = self.manager.strategy_engine.get_budget_and_permissions(skip_strategy_check=True)
-        debug_attrs = {k: v for k, v in budget_data.items() if k.startswith("debug_")}
+        # 3. Run Base-only simulation for comparison
+        simulated_soc_base, _, _ = self.manager.run_soc_simulation(
+            batt_soc, sim_hours, now,
+            commands=merged_commands,
+            no_battery_charge_until=no_battery_charge_until,
+            pv_curtail_hours=pv_curtail_hours,
+            mode_overrides=getattr(self.manager, "planned_mode_overrides", None),
+            house_profile_override="consumption_base"
+        )
 
         f_raw = self.manager.get_forecast_value(self.manager.forecast_today_sensor)
         coeff = getattr(self.manager, "last_blended_coeff", 1.0)
@@ -2717,6 +2723,8 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
             "prediction_target": target_label,
             "target_hour": f"{target_hour:02d}:00",
             "current_soc_pct": round_f(batt_soc, 1),
+            "projected_soc_base_pct": round_f(simulated_soc_base, 1),
+            "load_profile_used": "total",
             "forecast_income_remaining_kwh": round_f(f_val, 2),
             "forecast_raw_kwh": round_f(f_raw or 0.0, 2),
             "forecast_coefficient_blended": round_f(coeff, 3),
