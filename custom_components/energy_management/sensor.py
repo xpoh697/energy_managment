@@ -397,6 +397,9 @@ class EnergyProfileManager:
         self.planned_mode_overrides = {}
         self.manual_mode_overrides = {}
         self.hourly_manual_overrides = {}
+        self._last_override_hour = -1
+        
+        # v11.9.453: Manual mode anchoring for stable power commands
         self._manual_anchor_hour = -1
         self._manual_anchor_target_soc = -1.0
         self._manual_anchor_power = 0.0
