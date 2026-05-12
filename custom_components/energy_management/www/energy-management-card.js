@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v11.9.413 ",
+  "%c ENERGY MANAGEMENT %c v11.9.414 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -402,7 +402,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.stroke = this._getBatteryColor(soc);
     }
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.413';
+    if (vTag) vTag.innerText = 'v11.9.414';
     
     const socVal = this.shadowRoot.getElementById('soc-val');
     if (socVal) socVal.innerText = Math.round(soc);
@@ -517,10 +517,12 @@ class EnergyManagementCard extends HTMLElement {
               ${isManual ? `<ha-icon class="manual-indicator" icon="mdi:hand-back-right"></ha-icon>` : ''}
               <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
               <span class="h-time">${key.split(' ')[1]}</span>
+              ${(hourData.buy_price > 0 || hourData.sell_price > 0) ? `
               <div class="h-prices">
                 <span class="price-buy">${hourData.buy_price.toFixed(2)}</span>
                 <span class="price-sell">${hourData.sell_price.toFixed(2)}</span>
               </div>
+              ` : '<div class="h-prices" style="height:14px"></div>'}
               <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
               <div style="display:flex; flex-direction:column; align-items:center; margin-top:4px">
                 <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
@@ -583,8 +585,15 @@ class EnergyManagementCard extends HTMLElement {
           socLabel.style.color = modeColor;
           socLabel.innerText = hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : '';
         }
-        if (buyPrice) buyPrice.innerText = hourData.buy_price.toFixed(2);
-        if (sellPrice) sellPrice.innerText = hourData.sell_price.toFixed(2);
+        if (priceContainer) {
+          if (hourData.buy_price > 0 || hourData.sell_price > 0) {
+            priceContainer.style.display = 'flex';
+            if (buyPrice) buyPrice.innerText = hourData.buy_price.toFixed(2);
+            if (sellPrice) sellPrice.innerText = hourData.sell_price.toFixed(2);
+          } else {
+            priceContainer.style.display = 'none';
+          }
+        }
         bar.setAttribute('data-mode', hourData.mode);
       });
     }
