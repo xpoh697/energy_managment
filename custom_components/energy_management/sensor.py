@@ -70,8 +70,8 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.508"
-VERSION_CODE = 1109508
+VERSION = "v11.9.510"
+VERSION_CODE = 1109510
 
 STORAGE_VERSION = 1
 
@@ -3104,37 +3104,30 @@ class InverterOperationModeSensor(SensorEntity):
                         h_override = v
                         break
                 
-                if h_override and h_override.get("mode") == "buy":
+                    # v11.9.510: Instant Manual Power Sync
+                    # We recalculate power in real-time if the Target SOC changes, 
+                    # ensuring the UI 'Power' attribute updates instantly with the slider.
                     t_soc = h_override.get("soc_limit", t_soc)
                     
-                    # v11.9.508: Remove 0W anchoring to allow strategy override logic to operate freely
-                    is_new_anchor = (
-                        man._manual_anchor_hour != now.hour or 
-                        abs(man._manual_anchor_target_soc - t_soc) > 0.05 or
-                        getattr(man, "_manual_anchor_last_mode", None) != mode
-                    )
-                    
-                    if is_new_anchor:
-                        man._manual_anchor_hour = now.hour
-                        man._manual_anchor_target_soc = t_soc
-                        man._manual_anchor_last_mode = mode
+                    if batt_soc < (t_soc - 0.1):
+                        delta_soc = max(0.0, t_soc - batt_soc)
+                        delta_kwh = (delta_soc / 100.0) * b_cap
+                        # Calculate power needed for the REMAINING minutes of this hour
+                        p_calc = (delta_kwh / hours_left) / max(0.1, eff)
+                        p_val = min(max_batt_p, round_f(p_calc, 2))
                         
-                        if batt_soc < (t_soc - 0.1):
-                            delta_soc = max(0.0, t_soc - batt_soc)
-                            delta_kwh = (delta_soc / 100.0) * b_cap
-                            req_p = (delta_kwh / hours_left) / max(0.1, eff)
-                            man._manual_anchor_power = min(max_batt_p, round_f(req_p, 2))
-                            
-                            v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
-                            man._manual_anchor_amps = round_f((man._manual_anchor_power * 1000.0) / max(10.0, v_val), 2)
-                            
-                            _LOGGER.warning(f"[Manual Anchor Buy] Recalculated: {man._manual_anchor_power}kW ({man._manual_anchor_amps}A) to reach {t_soc}% SOC")
-                        else:
-                            man._manual_anchor_power = 0.0
-                            man._manual_anchor_amps = 0.0
-                            
-                    p_val = man._manual_anchor_power
-                    c_amps_fixed = man._manual_anchor_amps
+                        v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
+                        c_amps_fixed = round_f((p_val * 1000.0) / max(10.0, v_val), 2)
+                        
+                        # Update anchor only to keep logic consistent for other parts of the system
+                        man._manual_anchor_power = p_val
+                        man._manual_anchor_amps = c_amps_fixed
+                        man._manual_anchor_target_soc = t_soc
+                    else:
+                        p_val = 0.0
+                        c_amps_fixed = 0.0
+                        man._manual_anchor_power = 0.0
+                        man._manual_anchor_amps = 0.0
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
