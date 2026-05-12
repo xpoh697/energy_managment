@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v11.9.416 ",
+  "%c ENERGY MANAGEMENT %c v11.9.417 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -159,8 +159,8 @@ class EnergyManagementCard extends HTMLElement {
         .h-prices { display: flex; gap: 4px; margin: 2px 0; }
         .price-buy { font-size: 0.6rem; font-weight: 800; color: #90caf9; }
         .price-sell { font-size: 0.6rem; font-weight: 800; color: #a5d6a7; }
-        .h-mode { font-size: 0.55rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 1px; text-transform: uppercase; letter-spacing: 0.02em; }
-        .h-soc { font-size: 0.45rem; font-weight: 700; color: rgba(255,255,255,0.5); margin-top: 0; }
+        .h-mode { font-size: 0.55rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.02em; }
+        .h-soc { font-size: 0.45rem; font-weight: 700; color: rgba(255,255,255,0.5); margin-top: 1px; }
 
 
         .btn {
@@ -402,7 +402,7 @@ class EnergyManagementCard extends HTMLElement {
       bar.style.stroke = this._getBatteryColor(soc);
     }
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.416';
+    if (vTag) vTag.innerText = 'v11.9.417';
     
     const socVal = this.shadowRoot.getElementById('soc-val');
     if (socVal) socVal.innerText = Math.round(soc);
@@ -531,7 +531,7 @@ class EnergyManagementCard extends HTMLElement {
                 <span class="price-sell">${(hourData.sell_price || 0).toFixed(2)}</span>
               </div>
               <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
-              <div style="display:flex; flex-direction:column; align-items:center; margin-top:4px">
+              <div style="display:flex; flex-direction:column; align-items:center;">
                 <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
               </div>
             </div>

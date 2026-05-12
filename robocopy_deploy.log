@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : wtorek, 12 maja 2026 08:32:09
+  Started : wtorek, 12 maja 2026 08:36:25
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -20,18 +20,18 @@
 	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\scratch\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
 	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\www\
-	    Newer     		   26621	energy-management-card.js100%  
+	    Newer     		   26608	energy-management-card.js100%  
 
 ------------------------------------------------------------------------------
 
                Total    Copied   Skipped  Mismatch    FAILED    Extras
     Dirs :         5         0         5         0         0         0
    Files :        23         3        20         0         0         0
-   Bytes :    1.37 m    33.0 k    1.34 m         0         0         0
+   Bytes :    1.37 m    32.9 k    1.34 m         0         0         0
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :             161ÿ722 Bytes/sec.
-   Speed :               9,254 MegaBytes/min.
-   Ended : wtorek, 12 maja 2026 08:32:09
+   Speed :             184ÿ628 Bytes/sec.
+   Speed :              10,565 MegaBytes/min.
+   Ended : wtorek, 12 maja 2026 08:36:25
 
