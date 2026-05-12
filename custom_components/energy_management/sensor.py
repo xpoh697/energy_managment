@@ -395,10 +395,14 @@ class EnergyProfileManager:
         self.current_inverter_mode = "sale_pv"
         # v11.9.331: Mode overrides map {abs_hour -> mode_name} for simulation engine
         self.planned_mode_overrides = {}
-        # v11.9.333: Manual mode overrides (from UI)
         self.manual_mode_overrides = {}
         self.hourly_manual_overrides = {}
         self._last_override_hour = -1
+        
+        # v11.9.453: Manual mode anchoring for stable power commands
+        self._manual_anchor_hour = -1
+        self._manual_anchor_target_soc = -1.0
+        self._manual_anchor_power = 0.0
 
         self.all_active_sensors = set()
         raw_deduct_2 = config_data.get(CONF_DEDUCT_SETTINGS, {})
@@ -3058,18 +3062,28 @@ class InverterOperationModeSensor(SensorEntity):
                     t_soc = buy_strategy.get("target_soc", 0.0)
                 c_amps_fixed = buy_strategy.get("recommended_amps", 0.0)
                 
-                # v11.9.452: Manual Fallback with Dynamic Power Calculation
+                # v11.9.453: Anchored Manual Fallback (Buy)
                 if h_override and h_override.get("mode") == "buy":
                     t_soc = h_override.get("soc_limit", t_soc)
-                    if p_val < 0.1 and batt_soc < (t_soc - 0.2):
-                        # Calculate required power to reach target SOC by end of hour
-                        delta_soc = max(0.0, t_soc - batt_soc)
-                        delta_kwh = (delta_soc / 100.0) * b_cap
-                        # Power = Energy / Time / Efficiency
-                        req_p = (delta_kwh / hours_left) / max(0.8, eff)
-                        p_val = min(max_batt_p, round_f(req_p, 2))
-                        _LOGGER.info("[Smart Manual Buy] Needed: %.2fkWh | Time: %dmin | Power: %.2fkW (Target: %.1f%%)", 
-                                     delta_kwh, mins_left, p_val, t_soc)
+                    
+                    # Check if we need to recalculate anchor (new hour or target changed)
+                    is_new_anchor = (man._manual_anchor_hour != now.hour or abs(man._manual_anchor_target_soc - t_soc) > 0.1)
+                    
+                    if is_new_anchor:
+                        man._manual_anchor_hour = now.hour
+                        man._manual_anchor_target_soc = t_soc
+                        
+                        if batt_soc < (t_soc - 0.2):
+                            delta_soc = max(0.0, t_soc - batt_soc)
+                            delta_kwh = (delta_soc / 100.0) * b_cap
+                            req_p = (delta_kwh / hours_left) / max(0.8, eff)
+                            man._manual_anchor_power = min(max_batt_p, round_f(req_p, 2))
+                            _LOGGER.info("[Manual Anchor Buy] Recalculated Power: %.2fkW for Target: %.1f%% (%dmin left)", 
+                                         man._manual_anchor_power, t_soc, mins_left)
+                        else:
+                            man._manual_anchor_power = 0.0
+                            
+                    p_val = man._manual_anchor_power
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
@@ -3088,17 +3102,27 @@ class InverterOperationModeSensor(SensorEntity):
                     t_soc = sell_strategy.get("target_soc", 0.0)
                 c_amps_fixed = sell_strategy.get("recommended_amps", 0.0)
                 
-                # v11.9.452: Smart Manual Fallback (Discharge)
+                # v11.9.453: Anchored Manual Fallback (Discharge)
                 if h_override and h_override.get("mode") == "sale_pv_bat":
                     t_soc = h_override.get("soc_limit", t_soc)
-                    if p_val < 0.1 and batt_soc > (t_soc + 0.2):
-                        delta_soc = max(0.0, batt_soc - t_soc)
-                        delta_kwh = (delta_soc / 100.0) * b_cap
-                        # Power = Energy / Time * Efficiency
-                        req_p = (delta_kwh / hours_left) * max(0.8, eff)
-                        p_val = min(max_batt_p, round_f(req_p, 2))
-                        _LOGGER.info("[Smart Manual Discharge] Needed: %.2fkWh | Time: %dmin | Power: %.2fkW (Target: %.1f%%)", 
-                                     delta_kwh, mins_left, p_val, t_soc)
+                    
+                    is_new_anchor = (man._manual_anchor_hour != now.hour or abs(man._manual_anchor_target_soc - t_soc) > 0.1)
+                    
+                    if is_new_anchor:
+                        man._manual_anchor_hour = now.hour
+                        man._manual_anchor_target_soc = t_soc
+                        
+                        if batt_soc > (t_soc + 0.2):
+                            delta_soc = max(0.0, batt_soc - t_soc)
+                            delta_kwh = (delta_soc / 100.0) * b_cap
+                            req_p = (delta_kwh / hours_left) * max(0.8, eff)
+                            man._manual_anchor_power = min(max_batt_p, round_f(req_p, 2))
+                            _LOGGER.info("[Manual Anchor Discharge] Recalculated Power: %.2fkW for Target: %.1f%% (%dmin left)", 
+                                         man._manual_anchor_power, t_soc, mins_left)
+                        else:
+                            man._manual_anchor_power = 0.0
+                            
+                    p_val = man._manual_anchor_power
             else:
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
