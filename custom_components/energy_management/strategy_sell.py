@@ -228,8 +228,9 @@ class StrategySell(StrategyEngine):
                 f_tom_v = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
                 energy_to_full = (100.0 - b_soc) * b_cap / 100.0
                 
-                # v11.9.230: Account for tomorrow's forecast too to allow deeper discharge tonight
-                is_solar_surplus = (f_today_val > energy_to_full + 2.0) or (f_tom_v > (energy_to_full + 5.0))
+                # v11.9.423: Removed tomorrow's forecast from surplus trigger to protect night survival.
+                # Surplus is only if TODAY we have more energy than we can store.
+                is_solar_surplus = (f_today_val > energy_to_full + 2.0)
                 
                 # v11.9.240: Explicit debug components
                 _debug_surplus = {
@@ -394,11 +395,6 @@ class StrategySell(StrategyEngine):
                     # Survival floor includes SOC buffer and predicted house need adjusted by efficiency
                     survival_floor = (emergency_soc + soc_buffer) + (h_bridge_kwh / b_cap * 100.0 / eff)
                     h_floor = max(user_limit, survival_floor)
-                    
-                    # v11.9.285: In surplus mode, force floor to MinSOC + 2.0% (TS 1.1)
-                    # This allows morning squeeze but respects the survival boundary.
-                    if is_solar_surplus:
-                        h_floor = emergency_soc + 2.0
                 
                 floors_sliding[h_abs] = h_floor 
                 floors_anchored[h_abs] = h_floor
