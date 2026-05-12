@@ -1025,6 +1025,8 @@ class StrategyEngine:
     
                 # 4. Inverter Command (AI Buying/Selling)
                 cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
+                if commands and int(h_abs) in commands:
+                    _LOGGER.warning(f"[SimCmd] H:{h_abs} cmd_p found: {cmd_p}")
     
                 # v11.9.331: Apply InverterModeClass rules from mode_overrides map.
                 # mode_overrides is a dict {abs_hour: mode_name_str} pre-computed by _get_mode_at.
