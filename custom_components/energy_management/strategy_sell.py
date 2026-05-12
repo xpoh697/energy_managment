@@ -636,12 +636,23 @@ class StrategySell(StrategyEngine):
             })
             
             # --- Stage 4: Final Simulation for UI (Projection) ---
-            # v11.8.438: Run simulation with ALL commands and SLIDING floors for realistic UI charts
+            # v11.9.440: Inject mode_overrides to ensure UI simulation respects charge_from_pv rules
+            mode_overrides_sim = {}
+            for h in sim_range:
+                if h in sell_commands and sell_commands[h] > 0.01:
+                    if man.get_setting(CONF_BATTERY_DISCHARGE_ENABLED, True):
+                        mode_overrides_sim[h] = "sale_pv_bat"
+                    else:
+                        mode_overrides_sim[h] = "sale_pv_no_bat"
+                elif h in active_h: # Selling but maybe zero power
+                     mode_overrides_sim[h] = "sale_pv_no_bat"
+
             _, sim_log_final, _ = self.run_soc_simulation(
                 b_soc, sim_range, now, 
                 commands={h: -p for h, p in sell_commands.items()}, 
                 b_min_soc=emergency_soc, dynamic_floors=floors_sliding,
-                ignore_blended=True, house_profile_override="consumption_base"
+                ignore_blended=True, house_profile_override="consumption_base",
+                mode_overrides=mode_overrides_sim
             )
             sim_log = sim_log_final # Use this for all UI displays below
 
