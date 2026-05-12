@@ -1025,8 +1025,7 @@ class StrategyEngine:
     
                 # 4. Inverter Command (AI Buying/Selling)
                 cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
-                if commands and int(h_abs) in commands:
-                    _LOGGER.warning(f"[SimCmd] H:{h_abs} cmd_p found: {cmd_p}")
+                _prev_soc_for_log = simulated_soc
     
                 # v11.9.331: Apply InverterModeClass rules from mode_overrides map.
                 # mode_overrides is a dict {abs_hour: mode_name_str} pre-computed by _get_mode_at.
@@ -1117,6 +1116,11 @@ class StrategyEngine:
                     
                     overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
                     overflow_kwh += overflow_h
+                
+                # v11.9.489: Full trace for survival charging debugging
+                if commands and int(h_abs) in commands:
+                    _LOGGER.warning(f"[SimFull] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} soc:{_prev_soc_for_log:.1f}->{simulated_soc:.1f}")
+                
                 elif total_net_kw < -0.001 and allow_discharge: 
                     # v11.9.465: Split Discharge Logic (House vs Trade)
                     # 1. Total requested discharge power (DC) capped by inverter max
@@ -1216,7 +1220,7 @@ class StrategyEngine:
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.487",
+            "strategy_version": "v11.9.489",
             "state": "sale_pv",
             "mode": mode,
             "active_hours": [],
@@ -1252,8 +1256,8 @@ class StrategyEngine:
         natural_soc_after_sale = b_soc
         
         # v11.6.228: Ensure VERSION is defined for the response object
-        VERSION = "v11.9.486"
-        VERSION_CODE = 1109486
+        VERSION = "v11.9.489"
+        VERSION_CODE = 1109489
         res["strategy_version"] = VERSION
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
