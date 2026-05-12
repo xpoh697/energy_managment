@@ -313,11 +313,11 @@ class StrategySell(StrategyEngine):
             house_during_pct = round_f(self.get_survival_floor(cur_hour, h_end_pool) - emergency_soc, 1)
 
             # 3. Determine Active Safety Floor for Current Hour (Limit for SALE)
+            active_safety_floor = max(user_limit, gatekeeper)
             if is_turbo_win:
-                active_safety_floor = emergency_soc + 2.0
                 limit_reason = "Turbo (Morning)"
             else:
-                active_safety_floor = max(user_limit, gatekeeper)
+                limit_reason = "Safe Mode"
                 limit_reason = "Safe Mode"
 
             available_sell_dc_pre = max(0.0, (b_soc - active_safety_floor) * b_cap / 100.0)
@@ -357,18 +357,10 @@ class StrategySell(StrategyEngine):
             _sim_gen_profile = dict(man.get_predicted_profile("generation_total"))
             
             for h_abs in sim_range:
-                h_rel = h_abs % 24
-                is_turbo = (4 <= h_rel < 10)
-                
-                if is_turbo:
-                    # v11.9.285: Turbo mode strictly MinSOC + 2% as per TS 1.1
-                    h_floor = emergency_soc + 2.0 
-                else:
-                    # v11.9.447: Unified Floor Logic (House Survival + User Limit)
-                    # Use centralized helper to avoid discrepancies in attributes/debug
-                    next_sr = get_next_sunrise(h_abs)
-                    survival_floor = self.get_gatekeeper_floor(h_abs, next_sr)
-                    h_floor = max(user_limit, survival_floor)
+                # v11.9.449: Unified Gatekeeper Floor handles Turbo Mode internally
+                next_sr = get_next_sunrise(h_abs)
+                survival_floor = self.get_gatekeeper_floor(h_abs, next_sr)
+                h_floor = max(user_limit, survival_floor)
                 
                 floors_sliding[h_abs] = h_floor 
                 floors_anchored[h_abs] = h_floor

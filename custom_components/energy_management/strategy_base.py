@@ -150,10 +150,18 @@ class StrategyEngine:
         house_soc_pct = (house_kwh_needed / eff / b_cap * 100.0) if b_cap > 0 else 0
         return round_f(min_soc + house_soc_pct, 1)
 
-    def get_gatekeeper_floor(self, start_h_abs: int, end_h_abs: int) -> float:
-        """Calculate buffered survival floor (Gatekeeper = Survival + SOC Buffer). Used for Strategy Limits."""
-        soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 5.0))
-        return round_f(self.get_survival_floor(start_h_abs, end_h_abs) + soc_buffer, 1)
+    def get_gatekeeper_floor(self, h_abs: int, end_h_abs: int) -> float:
+        """Calculate unified gatekeeper floor (Turbo or Safe) as per TS Section 1.1."""
+        h_rel = h_abs % 24
+        # v11.9.449: Unified Gatekeeper logic - Turbo Mode (4-10 AM) vs Safe Mode
+        if 4 <= h_rel < 10:
+            # Turbo Mode: MinSOC + 2%
+            min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
+            return round_f(min_soc + 2.0, 1)
+        else:
+            # Safe Mode: Survival + SOC Buffer
+            soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 5.0))
+            return round_f(self.get_survival_floor(h_abs, end_h_abs) + soc_buffer, 1)
 
     # --- REFACTOR v6.2 MODULAR HELPERS ---
 
@@ -2239,8 +2247,9 @@ class StrategyEngine:
                     house_safety = min_soc_bat_val + soc_buffer
                     
                     # 1. Survival Target SOC (Sunrise Guard)
-                    # v11.6.367: Evening (13:00-04:00) = 18%, Morning (04:00-10:00) = 15%
-                    _m_survival_target = house_safety if not (4 <= (cur_hour % 24) < 10) else (float(man.get_setting(CONF_EMERGENCY_SOC_LIMIT, 13.0)) + 2.0)
+                    # v11.9.449: Unified Gatekeeper calculation via function (handles Turbo/Safe modes)
+                    _sr_h_abs = sunrise_h + (24 if cur_hour >= sunrise_h else 0)
+                    _m_survival_target = self.get_gatekeeper_floor(cur_hour, _sr_h_abs)
                     
                     # 2. User Discharge Limit (Static user setting)
                     user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 13.0))
