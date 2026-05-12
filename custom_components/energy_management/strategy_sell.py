@@ -628,6 +628,7 @@ class StrategySell(StrategyEngine):
                 "limit_reason": limit_reason,
                 "target_morning": round_f(target_morning, 1),
                 "gatekeeper_after_sale": round_f(gatekeeper, 1) if not is_turbo_win else "Turbo",
+                "gatekeeper_floor": round_f(gatekeeper_val, 1),
                 "projected_soc_morning": round_f(soc_morning, 1),
                 "projected_soc_after_sale": round_f(soc_end, 1),
                 "arbitrage_buyback": {
