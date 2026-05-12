@@ -73,7 +73,7 @@ class StrategyBuy(StrategyEngine):
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.492",
+            "strategy_version": "v11.9.494",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -298,7 +298,7 @@ class StrategyBuy(StrategyEngine):
             res["survival_target"] = survival_target
             res["target_soc"] = round_f(target_soc, 1)
             
-            # v11.9.475: CRITICAL - Ensure survival hours are included in the allocation window
+            # v11.9.475: Ensure survival hours are included in the allocation window
             # even if their price is above the market limit.
             final_target_set = set(target_hours) | survival_hours
             target_hours = sorted(list(final_target_set))
