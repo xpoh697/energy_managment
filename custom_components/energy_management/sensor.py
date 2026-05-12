@@ -3784,7 +3784,8 @@ class MarketStrategySensor(SensorEntity):
     @property
     def native_value(self):
         res = self.manager.get_market_strategy(self.mode)
-        return res["state"]
+        # v11.9.429: Prioritize descriptive text for the main dashboard
+        return res.get("power_decision", res.get("state", "idle"))
 
     @property
     def extra_state_attributes(self):
