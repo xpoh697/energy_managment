@@ -70,8 +70,8 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.503"
-VERSION_CODE = 1109502
+VERSION = "v11.9.508"
+VERSION_CODE = 1109508
 
 STORAGE_VERSION = 1
 
@@ -3107,12 +3107,11 @@ class InverterOperationModeSensor(SensorEntity):
                 if h_override and h_override.get("mode") == "buy":
                     t_soc = h_override.get("soc_limit", t_soc)
                     
-                    # v11.9.505: Recalculate anchor if hour, target, mode changed OR SOC dropped below target
+                    # v11.9.508: Remove 0W anchoring to allow strategy override logic to operate freely
                     is_new_anchor = (
                         man._manual_anchor_hour != now.hour or 
                         abs(man._manual_anchor_target_soc - t_soc) > 0.05 or
-                        getattr(man, "_manual_anchor_last_mode", None) != mode or
-                        (man._manual_anchor_power < 0.001 and batt_soc < t_soc - 0.5)
+                        getattr(man, "_manual_anchor_last_mode", None) != mode
                     )
                     
                     if is_new_anchor:
@@ -3123,14 +3122,13 @@ class InverterOperationModeSensor(SensorEntity):
                         if batt_soc < (t_soc - 0.1):
                             delta_soc = max(0.0, t_soc - batt_soc)
                             delta_kwh = (delta_soc / 100.0) * b_cap
-                            req_p = (delta_kwh / hours_left) / max(0.8, eff)
+                            req_p = (delta_kwh / hours_left) / max(0.1, eff)
                             man._manual_anchor_power = min(max_batt_p, round_f(req_p, 2))
                             
                             v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
-                            man._manual_anchor_amps = round_f((man._manual_anchor_power * 1000.0) / v_val, 2)
+                            man._manual_anchor_amps = round_f((man._manual_anchor_power * 1000.0) / max(10.0, v_val), 2)
                             
-                            _LOGGER.info("[Manual Anchor Buy] Recalculated Power: %.2fkW for Mode: %s", 
-                                         man._manual_anchor_power, mode)
+                            _LOGGER.warning(f"[Manual Anchor Buy] Recalculated: {man._manual_anchor_power}kW ({man._manual_anchor_amps}A) to reach {t_soc}% SOC")
                         else:
                             man._manual_anchor_power = 0.0
                             man._manual_anchor_amps = 0.0
@@ -3930,7 +3928,7 @@ class MarketStrategySensor(SensorEntity):
         tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
 
         attrs = {
-            "strategy_version": "v11.9.505",
+            "strategy_version": "v11.9.508",
             "strategy_candidates": res.get("strategy_candidates", []),
             "deg_cost": res.get("deg_cost", 0.0),
             "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
