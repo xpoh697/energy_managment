@@ -194,16 +194,11 @@ class StrategyBuy(StrategyEngine):
                     res["state"] = "price_limit_not_met"
 
             min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
-            soc_buffer = float(man.get_setting(CONF_SOC_BUFFER, 5.0))
             survival_hours = set(target_hours)
             avg_price = sum(all_buy_prices.values()) / len(all_buy_prices) if all_buy_prices else 0.0
             
             morning_h = man.get_sunrise_hour() or 8
             morning_h_abs = morning_h + (24 if cur_hour >= 4 else 0)
-
-            # v11.9.425: Survival trigger based on user-requested 0.5 * buffer formula
-            # This allows proactive charging before hitting the absolute minimum.
-            trigger_threshold = min_soc + (0.5 * soc_buffer)
 
             for _ in range(5):
                 added = False
@@ -215,17 +210,14 @@ class StrategyBuy(StrategyEngine):
                 for h_step in sim_range:
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
-                    if soc_h < trigger_threshold:
+                    
+                    # v11.9.426: Dynamic Survival Trigger
+                    # Check if SOC at this hour is enough to survive until sunrise
+                    h_survival = self.get_survival_floor(h_step, morning_h_abs)
+                    if soc_h < h_survival:
                         first_violation_h = h_step
                         break
                 
-                # If no mid-night crash, check if we survive until morning with enough safety
-                if first_violation_h is None:
-                    morning_key = get_h_log_key(morning_h_abs - 1)
-                    soc_morn = self._get_soc_from_log(log, morning_key, 100.0)
-                    if soc_morn < trigger_threshold + 2.0: # Extra bit for morning buffer
-                        first_violation_h = morning_h_abs - 1
-
                 if first_violation_h is not None:
                     res["survival_violation_hour"] = first_violation_h
                     candidates_global = [sh for sh in all_buy_prices.keys() if sh not in survival_hours]
