@@ -70,8 +70,8 @@ _get_stored_price = get_price_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-VERSION = "v11.9.514"
-VERSION_CODE = 1109514
+VERSION = "v11.9.515"
+VERSION_CODE = 1109515
 
 STORAGE_VERSION = 1
 
@@ -3108,6 +3108,9 @@ class InverterOperationModeSensor(SensorEntity):
                 # We recalculate power in real-time ONLY for Manual mode to ensure UI responsiveness.
                 if h_override and h_override.get("mode") == "buy":
                     t_soc = h_override.get("soc_limit", t_soc)
+                    
+                    # v11.9.515: Diagnostic Logging
+                    _LOGGER.error(f"[Real-time Sync Check] SOC: {batt_soc}%, Target: {t_soc}%, Cap: {b_cap}kWh, Eff: {eff}, Left: {hours_left}h")
                         
                     if batt_soc < (t_soc - 0.1):
                         delta_soc = max(0.0, t_soc - batt_soc)
@@ -3121,12 +3124,13 @@ class InverterOperationModeSensor(SensorEntity):
                         man._manual_anchor_power = p_val
                         man._manual_anchor_amps = c_amps_fixed
                         man._manual_anchor_target_soc = t_soc
-                        _LOGGER.debug(f"[Real-time Sync] Manual: {p_val}kW for {t_soc}%")
+                        _LOGGER.error(f"[Real-time Sync Result] Power: {p_val}kW, Amps: {c_amps_fixed}A")
                     else:
                         p_val = 0.0
                         c_amps_fixed = 0.0
                         man._manual_anchor_power = 0.0
                         man._manual_anchor_amps = 0.0
+                        _LOGGER.error(f"[Real-time Sync Result] SOC reached target. Power: 0")
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
