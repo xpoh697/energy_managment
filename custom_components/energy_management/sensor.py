@@ -3028,10 +3028,18 @@ class InverterOperationModeSensor(SensorEntity):
             
             # v11.1.22/58: Synchronize with dynamic strategy results
             chg_reason = ""
-            # Check for fixed hourly anchors for stable display
-            fixed_buy = self.manager.fixed_strategy_data.get("buy", {})
-            fixed_sell = self.manager.fixed_strategy_data.get("sell", {})
-            hour_str = f"{now.hour}"
+            # v11.9.452: Smart Manual Mode Injector (Dynamic Power Calculation)
+            cur_h_key = now.strftime("%Y-%m-%d %H:00")
+            h_override = self.manager.hourly_manual_overrides.get(cur_h_key)
+            
+            from .const import CONF_BATTERY_MAX_POWER
+            max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
+            _, b_cap, _ = self.manager.get_battery_state(soc_default=100.0)
+            eff = float(self.manager.eff_coeff)
+            
+            # Minutes left in the hour (min 6 mins to avoid infinity power)
+            mins_left = 60 - now.minute
+            hours_left = max(0.1, mins_left / 60.0)
             
             p_val = 0.0
             t_soc = 0.0
@@ -3050,6 +3058,18 @@ class InverterOperationModeSensor(SensorEntity):
                     t_soc = buy_strategy.get("target_soc", 0.0)
                 c_amps_fixed = buy_strategy.get("recommended_amps", 0.0)
                 
+                # v11.9.452: Manual Fallback with Dynamic Power Calculation
+                if h_override and h_override.get("mode") == "buy":
+                    t_soc = h_override.get("soc_limit", t_soc)
+                    if p_val < 0.1 and batt_soc < (t_soc - 0.2):
+                        # Calculate required power to reach target SOC by end of hour
+                        delta_soc = max(0.0, t_soc - batt_soc)
+                        delta_kwh = (delta_soc / 100.0) * b_cap
+                        # Power = Energy / Time / Efficiency
+                        req_p = (delta_kwh / hours_left) / max(0.8, eff)
+                        p_val = min(max_batt_p, round_f(req_p, 2))
+                        _LOGGER.info("[Smart Manual Buy] Needed: %.2fkWh | Time: %dmin | Power: %.2fkW (Target: %.1f%%)", 
+                                     delta_kwh, mins_left, p_val, t_soc)
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
@@ -3067,10 +3087,29 @@ class InverterOperationModeSensor(SensorEntity):
                     p_val = sell_strategy.get("recommended_power_kw", 0.0)
                     t_soc = sell_strategy.get("target_soc", 0.0)
                 c_amps_fixed = sell_strategy.get("recommended_amps", 0.0)
+                
+                # v11.9.452: Smart Manual Fallback (Discharge)
+                if h_override and h_override.get("mode") == "sale_pv_bat":
+                    t_soc = h_override.get("soc_limit", t_soc)
+                    if p_val < 0.1 and batt_soc > (t_soc + 0.2):
+                        delta_soc = max(0.0, batt_soc - t_soc)
+                        delta_kwh = (delta_soc / 100.0) * b_cap
+                        # Power = Energy / Time * Efficiency
+                        req_p = (delta_kwh / hours_left) * max(0.8, eff)
+                        p_val = min(max_batt_p, round_f(req_p, 2))
+                        _LOGGER.info("[Smart Manual Discharge] Needed: %.2fkWh | Time: %dmin | Power: %.2fkW (Target: %.1f%%)", 
+                                     delta_kwh, mins_left, p_val, t_soc)
             else:
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
                 c_amps_fixed = 0.0
+                
+                # v11.9.452: Apply manual SOC limit for other modes (e.g. stop_sale, sale_pv)
+                if h_override:
+                    t_soc = h_override.get("soc_limit", t_soc)
+                    if h_override.get("mode") == "stop_sale":
+                        p_val = 0.0
+                        c_amps_fixed = 0.0
                 
                 hour_key = f"{now.hour:02d}:00"
                 if sell_strategy.get("state") == "active":
