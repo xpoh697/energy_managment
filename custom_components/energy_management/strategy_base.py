@@ -1052,32 +1052,41 @@ class StrategyEngine:
                 rem_gen = _expected_gen_kw_sim - p_for_house
                 rem_cons = expected_cons_kw - p_for_house
                 
-                # v11.9.331: If mode does not allow PV to charge battery (e.g. sale_pv_no_bat),
-                # surplus solar goes to grid, not battery.
-                _pv_to_bat = rem_gen if (_h_mode_cls is None or _h_mode_cls.charge_from_pv) else 0.0
-
-                # v11.9.442: Smart Morning Mode Resolution
-                # If mode is not explicitly provided, check if we should be in sale_pv_no_bat
-                # (Price > Threshold AND Hour < Limit AND Generation > 0)
-                _is_morning_export = False
-                if _h_mode_cls is None and not no_solar_to_bat:
+                # v11.9.482: Determine Mode Config for this simulation hour
+                # Use current_mode if provided, otherwise detect based on price/time
+                _h_mode_str = current_mode
+                if _h_mode_str is None:
                     if _h_price >= price_sell_only_pv and real_h < sale_pv_no_bat_max_hour and expected_gen_kw > 0.05:
-                        _is_morning_export = True
-
-                # 2. Total Net Power for battery
-                _solar_charge = 0.0 if (no_solar_to_bat or _is_morning_export) else _pv_to_bat
+                        _h_mode_str = "sale_pv_no_bat"
+                    else:
+                        _h_mode_str = "standard"
                 
-                # v11.9.479: Charging bypass at root level. 
-                # If we are charging from grid, house load is powered by grid, not battery.
+                _mode_cfg = INVERTER_MODES.get(_h_mode_str, INVERTER_MODES["standard"])
+                
+                # 2. Total Net Power for battery
+                # Solar charge depends on mode flag
+                _pv_to_bat = rem_gen if (_mode_cfg.charge_from_pv and not no_solar_to_bat) else 0.0
+                _solar_charge = _pv_to_bat if (_mode_cfg.charge_from_pv and not no_solar_to_bat) else 0.0
+                
+                # v11.9.479/482: Charging bypass. If grid charging is active, house is powered by grid.
                 if cmd_p > 0.01:
                     total_net_kw = float(cmd_p + max(0.0, _solar_charge))
                 else:
-                    total_net_kw = float(_solar_charge - rem_cons + cmd_p)
+                    # Battery power depends on discharge flag for house load
+                    if _mode_cfg.discharge_to_house:
+                        total_net_kw = float(_solar_charge - rem_cons + cmd_p)
+                    else:
+                        total_net_kw = float(_solar_charge + cmd_p)
                 
-                # v11.7.68: Solar Bypass during Sale
-                if cmd_p < -0.01:
-                    total_net_kw = float(-rem_cons + cmd_p)
+                # v11.9.480: Trace power for debugging
+                if abs(cmd_p) > 0.001 or abs(total_net_kw) > 0.1:
+                    _LOGGER.debug(f"[Sim] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} load:{rem_cons:.3f}")
 
+                # v11.9.482: Export Logic integration
+                if _mode_cfg.export_pv_to_grid and not _mode_cfg.charge_from_pv:
+                    # If we export PV and don't charge from it, solar to bat is 0
+                    total_net_kw = float(total_net_kw - _solar_charge)
+                    _solar_charge = 0.0
             
                 sim_eff = float(max(0.85, eff_coeff))
                 if total_net_kw > 0.001: 
@@ -1198,7 +1207,7 @@ class StrategyEngine:
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.215",
+            "strategy_version": "v11.9.482",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -1234,8 +1243,8 @@ class StrategyEngine:
         natural_soc_after_sale = b_soc
         
         # v11.6.228: Ensure VERSION is defined for the response object
-        VERSION = "v11.9.215"
-        VERSION_CODE = 1109215
+        VERSION = "v11.9.482"
+        VERSION_CODE = 1109482
         res["strategy_version"] = VERSION
         
         old_calc = bool(getattr(self, "_calculating_strategy", False))
