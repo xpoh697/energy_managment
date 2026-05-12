@@ -855,6 +855,10 @@ class StrategyEngine:
         _LOGGER.warning(f"[SimStart] start_soc: {start_soc} (type: {type(start_soc)})")
 
         man = man or self.manager
+        # v11.9.466: Resolve hardware Min SOC if not explicitly passed
+        if b_min_soc < 0.01:
+            b_min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
+
         _, batt_cap, _ = man.get_battery_state()
         b_cap_f = float(batt_cap)
         if b_cap_f <= 0.1:
@@ -1095,25 +1099,37 @@ class StrategyEngine:
                     overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
                     overflow_kwh += overflow_h
                 elif total_net_kw < -0.001 and allow_discharge: 
+                    # v11.9.465: Split Discharge Logic (House vs Trade)
+                    # 1. Total requested discharge power (DC) capped by inverter max
                     actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
                     
                     old_soc = simulated_soc
                     if b_cap_f > 0.1:
-                        # v11.8.431: Bulletproof Floor Enforcement.
-                        # We resolve the floor for this specific absolute hour.
+                        # 2. Identify Sale component (Trade) vs House component
+                        p_sale_ac = abs(min(0.0, cmd_p))
+                        p_sale_dc = min(actual_discharge_kw, p_sale_ac / sim_eff)
+                        p_house_dc = max(0.0, actual_discharge_kw - p_sale_dc)
+                        
+                        # 3. Resolve Floors
                         h_idx_int = int(h_abs)
-                        h_floor = b_min_soc
+                        h_floor_trade = b_min_soc
                         if dynamic_floors and h_idx_int in dynamic_floors:
-                            h_floor = float(dynamic_floors[h_idx_int])
+                            h_floor_trade = float(dynamic_floors[h_idx_int])
+
+                        # 4. Sequential Discharge Simulation
+                        # Phase A: House Load (Limit = Hardware b_min_soc)
+                        # v11.9.467: House load ALWAYS has priority and ignores Trade Floor
+                        house_drop_req = (p_house_dc * step_duration / b_cap_f * 100.0)
+                        house_drop_act = min(house_drop_req, max(0.0, simulated_soc - b_min_soc))
+                        simulated_soc = float(simulated_soc - house_drop_act)
                         
-                        # Calculate how much SOC we ARE ALLOWED to drop
-                        max_drop_soc = max(0.0, simulated_soc - h_floor)
-                        # Calculate how much SOC we WANT to drop
-                        requested_drop_soc = (actual_discharge_kw * step_duration / b_cap_f * 100.0)
-                        
-                        # Apply the cap
-                        actual_drop_soc = min(requested_drop_soc, max_drop_soc)
-                        simulated_soc = float(simulated_soc - actual_drop_soc)
+                        # Phase B: Sale/Trade (Limit = Trade Floor)
+                        sale_drop_req = (p_sale_dc * step_duration / b_cap_f * 100.0)
+                        sale_drop_act = min(sale_drop_req, max(0.0, simulated_soc - h_floor_trade))
+                        simulated_soc = float(simulated_soc - sale_drop_act)
+
+                        # Actual total drop for logging
+                        actual_drop_soc = house_drop_act + sale_drop_act
                         
                         # v11.8.431: Important - if we capped the drop, we must reflect 
                         # the REAL AC power that the battery actually provided.

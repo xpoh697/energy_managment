@@ -1,6 +1,6 @@
 DOMAIN = "energy_management"
-VERSION = "v11.9.456"
-VERSION_CODE = 1109456
+VERSION = "v11.9.467"
+VERSION_CODE = 1109467
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"

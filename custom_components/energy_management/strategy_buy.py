@@ -350,12 +350,15 @@ class StrategyBuy(StrategyEngine):
                 res["active_periods"] = ""
                 needed_kwh_dc = max(0.0, (target_soc - b_soc) * b_cap / 100.0)
             
-            # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
+            # v11.9.467: Pass dynamic floors to final simulation to distinguish House vs Trade limits
             sim_range = list(range(cur_hour, cur_hour + 48))
-            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc)
+            d_floors = {h: self.get_gatekeeper_floor(h, morning_h_abs) for h in sim_range}
+            
+            # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
+            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc, dynamic_floors=d_floors)
             
             # 3b. Survival-only simulation for debug (to see what 'Survival Bridge' sees)
-            _, sim_log_base, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc, house_profile_override="consumption_base")
+            _, sim_log_base, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc, house_profile_override="consumption_base", dynamic_floors=d_floors)
             
             # v11.9.427: Use the last hour OF CHARGING for soc_end, to match Planned Power display
             last_charge_h = max([h for h, p in charge_commands.items() if p > 0.05], default=cur_hour)

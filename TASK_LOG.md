@@ -1,6 +1,7 @@
 # Project Task Log & Universal Rules
 
-## Current Status (v11.9.15)
+## Current Status (v11.9.467)
+- [x] Fixed Nocturnal SOC Plateau by decoupling House and Trade floors (v11.9.467).
 - [x] Fixed NameError: prof_gen in DP engine (v11.9.15).
 - [x] Fixed NameError: sunrise_h in DP engine (v11.9.14).
 - [x] Fixed ImportError in DP engine (v11.9.13).

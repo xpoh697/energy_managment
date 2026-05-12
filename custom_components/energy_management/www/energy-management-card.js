@@ -83,21 +83,66 @@ class EnergyManagementCard extends HTMLElement {
           font-family: var(--font-family);
           color: var(--primary-text);
         }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
-        .title { font-size: 1.4rem; font-weight: 800; }
-        .status-badge { padding: 8px 16px; border-radius: 16px; font-size: 0.8rem; font-weight: 800; text-transform: uppercase; border: 2px solid rgba(255,255,255,0.1); }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .title { font-size: 1.1rem; font-weight: 800; opacity: 0.8; }
+        .status-badge { 
+          padding: 4px 10px; 
+          border-radius: 10px; 
+          font-size: 0.7rem; 
+          font-weight: 800; 
+          text-transform: uppercase; 
+          border: 1px solid rgba(255,255,255,0.1); 
+          background: rgba(255,255,255,0.02);
+        }
 
-        .gauge-wrap { position: relative; width: 250px; height: 250px; flex-shrink: 0; margin-bottom: 24px; }
-        .gauge-svg { transform: rotate(-90deg); width: 100%; height: 100%; overflow: visible; }
-        .gauge-track { fill: none; stroke: rgba(255,255,255,0.05); stroke-width: 10; }
-        .gauge-bar { fill: none; stroke: var(--accent); stroke-width: 16; stroke-linecap: round; transition: stroke-dashoffset 1s ease, stroke 1s ease; }
-        .gauge-label { position: absolute; top: 53%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
-        .soc-value { font-size: 4rem; font-weight: 900; line-height: 0.7; letter-spacing: -0.04em; }
-        .soc-unit { font-size: 1rem; font-weight: 700; color: var(--secondary-text); opacity: 0.7; margin-top: 4px; }
-        .hero-section { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; margin-bottom: 24px; background: rgba(255,255,255,0.03); padding: 16px; border-radius: 24px; }
+        .stats-panel {
+          background: rgba(255,255,255,0.02);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 24px;
+          padding: 16px;
+          margin-bottom: 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .hero-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
         
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 8px; width: 100%; max-width: 450px; }
-        .stat-card { background: rgba(255,255,255,0.02); padding: 6px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); text-align: center; cursor: pointer; transition: background 0.2s, transform 0.1s; }
+        .hero-badge {
+          height: 64px;
+          border-radius: 16px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.04);
+          transition: all 0.4s ease;
+          cursor: pointer;
+        }
+        .hero-badge:hover { background: rgba(255,255,255,0.08); transform: translateY(-2px); }
+        .hero-val { font-size: 1.6rem; font-weight: 900; line-height: 1; }
+        .hero-label { font-size: 0.65rem; font-weight: 800; opacity: 0.5; text-transform: uppercase; margin-top: 4px; }
+
+        .stats-grid { 
+          display: grid; 
+          grid-template-columns: repeat(auto-fit, minmax(85px, 1fr)); 
+          gap: 8px; 
+          width: 100%; 
+        }
+        .stat-card { 
+          background: rgba(255,255,255,0.02); 
+          padding: 8px 10px; 
+          border-radius: 12px; 
+          border: 1px solid rgba(255,255,255,0.03); 
+          text-align: center; 
+          cursor: pointer; 
+          transition: all 0.2s; 
+        }
         .stat-card:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
         .stat-card:active { transform: scale(0.96); }
         .stat-label { font-size: 0.55rem; font-weight: 800; color: var(--secondary-text); text-transform: uppercase; margin-bottom: 2px; display: block; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
@@ -246,17 +291,18 @@ class EnergyManagementCard extends HTMLElement {
           <div id="status-badge" class="status-badge">AI Operational</div>
         </div>
 
-        <div class="hero-section">
-          <div class="gauge-wrap">
-            <svg class="gauge-svg" viewBox="0 0 160 160">
-              <circle class="gauge-track" cx="80" cy="80" r="72"></circle>
-              <circle id="gauge-bar" class="gauge-bar" cx="80" cy="80" r="72" stroke-dasharray="452" stroke-dashoffset="452"></circle>
-            </svg>
-            <div class="gauge-label">
-              <span id="soc-val" class="soc-value">--</span>
-              <span class="soc-unit">SOC %</span>
+        <div class="stats-panel">
+          <div class="hero-row">
+            <div id="soc-hero" class="hero-badge" onclick="this.getRootNode().host._handleMoreInfo()">
+              <span id="soc-val" class="hero-val">--</span>
+              <span class="hero-label">Battery SOC</span>
+            </div>
+            <div id="profit-hero" class="hero-badge" onclick="this.getRootNode().host._handleMoreInfo(this.getAttribute('data-entity'))">
+              <span id="profit-val" class="hero-val">--</span>
+              <span id="profit-label" class="hero-label">Today Profit</span>
             </div>
           </div>
+
           <div class="stats-grid" id="stats-container">
             <div class="stat-card" onclick="this.getRootNode().host._handleMoreInfo()">
               <span class="stat-label">Morning Projection</span>
@@ -395,17 +441,45 @@ class EnergyManagementCard extends HTMLElement {
     const bms = attrs.bms_status || {};
     const hourlyData = attrs.hourly_data || {};
 
-    // Update Gauge & Stats
-    const bar = this.shadowRoot.getElementById('gauge-bar');
-    if (bar) {
-      bar.style.strokeDashoffset = 452 - (452 * Math.min(100, Math.max(0, soc))) / 100;
-      bar.style.stroke = this._getBatteryColor(soc);
+    // Update Hero Badges
+    const socColor = this._getBatteryColor(soc);
+    const socHero = this.shadowRoot.getElementById('soc-hero');
+    if (socHero) {
+      socHero.style.borderColor = socColor;
+      socHero.style.boxShadow = `0 6px 20px ${socColor}22`;
     }
-    const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = 'v11.9.417';
-    
     const socVal = this.shadowRoot.getElementById('soc-val');
-    if (socVal) socVal.innerText = Math.round(soc);
+    if (socVal) {
+      socVal.innerText = Math.round(soc) + '%';
+      socVal.style.color = socColor;
+    }
+
+    // Profit Badge
+    const profitEntity = this._config.profit_entity;
+    const profitHero = this.shadowRoot.getElementById('profit-hero');
+    if (profitEntity && this._hass.states[profitEntity]) {
+      const pState = this._hass.states[profitEntity];
+      const pValRaw = parseFloat(pState.state) || 0;
+      const pColor = pValRaw >= 0 ? '#4caf50' : '#f44336';
+      
+      profitHero.style.display = 'flex';
+      profitHero.setAttribute('data-entity', profitEntity);
+      profitHero.style.borderColor = pColor;
+      profitHero.style.boxShadow = `0 6px 20px ${pColor}22`;
+      
+      const pLabel = this.shadowRoot.getElementById('profit-label');
+      pLabel.innerText = this._config.profit_label || 'Today Profit';
+
+      const pValEl = this.shadowRoot.getElementById('profit-val');
+      pValEl.innerText = pValRaw.toFixed(2) + (pState.attributes.unit_of_measurement || '');
+      pValEl.style.color = pColor;
+    } else if (profitHero) {
+      profitHero.style.display = 'none';
+      if (socHero) socHero.style.gridColumn = 'span 2';
+    }
+    
+    const vTag = this.shadowRoot.getElementById('v-tag');
+    if (vTag) vTag.innerText = 'v11.9.460';
     
     const projM = this.shadowRoot.getElementById('proj-morning');
     if (projM) projM.innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
