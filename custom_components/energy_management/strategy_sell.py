@@ -481,9 +481,15 @@ class StrategySell(StrategyEngine):
                             
                             deficit_detail.append(f"{h_cmd}h: req {p_req:.2f}, real {p_real_bat:.2f} [M:{h_mode} Net:{h_net:.2f}]{reason}")
                     
-                    # v11.9.541: Hourly SOC deficit tracking against dynamic floors
+                    # v11.9.566: Limit deficit check to sell window + 3h buffer ONLY.
+                    # Natural overnight house consumption causing SOC drops FAR from sell window
+                    # is Buy strategy's responsibility, not Sell's. Checking the full 48h range
+                    # causes the sell budget to be cut incorrectly.
                     max_soc_deficit_kwh = 0.0
+                    sell_window_end = (max(target_hours) + 3) if target_hours else cur_hour
                     for h_abs in sim_range:
+                        if h_abs > sell_window_end:
+                            break
                         h_key = f"{h_abs%24:02d}:59" + (" (Завтра)" if h_abs >= 24 else (" (Через день)" if h_abs >= 48 else ""))
                         soc_h = trial_log.get(h_key, {}).get("soc", 100.0)
                         floor_h = floors_sliding.get(h_abs, emergency_soc + 2.0)
