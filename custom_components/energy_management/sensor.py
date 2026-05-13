@@ -3048,10 +3048,11 @@ class InverterOperationModeSensor(SensorEntity):
                     elif isinstance(f_sim_data, (int, float)):
                         p_soc = float(f_sim_data)
                     
-                    # Update SOC (0.98 eff for charging, 1.0 for discharging/load)
-                    if net_p > 0: net_p *= eff
-                    p_soc = min(100.0, max(min_soc, p_soc + (net_p / b_cap * 100.0)))
-                    batt_soc = p_soc
+                    # v11.9.529: Update SOC ONLY for future hours to prevent poisoning from past today
+                    if is_tom or h >= now.hour:
+                        if net_p > 0: net_p *= eff
+                        p_soc = min(100.0, max(min_soc, p_soc + (net_p / b_cap * 100.0)))
+                        batt_soc = p_soc
 
                     # Mode logic: Pass extracted forecasts to correctly trigger Morning Mode and other logic
                     f_mode, _, _, _ = self._get_mode_at(
