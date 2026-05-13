@@ -3879,7 +3879,6 @@ class EnergyBudgetSensor(SensorEntity):
                 "forecast_coefficient_today": _sr(res.get("forecast_today_coefficient", 1.0), 1.0),
                 "occupancy_coefficient": _sr(res.get("occupancy_coefficient", 1.0), 1.0),
                 "efficiency_coefficient": _sr(res.get("efficiency_coefficient", 1.0), 1.0),
-                "target_soc": round_f(t_soc, 3),
                 "survival_floor": self.manager.strategy_engine.get_survival_floor(dt_util.now().hour, (self.manager.get_sunrise_hour() or 8) + (24 if dt_util.now().hour >= 4 else 0)),
                 "current_battery_soc": _sr(self.manager.get_battery_state()[0]),
                 "projected_morning_soc": _sr(res.get("projected_morning_soc"))
