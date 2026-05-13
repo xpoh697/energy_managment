@@ -428,19 +428,19 @@ class StrategySell(StrategyEngine):
                     sell_commands = {}
                     rem_budget = target_budget_ac
                 
-                    # 2. Distribution: Strict price-hour priority (TS 104)
-                    for h in h_by_priority:
-                        duration = 1.0
-                        if h == cur_hour:
-                            duration = max(0.01, 1.0 - (now.minute / 60.0))
-                        
+                        # v11.9.551: DC-Oriented Allocation. 1kW in plan = 1kW from Battery (DC).
+                        # p_export is DC power here.
                         p_export = min(max_batt_p, rem_budget / duration)
                         sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
                         rem_budget -= p_export * duration
                 
                     # 3. Simulation Check (TS 105)
+                    # Important: We must pass AC commands to simulation and inverter!
+                    # AC_cmd = DC_plan * sim_eff
+                    sim_commands = {h: -(p * sim_eff) for h, p in sell_commands.items()}
+                    
                     _, trial_log, _ = self.run_soc_simulation(
-                        b_soc, sim_range, now, commands={h: -p for h, p in sell_commands.items()}, 
+                        b_soc, sim_range, now, commands=sim_commands, 
                         b_min_soc=emergency_soc, ignore_blended=True, 
                         house_profile_override="consumption_base", dynamic_floors=floors_sliding
                     )

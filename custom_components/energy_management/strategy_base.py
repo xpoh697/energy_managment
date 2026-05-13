@@ -1155,18 +1155,12 @@ class StrategyEngine:
                     overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
                     overflow_kwh += overflow_h
                 
-                # v11.9.522: Critical Debug for Current Hour SOC
-                if i == 0:
-                    _LOGGER.warning(f"[SimH0] H:{h_abs} start:{_prev_soc_for_log:.2f} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} dur:{step_duration:.2f} cap:{b_cap_f:.1f} eff:{eff_coeff:.2f} end:{simulated_soc:.2f} gain:{(simulated_soc - _prev_soc_for_log):.2f}%")
+                # v11.9.550: Clean logs for production stability
                 
                 # v11.9.548: Fix - Debug logs MUST NOT use elif as they block discharge logic
-                if i != 0:
-                    if (commands and int(h_abs) in commands and abs(cmd_p) > 0.01) or int(h_abs) == 25:
-                         _LOGGER.warning(f"[SimFull] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} soc:{_prev_soc_for_log:.1f}->{simulated_soc:.1f}")
                 
                 if total_net_kw < -0.001 and allow_discharge: 
-                    # v11.9.465: Split Discharge Logic (House vs Trade)
-                    # 1. Total requested discharge power (DC) capped by inverter max
+                    # v11.9.551: Battery-First Logic. max_batt_p is a DC limit (what leaves the battery).
                     actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
                     
                     old_soc = simulated_soc
@@ -1206,10 +1200,6 @@ class StrategyEngine:
                     sim_p_bat = 0.0
                 
                 # v11.7.50: Midnight Jump Hunter
-                if real_h == 23 or real_h == 0 or real_h == 1:
-                    trust_val = tom_coeff if is_tom else blended_coeff
-                    trace_msg = f"[A:{attempt} H:{h_abs} R:{real_h}] SOC:{simulated_soc:.1f} Net:{total_net_kw:.3f} Cap:{b_cap_f:.1f} G:{expected_gen_kw:.3f} C:{expected_cons_kw:.3f} CMD:{cmd_p:.2f} Trust:{trust_val:.2f}"
-                    _LOGGER.warning(f"[SimTrace] {trace_msg}")
                     if not hasattr(man, "midnight_trace"): man.midnight_trace = []
                     man.midnight_trace.append(trace_msg)
 
@@ -1226,19 +1216,20 @@ class StrategyEngine:
                 log_key_str = f"{real_h_log:02d}:59{day_suffix}"
                 
                 # v11.7.73: Unified keys with sensor.py (gen_kw / load_kw)
-                history_log[log_key_str] = {
-                    "soc": round_f(float(simulated_soc), 1),
-                    "gen_kw": round_f(float(expected_gen_kw), 2),
-                    "load_kw": round_f(float(expected_cons_kw), 2),
-                    "p_bat": round_f(float(sim_p_bat), 3),
-                    "p_inv_ac": round_f(float(sim_p_bat + expected_gen_kw), 3), # v11.9.260
-                    "p_grid": round_f(float(sim_p_bat + rem_gen - rem_cons), 2),
-                    "trust": round_f(float(tom_coeff if is_tom else blended_coeff), 2)
-                }
-                # v11.9.545: Inject active command details for debugging
-                if abs(cmd_p) > 0.001:
-                    history_log[log_key_str]["req_p"] = round_f(float(abs(cmd_p)), 3)
-                    history_log[log_key_str]["floor"] = round_f(float(h_floor_trade), 1)
+                log_key_str = f"{real_h:02d}:59" + (" (Завтра)" if is_tom else (" (Через день)" if h_abs >= 48 else ""))
+                if log_key_str not in history_log:
+                    history_log[log_key_str] = {
+                        "soc": round_f(float(simulated_soc), 1),
+                        "p_bat": round_f(float(sim_p_bat), 2),
+                        "gen_kw": round_f(float(expected_gen_kw), 2),
+                        "cons_kw": round_f(float(expected_cons_kw), 2),
+                        "net_kw": round_f(float(total_net_kw), 2),
+                        "mode": _h_mode_str
+                    }
+                    if abs(cmd_p) > 0.001:
+                        history_log[log_key_str]["req_p"] = round_f(float(abs(cmd_p)), 3)
+                        history_log[log_key_str]["floor"] = round_f(float(h_floor_trade), 1)
+
             except Exception as e:
                 _LOGGER.error(f"Simulation error at hour {h_abs}: {e}")
                 continue
