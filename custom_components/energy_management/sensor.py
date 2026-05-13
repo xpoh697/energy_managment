@@ -3027,6 +3027,16 @@ class InverterOperationModeSensor(SensorEntity):
                         if h_cmd_s:
                             cmd_p = h_cmd_s.get("power", 0.0) if isinstance(h_cmd_s, dict) else h_cmd_s
 
+                    # v11.9.528: Manual Override synchronization for first hour
+                    if not is_tom and h == now.hour:
+                        manual_mode = man.manual_mode_overrides.get(h)
+                        if manual_mode == "buy":
+                            cmd_p = max_batt_p
+                        elif manual_mode == "sale_pv_bat":
+                            cmd_p = -max_batt_p
+                        elif manual_mode in ["stop_sale", "sale_pv_no_bat"]:
+                            cmd_p = 0.0
+
                     # Simplified simulation step for UI (v11.9.498)
                     eff = float(man.get_efficiency_coefficient())
                     net_p = cmd_p - 0.3 # Assume 300W base load if no better data
