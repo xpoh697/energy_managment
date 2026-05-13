@@ -370,6 +370,7 @@ class StrategyBuy(StrategyEngine):
                     if accum_kwh_dc >= (needed_kwh_dc - 0.01) and all_buy_prices.get(h, 0) > 0:
                         charge_commands[h] = 0.0
                         continue
+                        
                     h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
                     rem_needed = max(0.0, (needed_kwh_dc - accum_kwh_dc))
                     p_needed = rem_needed / (h_factor * eff) if h_factor > 0 else 0
@@ -381,6 +382,10 @@ class StrategyBuy(StrategyEngine):
                     p_charge = min(max_p, max_p * cc_cv, p_needed)
                     charge_commands[h] = round_f(p_charge, 3)
                     accum_kwh_dc += (p_charge * h_factor * eff)
+                
+                # v11.9.574: TS compliance (Negative prices block PV charging - section 152)
+                if res.get("charge_reason") == "Отрицательная цена":
+                    res["no_battery_charge_until"] = max(target_hours) + 1
                 
                 res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
                 res["active_periods"] = group_h(target_hours)
