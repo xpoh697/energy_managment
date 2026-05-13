@@ -1159,10 +1159,12 @@ class StrategyEngine:
                 if i == 0:
                     _LOGGER.warning(f"[SimH0] H:{h_abs} start:{_prev_soc_for_log:.2f} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} dur:{step_duration:.2f} cap:{b_cap_f:.1f} eff:{eff_coeff:.2f} end:{simulated_soc:.2f} gain:{(simulated_soc - _prev_soc_for_log):.2f}%")
                 
-                elif (commands and int(h_abs) in commands and abs(cmd_p) > 0.01) or int(h_abs) == 25:
-                    _LOGGER.warning(f"[SimFull] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} soc:{_prev_soc_for_log:.1f}->{simulated_soc:.1f}")
+                # v11.9.548: Fix - Debug logs MUST NOT use elif as they block discharge logic
+                if i != 0:
+                    if (commands and int(h_abs) in commands and abs(cmd_p) > 0.01) or int(h_abs) == 25:
+                         _LOGGER.warning(f"[SimFull] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} soc:{_prev_soc_for_log:.1f}->{simulated_soc:.1f}")
                 
-                elif total_net_kw < -0.001 and allow_discharge: 
+                if total_net_kw < -0.001 and allow_discharge: 
                     # v11.9.465: Split Discharge Logic (House vs Trade)
                     # 1. Total requested discharge power (DC) capped by inverter max
                     actual_discharge_kw = float(min(abs(total_net_kw) / sim_eff, max_batt_p))
@@ -1194,9 +1196,9 @@ class StrategyEngine:
                         soc_delta = old_soc - simulated_soc
                         sim_p_bat = (soc_delta / 100.0 * b_cap_f) / step_duration * sim_eff
                         
-                        # v11.9.547: Trace Discharge Deficiency with Mode
+                        # v11.9.548: Enhanced Trace for Locked/Limit diagnosis
                         if abs(cmd_p) > 0.05 and sim_p_bat < abs(cmd_p) - 0.05:
-                            _LOGGER.warning(f"[SimDeficit] H:{h_abs} M:{_h_mode_str} req:{abs(cmd_p):.2f} real:{sim_p_bat:.2f} soc:{old_soc:.1f}->{simulated_soc:.1f} floor:{h_floor_trade:.1f} cap:{b_cap_f:.1f}")
+                            _LOGGER.warning(f"[SimDeficit] H:{h_abs} M:{_h_mode_str} req:{abs(cmd_p):.2f} real:{sim_p_bat:.2f} net:{total_net_kw:.2f} dc:{actual_discharge_kw:.2f} soc:{old_soc:.1f}->{simulated_soc:.1f} floor:{h_floor_trade:.1f}")
                     else:
                         simulated_soc = 0.0
                         sim_p_bat = 0.0
