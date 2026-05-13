@@ -704,7 +704,7 @@ class StrategySell(StrategyEngine):
                 v_val = float(man.get_sensor_float(man.battery_voltage_sensor) or 52.0)
             res["recommended_amps"] = round_f((sell_commands.get(cur_hour, 0.0) * 1000.0) / v_val, 1) if v_val > 0 else 0.0
             
-            res["arbitrage_decision"] = f"Продажа по {cur_p_f:.2f}" if cur_hour in active_h else "Ожидание пика"
+            # v11.9.581: Removed legacy assignment that was overwriting the new detailed report below
             
             # v11.8.559: Simplified Overall Limit ID
             overall_limit = limit_reason
