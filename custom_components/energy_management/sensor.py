@@ -2988,8 +2988,9 @@ class InverterOperationModeSensor(SensorEntity):
                 is_boring = any(f_reason.startswith(p) for p in ["Стандартная работа", "Значения по умолчанию"])
                 
                 # v11.9.562: Use rich strategy display string if available for the FIRST hour
-                if not is_tom and h == now.hour and cmd_display:
-                    f_display = cmd_display
+                # Note: cmd_display will be available in the second loop, for now we keep it safe
+                if not is_tom and f_dt.hour == now.hour and locals().get('cmd_display'):
+                    f_display = locals().get('cmd_display')
                 elif f_mode == "sale_pv" and (is_boring or not f_reason):
                     f_display = f"{f_mode}{p_suffix}"
                 else:
