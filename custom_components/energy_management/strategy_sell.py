@@ -528,18 +528,9 @@ class StrategySell(StrategyEngine):
                     house_profile_override="consumption_base", dynamic_floors=floors_sliding
                 )
             
-            # v11.9.565: Final mandatory redistribution with converged budget
-            # Ensures sell_commands always matches final_budget, regardless of convergence
-            if target_hours:
-                sell_commands = {}
-                rem_budget = target_budget_ac
-                for h in h_by_priority:
-                    duration = 1.0
-                    if h == cur_hour:
-                        duration = max(0.01, 1.0 - (now.minute / 60.0))
-                    p_export = min(max_batt_p, max(0.0, rem_budget / duration))
-                    sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
-                    rem_budget = max(0.0, rem_budget - p_export * duration)
+            # v11.9.567: Final redistribution REMOVED. It bypassed floor checks, causing
+            # sell commands to push SOC below the gatekeeper floor.
+            # sell_commands from the convergence loop are already floor-verified.
 
             # v11.9.255: Update diagnostics
             _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
