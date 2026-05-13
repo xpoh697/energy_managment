@@ -3045,13 +3045,14 @@ class InverterOperationModeSensor(SensorEntity):
                         sim_load = f_sim_data.get("load_kw", 0.5)
                         p_soc = f_sim_data.get("soc", batt_soc)
                         net_p = cmd_p + sim_gen - sim_load
-                    elif isinstance(f_sim_data, (int, float)):
-                        p_soc = float(f_sim_data)
-                    
-                    # v11.9.529: Update SOC ONLY for future hours to prevent poisoning from past today
+                    # v11.9.538: Update SOC ONLY for future hours to prevent poisoning from past today
+                    # If f_sim_data has 'soc', trust it as final result for the hour (prevents double-counting)
                     if is_tom or h >= now.hour:
-                        if net_p > 0: net_p *= eff
-                        p_soc = min(100.0, max(min_soc, p_soc + (net_p / b_cap * 100.0)))
+                        if f_sim_data and isinstance(f_sim_data, dict) and "soc" in f_sim_data:
+                            p_soc = float(f_sim_data["soc"])
+                        else:
+                            if net_p > 0: net_p *= eff
+                            p_soc = min(100.0, max(min_soc, p_soc + (net_p / b_cap * 100.0)))
                         batt_soc = p_soc
 
                     # Mode logic: Pass extracted forecasts to correctly trigger Morning Mode and other logic
