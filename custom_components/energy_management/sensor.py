@@ -3286,7 +3286,7 @@ class InverterOperationModeSensor(SensorEntity):
             
             strat_decision = buy_strategy.get("strategy_decision") or sell_strategy.get("strategy_decision") or "Ожидание окна"
             attrs["strategy_decision"] = strat_decision
-            attrs["arbitrage_decision"] = strat_decision
+            attrs["arbitrage_decision"] = sell_strategy.get("arbitrage_decision", "Нет данных")
             
             # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
             if self.manager.battery_voltage_sensor:

@@ -394,7 +394,6 @@ class StrategyBuy(StrategyEngine):
                 res["active_periods"] = group_h(target_hours)
 
             res["strategy_decision"] = decision_str
-            res["arbitrage_decision"] = decision_str # For backward compatibility
             
             # v11.9.200: Debug Logging for Allocator
             _dbg_log = f"[Strategy Buy Debug] Status: {decision_str} | Target: {target_soc}% | StartSOC: {soc_at_start_plan:.1f}% | Need: {needed_kwh_dc:.3f} kWh | Cap: {b_cap:.1f}"
