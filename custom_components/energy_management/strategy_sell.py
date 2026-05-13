@@ -515,6 +515,7 @@ class StrategySell(StrategyEngine):
             # v11.9.255: Update diagnostics
             _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
             _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
+            _sell_debug["deficit_detail"] = deficit_detail
             
             # Final Pass: Use the best sim_log we found
 

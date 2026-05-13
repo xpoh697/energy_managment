@@ -1194,9 +1194,9 @@ class StrategyEngine:
                         soc_delta = old_soc - simulated_soc
                         sim_p_bat = (soc_delta / 100.0 * b_cap_f) / step_duration * sim_eff
                         
-                        # v11.9.543: Trace Discharge Deficiency
+                        # v11.9.547: Trace Discharge Deficiency with Mode
                         if abs(cmd_p) > 0.05 and sim_p_bat < abs(cmd_p) - 0.05:
-                            _LOGGER.warning(f"[SimDeficit] H:{h_abs} req:{abs(cmd_p):.2f} real:{sim_p_bat:.2f} soc:{old_soc:.1f}->{simulated_soc:.1f} floor:{h_floor_trade:.1f} cap:{b_cap_f:.1f}")
+                            _LOGGER.warning(f"[SimDeficit] H:{h_abs} M:{_h_mode_str} req:{abs(cmd_p):.2f} real:{sim_p_bat:.2f} soc:{old_soc:.1f}->{simulated_soc:.1f} floor:{h_floor_trade:.1f} cap:{b_cap_f:.1f}")
                     else:
                         simulated_soc = 0.0
                         sim_p_bat = 0.0
