@@ -1078,8 +1078,9 @@ class StrategyEngine:
                 # v11.9.484: Determine Mode Config for this simulation hour
                 # Use current_mode ONLY for the first hour of simulation.
                 # For future hours, detect based on price/time logic.
-                _h_mode_str = None
-                if h_abs == now.hour:
+                # For future hours, detect based on price/time logic if no override.
+                _h_mode_str = _h_mode_name
+                if h_abs == now.hour and _h_mode_str is None:
                     _h_mode_str = current_mode
                 
                 if _h_mode_str is None:
