@@ -3276,17 +3276,15 @@ class InverterOperationModeSensor(SensorEntity):
                 elif "sale" in mode and sell_strategy.get("state") == "active":
                     chg_reason = sell_strategy.get("charge_reason", "Нет")
 
-            attrs["power"] = p_val
-            attrs["target_soc"] = t_soc
-            attrs["charge_reason"] = chg_reason
-            
-            # v11.9.577: Split decisions for better observability (as per user request)
+            # v11.9.579: Decisions to the TOP for better UX
+            attrs["strategy_decision"] = buy_strategy.get("strategy_decision") or sell_strategy.get("strategy_decision") or "Ожидание окна"
+            attrs["arbitrage_decision"] = sell_strategy.get("arbitrage_decision", "Нет данных")
             attrs["buy_decision"] = buy_strategy.get("strategy_decision", "Нет данных")
             attrs["sell_decision"] = sell_strategy.get("strategy_decision", "Нет данных")
-            
-            strat_decision = buy_strategy.get("strategy_decision") or sell_strategy.get("strategy_decision") or "Ожидание окна"
-            attrs["strategy_decision"] = strat_decision
-            attrs["arbitrage_decision"] = sell_strategy.get("arbitrage_decision", "Нет данных")
+            attrs["charge_reason"] = chg_reason
+
+            attrs["power"] = p_val
+            attrs["target_soc"] = t_soc
             
             # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
             if self.manager.battery_voltage_sensor:
