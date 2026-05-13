@@ -3055,12 +3055,12 @@ class InverterOperationModeSensor(SensorEntity):
 
                     # Simplified simulation step for UI (v11.9.498)
                     eff = float(man.get_efficiency_coefficient())
-                    net_p = cmd_p - 0.3 # Assume 300W base load if no better data
+                    net_p = float(cmd_p) - 0.3 # Assume 300W base load if no better data
                     if f_sim_data and isinstance(f_sim_data, dict):
-                        sim_gen = f_sim_data.get("gen_kw", 0.0)
-                        sim_load = f_sim_data.get("load_kw", 0.5)
-                        p_soc = f_sim_data.get("soc", batt_soc)
-                        net_p = cmd_p + sim_gen - sim_load
+                        sim_gen = float(f_sim_data.get("gen_kw", 0.0))
+                        sim_load = float(f_sim_data.get("load_kw", 0.5))
+                        p_soc = float(f_sim_data.get("soc", batt_soc))
+                        net_p = float(cmd_p) + sim_gen - sim_load
                     # v11.9.538: Update SOC ONLY for future hours to prevent poisoning from past today
                     # If f_sim_data has 'soc', trust it as final result for the hour (prevents double-counting)
                     if is_tom or h >= now.hour:
@@ -3068,8 +3068,8 @@ class InverterOperationModeSensor(SensorEntity):
                             p_soc = float(f_sim_data["soc"])
                         else:
                             if net_p > 0: net_p *= eff
-                            p_soc = min(100.0, max(min_soc, p_soc + (net_p / b_cap * 100.0)))
-                        batt_soc = p_soc
+                            p_soc = min(100.0, max(min_soc, float(p_soc) + (float(net_p) / float(b_cap) * 100.0)))
+                        batt_soc = float(p_soc)
 
                     # Mode logic: Pass extracted forecasts to correctly trigger Morning Mode and other logic
                     f_mode, _, _, _ = self._get_mode_at(
@@ -3183,23 +3183,23 @@ class InverterOperationModeSensor(SensorEntity):
                 
                 # v11.9.453: Anchored Manual Fallback (Discharge)
                 if h_override and h_override.get("mode") == "sale_pv_bat":
-                    t_soc = h_override.get("soc_limit", t_soc)
+                    t_soc = float(h_override.get("soc_limit", t_soc))
                     
-                    is_new_anchor = (man._manual_anchor_hour != now.hour or abs(man._manual_anchor_target_soc - t_soc) > 0.1)
+                    is_new_anchor = (man._manual_anchor_hour != now.hour or abs(float(man._manual_anchor_target_soc) - t_soc) > 0.1)
                     
                     if is_new_anchor:
                         man._manual_anchor_hour = now.hour
-                        man._manual_anchor_target_soc = t_soc
+                        man._manual_anchor_target_soc = float(t_soc)
                         
-                        if batt_soc > (t_soc + 0.2):
-                            delta_soc = max(0.0, batt_soc - t_soc)
-                            delta_kwh = (delta_soc / 100.0) * b_cap
-                            req_p = (delta_kwh / hours_left) * max(0.8, eff)
-                            man._manual_anchor_power = min(max_batt_p, round_f(req_p, 2))
+                        if float(batt_soc) > (float(t_soc) + 0.2):
+                            delta_soc = max(0.0, float(batt_soc) - float(t_soc))
+                            delta_kwh = (delta_soc / 100.0) * float(b_cap)
+                            req_p = (delta_kwh / float(hours_left)) * max(0.8, eff)
+                            man._manual_anchor_power = min(float(max_batt_p), round_f(req_p, 2))
                             
                             # v11.9.454: Anchor Amps as well
                             v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
-                            man._manual_anchor_amps = round_f((man._manual_anchor_power * 1000.0) / v_val, 2)
+                            man._manual_anchor_amps = round_f((float(man._manual_anchor_power) * 1000.0) / v_val, 2)
                             
                             _LOGGER.info("[Manual Anchor Discharge] Recalculated Power: %.2fkW | Amps: %.1fA for Target: %.1f%% (%dmin left)", 
                                          man._manual_anchor_power, man._manual_anchor_amps, t_soc, mins_left)
@@ -3207,8 +3207,8 @@ class InverterOperationModeSensor(SensorEntity):
                             man._manual_anchor_power = 0.0
                             man._manual_anchor_amps = 0.0
                             
-                    p_val = man._manual_anchor_power
-                    c_amps_fixed = man._manual_anchor_amps
+                    p_val = float(man._manual_anchor_power)
+                    c_amps_fixed = float(man._manual_anchor_amps)
             else:
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
