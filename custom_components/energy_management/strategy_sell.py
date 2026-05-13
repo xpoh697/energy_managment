@@ -502,7 +502,8 @@ class StrategySell(StrategyEngine):
                         target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
                     elif max_soc_deficit_kwh > 0.05:
                         # Priority 2: Correct SOC deficit seen at any hour
-                        target_budget_ac = max(0.0, target_budget_ac - max_soc_deficit_kwh * 1.1)
+                        # v11.9.565: Use 1.0x multiplier (was 1.1) to prevent over-correction
+                        target_budget_ac = max(0.0, target_budget_ac - max_soc_deficit_kwh * 1.0)
                     elif soc_err > 0.1:
                         # Priority 3: Increase budget if we have surplus at sunrise
                         target_budget_ac += (soc_err * b_cap / 100.0) * 0.4
@@ -521,10 +522,25 @@ class StrategySell(StrategyEngine):
                     house_profile_override="consumption_base", dynamic_floors=floors_sliding
                 )
             
+            # v11.9.565: Final mandatory redistribution with converged budget
+            # Ensures sell_commands always matches final_budget, regardless of convergence
+            if target_hours:
+                sell_commands = {}
+                rem_budget = target_budget_ac
+                for h in h_by_priority:
+                    duration = 1.0
+                    if h == cur_hour:
+                        duration = max(0.01, 1.0 - (now.minute / 60.0))
+                    p_export = min(max_batt_p, max(0.0, rem_budget / duration))
+                    sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
+                    rem_budget = max(0.0, rem_budget - p_export * duration)
+
             # v11.9.255: Update diagnostics
             _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
             _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
             _sell_debug["deficit_detail"] = deficit_detail
+            _sell_debug["commands"] = {f"{h}h": round_f(p, 3) for h, p in sell_commands.items() if p > 0}
+            _sell_debug["max_batt_p"] = round_f(max_batt_p, 2)
             
             # Final Pass: Use the best sim_log we found
 
