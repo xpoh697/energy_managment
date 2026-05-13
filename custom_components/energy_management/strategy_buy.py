@@ -230,7 +230,7 @@ class StrategyBuy(StrategyEngine):
                     
                     # v11.9.450: Standardized logic - Trigger on (Survival - 5%), Target is (Survival + 5%)
                     h_survival_raw = self.get_survival_floor(h_step, morning_h_abs)
-                    h_survival = max(h_survival_raw - 5.0, min_soc)
+                    h_survival = min_soc + 5.0
                     h_critical = min_soc + 5.0
                     
                     if first_violation_h is None and soc_h <= h_survival:
