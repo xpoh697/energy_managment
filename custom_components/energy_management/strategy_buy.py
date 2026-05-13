@@ -391,7 +391,6 @@ class StrategyBuy(StrategyEngine):
                 soc_morning = soc_end
                 
             soc_morning_base = self._get_soc_from_log(sim_log_base, get_h_log_key(morning_h_abs - 1), soc_morning)
-                
             res["buy_simulation"] = {
                 "projected_soc_at_start_pct": round_f(soc_at_start_plan, 1),
                 "projected_soc_at_end_pct": round_f(soc_end, 1),
@@ -401,7 +400,8 @@ class StrategyBuy(StrategyEngine):
                 "b_cap": round_f(b_cap, 2),
                 "needed_kwh_dc": round_f(needed_kwh_dc, 3),
                 "max_p": round_f(max_p, 2),
-                "p_total_planned": round_f(sum(charge_commands.values()), 3)
+                "p_total_planned": round_f(sum(charge_commands.values()), 3),
+                "log": sim_log
             }
             res["charge_commands"] = charge_commands
             res["recommended_power_kw"] = charge_commands.get(cur_hour, 0.0)
