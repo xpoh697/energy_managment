@@ -1213,11 +1213,21 @@ class EnergyProfileManager:
 
         if entity_id in self.all_price_sensors:
             self._update_prices_from_sensor(entity_id, new_state)
+            # v11.9.560: Force immediate recalculation when prices update (blocks loop for ~1s, but fast update)
+            self._notify_update()
             return
 
         # Handle power sensors (trigger re-calculation of current power and balance)
         if entity_id in self.all_power_sensors:
             self._poll_instant_power(dt_util.now())
+            return
+
+        # v11.9.560: Force immediate recalculation when forecasts update
+        is_f = False
+        if isinstance(self.forecast_today_sensor, list) and entity_id in self.forecast_today_sensor: is_f = True
+        if isinstance(self.forecast_tomorrow_sensor, list) and entity_id in self.forecast_tomorrow_sensor: is_f = True
+        if is_f:
+            self._notify_update()
             return
 
         # Handle energy sensors
@@ -3272,11 +3282,16 @@ class InverterOperationModeSensor(SensorEntity):
             }
             
             # Check for significant changes OR new hour (Round 113)
+            # v11.9.560: Use float() to avoid 'str' vs 'float' errors during state restoration
+            def f_val(d, k): 
+                try: return float(d.get(k, 0.0) or 0.0)
+                except: return 0.0
+
             has_changed = (
                 curr_params["mode"] != self._last_logged_params.get("mode") or
-                abs(curr_params["power"] - self._last_logged_params.get("power", 0.0)) >= 0.1 or
-                abs(curr_params["target_soc"] - self._last_logged_params.get("target_soc", 0.0)) >= 0.1 or
-                abs(curr_params["charge_amps"] - self._last_logged_params.get("charge_amps", 0.0)) >= 0.5 or
+                abs(float(curr_params["power"]) - f_val(self._last_logged_params, "power")) >= 0.1 or
+                abs(float(curr_params["target_soc"]) - f_val(self._last_logged_params, "target_soc")) >= 0.1 or
+                abs(float(curr_params["charge_amps"]) - f_val(self._last_logged_params, "charge_amps")) >= 0.5 or
                 now.hour != self._last_logged_hour
             )
             

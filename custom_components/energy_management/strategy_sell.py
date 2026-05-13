@@ -460,6 +460,7 @@ class StrategySell(StrategyEngine):
                         if h_cmd == cur_hour: duration = max(0.01, 1.0 - (now.minute / 60.0))
                         
                         h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
+                        p_real_bat = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
                         # v11.9.556: Convert AC power from simulation to DC before comparing with DC request
                         # This prevents the allocator from seeing efficiency loss as a "deficit".
                         p_real_dc = p_real_bat / max(0.1, eff)
