@@ -592,3 +592,54 @@
    Speed :              14,802 MegaBytes/min.
    Ended : ˜roda, 13 maja 2026 13:45:40
 
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : ˜roda, 13 maja 2026 13:53:04
+   Source : g:\systemair\energy_mamagment\custom_components\energy_management\
+     Dest : \\192.168.100.5\config\custom_components\energy_management\
+
+    Files : *.*
+	    
+  Options : *.* /FFT /S /E /DCOPY:DA /COPY:DAT /PURGE /MIR /Z /ETA /XO /R:3 /W:5 
+
+------------------------------------------------------------------------------
+
+	                  17	g:\systemair\energy_mamagment\custom_components\energy_management\
+	*EXTRA Dir        -1	\\192.168.100.5\config\custom_components\energy_management\__pycache__\
+	  *EXTRA File 		   13518	binary_sensor.cpython-314.pyc
+	  *EXTRA File 		   31245	config_flow.cpython-314.pyc
+	  *EXTRA File 		    4984	const.cpython-314.pyc
+	  *EXTRA File 		    5891	number.cpython-314.pyc
+	  *EXTRA File 		  258453	sensor.cpython-314.pyc
+	  *EXTRA File 		    1653	strategy.cpython-314.pyc
+	  *EXTRA File 		  184361	strategy_base.cpython-314.pyc
+	  *EXTRA File 		   28207	strategy_buy.cpython-314.pyc
+	  *EXTRA File 		   25584	strategy_dp.cpython-314.pyc
+	  *EXTRA File 		   38102	strategy_sell.cpython-314.pyc
+	  *EXTRA File 		    3254	switch.cpython-314.pyc
+	  *EXTRA File 		    3170	utils.cpython-314.pyc
+	  *EXTRA File 		   18072	__init__.cpython-314.pyc
+	    Newer     		    6837	const.py100%  
+	    Newer     		     418	manifest.json	13:53 -> 13:53100%  
+	    Newer     		   41365	strategy_sell.py	13:53 -> 13:53100%  
+	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
+	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\scratch\
+	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
+	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\www\
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :         5         0         5         0         0         1
+   Files :        23         3        20         0         0        13
+   Bytes :    1.39 m    47.4 k    1.34 m         0         0   602.0 k
+   Times :   0:00:00   0:00:00                       0:00:00   0:00:00
+
+
+   Speed :             183ÿ471 Bytes/sec.
+   Speed :              10,498 MegaBytes/min.
+   Ended : ˜roda, 13 maja 2026 13:53:05
+
