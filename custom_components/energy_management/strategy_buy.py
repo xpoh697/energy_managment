@@ -394,9 +394,7 @@ class StrategyBuy(StrategyEngine):
                 res["active_periods"] = group_h(target_hours)
 
             res["strategy_decision"] = decision_str
-            # v11.9.580: Link arbitrage_decision to the actual economic calculation in Sell Strategy
-            sell_strategy = man.get_market_strategy("sell")
-            res["arbitrage_decision"] = sell_strategy.get("arbitrage_decision", "Нет данных")
+            # v11.9.582: Removed sell_strategy call to avoid recursion deadlock
             
             # v11.9.200: Debug Logging for Allocator
             _dbg_log = f"[Strategy Buy Debug] Status: {decision_str} | Target: {target_soc}% | StartSOC: {soc_at_start_plan:.1f}% | Need: {needed_kwh_dc:.3f} kWh | Cap: {b_cap:.1f}"

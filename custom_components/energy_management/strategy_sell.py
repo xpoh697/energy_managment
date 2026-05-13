@@ -811,22 +811,22 @@ class StrategySell(StrategyEngine):
             else:
                 res["current_mode_text"] = "Ожидание пика" if target_hours else "Нет ценового окна"
 
-            # v11.9.578: Proper Arbitrage Decision (TS 199/User Req)
+            # v11.9.582: FIXED RECURSION (Deadlock fix)
+            # Use all_buy_prices which we already have in this function, no need to call buy_strategy
             arb_msg = "Нет выгодного арбитража"
-            buy_res = self.manager.get_market_strategy("buy")
-            buy_active_h = buy_res.get("active_hours", [])
-            
-            # Find best buy hour (lowest price)
             best_buy_h = None
-            if buy_active_h:
-                best_buy_h = min(buy_active_h, key=lambda h: self.manager.get_price("buy", today_str, h % 24) or 999.0)
+            if all_buy_prices:
+                # Find lowest buy price in the next 24h
+                options = {h: p for h, p in all_buy_prices.items() if h >= cur_hour}
+                if options:
+                    best_buy_h = min(options, key=lambda k: options[k])
             
             if target_hours:
                 # Find best sell hour (highest price)
-                best_sell_h = max(target_hours, key=lambda h: self.manager.get_price("sell", today_str, h % 24) or 0.0)
+                best_sell_h = max(target_hours, key=lambda h: all_sell_prices.get(h, 0.0))
                 
-                p_buy = (self.manager.get_price("buy", today_str, best_buy_h % 24) if best_buy_h is not None else target_price) or 0.0
-                p_sell = (self.manager.get_price("sell", today_str, best_sell_h % 24)) or 0.0
+                p_buy = all_buy_prices.get(best_buy_h, 0.0) if best_buy_h is not None else target_price
+                p_sell = all_sell_prices.get(best_sell_h, 0.0)
                 profit = (p_sell - p_buy) - deg_cost
                 
                 h_buy_str = f"{best_buy_h % 24:02d}:00" if best_buy_h is not None else "Plan"
@@ -835,8 +835,8 @@ class StrategySell(StrategyEngine):
                 if best_sell_h >= 24: h_sell_str += " (Завтра)"
                 
                 arb_msg = f"Купим в {h_buy_str} ({p_buy:.2f}) -> Продадим в {h_sell_str} ({p_sell:.2f}). Профит: {profit:.2f}/кВтч"
-            elif buy_active_h:
-                arb_msg = "Зарядка активна, но выгодных окон продажи пока нет"
+            elif best_buy_h is not None:
+                arb_msg = f"Ожидаем окно продажи (Лучшая закупка в {best_buy_h%24:02d}:00)"
             
             res["arbitrage_decision"] = arb_msg
             res["strategy_decision"] = res.get("current_mode_text", "Ожидание")
