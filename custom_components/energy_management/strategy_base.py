@@ -1127,8 +1127,11 @@ class StrategyEngine:
                     overflow_h = max(0.0, (total_net_kw * step_duration) - actual_stored_kwh_ac)
                     overflow_kwh += overflow_h
                 
-                # v11.9.489/490: Targeted trace for survival charging debugging
-                if (commands and int(h_abs) in commands and abs(cmd_p) > 0.01) or int(h_abs) == 25:
+                # v11.9.522: Critical Debug for Current Hour SOC
+                if i == 0:
+                    _LOGGER.warning(f"[SimH0] H:{h_abs} start:{_prev_soc_for_log:.2f} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} dur:{step_duration:.2f} cap:{b_cap_f:.1f} eff:{eff_coeff:.2f} end:{simulated_soc:.2f} gain:{(simulated_soc - _prev_soc_for_log):.2f}%")
+                
+                elif (commands and int(h_abs) in commands and abs(cmd_p) > 0.01) or int(h_abs) == 25:
                     _LOGGER.warning(f"[SimFull] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} soc:{_prev_soc_for_log:.1f}->{simulated_soc:.1f}")
                 
                 elif total_net_kw < -0.001 and allow_discharge: 
