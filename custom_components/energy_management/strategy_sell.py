@@ -428,6 +428,12 @@ class StrategySell(StrategyEngine):
                     sell_commands = {}
                     rem_budget = target_budget_ac
                 
+                    # 2. Distribution: Strict price-hour priority (TS 104)
+                    for h in h_by_priority:
+                        duration = 1.0
+                        if h == cur_hour:
+                            duration = max(0.01, 1.0 - (now.minute / 60.0))
+                        
                         # v11.9.551: DC-Oriented Allocation. 1kW in plan = 1kW from Battery (DC).
                         # p_export is DC power here.
                         p_export = min(max_batt_p, rem_budget / duration)
