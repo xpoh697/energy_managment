@@ -3283,6 +3283,7 @@ class InverterOperationModeSensor(SensorEntity):
             # v11.9.572: Unified Strategy Decision
             strat_decision = buy_strategy.get("strategy_decision") or sell_strategy.get("strategy_decision") or "Ожидание окна"
             attrs["strategy_decision"] = strat_decision
+            attrs["arbitrage_decision"] = strat_decision
             
             # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
             if self.manager.battery_voltage_sensor:
@@ -3998,7 +3999,8 @@ class MarketStrategySensor(SensorEntity):
             "active_periods": res.get("active_periods", ""),
             "target_price": safe_round(res.get("target_price")),
             "limit_used": safe_round(res.get("limit_used")),
-            "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
+            "arbitrage_decision": res.get("strategy_decision", "Нет данных"),
+            "strategy_decision": res.get("strategy_decision", "Нет данных"),
             "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
             "prices_today": today_fmt,
             "prices_tomorrow": tom_fmt,
