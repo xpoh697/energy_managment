@@ -442,8 +442,8 @@ class StrategySell(StrategyEngine):
                 
                     # 3. Simulation Check (TS 105)
                     # Important: We must pass AC commands to simulation and inverter!
-                    # AC_cmd = DC_plan * sim_eff
-                    sim_commands = {h: -(p * sim_eff) for h, p in sell_commands.items()}
+                    # AC_cmd = DC_plan * eff
+                    sim_commands = {h: -(p * eff) for h, p in sell_commands.items()}
                     
                     _, trial_log, _ = self.run_soc_simulation(
                         b_soc, sim_range, now, commands=sim_commands, 

@@ -1199,9 +1199,6 @@ class StrategyEngine:
                 else:
                     sim_p_bat = 0.0
                 
-                # v11.7.50: Midnight Jump Hunter
-                    if not hasattr(man, "midnight_trace"): man.midnight_trace = []
-                    man.midnight_trace.append(trace_msg)
 
                 # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
                 real_h_log = h_abs % 24
