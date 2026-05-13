@@ -409,6 +409,10 @@ class StrategyBuy(StrategyEngine):
             is_neg = bool(all_buy_prices.get(cur_hour, 1.0) <= 0.0)
             res["is_charging_now"] = bool(res["recommended_power_kw"] > 0.05 or is_neg)
             
+            # v11.9.519: If we have a planned charge for NOW, state MUST be active
+            if res["is_charging_now"]:
+                res["state"] = "active"
+            
             v_val = 52.0
             if man.battery_voltage_sensor:
                 v_val = float(man.get_sensor_float(man.battery_voltage_sensor) or 52.0)
