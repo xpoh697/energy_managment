@@ -3280,7 +3280,10 @@ class InverterOperationModeSensor(SensorEntity):
             attrs["target_soc"] = t_soc
             attrs["charge_reason"] = chg_reason
             
-            # v11.9.572: Unified Strategy Decision
+            # v11.9.577: Split decisions for better observability (as per user request)
+            attrs["buy_decision"] = buy_strategy.get("strategy_decision", "Нет данных")
+            attrs["sell_decision"] = sell_strategy.get("strategy_decision", "Нет данных")
+            
             strat_decision = buy_strategy.get("strategy_decision") or sell_strategy.get("strategy_decision") or "Ожидание окна"
             attrs["strategy_decision"] = strat_decision
             attrs["arbitrage_decision"] = strat_decision
