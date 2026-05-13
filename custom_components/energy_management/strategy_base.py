@@ -1059,6 +1059,13 @@ class StrategyEngine:
                 _manual_m = man.hourly_manual_overrides.get(_h_ts_key)
                 if _manual_m:
                     _h_mode_name = _manual_m.get("mode")
+                    # v11.9.539: Inject manual power commands into simulation
+                    if _h_mode_name == "buy":
+                        cmd_p = max_batt_p
+                    elif _h_mode_name == "sale_pv_bat":
+                        cmd_p = -max_batt_p
+                    elif _h_mode_name in ["stop_sale", "sale_pv_no_bat"]:
+                        cmd_p = 0.0
 
                 _h_mode_cls = INVERTER_MODES.get(_h_mode_name) if _h_mode_name else None
 
