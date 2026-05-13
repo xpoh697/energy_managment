@@ -3006,7 +3006,7 @@ class InverterOperationModeSensor(SensorEntity):
                     # v11.9.446: Get projected data (SOC, gen, load) from simulation logs FIRST 
                     # to use them for accurate mode resolution in the card view.
                     f_h_key = f_dt.strftime("%H:59") + (" (Завтра)" if is_tom else "")
-                    f_sim_data = buy_sim_log.get(f_h_key) or sell_sim_log.get(f_h_key)
+                    f_sim_data = sell_sim_log.get(f_h_key) or buy_sim_log.get(f_h_key)
                     
                     p_soc = batt_soc
                     sim_gen = 0.0
