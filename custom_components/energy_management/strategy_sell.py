@@ -781,7 +781,8 @@ class StrategySell(StrategyEngine):
 
             res["arbitrage_sell_debug"] = {
                 "start_soc": f"{b_soc:.1f}%",
-                "gatekeeper_floor": round_f(gatekeeper, 1) if not is_turbo_win else "Turbo",
+                "gatekeeper_cur_h": round_f(gatekeeper, 1) if not is_turbo_win else "Turbo",
+                "gatekeeper_last_sell_h": round_f(floors_sliding.get(max(target_hours), gatekeeper), 1) if target_hours else round_f(gatekeeper, 1),
                 "active_safety_floor": round_f(active_safety_floor, 1),
                 "available_ac": round_f(available_sell_ac, 2),
                 "limit_reason": limit_reason or "None",
