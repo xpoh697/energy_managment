@@ -1010,9 +1010,20 @@ class StrategyEngine:
                     expected_cons_kw = 0.0
     
                 # v11.1.15 - Blended Anchor
-                if i == 0:
-                    anchor_weight = max(0.0, min(1.0, (now.minute / 60.0)))
+                    # v11.9.525: Smart Purification. If real_load includes battery charging, 
+                    # the simulation "leaks" energy. We subtract charging power if detected.
                     real_load = float(getattr(man, "avg_base_load_kw" if house_profile_override == "consumption_base" else "avg_load_kw", expected_cons_kw))
+                    
+                    # Heuristic: if charging > 0.1kW and real_load > 0.5kW, 
+                    # and the user hasn't explicitly separated the sensors, 
+                    # we subtract the charge to avoid double-counting.
+                    cur_batt_p = float(man.get_sensor_float(man.battery_power_sensor) or 0.0)
+                    if cur_batt_p < -0.1: # Charging (negative sign convention)
+                        p_charge = abs(cur_batt_p)
+                        # If load is significantly higher than charge, it's likely blended
+                        if real_load > (p_charge * 0.8):
+                             real_load = max(0.1, real_load - p_charge)
+                             
                     expected_cons_kw = (real_load * anchor_weight) + (expected_cons_kw * (1.0 - anchor_weight))
             
                 # First hour solar correction: 
@@ -1087,6 +1098,7 @@ class StrategyEngine:
                 _solar_charge = _pv_to_bat if (_mode_cfg.charge_from_pv and not no_solar_to_bat) else 0.0
                 
                 # v11.9.479/482: Charging bypass. If grid charging is active, house is powered by grid.
+                # v11.9.523: In Buy mode, battery gets FULL cmd_p (Grid covers house).
                 if cmd_p > 0.01:
                     total_net_kw = float(cmd_p + max(0.0, _solar_charge))
                 else:

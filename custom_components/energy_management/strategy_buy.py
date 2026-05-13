@@ -213,6 +213,12 @@ class StrategyBuy(StrategyEngine):
                 # v11.9.473: Use 48h horizon for planning to match UI simulation
                 sim_range = list(range(cur_hour, cur_hour + 48))
                 sim_cmds = {h: max_p for h in survival_hours}
+                
+                # v11.9.527: Merge current real-time activity into survival sim commands
+                _p_raw_s = float(man.get_sensor_float(man.battery_power_sensor) or 0.0)
+                if _p_raw_s < -0.05:
+                    sim_cmds[cur_hour] = abs(_p_raw_s)
+                
                 _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds, house_profile_override="consumption_base")
                 
                 first_violation_h = None
@@ -309,11 +315,15 @@ class StrategyBuy(StrategyEngine):
             soc_morning = b_soc
 
             if target_hours:
+                # v11.9.526: Account for current real-time activity in intermediate planning steps
+                _p_raw = float(man.get_sensor_float(man.battery_power_sensor) or 0.0)
+                current_cmd = {cur_hour: abs(_p_raw)} if _p_raw < -0.05 else {}
+                
                 first_h = min(target_hours)
-                soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, {}, allow_discharge=True, no_solar_to_bat=True)
+                soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, current_cmd, allow_discharge=True, no_solar_to_bat=True)
                 
                 _sim_h_window = list(range(cur_hour, max(target_hours) + 1))
-                _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, {}, allow_discharge=True, no_solar_to_bat=True)
+                _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, current_cmd, allow_discharge=True, no_solar_to_bat=True)
                 soc_with_sun_only = self._get_soc_from_log(_log_sun, get_h_log_key(max(target_hours)), b_soc)
                 
                 # v11.9.155: Don't deduct solar for negative prices, we want to buy and export solar instead
