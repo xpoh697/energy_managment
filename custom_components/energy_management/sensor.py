@@ -3067,14 +3067,15 @@ class InverterOperationModeSensor(SensorEntity):
                     # v11.9.386: Initialize with AI predicted SOC if no manual limit set yet
                     soc_limit = h_override.get("soc_limit", round_f(p_soc, 0)) if h_override else round_f(p_soc, 0)
 
-                    hourly_data[h_key] = {
-                        "sell_price": round_f(s_price, 2) if s_price is not None else 0.0,
-                        "buy_price": round_f(b_price, 2) if b_price is not None else 0.0,
-                        "mode": f_mode,
-                        "soc": round_f(p_soc, 2),
-                        "soc_limit": soc_limit,
-                        "is_manual": h_override is not None
-                    }
+                    if is_tom or h >= now.hour:
+                        hourly_data[h_key] = {
+                            "sell_price": round_f(s_price, 2) if s_price is not None else 0.0,
+                            "buy_price": round_f(b_price, 2) if b_price is not None else 0.0,
+                            "mode": f_mode,
+                            "soc": round_f(p_soc, 2),
+                            "soc_limit": soc_limit,
+                            "is_manual": h_override is not None
+                        }
             attrs["hourly_data"] = hourly_data
 
             # v11.9.331: Persist mode overrides on manager for use in all simulation calls
