@@ -1070,6 +1070,7 @@ class StrategyEngine:
                     _expected_gen_kw_sim = min(_expected_gen_kw_sim, expected_cons_kw)
 
                 # 1. House Load Balance (Solar covers load first)
+                sim_p_bat = 0.0
                 p_for_house = min(_expected_gen_kw_sim, expected_cons_kw)
                 rem_gen = _expected_gen_kw_sim - p_for_house
                 rem_cons = expected_cons_kw - p_for_house
