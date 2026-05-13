@@ -453,7 +453,10 @@ class StrategySell(StrategyEngine):
                         
                         h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
                         p_real_bat = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
-                        if p_real_bat < p_req - 0.1:
+                        
+                        # v11.9.542: Only count deficit if battery is NOT charging (p_real_bat >= 0)
+                        # and fact discharge is less than requested.
+                        if p_real_bat >= 0 and p_real_bat < p_req - 0.1:
                             total_deficit_kwh += (p_req - p_real_bat) * duration
                     
                     # v11.9.541: Hourly SOC deficit tracking against dynamic floors
@@ -471,20 +474,21 @@ class StrategySell(StrategyEngine):
                     target_morning = floors_sliding.get(next_sunrise_abs, emergency_soc + 2.0)
                     soc_err = soc_morning_sim - target_morning
 
-                    # v11.9.541: Priority-Based Refinement
+                    # v11.9.542: Priority-Based Refinement
                     if total_deficit_kwh > 0.15:
                         # Priority 1: Physical impossibility
                         target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
                     elif max_soc_deficit_kwh > 0.05:
                         # Priority 2: Correct SOC deficit seen at any hour
                         target_budget_ac = max(0.0, target_budget_ac - max_soc_deficit_kwh * 1.1)
-                    elif soc_err > 0.5:
+                    elif soc_err > 0.1:
                         # Priority 3: Increase budget if we have surplus at sunrise
                         target_budget_ac += (soc_err * b_cap / 100.0) * 0.4
                     else:
                         # Convergence!
                         _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
                         _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
+                        _sell_debug["max_soc_deficit"] = round_f(max_soc_deficit_kwh, 3)
                         break
             else:
                 # v11.9.332: No sell windows found. Run natural flow simulation.
@@ -746,6 +750,9 @@ class StrategySell(StrategyEngine):
                 "house_h": "Profile",
                 "sim_gen": round_f(sim_gen_24h, 1),
                 "sim_log": " | ".join(debug_log_parts),
+                "final_budget": round_f(target_budget_ac, 2),
+                "total_deficit": round_f(total_deficit_kwh, 3),
+                "max_soc_deficit": round_f(max_soc_deficit_kwh, 3),
                 "final_targets": str(target_hours),
                 "f_today": f_today,
                 "f_tom": f_tom_val,
