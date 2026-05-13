@@ -337,6 +337,9 @@ class StrategyBuy(StrategyEngine):
                 else:
                     decision_str = f"Дорого (>{buy_limit:.2f})"
                 res["charge_reason"] = "Нет"
+                res["analyzed_window"] = "Нет окон"
+                res["active_periods"] = ""
+                needed_kwh_dc = max(0.0, (target_soc - b_soc) * b_cap / 100.0)
             else:
                 # We have candidate hours. Decide if we actually need to buy.
                 planning_h = min(target_hours)
@@ -389,10 +392,6 @@ class StrategyBuy(StrategyEngine):
                 
                 res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
                 res["active_periods"] = group_h(target_hours)
-            else:
-                res["analyzed_window"] = "Нет окон"
-                res["active_periods"] = ""
-                needed_kwh_dc = max(0.0, (target_soc - b_soc) * b_cap / 100.0)
 
             res["strategy_decision"] = decision_str
             res["arbitrage_decision"] = decision_str # For backward compatibility
