@@ -1128,6 +1128,13 @@ class StrategyEngine:
                     _solar_charge = 0.0
             
                 sim_eff = float(max(0.85, eff_coeff))
+                
+                # v11.9.545: Resolve Trade Floor early for logging
+                h_idx_int = int(h_abs)
+                h_floor_trade = b_min_soc
+                if dynamic_floors and h_idx_int in dynamic_floors:
+                    h_floor_trade = float(dynamic_floors[h_idx_int])
+
                 if total_net_kw > 0.001: 
                     # v11.1.62 - bat_emergency recovery
                     acc_ratio = float(self.get_cc_cv_ratio(simulated_soc))
@@ -1167,12 +1174,6 @@ class StrategyEngine:
                         p_sale_dc = min(actual_discharge_kw, p_sale_ac / sim_eff)
                         p_house_dc = max(0.0, actual_discharge_kw - p_sale_dc)
                         
-                        # 3. Resolve Floors
-                        h_idx_int = int(h_abs)
-                        h_floor_trade = b_min_soc
-                        if dynamic_floors and h_idx_int in dynamic_floors:
-                            h_floor_trade = float(dynamic_floors[h_idx_int])
-
                         # 4. Sequential Discharge Simulation
                         # Phase A: House Load (Limit = Hardware b_min_soc)
                         # v11.9.467: House load ALWAYS has priority and ignores Trade Floor
@@ -1232,6 +1233,10 @@ class StrategyEngine:
                     "p_grid": round_f(float(sim_p_bat + rem_gen - rem_cons), 2),
                     "trust": round_f(float(tom_coeff if is_tom else blended_coeff), 2)
                 }
+                # v11.9.545: Inject active command details for debugging
+                if abs(cmd_p) > 0.001:
+                    history_log[log_key_str]["req_p"] = round_f(float(abs(cmd_p)), 3)
+                    history_log[log_key_str]["floor"] = round_f(float(h_floor_trade), 1)
             except Exception as e:
                 _LOGGER.error(f"Simulation error at hour {h_abs}: {e}")
                 continue

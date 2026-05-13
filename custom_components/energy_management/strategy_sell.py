@@ -459,7 +459,18 @@ class StrategySell(StrategyEngine):
                         if p_real_bat >= 0 and p_real_bat < p_req - 0.05:
                             diff = (p_req - p_real_bat) * duration
                             total_deficit_kwh += diff
-                            deficit_detail.append(f"{h_cmd}h: req {p_req:.2f}, real {p_real_bat:.2f} (diff {diff:.3f})")
+                            
+                            # v11.9.545: Identify reason using extended sim log
+                            sim_data = trial_log.get(h_sim_key, {})
+                            floor_val = sim_data.get("floor", 0.0)
+                            soc_val = sim_data.get("soc", 0.0)
+                            reason = ""
+                            if soc_val < floor_val + 0.1:
+                                reason = f" (Floor: {floor_val}%)"
+                            elif p_real_bat < 0.01:
+                                reason = " (Locked/Limit)"
+                            
+                            deficit_detail.append(f"{h_cmd}h: req {p_req:.2f}, real {p_real_bat:.2f}{reason}")
                     
                     # v11.9.541: Hourly SOC deficit tracking against dynamic floors
                     max_soc_deficit_kwh = 0.0
