@@ -35,7 +35,7 @@ const MODE_LABELS = {
   'sale_pv': 'Normal',
   'sale_pv_no_bat': 'Export PV',
   'sale_pv_bat': 'Discharge',
-  'buy': 'Grid Charging',
+  'buy': 'Charge',
   'stop_sale': 'Stop Sale',
   'bat_emergency': 'Emergency',
   'no_pv_sale_no_bat': 'Wait'
@@ -333,7 +333,7 @@ class EnergyManagementCard extends HTMLElement {
               <div class="form-group">
                 <span class="form-label">Mode Override</span>
                 <select id="modal-mode" onchange="this.getRootNode().host._toggleSocVisibility()">
-                  <option value="buy">Grid Charging</option>
+                  <option value="buy">Charge</option>
                   <option value="sale_pv_bat">Discharge</option>
                   <option value="sale_pv_no_bat">Export PV</option>
                   <option value="no_pv_sale_no_bat">Wait</option>
@@ -461,12 +461,12 @@ class EnergyManagementCard extends HTMLElement {
       const pState = this._hass.states[profitEntity];
       const pValRaw = parseFloat(pState.state) || 0;
       const pColor = pValRaw >= 0 ? '#4caf50' : '#f44336';
-      
+
       profitHero.style.display = 'flex';
       profitHero.setAttribute('data-entity', profitEntity);
       profitHero.style.borderColor = pColor;
       profitHero.style.boxShadow = `0 6px 20px ${pColor}22`;
-      
+
       const pLabel = this.shadowRoot.getElementById('profit-label');
       pLabel.innerText = this._config.profit_label || 'Today Profit';
 
@@ -477,13 +477,13 @@ class EnergyManagementCard extends HTMLElement {
       profitHero.style.display = 'none';
       if (socHero) socHero.style.gridColumn = 'span 2';
     }
-    
+
     const vTag = this.shadowRoot.getElementById('v-tag');
     if (vTag) vTag.innerText = attrs.strategy_version || 'v11.9.497';
-    
+
     const projM = this.shadowRoot.getElementById('proj-morning');
     if (projM) projM.innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
-    
+
     // v11.9.405: Dynamic Extra Indicators from Config
     this._updateExtraIndicators();
 
@@ -532,7 +532,7 @@ class EnergyManagementCard extends HTMLElement {
 
       const label = card.querySelector('.stat-label');
       const value = card.querySelector('.stat-value');
-      
+
       const newLabel = item.name || stateObj.attributes.friendly_name || 'Sensor';
       const newVal = `${stateObj.state} ${stateObj.attributes.unit_of_measurement || ''}`;
 
@@ -583,7 +583,7 @@ class EnergyManagementCard extends HTMLElement {
         const isTomorrow = !key.includes(todayStr);
         const label = isTomorrow ? 'TOMORROW' : 'TODAY';
         const hourData = data[key];
-        
+
         if (label !== currentDayLabel) {
           if (currentDayLabel !== '') html += '</div>';
           html += `<div class="section-header">${label}</div><div class="timeline-grid">`;
@@ -593,7 +593,7 @@ class EnergyManagementCard extends HTMLElement {
         const modeColor = MODE_COLORS[hourData.mode] || MODE_COLORS.default;
         const bgColor = hexToRgba(modeColor, 0.1);
         const isManual = hourData.is_manual;
-        
+
         html += `
           <div class="hour-bar ${idx === 0 ? 'active' : ''} ${isManual ? 'manual-glow' : ''}" data-ts="${key}" data-mode="${hourData.mode}" id="hb-${key.replace(/[: ]/g, '-')}">
             <div class="bar-content" style="border-color: ${modeColor}; background-color: ${bgColor};">

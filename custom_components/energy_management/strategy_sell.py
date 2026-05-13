@@ -108,6 +108,7 @@ class StrategySell(StrategyEngine):
         user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
         price_sell_limit = float(man.get_setting(CONF_PRICE_SELL_LIMIT, 5.0))
         res["limit_used"] = price_sell_limit
+        res["discharge_limit"] = user_limit
         
         try:
             cur_hour = int(now.hour)
@@ -630,7 +631,7 @@ class StrategySell(StrategyEngine):
                 "planned_power_per_h": planned_results,
                 "target_soc": round_f(active_safety_floor, 1),
                 "recommended_power_kw": sell_commands.get(cur_hour, 0.0),
-                "limit_used": user_limit if not is_turbo_win else "None",
+                "discharge_limit": user_limit if not is_turbo_win else "None",
                 "target_price": target_price,
                 "limit_reason": limit_reason,
                 "target_morning": round_f(target_morning, 1),
@@ -805,40 +806,28 @@ class StrategySell(StrategyEngine):
             }
             if '_sell_debug' in locals(): res["arbitrage_sell_debug"].update(_sell_debug)
 
+            # v11.9.599: Enhanced Status Logic for Sell Strategy
+            has_sell_plan = bool(sell_commands and any(p > 0.05 for p in sell_commands.values()))
+            reason = "Цена"
+            if res.get("is_arbitrage_profitable"): reason = "Арбитраж"
+            elif f_today > 10.0: reason = "Излишки PV" # Heuristic
+
             if sell_commands.get(cur_hour, 0.0) > 0.05:
                 res["state"] = "active"
-                res["current_mode_text"] = "Активная продажа"
+                res["current_mode_text"] = f"Продажа ({reason})"
+            elif has_sell_plan:
+                next_h = min([h for h, p in sell_commands.items() if p > 0.05 and h > cur_hour], default=None)
+                h_hint = ""
+                if next_h is not None:
+                    h_fmt = f"{next_h%24:02d}:00" + (" (Завтра)" if next_h >= 24 else "")
+                    h_hint = f" в {h_fmt}"
+                res["current_mode_text"] = f"Запланирована продажа ({reason}){h_hint}"
             else:
                 res["current_mode_text"] = "Ожидание пика" if target_hours else "Нет ценового окна"
 
-            # v11.9.582: FIXED RECURSION (Deadlock fix)
-            # Use all_buy_prices which we already have in this function, no need to call buy_strategy
-            arb_msg = "Нет выгодного арбитража"
-            best_buy_h = None
-            if all_buy_prices:
-                # Find lowest buy price in the next 24h
-                options = {h: p for h, p in all_buy_prices.items() if h >= cur_hour}
-                if options:
-                    best_buy_h = min(options, key=lambda k: options[k])
-            
-            if target_hours:
-                # Find best sell hour (highest price)
-                best_sell_h = max(target_hours, key=lambda h: all_sell_prices.get(h, 0.0))
-                
-                p_buy = all_buy_prices.get(best_buy_h, 0.0) if best_buy_h is not None else target_price
-                p_sell = all_sell_prices.get(best_sell_h, 0.0)
-                profit = (p_sell - p_buy) - deg_cost
-                
-                h_buy_str = f"{best_buy_h % 24:02d}:00" if best_buy_h is not None else "Plan"
-                h_sell_str = f"{best_sell_h % 24:02d}:00"
-                if best_buy_h is not None and best_buy_h >= 24: h_buy_str += " (Завтра)"
-                if best_sell_h >= 24: h_sell_str += " (Завтра)"
-                
-                arb_msg = f"Купим в {h_buy_str} ({p_buy:.2f}) -> Продадим в {h_sell_str} ({p_sell:.2f}). Профит: {profit:.2f}/кВтч"
-            elif best_buy_h is not None:
-                arb_msg = f"Ожидаем окно продажи (Лучшая закупка в {best_buy_h%24:02d}:00)"
-            
-            res["arbitrage_decision"] = arb_msg
+            # v11.9.586: Use shared arbitrage logic
+            arb_info = self._get_arbitrage_info(cur_hour, all_buy_prices, all_sell_prices, target_hours)
+            res["arbitrage_decision"] = arb_info["arbitrage_decision"]
             res["strategy_decision"] = res.get("current_mode_text", "Ожидание")
 
             self._strategy_cache[cache_key] = {"time": now, "res": res}

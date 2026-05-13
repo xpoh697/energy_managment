@@ -477,7 +477,7 @@ class StrategyEngine:
                 old_today = today_coeff
                 today_coeff = max(today_coeff, hist_coeff, 1.0)
                 if abs(today_coeff - old_today) > 0.01:
-                    _LOGGER.warning(f"[Strategy] Curtailment detected (mode={cur_mode}, price={cur_price}, SOC={man.get_sensor_float(man.battery_soc_sensor, 0.0)}%). Corrected today_coeff: {old_today:.2f} -> {today_coeff:.2f}")
+                    _LOGGER.debug(f"[Strategy] Curtailment detected (mode={cur_mode}, price={cur_price}, SOC={man.get_sensor_float(man.battery_soc_sensor, 0.0)}%). Corrected today_coeff: {old_today:.2f} -> {today_coeff:.2f}")
 
             # C. Blended Coeff: Weighted average of Today vs 1.0 (Baseline)
             # v11.3.64: Using fraction_so_far as the stable progress measure.
@@ -852,7 +852,7 @@ class StrategyEngine:
             return float(start_soc), {}, 0.0
         
         # v11.7.51: Start SOC Debug
-        _LOGGER.warning(f"[SimStart] start_soc: {start_soc} (type: {type(start_soc)})")
+        _LOGGER.debug(f"[SimStart] start_soc: {start_soc} (type: {type(start_soc)})")
 
         man = man or self.manager
         # v11.9.466: Resolve hardware Min SOC if not explicitly passed
@@ -878,6 +878,8 @@ class StrategyEngine:
         f_tom = float(man.get_forecast_value(man.forecast_tomorrow_sensor) or 0.0)
         dist_today = man.get_forecast_hourly_distribution(man.forecast_today_hourly_sensor)
         dist_tom = man.get_forecast_hourly_distribution(man.forecast_tomorrow_sensor, tomorrow_dt.strftime("%Y-%m-%d"))
+
+        _LOGGER.debug(f"[SimSolar] today: {f_today:.2f} (dist: {len(dist_today) if dist_today else 0}), tom: {f_tom:.2f} (dist: {len(dist_tom) if dist_tom else 0})")
 
         # 2. Consumption profiles (7-day Aware Total Load)
         p_type = house_profile_override or "consumption_total"
@@ -905,6 +907,7 @@ class StrategyEngine:
                 blended_coeff = 1.0
                 man.last_blended_coeff = 1.0
         eff_coeff = float(self.get_efficiency_coefficient() or 1.0)
+        _LOGGER.debug(f"[SimSolar] today: {f_today:.2f}, tom: {f_tom:.2f} | blended: {blended_coeff:.3f}")
         fraction_left_h1 = float(1.0 - (now.minute / 60.0))
         max_batt_p_v = man.get_setting(CONF_BATTERY_MAX_POWER, 5.0)
         max_batt_p = float(max_batt_p_v) if max_batt_p_v is not None else 5.0
@@ -1192,7 +1195,7 @@ class StrategyEngine:
                         
                         # v11.9.548: Enhanced Trace for Locked/Limit diagnosis
                         if abs(cmd_p) > 0.05 and sim_p_bat < abs(cmd_p) - 0.05:
-                            _LOGGER.warning(f"[SimDeficit] H:{h_abs} M:{_h_mode_str} req:{abs(cmd_p):.2f} real:{sim_p_bat:.2f} net:{total_net_kw:.2f} dc:{actual_discharge_kw:.2f} soc:{old_soc:.1f}->{simulated_soc:.1f} floor:{h_floor_trade:.1f}")
+                            _LOGGER.debug(f"[SimDeficit] H:{h_abs} M:{_h_mode_str} req:{abs(cmd_p):.2f} real:{sim_p_bat:.2f} net:{total_net_kw:.2f} dc:{actual_discharge_kw:.2f} soc:{old_soc:.1f}->{simulated_soc:.1f} floor:{h_floor_trade:.1f}")
                     else:
                         simulated_soc = 0.0
                         sim_p_bat = 0.0
@@ -3703,4 +3706,50 @@ class StrategyEngine:
             return res
         finally:
             self._calculating_strategy = old_calc
+
+    def _get_arbitrage_info(self, cur_hour, buy_prices, sell_prices, target_hours=None):
+        """Universal arbitrage calculation logic to avoid code duplication.
+        Returns a dict with arbitrage_decision and best buy/sell hour info.
+        """
+        arb_msg = "Нет выгодного арбитража"
+        best_buy_h = None
+        deg_cost = self.get_battery_degradation_cost()
+        prof_thresh = float(self.manager.get_setting("arbitrage_profit_threshold", 0.5))
+        threshold = float(max(prof_thresh, 2.0 * deg_cost))
+        
+        # 1. Find best buy window in the next 24h
+        if buy_prices:
+            options = {int(h): p for h, p in buy_prices.items() if int(h) >= cur_hour}
+            if options:
+                best_buy_h = min(options, key=lambda k: options[k])
+        
+        # 2. Find best sell window
+        profit = 0.0
+        if target_hours and sell_prices:
+            best_sell_h = max(target_hours, key=lambda h: sell_prices.get(str(h), sell_prices.get(int(h), 0.0)))
+            
+            p_buy = buy_prices.get(str(best_buy_h), buy_prices.get(best_buy_h, 0.0)) if best_buy_h is not None else 0.0
+            p_sell = sell_prices.get(str(best_sell_h), sell_prices.get(best_sell_h, 0.0))
+            profit = (p_sell - p_buy) - deg_cost
+            
+            h_buy_str = f"{best_buy_h % 24:02d}:00" if best_buy_h is not None else "Plan"
+            h_sell_str = f"{best_sell_h % 24:02d}:00"
+            if best_buy_h is not None and best_buy_h >= 24: h_buy_str += " (Завтра)"
+            if best_sell_h >= 24: h_sell_str += " (Завтра)"
+            
+            if profit >= threshold:
+                arb_msg = f"Купим в {h_buy_str} ({p_buy:.2f}) -> Продадим в {h_sell_str} ({p_sell:.2f}). Профит: {profit:.2f}/кВтч"
+            else:
+                arb_msg = f"Арбитраж невыгоден ({profit:.2f} < {threshold:.2f}). Лучшая закупка в {h_buy_str}, продажа в {h_sell_str}"
+        elif best_buy_h is not None:
+            h_buy_str = f"{best_buy_h % 24:02d}:00"
+            if best_buy_h >= 24: h_buy_str += " (Завтра)"
+            arb_msg = f"Ожидаем окно продажи (Лучшая закупка в {h_buy_str})"
+            
+        return {
+            "arbitrage_decision": arb_msg,
+            "best_buy_hour": best_buy_h,
+            "best_sell_hour": max(target_hours) if target_hours else None,
+            "expected_profit": round_f(profit, 3)
+        }
 

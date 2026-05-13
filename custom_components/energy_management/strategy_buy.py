@@ -110,7 +110,11 @@ class StrategyBuy(StrategyEngine):
             elif h_abs >= 24: suffix = " (Завтра)"
             return f"{h_rel:02d}:59{suffix}"
 
+        user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
+        charge_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
         res["limit_used"] = price_buy_limit
+        res["discharge_limit"] = user_limit
+        res["charge_limit"] = charge_limit
         
         try:
             cur_hour = int(now.hour)
@@ -325,10 +329,18 @@ class StrategyBuy(StrategyEngine):
             _sim_h_disp = list(range(cur_hour, max(sunset_abs, (max(target_hours) if target_hours else cur_hour)) + 1))
             _p_raw = float(man.get_sensor_float(man.battery_power_sensor) or 0.0)
             current_cmd = {cur_hour: abs(_p_raw)} if _p_raw < -0.05 else {}
-            _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_disp, now, current_cmd, allow_discharge=True, no_solar_to_bat=False)
+            _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_disp, now, current_cmd, allow_discharge=True, no_solar_to_bat=False, house_profile_override="consumption_base")
+            
+            # v11.9.602: Peak Solar Awareness
+            # If at ANY hour from now until sunset the battery reaches 95% from solar, 
+            # then grid charging at positive prices is absolutely NOT needed.
+            hours_until_sunset = [h for h in _sim_h_disp if h <= sunset_abs]
+            if not hours_until_sunset: hours_until_sunset = [cur_hour]
+            
+            peak_soc_before_sunset = max([self._get_soc_from_log(_log_sun, get_h_log_key(h), 0.0) for h in hours_until_sunset])
+            is_solar_enough = bool(peak_soc_before_sunset >= 95.0)
             
             soc_at_sunset = self._get_soc_from_log(_log_sun, get_h_log_key(sunset_abs), b_soc)
-            is_solar_enough = bool(soc_at_sunset >= (target_soc - 2.0))
             
             charge_commands = {}
             if not target_hours:
@@ -349,8 +361,8 @@ class StrategyBuy(StrategyEngine):
                 if cur_p > 0 and is_solar_enough:
                     needed_kwh_dc = 0.0
                     res["charge_reason"] = "Скип (Будет солнце)"
-                    decision_str = f"Скип (Солнце {soc_at_sunset:.0f}%)"
-                    _buy_debug["solar_skip"] = f"SOC at sunset {soc_at_sunset:.1f}% >= target {target_soc}%"
+                    decision_str = f"Скип (Пик Солнца {peak_soc_before_sunset:.0f}%)"
+                    _buy_debug["solar_skip"] = f"Peak SOC before sunset {peak_soc_before_sunset:.1f}% >= 95%"
                 elif res.get("charge_reason") == "Отрицательная цена":
                     needed_kwh_dc = max(0.0, (target_soc - soc_at_start_plan) * b_cap / 100.0)
                     decision_str = f"Зарядка (Минус {cur_p:.2f})"
@@ -370,6 +382,16 @@ class StrategyBuy(StrategyEngine):
                 # 2. Fill energy budget based on price attractiveness
                 accum_kwh_dc = 0.0
                 for h in sorted_by_price:
+                    # v11.9.603: Strict Solar Guard.
+                    # For this specific hour 'h', check if solar will fill the battery 
+                    # at ANY point between 'h' and sunset.
+                    h_future_until_sunset = [sh for sh in _sim_h_disp if sh >= h and sh <= sunset_abs]
+                    if h_future_until_sunset:
+                        peak_after_h = max([self._get_soc_from_log(_log_sun, get_h_log_key(sh), 0.0) for sh in h_future_until_sunset])
+                        if peak_after_h >= 95.0 and all_buy_prices.get(h, 0) > 0:
+                            charge_commands[h] = 0.0
+                            continue
+
                     if accum_kwh_dc >= (needed_kwh_dc - 0.01) and all_buy_prices.get(h, 0) > 0:
                         charge_commands[h] = 0.0
                         continue
@@ -390,6 +412,13 @@ class StrategyBuy(StrategyEngine):
                 if res.get("charge_reason") == "Отрицательная цена":
                     res["no_battery_charge_until"] = max(target_hours) + 1
                 
+                # Check if allocator actually planned anything
+                actual_planned = sum(charge_commands.values())
+                if actual_planned <= 0.05 and needed_kwh_dc > 0.1:
+                    # v11.9.604: We needed energy, but skipped all windows because solar will fill later
+                    decision_str = "Скип (Солнце наполнит)"
+                    res["charge_reason"] = "Скип (Солнце)"
+                
                 res["analyzed_window"] = f"До {max(target_hours)%24:02d}:59"
                 res["active_periods"] = group_h(target_hours)
 
@@ -406,11 +435,11 @@ class StrategyBuy(StrategyEngine):
             
             # v11.9.481: Debug charge_commands integrity
             if charge_commands:
-                _LOGGER.warning(f"[Strategy Buy] Final Charge Commands: {charge_commands}")
+                _LOGGER.debug(f"[Strategy Buy] Final Charge Commands: {charge_commands}")
             
             # v11.9.491: Final debug of command mapping
             if charge_commands:
-                _LOGGER.warning(f"[Strategy Buy] FINAL Simulation Keys: {list(charge_commands.keys())} | Vals: {list(charge_commands.values())}")
+                _LOGGER.debug(f"[Strategy Buy] FINAL Simulation Keys: {list(charge_commands.keys())} | Vals: {list(charge_commands.values())}")
             
             # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
             soc_end, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=False, b_min_soc=min_soc, dynamic_floors=d_floors)
@@ -435,6 +464,16 @@ class StrategyBuy(StrategyEngine):
                 soc_morning = soc_end
                 
             soc_morning_base = self._get_soc_from_log(sim_log_base, get_h_log_key(morning_h_abs - 1), soc_morning)
+            # v11.9.615: Ultra-Detailed Debug Log
+            def fmt_log(log_dict):
+                return " | ".join([
+                    f"{int(str(h).split(':')[0]):02d}: {v['soc']:.0f}% (G:{v.get('gen_kw',0.0):.1f}|C:{v.get('cons_kw',0.0):.1f}|N:{v.get('p_bat',0.0):.1f})" 
+                    for h, v in log_dict.items() if isinstance(h, str) and ":" in h and "Завтра" not in h
+                ])
+
+            log_str_base = fmt_log(_log_sun)
+            log_str_final = fmt_log(sim_log)
+
             res["buy_simulation"] = {
                 "projected_soc_at_start_pct": round_f(soc_at_start_plan, 1),
                 "projected_soc_at_end_pct": round_f(soc_end, 1),
@@ -445,6 +484,8 @@ class StrategyBuy(StrategyEngine):
                 "needed_kwh_dc": round_f(needed_kwh_dc, 3),
                 "max_p": round_f(max_p, 2),
                 "p_total_planned": round_f(sum(charge_commands.values()), 3),
+                "sim_log_base": log_str_base,
+                "sim_log": log_str_final,
                 "log": sim_log
             }
             res["charge_commands"] = charge_commands
@@ -526,19 +567,50 @@ class StrategyBuy(StrategyEngine):
 
             txt = "Ожидание окна"
             reason = res.get("charge_reason", "")
+            has_plan = bool(charge_commands and any(p > 0.05 for p in charge_commands.values()))
+
             if res["state"] == "active":
                 if reason == "Отрицательная цена": txt = "Зарядка (Отриц. цена)"
                 elif reason == "Арбитраж": txt = "Зарядка (Арбитраж)"
                 elif reason == "Выживание": txt = "Зарядка (Выживание)"
                 else: txt = "Зарядка (Дешево)"
+            elif has_plan:
+                # v11.9.598: Show reason even if the window is in the future
+                prefix = "Запланировано"
+                if reason == "Отрицательная цена": txt = f"{prefix} (Отриц. цена)"
+                elif reason == "Арбитраж": txt = f"{prefix} (Арбитраж)"
+                elif reason == "Выживание": txt = f"{prefix} (Выживание)"
+                else: txt = f"{prefix} (Дешево)"
+                
+                # Add time hint
+                next_h = min([h for h, p in charge_commands.items() if p > 0.05 and h > cur_hour], default=None)
+                if next_h is not None:
+                    h_fmt = f"{next_h%24:02d}:00" + (" (Завтра)" if next_h >= 24 else "")
+                    txt += f" в {h_fmt}"
             elif reason == "Выживание":
                 txt = "Запланировано выживание"
             elif reason == "Нет":
                 txt = "В покупке нет необходимости"
             res["current_mode_text"] = txt
-            res["power_decision"] = txt
+            res["strategy_decision"] = txt
+            
+            # v11.9.606: Restore technical info to power_decision
+            if res["state"] == "active":
+                p_val = res["recommended_power_kw"]
+                res["power_decision"] = f"Зарядка {p_val:.2f} кВт ({reason})"
+            elif has_plan:
+                next_h = min([h for h, p in charge_commands.items() if p > 0.05 and h > cur_hour], default=None)
+                h_fmt = f"{next_h%24:02d}:00" + (" (Завтра)" if next_h >= 24 else "")
+                res["power_decision"] = f"Запланировано {charge_commands.get(next_h, 0):.2f} кВт в {h_fmt}"
+            else:
+                res["power_decision"] = "Ожидание окна"
+            
             res["raw_commands"] = charge_commands
-            res["strategy_candidates"] = [f"{h%24:02d}:00" for h in target_hours]
+            # v11.9.586: Integrate shared arbitrage logic
+            # v11.9.596: Sync Arbitrage Info logic with Sell strategy
+            sell_targets = [h for h, p in all_sell_prices.items() if h > cur_hour and p >= max(all_sell_prices.values()) - 0.05]
+            arb_info = self._get_arbitrage_info(cur_hour, all_buy_prices, all_sell_prices, sell_targets)
+            res["arbitrage_decision"] = arb_info["arbitrage_decision"]
 
             self._strategy_cache[cache_key] = {"time": now, "res": res}
             return res

@@ -2077,7 +2077,7 @@ class EnergyProfileManager:
 
         # v11.9.556: Trace successful pull for critical settings
         if key in [CONF_BATTERY_MAX_POWER, CONF_AI_DISCHARGE_LIMIT]:
-            _LOGGER.warning(f"[SettingTrace] {key} = {val} (Source: {source})")
+            _LOGGER.debug(f"[SettingTrace] {key} = {val} (Source: {source})")
 
         if isinstance(default, float):
             try: return float(val)
@@ -2171,7 +2171,7 @@ class EnergyProfileManager:
                 soc = float(normalize_float(soc_attr))
                 _LOGGER.info(f"Battery SOC read from attributes: {soc}% from {self.battery_soc_sensor} (state={st.state})")
         elif self.battery_soc_sensor:
-            _LOGGER.warning(f"Battery SOC sensor {self.battery_soc_sensor} not found in Home Assistant states.")
+            _LOGGER.debug(f"Battery SOC sensor {self.battery_soc_sensor} not found in Home Assistant states.")
         else:
             _LOGGER.debug("Battery SOC sensor is not configured.")
         
@@ -2933,7 +2933,12 @@ class InverterOperationModeSensor(SensorEntity):
             # before calling get_market_strategy — prevents strategy.py from reading stale "sale_pv" default.
             self.manager.current_inverter_mode = mode
             
+            # v11.9.585: Initialize attributes in a specific order for the TOP view in UI
             attrs = {}
+            # Reserved keys for the TOP (filled later)
+            for k in ["arbitrage_decision", "buy_decision", "sell_decision", "power", "charge_amps", "target_soc", "battery_soc", "is_preparing_for_peak", "next_peak_start_hour", "morning_soc_target", "morning_soc_projected"]:
+                attrs[k] = None
+
             attrs["mode_reason"] = reason
             attrs["mode_lock_until"] = self._mode_lock_until.isoformat() if self._mode_lock_until else "None"
             attrs["battery_soc"] = round_f(batt_soc, 1)
@@ -3276,12 +3281,10 @@ class InverterOperationModeSensor(SensorEntity):
                 elif "sale" in mode and sell_strategy.get("state") == "active":
                     chg_reason = sell_strategy.get("charge_reason", "Нет")
 
-            # v11.9.579: Decisions to the TOP for better UX
-            attrs["strategy_decision"] = buy_strategy.get("strategy_decision") or sell_strategy.get("strategy_decision") or "Ожидание окна"
+            # v11.9.585: Decisions to the TOP for better UX (Updating reserved keys)
             attrs["arbitrage_decision"] = sell_strategy.get("arbitrage_decision", "Нет данных")
             attrs["buy_decision"] = buy_strategy.get("strategy_decision", "Нет данных")
             attrs["sell_decision"] = sell_strategy.get("strategy_decision", "Нет данных")
-            attrs["charge_reason"] = chg_reason
 
             attrs["power"] = p_val
             attrs["target_soc"] = t_soc
@@ -3425,10 +3428,6 @@ class InverterOperationModeSensor(SensorEntity):
                 _active_h_raw = sell_strategy.get("active_hours", [])
                 is_selling_active = check_h_abs in _active_h_raw
                 is_buying_active = check_h_abs in buy_strategy.get("active_hours", [])
-                # v11.6.62: debug
-                if check_h_abs in [19, 20]:
-                    _LOGGER.warning("[Mode Forecast] h=%s active_hours=%s type=%s is_selling=%s",
-                                    check_h_abs, _active_h_raw, type(_active_h_raw).__name__, is_selling_active)
         else:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"
@@ -3980,6 +3979,9 @@ class MarketStrategySensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         res = self.manager.get_market_strategy(self.mode)
+        _LOGGER.debug("[UI Debug] Strategy %s res keys: %s", self.mode, list(res.keys()))
+        if "limit_used" in res:
+            _LOGGER.debug("[UI Debug] Strategy %s limit_used: %s", self.mode, res["limit_used"])
 
         now = dt_util.now()
         cur_hour = now.hour
@@ -3992,22 +3994,41 @@ class MarketStrategySensor(SensorEntity):
 
         attrs = {
             "strategy_version": VERSION,
-            "strategy_candidates": res.get("strategy_candidates", []),
-            "deg_cost": res.get("deg_cost", 0.0),
-            "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
             "analyzed_window": res.get("analyzed_window", "Неизвестно"),
-            "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
-            "active_periods": res.get("active_periods", ""),
+            "price_limit_used": safe_round(res.get("limit_used")),
+            "discharge_limit_used": safe_round(res.get("discharge_limit", 20.0)),
+            "charge_limit_used": safe_round(res.get("charge_limit", 100.0)),
             "target_price": safe_round(res.get("target_price")),
-            "limit_used": safe_round(res.get("limit_used")),
-            "arbitrage_decision": res.get("strategy_decision", "Нет данных"),
+            "arbitrage_profit_threshold": res.get("profit_threshold", 0.0),
+            "deg_cost": res.get("deg_cost", 0.0),
+            "strategy_candidates": res.get("strategy_candidates", []),
+            "active_periods": res.get("active_periods", ""),
+            "double_cycle_opportunity": res.get("multi_cycle", "Не предвидится"),
+            "arbitrage_decision": res.get("arbitrage_decision", "Нет данных"),
             "strategy_decision": res.get("strategy_decision", "Нет данных"),
             "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
-            "prices_today": today_fmt,
-            "prices_tomorrow": tom_fmt,
             "planned_power": {h: f"{d['power']} кВт ({d['reason'] if d.get('reason') else f'Цель: {d['soc']}%'})" if isinstance(d, dict) else d for h, d in res.get("planned_power_per_h", {}).items()},
-            "power_decision": res.get("power_decision", "Ожидание")
+            "power_decision": res.get("power_decision", "Ожидание"),
         }
+
+        # v11.9.587: Move SOC projections up (before prices)
+        if self.mode == "sell":
+            attrs.update({
+                "projected_soc_at_sale_start": res.get("sell_simulation", {}).get("projected_soc_at_sale_start_pct", 0.0),
+                "projected_soc_after_sale": res.get("sell_simulation", {}).get("projected_soc_after_sale_pct", 0.0),
+                "projected_soc_morning": res.get("sell_simulation", {}).get("projected_soc_morning_pct", 0.0),
+                "projected_soc_morning_base": res.get("sell_simulation", {}).get("projected_soc_morning_base_pct", 0.0),
+            })
+        else: # buy
+            attrs.update({
+                "projected_soc_at_buy_start": res.get("buy_simulation", {}).get("projected_soc_at_start_pct", 0.0),
+                "projected_soc_at_end": res.get("buy_simulation", {}).get("projected_soc_at_end_pct", 0.0),
+                "projected_soc_morning": res.get("buy_simulation", {}).get("projected_soc_morning_pct", 0.0),
+                "projected_soc_morning_base": res.get("buy_simulation", {}).get("projected_soc_morning_base_pct", 0.0),
+            })
+
+        attrs["prices_today"] = today_fmt
+        attrs["prices_tomorrow"] = tom_fmt
 
         # v7.2 - Hide detailed projections if nothing is planned for today
         # (reduces clutter and avoids 'nonsense' values for future/past windows)
@@ -4015,6 +4036,7 @@ class MarketStrategySensor(SensorEntity):
         has_planned = bool(res.get("active_hours", []))
         show_extra = is_active or has_planned
 
+        b_coeff = round_f(float(getattr(self.manager, "last_blended_coeff", 1.0)), 3)
         if self.mode == "sell":
             attrs["sell_debug"] = res.get("arbitrage_sell_debug", "Нет данных")
             attrs.update({
@@ -4028,7 +4050,9 @@ class MarketStrategySensor(SensorEntity):
                 "arbitrage_reserve_kwh": res.get("arbitrage_buyback", {}).get("reserve_kwh", 0.0),
                 "arbitrage_energy_to_wait_kwh": res.get("arbitrage_buyback", {}).get("energy_to_wait_kwh", 0.0),
                 "arbitrage_limit_reason": res.get("arbitrage_sell_limit_reason", ""),
-                "arbitrage_gatekeeper_floor": res.get("gatekeeper_floor", 0.0)
+                "arbitrage_gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
+                "sim_log": res.get("sell_simulation", {}).get("sim_log", ""),
+                "blended_coeff": b_coeff
             })
         else: # buy
             attrs.update({
@@ -4042,7 +4066,9 @@ class MarketStrategySensor(SensorEntity):
                 "debug_b_cap": res.get("buy_simulation", {}).get("b_cap", 0.0),
                 "debug_needed_kwh": res.get("buy_simulation", {}).get("needed_kwh_dc", 0.0),
                 "debug_max_p": res.get("buy_simulation", {}).get("max_p", 0.0),
-                "debug_planned_kwh": res.get("buy_simulation", {}).get("p_total_planned", 0.0)
+                "debug_planned_kwh": res.get("buy_simulation", {}).get("p_total_planned", 0.0),
+                "sim_log": res.get("buy_simulation", {}).get("sim_log", ""),
+                "blended_coeff": b_coeff
             })
 
         return attrs
