@@ -594,7 +594,11 @@ class StrategySell(StrategyEngine):
                 # v11.9.320: Show DC battery power (divide AC back by eff) as requested by user.
                 # Inverter script needs to know how much to pull from the battery.
                 p_bat_dc = real_p_bat / max(0.1, eff)
-                planned_results[h_key] = f"{p_bat_dc:.3f} кВт (SOC: {sim_soc:.1f}%) [{real_p_export:.1f} Exp] ({limit_reason_h})"
+                planned_results[h_key] = {
+                    "power": round_f(p_bat_dc, 3),
+                    "soc": round_f(sim_soc, 1),
+                    "display": f"{p_bat_dc:.3f} кВт (SOC: {sim_soc:.1f}%) [{real_p_export:.1f} Exp] ({limit_reason_h})"
+                }
 
             # 5. UI Diagnostics (v11.7.137: Restored missing variables)
             morning_h_abs = morning_h if cur_hour < morning_h else (morning_h + 24)

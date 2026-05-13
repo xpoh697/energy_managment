@@ -2987,7 +2987,10 @@ class InverterOperationModeSensor(SensorEntity):
                 # Smart Forecast Logic: Hide 'boring' reasons for sale_pv, show everything else
                 is_boring = any(f_reason.startswith(p) for p in ["Стандартная работа", "Значения по умолчанию"])
                 
-                if f_mode == "sale_pv" and (is_boring or not f_reason):
+                # v11.9.562: Use rich strategy display string if available for the FIRST hour
+                if not is_tom and h == now.hour and cmd_display:
+                    f_display = cmd_display
+                elif f_mode == "sale_pv" and (is_boring or not f_reason):
                     f_display = f"{f_mode}{p_suffix}"
                 else:
                     # Show diagnosis for non-standard modes or strategic fallbacks (v11.4.17)
@@ -3030,18 +3033,31 @@ class InverterOperationModeSensor(SensorEntity):
                     
                     # v11.9.498: Inject strategy commands into UI projection
                     cmd_p = 0.0
+                    cmd_display = None
+                    
+                    # v11.9.562: Robust key matching including (Завтра) suffix
+                    h_cmd_key = f"{h:02d}:00" + (" (Завтра)" if is_tom else "")
+                    
                     # Check Buy Strategy first
                     b_plan = buy_strategy.get("planned_power_per_h", {})
-                    h_cmd = b_plan.get(f"{h:02d}:00")
+                    h_cmd = b_plan.get(h_cmd_key)
                     if h_cmd:
-                        cmd_p = h_cmd.get("power", 0.0) if isinstance(h_cmd, dict) else h_cmd
+                        if isinstance(h_cmd, dict):
+                            cmd_p = h_cmd.get("power", 0.0)
+                            cmd_display = h_cmd.get("display")
+                        else:
+                            cmd_p = h_cmd
                     
                     # If no buy, check Sell Strategy (for discharging)
-                    if cmd_p < 0.001:
+                    if abs(cmd_p) < 0.001:
                         s_plan = sell_strategy.get("planned_power_per_h", {})
-                        h_cmd_s = s_plan.get(f"{h:02d}:00")
+                        h_cmd_s = s_plan.get(h_cmd_key)
                         if h_cmd_s:
-                            cmd_p = h_cmd_s.get("power", 0.0) if isinstance(h_cmd_s, dict) else h_cmd_s
+                            if isinstance(h_cmd_s, dict):
+                                cmd_p = h_cmd_s.get("power", 0.0)
+                                cmd_display = h_cmd_s.get("display")
+                            else:
+                                cmd_p = h_cmd_s
 
                     # v11.9.528: Manual Override synchronization for first hour
                     if not is_tom and h == now.hour:
