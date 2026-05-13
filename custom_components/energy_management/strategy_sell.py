@@ -420,6 +420,8 @@ class StrategySell(StrategyEngine):
             sell_commands = {}
             sim_log = {}
             total_deficit_kwh = 0.0
+            deficit_detail = []
+            max_soc_deficit_kwh = 0.0
             
             if target_hours:
                 for attempt in range(20): # v11.9.315: Increased iterations for complex cases
@@ -454,10 +456,10 @@ class StrategySell(StrategyEngine):
                         h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
                         p_real_bat = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
                         
-                        # v11.9.542: Only count deficit if battery is NOT charging (p_real_bat >= 0)
-                        # and fact discharge is less than requested.
-                        if p_real_bat >= 0 and p_real_bat < p_req - 0.1:
-                            total_deficit_kwh += (p_req - p_real_bat) * duration
+                        if p_real_bat >= 0 and p_real_bat < p_req - 0.05:
+                            diff = (p_req - p_real_bat) * duration
+                            total_deficit_kwh += diff
+                            deficit_detail.append(f"{h_cmd}h: req {p_req:.2f}, real {p_real_bat:.2f} (diff {diff:.3f})")
                     
                     # v11.9.541: Hourly SOC deficit tracking against dynamic floors
                     max_soc_deficit_kwh = 0.0
@@ -488,6 +490,7 @@ class StrategySell(StrategyEngine):
                         # Convergence!
                         _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
                         _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
+                        _sell_debug["deficit_detail"] = deficit_detail
                         _sell_debug["max_soc_deficit"] = round_f(max_soc_deficit_kwh, 3)
                         break
             else:
