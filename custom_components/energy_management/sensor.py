@@ -2040,17 +2040,26 @@ class EnergyProfileManager:
         """Get setting from internal storage or config entry."""
         # 1. Try internal storage (persisted across reinstalls/reboots)
         val = self.settings.get(key)
+        source = "internal_storage"
 
         # 2. Try entry options (from Options Flow)
         if val is None:
             val = self.entry.options.get(key)
+            source = "config_options"
 
         # 3. Try entry data (from initial config)
         if val is None:
             val = self.entry.data.get(key)
+            source = "config_data"
 
         if val is None:
+            # v11.9.556: Trace default fallback
+            # _LOGGER.debug(f"[SettingTrace] {key} fallback to default: {default}")
             return default
+
+        # v11.9.556: Trace successful pull for critical settings
+        if key in [CONF_BATTERY_MAX_POWER, CONF_AI_DISCHARGE_LIMIT]:
+            _LOGGER.warning(f"[SettingTrace] {key} = {val} (Source: {source})")
 
         if isinstance(default, float):
             try: return float(val)
