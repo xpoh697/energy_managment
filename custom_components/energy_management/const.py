@@ -26,6 +26,7 @@ CONF_DYNAMIC_SOC_BUY = "dynamic_soc_buy"
 CONF_DYNAMIC_SOC_SELL = "dynamic_soc_sell"
 CONF_DEDUCT_SETTINGS = "deduct_settings"
 CONF_SOC_BUFFER = "soc_buffer"
+CONF_BATTERY_DISCHARGE_ENABLED = "battery_discharge_enabled"
 
 
 CONF_POWER_LOAD_SENSORS = "power_load_sensors"
