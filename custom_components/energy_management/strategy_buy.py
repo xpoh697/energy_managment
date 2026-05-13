@@ -314,28 +314,52 @@ class StrategyBuy(StrategyEngine):
             soc_end = b_soc
             soc_morning = b_soc
 
-            if target_hours:
-                # v11.9.526: Account for current real-time activity in intermediate planning steps
-                _p_raw = float(man.get_sensor_float(man.battery_power_sensor) or 0.0)
-                current_cmd = {cur_hour: abs(_p_raw)} if _p_raw < -0.05 else {}
-                
-                first_h = min(target_hours)
-                soc_at_start_plan, _, _ = self.run_soc_simulation(b_soc, list(range(cur_hour, first_h)), now, current_cmd, allow_discharge=True, no_solar_to_bat=True)
-                
-                _sim_h_window = list(range(cur_hour, max(target_hours) + 1))
-                _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_window, now, current_cmd, allow_discharge=True, no_solar_to_bat=True)
-                soc_with_sun_only = self._get_soc_from_log(_log_sun, get_h_log_key(max(target_hours)), b_soc)
-                
-                # v11.9.155: Don't deduct solar for negative prices, we want to buy and export solar instead
-                if res.get("charge_reason") == "Отрицательная цена":
-                    needed_kwh_dc = max(0.0, (target_soc - soc_at_start_plan) * b_cap / 100.0)
+            # v11.9.573: Unconditional Solar-Aware Status
+            # 1. Prepare Solar Horizon
+            sunset_h = man.get_sunset_hour() or 18
+            # Use tomorrow's sunset if we are late in the day (after 15:00) or no windows found today
+            planning_h = min(target_hours) if target_hours else (cur_hour + 24 if cur_hour > 15 else cur_hour)
+            sunset_abs = sunset_h + (24 if planning_h >= 24 else 0)
+            
+            # 2. Run baseline simulation to see if solar is enough
+            _sim_h_disp = list(range(cur_hour, max(sunset_abs, (max(target_hours) if target_hours else cur_hour)) + 1))
+            _p_raw = float(man.get_sensor_float(man.battery_power_sensor) or 0.0)
+            current_cmd = {cur_hour: abs(_p_raw)} if _p_raw < -0.05 else {}
+            _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_disp, now, current_cmd, allow_discharge=True, no_solar_to_bat=False)
+            
+            soc_at_sunset = self._get_soc_from_log(_log_sun, get_h_log_key(sunset_abs), b_soc)
+            is_solar_enough = bool(soc_at_sunset >= (target_soc - 2.0))
+            
+            charge_commands = {}
+            if not target_hours:
+                if is_solar_enough:
+                    decision_str = f"Скип (Солнце {soc_at_sunset:.0f}%)"
                 else:
-                    needed_kwh_dc = max(0.0, (target_soc - soc_with_sun_only) * b_cap / 100.0)
-                
-                # v11.9.200: Debug Logging for Allocator
-                _dbg_log = f"[Strategy Buy Debug] Reason: {res.get('charge_reason')} | Target: {target_soc}% | StartSOC: {soc_at_start_plan:.1f}% | Need: {needed_kwh_dc:.3f} kWh | Cap: {b_cap:.1f} | Eff: {eff:.2f}"
-                man.log_to_file(_dbg_log)
-                
+                    decision_str = f"Дорого (>{buy_limit:.2f})"
+                res["charge_reason"] = "Нет"
+            else:
+                # We have candidate hours. Decide if we actually need to buy.
+                planning_h = min(target_hours)
+                soc_at_start_plan = self._get_soc_from_log(_log_sun, get_h_log_key(planning_h), b_soc)
+                cur_p = all_buy_prices.get(cur_hour, 99.0)
+
+                if cur_p > 0 and is_solar_enough:
+                    needed_kwh_dc = 0.0
+                    res["charge_reason"] = "Скип (Будет солнце)"
+                    decision_str = f"Скип (Солнце {soc_at_sunset:.0f}%)"
+                    _buy_debug["solar_skip"] = f"SOC at sunset {soc_at_sunset:.1f}% >= target {target_soc}%"
+                elif res.get("charge_reason") == "Отрицательная цена":
+                    needed_kwh_dc = max(0.0, (target_soc - soc_at_start_plan) * b_cap / 100.0)
+                    decision_str = f"Зарядка (Минус {cur_p:.2f})"
+                else:
+                    needed_kwh_dc = max(0.0, (target_soc - soc_at_start_plan) * b_cap / 100.0)
+                    if needed_kwh_dc > 0:
+                        decision_str = f"Зарядка ({res.get('charge_reason')})"
+                        if cur_hour not in target_hours:
+                            decision_str = "Ожидание окна"
+                    else:
+                        decision_str = "Ожидание окна"
+
                 # v11.9.200: Advanced Allocator (Price-Priority with progressive SOC)
                 # 1. Sort by price to fill cheapest hours first
                 sorted_by_price = sorted(target_hours, key=lambda x: all_buy_prices.get(int(x), 100.0))
@@ -343,15 +367,14 @@ class StrategyBuy(StrategyEngine):
                 # 2. Fill energy budget based on price attractiveness
                 accum_kwh_dc = 0.0
                 for h in sorted_by_price:
-                    if accum_kwh_dc >= needed_kwh_dc - 0.01 and all_buy_prices[h] > 0:
+                    if accum_kwh_dc >= (needed_kwh_dc - 0.01) and all_buy_prices.get(h, 0) > 0:
                         charge_commands[h] = 0.0
                         continue
-                        
                     h_factor = max(0.1, (60 - now.minute)/60.0) if h == cur_hour else 1.0
                     rem_needed = max(0.0, (needed_kwh_dc - accum_kwh_dc))
                     p_needed = rem_needed / (h_factor * eff) if h_factor > 0 else 0
                     
-                    # Estimate CC/CV based on projected SOC at this point (rough estimate for allocation)
+                    # Estimate CC/CV based on projected SOC at this point
                     est_soc = soc_at_start_plan + (accum_kwh_dc / b_cap * 100.0)
                     cc_cv = self.get_cc_cv_ratio(est_soc)
                     
@@ -365,6 +388,13 @@ class StrategyBuy(StrategyEngine):
                 res["analyzed_window"] = "Нет окон"
                 res["active_periods"] = ""
                 needed_kwh_dc = max(0.0, (target_soc - b_soc) * b_cap / 100.0)
+
+            res["strategy_decision"] = decision_str
+            res["arbitrage_decision"] = decision_str # For backward compatibility
+            
+            # v11.9.200: Debug Logging for Allocator
+            _dbg_log = f"[Strategy Buy Debug] Status: {decision_str} | Target: {target_soc}% | StartSOC: {soc_at_start_plan:.1f}% | Need: {needed_kwh_dc:.3f} kWh | Cap: {b_cap:.1f}"
+            man.log_to_file(_dbg_log)
             
             # v11.9.473: Pass dynamic floors to final simulation to distinguish House vs Trade limits
             sim_range = list(range(cur_hour, cur_hour + 48))

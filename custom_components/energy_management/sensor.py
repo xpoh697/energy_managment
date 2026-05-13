@@ -229,6 +229,14 @@ class EnergyProfileManager:
                 return h
         return 6 # Default fallback
 
+    def get_sunset_hour(self):
+        """Find the last hour of solar generation from the profile (14:00 - 22:00)."""
+        prof = self.get_average_profile("generation", 14, "all")
+        for h in range(22, 14, -1):
+            if float(prof.get(str(h), 0.0)) > 0.05:
+                return h + 1
+        return 19 # Default fallback
+
     @property
     def now(self) -> datetime:
         """Centralized time source."""
@@ -3271,6 +3279,10 @@ class InverterOperationModeSensor(SensorEntity):
             attrs["power"] = p_val
             attrs["target_soc"] = t_soc
             attrs["charge_reason"] = chg_reason
+            
+            # v11.9.572: Unified Strategy Decision
+            strat_decision = buy_strategy.get("strategy_decision") or sell_strategy.get("strategy_decision") or "Ожидание окна"
+            attrs["strategy_decision"] = strat_decision
             
             # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
             if self.manager.battery_voltage_sensor:
