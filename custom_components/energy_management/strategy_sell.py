@@ -456,36 +456,31 @@ class StrategySell(StrategyEngine):
                         if p_real_bat < p_req - 0.1:
                             total_deficit_kwh += (p_req - p_real_bat) * duration
                     
-                    # v11.9.330: Robust Min-SOC tracking (Handles "Tomorrow" suffixes)
-                    sunrise_h_abs = sunrise_h + (24 if cur_hour > sunrise_h else 0)
-                    valid_socs = []
-                    for k, v in trial_log.items():
-                        if ":" not in k: continue
-                        try:
-                            h_idx = int(k.split(":")[0])
-                            if "Завтра" in k: h_idx += 24
-                            if "Через день" in k: h_idx += 48
-                            if cur_hour <= h_idx <= sunrise_h_abs:
-                                valid_socs.append(float(v.get("soc", 100.0)))
-                        except: continue
+                    # v11.9.541: Hourly SOC deficit tracking against dynamic floors
+                    max_soc_deficit_kwh = 0.0
+                    for h_abs in sim_range:
+                        h_key = f"{h_abs%24:02d}:59" + (" (Завтра)" if h_abs >= 24 else (" (Через день)" if h_abs >= 48 else ""))
+                        soc_h = trial_log.get(h_key, {}).get("soc", 100.0)
+                        floor_h = floors_sliding.get(h_abs, emergency_soc + 2.0)
+                        if soc_h < floor_h - 0.1:
+                            max_soc_deficit_kwh = max(max_soc_deficit_kwh, (floor_h - soc_h) * b_cap / 100.0)
                     
-                    min_soc = min(valid_socs) if valid_socs else 100.0
-                    
-                    # v11.9.430: Respect sliding floors (Gatekeeper) during refinement loop.
-                    # We target the most restrictive floor in our active window.
-                    target_final = max([floors_sliding.get(h, emergency_soc + 2.0) for h in target_hours], default=emergency_soc + 2.0)
-                    soc_err = min_soc - target_final
-                    
-                    # v11.9.330: Priority-Based Refinement
+                    # v11.9.541: Convergence check based on morning SOC at sunrise
+                    sunrise_key = f"{next_sunrise_abs%24:02d}:59" + (" (Завтра)" if next_sunrise_abs >= 24 else "")
+                    soc_morning_sim = trial_log.get(sunrise_key, {}).get("soc", 0.0)
+                    target_morning = floors_sliding.get(next_sunrise_abs, emergency_soc + 2.0)
+                    soc_err = soc_morning_sim - target_morning
+
+                    # v11.9.541: Priority-Based Refinement
                     if total_deficit_kwh > 0.15:
-                        # Priority 1: Eliminate physical impossibility (Budget too high for inverter limits)
+                        # Priority 1: Physical impossibility
                         target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
-                    elif soc_err > 0.2:
-                        # Priority 2: Increase budget if we have surplus and NO power deficit
+                    elif max_soc_deficit_kwh > 0.05:
+                        # Priority 2: Correct SOC deficit seen at any hour
+                        target_budget_ac = max(0.0, target_budget_ac - max_soc_deficit_kwh * 1.1)
+                    elif soc_err > 0.5:
+                        # Priority 3: Increase budget if we have surplus at sunrise
                         target_budget_ac += (soc_err * b_cap / 100.0) * 0.4
-                    elif soc_err < -0.2:
-                        # Priority 3: Decrease budget if SOC is too low
-                        target_budget_ac = max(0.0, target_budget_ac + (soc_err * b_cap / 100.0) * 0.7)
                     else:
                         # Convergence!
                         _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
@@ -740,13 +735,13 @@ class StrategySell(StrategyEngine):
                     sim_gen_24h += float(h_sim_data.get('gen_kw', 0.0))
 
             res["arbitrage_sell_debug"] = {
-                "start_soc": round_f(soc_at_start, 1),
+                "start_soc": f"{b_soc:.1f}%",
                 "gatekeeper_floor": round_f(gatekeeper, 1) if not is_turbo_win else "Turbo",
                 "active_safety_floor": round_f(active_safety_floor, 1),
                 "available_ac": round_f(available_sell_ac, 2),
                 "limit_reason": limit_reason or "None",
                 "next_peak": f"{target_hours[0] % 24:02d}:00" if target_hours else "None",
-                "soc_at_peak": f"{b_soc:.1f}%", 
+                "soc_at_peak": round_f(soc_at_start, 1),
                 "house_until_sunrise_pct": round_f(house_after_pct + house_during_pct, 2),
                 "house_h": "Profile",
                 "sim_gen": round_f(sim_gen_24h, 1),
