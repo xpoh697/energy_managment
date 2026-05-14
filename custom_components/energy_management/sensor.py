@@ -3582,113 +3582,10 @@ class InverterOperationModeSensor(SensorEntity):
                 if not planned_sales:
                     is_waiting_for_neg = True
 
-        # State Machine Ladder
-        # v11.9.106: Differentiate forecast vs live for buying priority
-        # v11.9.170: Force BUY mode if price is zero or negative (TS 4.1 Priority 1)
-        _is_buy_priority = is_buying_active and (
-            (buy_strategy.get("is_charging_now") or is_neg_buy) if not is_forecast 
-            else (check_h_abs in buy_strategy.get("active_hours", []) or is_neg_buy)
-        )
+        # State Machine Ladder (v11.9.691: Re-ordered by TS 4.1 Priority)
         
-        if _is_buy_priority:
-            # v11.6.32/v11.9.97 - Priority 1: Buying (Strictly restricted to active charging window)
-            mode = "buy"
-            reason = "Активна стратегия ПОКУПКИ"
-        
-        # v11.9.635: Morning Mode Priority (Maximize profit when prices are high)
-        elif cur_price is not None and cur_price >= price_sell_only_pv:
-            # SAFE MORNING MODE (User's 4 conditions)
-            # 1. Price >= Threshold
-            # 2. Before user limit hour
-            # 3. Averaged Surplus > 0
-            # 4. Energy reserve check: full enough for next peak OR Gatekeeper floor at next sunrise
-            
-            # v7.9 - Morning Survival Guard (v11.9.106: Extended for Gatekeeper floor)
-            # We don't just check for "Preparing for Peak Today", we also check 
-            # if we have enough energy to reach tomorrow morning (Sunrise).
-            man = self.manager
-            min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
-            morning_soc_proj = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
-            target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", (min_soc + 5.0))
-            
-            # v11.9.333: SOC Hysteresis for Morning Guard (avoid toggling on the edge)
-            hys = 0.5 if mode == "sale_pv_no_bat" else 0.0
-            is_low_for_morning = bool(morning_soc_proj < (target_morning + hys))
-            
-            hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
-            
-            # v11.8.529: Arbitrage Protection Rule
-            # If (Peak Price - Degradation) > Current Price AND SOC at peak < 90%, we MUST charge.
-            is_profitable_to_save = False
-            if peak_start_abs is not None:
-                deg_cost = self.manager.get_setting("degradation_cost", 0.15)
-                peak_p = self.manager.get_price("sell", today_str, peak_start_abs % 24) or 0.0
-                cur_p = cur_price or 0.0
-                if (peak_p - deg_cost) > cur_p and (sim_soc if 'sim_soc' in locals() else batt_soc) < 90.0:
-                    is_profitable_to_save = True
-            
-            # v11.9.106: Protect energy for either a future peak OR the morning Gatekeeper floor (survival)
-            is_energy_low_for_evening = bool((is_preparing_for_peak or is_low_for_morning or is_profitable_to_save) and not hit_full_before)
-            
-            # Smart Deficit Throttling Awareness
-            # v11.7.78: Throttling only applies to the CURRENT hour. 
-            # For forecast hours, we don't apply AI throttling logic here as it causes false positives.
-            is_throttled = False
-            if not is_forecast:
-                is_throttled = bool(sell_strategy.get("recommended_power_kw", 0.0) < 0.01 and dt_now.hour in sell_strategy.get("active_hours", []))
-            
-            if is_throttled or is_energy_low_for_evening:
-                is_preparing_for_peak = True
-
-            # Условия блокировки sale_pv_no_bat (все 4 из ТЗ):
-            # 1. Симуляция показывает что утренний уровень gatekeeper не будет достигнут
-            # 2. Вечерняя цена выше текущей И батарея не достигнет 100% за день (пик)
-            # 3. Цена ниже порога — обрабатывается выше (elif cur_price >= price_sell_only_pv)
-            # 4. Время позже лимита — обрабатывается выше (is_before_limit_hour)
-            _need_charge_for_morning = bool(is_low_for_morning)
-            _need_charge_for_peak = bool(
-                (is_preparing_for_peak or is_profitable_to_save) and not hit_full_before
-            )
-            _block_sale_pv_no_bat = _need_charge_for_morning or _need_charge_for_peak
-            if is_before_limit_hour and has_surplus and not _block_sale_pv_no_bat and cur_price > 0:
-                mode = "sale_pv_no_bat"
-                reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f}), утро, есть излишек и запас энергии"
-            else:
-                # If conditions for sale_pv_no_bat not met, fallback to standard or charge
-                mode = "sale_pv"
-                if is_throttled or is_energy_low_for_evening:
-                    if is_throttled:
-                         mode = "sale_pv"
-                         reason = "Продажа АКБ ограничена AI"
-                    elif is_low_for_morning:
-                         mode = "sale_pv"
-                         reason = f"Защита Gatekeeper: Рассвет {morning_soc_proj:.1f}% < {target_morning:.1f}%"
-                    elif is_energy_low_for_evening and sell_strategy.get("morning_autopilot_active"):
-                         mode = "sale_pv"
-                         prefix = "Продажа" if mode == "sale_pv_bat" else "Питание дома"
-                         sun_note = " (мало солнца)" if not hit_full_before else ""
-                         reason = f"{prefix} до {sell_strategy.get('morning_autopilot_floor')}% (защита Gatekeeper{sun_note})"
-                    elif peak_start_abs is not None and peak_start_abs < 48:
-                         mode = "sale_pv"
-                         reason = f"Подготовка к Пику {self.manager.strategy_engine._format_h(peak_start_abs)}"
-                    elif is_profitable_to_save:
-                         mode = "sale_pv"
-                         reason = "Сохранение заряда: Пик выгоднее текущей цены"
-                    else:
-                         mode = "sale_pv"
-                         reason = "Экономия заряда: Дефицит до рассвета"
-                elif not is_before_limit_hour:
-                    reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f})"
-                elif not has_surplus:
-                    if is_forecast:
-                         reason = "По прогнозу нет излишков солнца (генерация < потребления)"
-                    else:
-                         reason = f"Ожидание солнца: тек. генерация ({avg_gen:.2f}) < тек. потребления ({avg_load:.2f})"
-                else:
-                    reason = "Цена выше порога, но условия продажи PV+АКБ не соблюдены"
-        
-        elif batt_soc <= min_soc:
-            # v11.6.567 - Priority 2: Emergency SOC management (Survival First)
+        # Priority 1: Emergency SOC management (Survival First)
+        if batt_soc <= min_soc:
             if has_surplus:
                 if cur_price is not None and cur_price < price_stop_sell:
                     mode = "stop_sale"
@@ -3700,6 +3597,76 @@ class InverterOperationModeSensor(SensorEntity):
                 mode = "bat_emergency"
                 reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
 
+        # Priority 2: Buying (Strictly restricted to active charging window)
+        elif is_buying_active and (
+            (buy_strategy.get("is_charging_now") or is_neg_buy) if not is_forecast 
+            else (check_h_abs in buy_strategy.get("active_hours", []) or is_neg_buy)
+        ):
+            mode = "buy"
+            reason = "Активна стратегия ПОКУПКИ"
+
+        # Priority 3: AI / Arbitrage Strategy (sale_pv_bat)
+        # v11.9.691: Elevated priority to override Morning Mode heuristic
+        elif is_selling_active:
+            mode = "sale_pv_bat"
+            reason = "Активна стратегия ПРОДАЖИ (AI)"
+
+        # Priority 4: Morning Mode / Solar Surplus Heuristics
+        elif cur_price is not None and cur_price >= price_sell_only_pv:
+            # SAFE MORNING MODE (User's 4 conditions)
+            man = self.manager
+            morning_soc_proj = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
+            target_morning = (sell_strategy.get("arbitrage_buyback") or {}).get("target_morning_soc_pct", (min_soc + 5.0))
+            
+            hys = 0.5 if mode == "sale_pv_no_bat" else 0.0
+            is_low_for_morning = bool(morning_soc_proj < (target_morning + hys))
+            hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
+            
+            is_profitable_to_save = False
+            if peak_start_abs is not None:
+                deg_cost = self.manager.get_setting("degradation_cost", 0.15)
+                peak_p = self.manager.get_price("sell", today_str, peak_start_abs % 24) or 0.0
+                cur_p = cur_price or 0.0
+                if (peak_p - deg_cost) > cur_p and (sim_soc if 'sim_soc' in locals() else batt_soc) < 90.0:
+                    is_profitable_to_save = True
+            
+            is_energy_low_for_evening = bool((is_preparing_for_peak or is_low_for_morning or is_profitable_to_save) and not hit_full_before)
+            
+            is_throttled = False
+            if not is_forecast:
+                is_throttled = bool(sell_strategy.get("recommended_power_kw", 0.0) < 0.01 and dt_now.hour in sell_strategy.get("active_hours", []))
+            
+            if is_throttled or is_energy_low_for_evening:
+                is_preparing_for_peak = True
+
+            _need_charge_for_morning = bool(is_low_for_morning)
+            _need_charge_for_peak = bool((is_preparing_for_peak or is_profitable_to_save) and not hit_full_before)
+            _block_sale_pv_no_bat = _need_charge_for_morning or _need_charge_for_peak
+
+            if is_before_limit_hour and has_surplus and not _block_sale_pv_no_bat and cur_price > 0:
+                mode = "sale_pv_no_bat"
+                reason = f"Продажа только солнца: Цена ({cur_price or 0.0:.2f}) >= Порога ({price_sell_only_pv or 0.0:.2f}), утро, есть излишек и запас энергии"
+            else:
+                mode = "sale_pv"
+                if is_throttled or is_energy_low_for_evening:
+                    if is_throttled: reason = "Продажа АКБ ограничена AI"
+                    elif is_low_for_morning: reason = f"Защита Gatekeeper: Рассвет {morning_soc_proj:.1f}% < {target_morning:.1f}%"
+                    elif is_energy_low_for_evening and sell_strategy.get("morning_autopilot_active"):
+                         prefix = "Продажа" if mode == "sale_pv_bat" else "Питание дома"
+                         sun_note = " (мало солнца)" if not hit_full_before else ""
+                         reason = f"{prefix} до {sell_strategy.get('morning_autopilot_floor')}% (защита Gatekeeper{sun_note})"
+                    elif peak_start_abs is not None and peak_start_abs < 48:
+                         reason = f"Подготовка к Пику {self.manager.strategy_engine._format_h(peak_start_abs)}"
+                    elif is_profitable_to_save:
+                         reason = "Сохранение заряда: Пик выгоднее текущей цены"
+                    else: reason = "Экономия заряда: Дефицит до рассвета"
+                elif not is_before_limit_hour: reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f})"
+                elif not has_surplus:
+                    if is_forecast: reason = "По прогнозу нет излишков солнца (генерация < потребления)"
+                    else: reason = f"Ожидание солнца: тек. генерация ({avg_gen:.2f}) < тек. потребления ({avg_load:.2f})"
+                else: reason = "Цена выше порога, но условия продажи PV+АКБ не соблюдены"
+        
+        # Priority 5: Wait for negative price
         elif is_waiting_for_neg:
             # v11.6.567 - Priority 3: Wait for negative price
             # We ONLY wait if there's actually something to wait for (solar presence or daytime)
