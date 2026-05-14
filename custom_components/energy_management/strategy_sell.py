@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.688
-# Version change trace v11.9.688: Baseline-aware convergence to ignore natural (house-load) deficits.
+# Energy management strategy sell - v11.9.690
+# Version change trace v11.9.690: Human-readable status + Sunrise Safety Check (TS 1.6).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -434,15 +434,29 @@ class StrategySell(StrategyEngine):
             max_soc_deficit_kwh = 0.0
             
             if target_hours:
+                # v11.9.690: Baseline simulation ONCE before the loop to check natural feasibility
+                _, baseline_log, _ = self.run_soc_simulation(
+                    b_soc, sim_range, now, commands={}, 
+                    b_min_soc=emergency_soc, ignore_blended=True, 
+                    house_profile_override="consumption_base", dynamic_floors=floors_sliding
+                )
+                
+                # TS 1.6: Sunrise Safety Check. If baseline is already below floor, NO SALES allowed.
+                sunrise_h = (man.get_sunrise_hour() or 8)
+                h_rel_now = cur_hour % 24
+                h_to_sunrise = (sunrise_h - h_rel_now) if h_rel_now < sunrise_h else (24 + sunrise_h - h_rel_now)
+                next_sunrise_key = f"{(cur_hour + h_to_sunrise)%24:02d}:59" + (" (Завтра)" if (cur_hour + h_to_sunrise) >= 24 else "")
+                
+                base_sunrise_soc = self._get_soc_from_log(baseline_log, next_sunrise_key, b_soc)
+                sunrise_floor = floors_sliding.get(cur_hour + h_to_sunrise, emergency_soc + 2.0)
+                
+                if base_sunrise_soc < sunrise_floor - 0.1:
+                    target_budget_ac = 0.0
+                    _sell_debug["natural_deficit_detected"] = True
+                    _sell_debug["sunrise_safety_block"] = True
+
                 for attempt in range(20): # v11.9.315: Increased iterations for complex cases
                     # --- Stage 2: Distribution Loop (TS 107) ---
-                    # v11.9.688: Run Baseline simulation once to identify natural deficits
-                    _, baseline_log, _ = self.run_soc_simulation(
-                        b_soc, sim_range, now, commands={}, 
-                        b_min_soc=emergency_soc, ignore_blended=True, 
-                        house_profile_override="consumption_base", dynamic_floors=floors_sliding
-                    )
-                    
                     rem_budget = float(target_budget_ac)
                 
                     # 2. Distribution: Strict price-hour priority (TS 104)
@@ -609,12 +623,16 @@ class StrategySell(StrategyEngine):
             cur_cmd = sell_commands.get(cur_hour, 0.0)
             is_natural_deficit = _sell_debug.get("natural_deficit_detected", False)
             
+            # Find next planned hour for hint
+            next_h = min([h for h, p in sell_commands.items() if p > 0.05 and h > cur_hour], default=None)
+            h_hint = f" (Зарезервировано для {next_h%24:02d}:00)" if next_h is not None else ""
+
             if cur_cmd > 0.05:
                 limit_reason = "Активная продажа (Приоритет: Цена)"
             elif is_natural_deficit:
-                limit_reason = "Ожидание (Естественный дефицит АКБ)"
+                limit_reason = "Ожидание (Защита АКБ: Естественный дефицит)"
             elif cur_hour in target_hours:
-                limit_reason = "Ограничение (Цена > Порог, но бюджет на другие часы)"
+                limit_reason = f"Ожидание пика{h_hint}"
             elif target_hours:
                 limit_reason = "Ожидание пика"
             elif available_sell_dc <= 0.05:
@@ -866,11 +884,13 @@ class StrategySell(StrategyEngine):
             }
             if '_sell_debug' in locals(): res["arbitrage_sell_debug"].update(_sell_debug)
 
-            # v11.9.599: Enhanced Status Logic for Sell Strategy
+            # v11.9.690: Enhanced Status Logic for Sell Strategy
             has_sell_plan = bool(sell_commands and any(p > 0.05 for p in sell_commands.values()))
-            reason = "Цена"
+            
+            # Priority: Arbitrage > Price > Surplus
+            reason = "Излишки PV"
             if res.get("is_arbitrage_profitable"): reason = "Арбитраж"
-            elif f_today > 10.0: reason = "Излишки PV" # Heuristic
+            elif cur_p_f > target_price: reason = "Цена"
 
             if sell_commands.get(cur_hour, 0.0) > 0.05:
                 res["state"] = "active"
@@ -883,7 +903,12 @@ class StrategySell(StrategyEngine):
                     h_hint = f" в {h_fmt}"
                 res["current_mode_text"] = f"Запланирована продажа ({reason}){h_hint}"
             else:
-                res["current_mode_text"] = "Ожидание пика" if target_hours else "Нет ценового окна"
+                # If we have target hours but no plan, it means budget is 0 due to deficit
+                if target_hours:
+                    res["current_mode_text"] = "Ожидание (Защита АКБ)"
+                else:
+                    res["current_mode_text"] = "Нет ценового окна"
+
 
             # v11.9.586: Use shared arbitrage logic
             arb_info = self._get_arbitrage_info(cur_hour, all_buy_prices, all_sell_prices, target_hours)
