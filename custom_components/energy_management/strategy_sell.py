@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.685
-# Version change trace v11.9.685: Sunset-to-Sunset window and extensive debug diagnostics.
+# Energy management strategy sell - v11.9.686
+# Version change trace v11.9.686: Saturation-aware allocator to fix convergence issues.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -423,6 +423,10 @@ class StrategySell(StrategyEngine):
             _sell_debug["initial_budget"] = round_f(target_budget_ac, 2)
             _sell_debug["target_floors"] = {f"{h%24:02d}h": round_f(floors_sliding.get(h, 0.0), 1) for h in target_hours}
             
+            # v11.9.686: Saturation-Aware Limits
+            # We track which hours are "choking" (hitting floors) and cap them.
+            h_power_caps = {h: max_batt_p for h in target_hours}
+            
             sell_commands = {}
             sim_log = {}
             total_deficit_kwh = 0.0
@@ -440,9 +444,10 @@ class StrategySell(StrategyEngine):
                         if h == cur_hour:
                             duration = max(0.01, 1.0 - (now.minute / 60.0))
                         
-                        # v11.9.551: DC-Oriented Allocation. 1kW in plan = 1kW from Battery (DC).
-                        # p_export is DC power here.
-                        p_export = min(max_batt_p, rem_budget / duration)
+                        # v11.9.686: Apply dynamic saturation cap from previous iterations
+                        p_cap = h_power_caps.get(h, max_batt_p)
+                        p_export = min(p_cap, rem_budget / duration)
+                        
                         sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
                         rem_budget -= p_export * duration
                 
@@ -472,14 +477,23 @@ class StrategySell(StrategyEngine):
                         p_real_dc = p_real_bat / max(0.1, eff)
                         
                         if p_real_bat >= 0 and p_real_dc < p_req - 0.05:
+                            # v11.9.686: Saturation detection
+                            sim_data = trial_log.get(h_sim_key, {})
+                            h_soc = sim_data.get("soc", 0.0)
+                            h_floor = sim_data.get("floor", 0.0)
+                            
+                            # If hour is limited by floor, cap it for the next iteration
+                            if h_soc < h_floor + 0.1:
+                                old_cap = h_power_caps.get(h_cmd, max_batt_p)
+                                new_cap = max(0.0, p_real_dc + 0.01) # Small epsilon
+                                if new_cap < old_cap:
+                                    h_power_caps[h_cmd] = new_cap
+
                             diff = (p_req - p_real_dc) * duration
                             total_deficit_kwh += diff
                             
-                            sim_data = trial_log.get(h_sim_key, {})
                             h_mode = sim_data.get('mode', 'unk')
                             h_net = sim_data.get('net_kw', 0.0)
-                            h_floor = sim_data.get('floor', 0.0)
-                            h_soc = sim_data.get('soc', 0.0)
                             
                             reason = " (Locked/Limit)"
                             if p_real_bat > 0.05 or h_soc < h_floor + 0.1:
