@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.687
-# Version change trace v11.9.687: Removed h_power_caps from distribution to fix priority distortion.
+# Energy management strategy sell - v11.9.688
+# Version change trace v11.9.688: Baseline-aware convergence to ignore natural (house-load) deficits.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -435,8 +435,15 @@ class StrategySell(StrategyEngine):
             
             if target_hours:
                 for attempt in range(20): # v11.9.315: Increased iterations for complex cases
-                    sell_commands = {}
-                    rem_budget = target_budget_ac
+                    # --- Stage 2: Distribution Loop (TS 107) ---
+                    # v11.9.688: Run Baseline simulation once to identify natural deficits
+                    _, baseline_log, _ = self.run_soc_simulation(
+                        b_soc, sim_range, now, commands={}, 
+                        b_min_soc=emergency_soc, ignore_blended=True, 
+                        house_profile_override="consumption_base", dynamic_floors=floors_sliding
+                    )
+                    
+                    rem_budget = float(target_budget_ac)
                 
                     # 2. Distribution: Strict price-hour priority (TS 104)
                     for h in h_by_priority:
@@ -520,11 +527,20 @@ class StrategySell(StrategyEngine):
                         sim_st = trial_log.get(h_key, {})
                         soc_h = sim_st.get("soc", 100.0)
                         floor_h = floors_sliding.get(h_abs, emergency_soc + 2.0)
-                        if soc_h < floor_h - 0.1:
-                            deficit_h = (floor_h - soc_h) * b_cap / 100.0
-                            if deficit_h > max_soc_deficit_kwh:
-                                max_soc_deficit_kwh = deficit_h
-                                # Record diagnostics
+                        
+                        # v11.9.688: Calculate 'Added' SOC deficit relative to baseline
+                        baseline_soc_h = self._get_soc_from_log(baseline_log, h_key, b_soc)
+                        
+                        # Only count deficit if it's WORSE than baseline
+                        if soc_h < floor_h - 0.1 and soc_h < baseline_soc_h - 0.05:
+                            # The deficit we care about is how much we dropped it below the baseline OR the floor
+                            # whichever is the 'active' constraint for the allocator.
+                            added_deficit_pct = max(0.0, min(floor_h, baseline_soc_h) - soc_h)
+                            if added_deficit_pct > 0:
+                                max_soc_deficit_kwh = max(max_soc_deficit_kwh, added_deficit_pct * b_cap / 100.0)
+
+                            # Record diagnostics if this was the peak deficit hour
+                            if added_deficit_pct > 0:
                                 _sell_debug["deficit_hour"] = h_abs
                                 _sell_debug["deficit_floor"] = floor_h
                                 _sell_debug["deficit_soc"] = soc_h
@@ -591,8 +607,12 @@ class StrategySell(StrategyEngine):
             
             # Initial reason based on current hour command
             cur_cmd = sell_commands.get(cur_hour, 0.0)
+            is_natural_deficit = _sell_debug.get("natural_deficit_detected", False)
+            
             if cur_cmd > 0.05:
                 limit_reason = "Активная продажа (Приоритет: Цена)"
+            elif is_natural_deficit:
+                limit_reason = "Ожидание (Естественный дефицит АКБ)"
             elif cur_hour in target_hours:
                 limit_reason = "Ограничение (Цена > Порог, но бюджет на другие часы)"
             elif target_hours:
