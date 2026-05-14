@@ -3170,14 +3170,10 @@ class InverterOperationModeSensor(SensorEntity):
                     f_target_soc = float(h_override.get("soc_limit", t_soc))
                     
                     is_below = bool(f_batt_soc < (f_target_soc - 0.05))
-                    _LOGGER.error(f"[Real-time Sync Check] SOC: {f_batt_soc}%, Target: {f_target_soc}%, Below: {is_below}, Left: {hours_left}h")
+                    _LOGGER.error(f"[Real-time Sync Check] SOC: {f_batt_soc}%, Target: {f_target_soc}%, Below: {is_below}")
                         
                     if is_below:
-                        delta_soc = max(0.0, f_target_soc - f_batt_soc)
-                        delta_kwh = (delta_soc / 100.0) * float(b_cap)
-                        p_calc = (delta_kwh / float(hours_left)) / max(0.1, float(eff))
-                        p_val = min(float(max_batt_p), round_f(p_calc, 2))
-                        
+                        p_val = float(max_batt_p)
                         v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
                         c_amps_fixed = round_f((p_val * 1000.0) / max(10.0, v_val), 2)
                         
@@ -3211,34 +3207,25 @@ class InverterOperationModeSensor(SensorEntity):
                     t_soc = sell_strategy.get("target_soc", 0.0)
                 c_amps_fixed = sell_strategy.get("recommended_amps", 0.0)
                 
-                # v11.9.453: Anchored Manual Fallback (Discharge)
+                # v11.9.618: Simplified manual limits (15% min SOC, max_batt_p)
                 if h_override and h_override.get("mode") == "sale_pv_bat":
                     t_soc = float(h_override.get("soc_limit", t_soc))
+                    t_soc = max(15.0, t_soc) # Absolute 15% floor for manual
                     
-                    is_new_anchor = (man._manual_anchor_hour != now.hour or abs(float(man._manual_anchor_target_soc) - t_soc) > 0.1)
-                    
-                    if is_new_anchor:
-                        man._manual_anchor_hour = now.hour
-                        man._manual_anchor_target_soc = float(t_soc)
+                    if float(batt_soc) > (t_soc + 0.2):
+                        p_val = float(max_batt_p)
+                        v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
+                        c_amps_fixed = round_f((p_val * 1000.0) / max(10.0, v_val), 2)
                         
-                        if float(batt_soc) > (float(t_soc) + 0.2):
-                            delta_soc = max(0.0, float(batt_soc) - float(t_soc))
-                            delta_kwh = (delta_soc / 100.0) * float(b_cap)
-                            req_p = (delta_kwh / float(hours_left)) * max(0.8, eff)
-                            man._manual_anchor_power = min(float(max_batt_p), round_f(req_p, 2))
-                            
-                            # v11.9.454: Anchor Amps as well
-                            v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
-                            man._manual_anchor_amps = round_f((float(man._manual_anchor_power) * 1000.0) / v_val, 2)
-                            
-                            _LOGGER.info("[Manual Anchor Discharge] Recalculated Power: %.2fkW | Amps: %.1fA for Target: %.1f%% (%dmin left)", 
-                                         man._manual_anchor_power, man._manual_anchor_amps, t_soc, mins_left)
-                        else:
-                            man._manual_anchor_power = 0.0
-                            man._manual_anchor_amps = 0.0
-                            
-                    p_val = float(man._manual_anchor_power)
-                    c_amps_fixed = float(man._manual_anchor_amps)
+                        man._manual_anchor_power = p_val
+                        man._manual_anchor_amps = c_amps_fixed
+                        man._manual_anchor_target_soc = t_soc
+                        _LOGGER.info(f"[Manual Discharge] Power: {p_val}kW, Amps: {c_amps_fixed}A for Target: {t_soc}%")
+                    else:
+                        p_val = 0.0
+                        c_amps_fixed = 0.0
+                        man._manual_anchor_power = 0.0
+                        man._manual_anchor_amps = 0.0
             else:
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))

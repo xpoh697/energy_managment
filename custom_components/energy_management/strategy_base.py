@@ -1141,13 +1141,13 @@ class StrategyEngine:
                 if dynamic_floors and h_idx_int in dynamic_floors:
                     h_floor_trade = float(dynamic_floors[h_idx_int])
 
-                # v11.9.601: Manual SOC limit overrides trade floors (respecting hardware Min SOC)
+                # v11.9.618: Simplified manual limits - max power and 15% absolute floor
                 if _manual_soc is not None:
                     _m_soc_f = float(_manual_soc)
                     if _h_mode_name == "buy":
                         h_ceiling_trade = min(100.0, _m_soc_f)
                     else:
-                        h_floor_trade = max(b_min_soc, _m_soc_f)
+                        h_floor_trade = max(15.0, _m_soc_f)
 
                 if total_net_kw > 0.001: 
                     # v11.1.62 - bat_emergency recovery
