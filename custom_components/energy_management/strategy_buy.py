@@ -376,7 +376,8 @@ class StrategyBuy(StrategyEngine):
                 soc_at_start_plan = self._get_soc_from_log(_log_sun, get_h_log_key(planning_h), b_soc)
                 cur_p = all_buy_prices.get(cur_hour, 99.0)
 
-                if cur_p > 0 and is_solar_enough:
+                # v11.9.623: Survival Priority. Never skip survival due to future solar.
+                if cur_p > 0 and is_solar_enough and res.get("charge_reason") != "Выживание":
                     needed_kwh_dc = 0.0
                     res["charge_reason"] = "Скип (Будет солнце)"
                     decision_str = f"Скип (Пик Солнца {peak_soc_before_sunset:.0f}%)"
