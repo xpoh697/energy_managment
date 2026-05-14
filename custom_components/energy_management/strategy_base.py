@@ -1,4 +1,6 @@
 import logging
+# Version change trace v11.9.660: Synchronized release with removed discovery loop.
+# Version change trace v11.9.650: Unified logic for grid bypass and SimTrace integration.
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
@@ -937,11 +939,18 @@ class StrategyEngine:
         try:
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+            
             p_buy = dict(man.data.get("prices_buy", {}))
             for h, p in p_buy.get(today_str, {}).items(): all_prices[int(h)] = float(normalize_float(p))
             for h, p in p_buy.get(tomorrow_str, {}).items(): all_prices[int(h) + 24] = float(normalize_float(p))
+            
+            # v11.9.635: Load sell prices for accurate Morning Mode simulation
+            all_sell_prices = {}
+            p_sell = dict(man.data.get("prices_sell", {}))
+            for h, p in p_sell.get(today_str, {}).items(): all_sell_prices[int(h)] = float(normalize_float(p))
+            for h, p in p_sell.get(tomorrow_str, {}).items(): all_sell_prices[int(h) + 24] = float(normalize_float(p))
         except Exception:
-            pass
+            all_sell_prices = all_prices # Fallback
 
         simulated_soc = float(start_soc)
         overflow_kwh = 0.0
@@ -1047,12 +1056,23 @@ class StrategyEngine:
                     expected_cons_kw += idle_p
     
                 # v11.6.487: Block solar if price is zero or negative (panels disconnected)
+                # v11.9.635: Use sell price for Morning Mode logic
                 _h_price = float(normalize_float(all_prices.get(int(h_abs), 0.1)))
+                _h_sell_price = float(normalize_float(all_sell_prices.get(int(h_abs), _h_price)))
+                
                 if _h_price <= 0.0:
                     expected_gen_kw = 0.0
     
                 # 4. Inverter Command (AI Buying/Selling)
-                cmd_p = float(commands.get(int(h_abs), 0.0)) if commands else 0.0
+                # v11.9.660: Strict explicit command handling. NO DISCOVERY from strategy_results here
+                # as it causes feedback loops during strategy calculation.
+                _cmd_map = commands if commands else {}
+                _raw_p = _cmd_map.get(int(h_abs), 0.0)
+                if isinstance(_raw_p, dict):
+                    cmd_p = float(_raw_p.get("power", 0.0))
+                else:
+                    cmd_p = float(_raw_p)
+
                 _prev_soc_for_log = simulated_soc
     
                 # v11.9.331: Apply InverterModeClass rules from mode_overrides map.
@@ -1091,6 +1111,11 @@ class StrategyEngine:
                 rem_gen = _expected_gen_kw_sim - p_for_house
                 rem_cons = expected_cons_kw - p_for_house
                 
+                # v11.9.650/660: Physics - In BUY/CHARGE modes with grid bypass, 
+                # the house load is powered by the grid, NOT the battery.
+                if _h_mode_cls and _h_mode_cls.is_grid_bypass:
+                    rem_cons = 0.0
+                
                 # v11.9.484: Determine Mode Config for this simulation hour
                 # Use current_mode ONLY for the first hour of simulation.
                 # For future hours, detect based on price/time logic.
@@ -1100,7 +1125,8 @@ class StrategyEngine:
                     _h_mode_str = current_mode
                 
                 if _h_mode_str is None:
-                    if _h_price >= price_sell_only_pv and real_h < sale_pv_no_bat_max_hour and expected_gen_kw > 0.05:
+                    # v11.9.635: Use sell price correctly
+                    if _h_sell_price >= price_sell_only_pv and real_h < sale_pv_no_bat_max_hour and expected_gen_kw > 0.05:
                         _h_mode_str = "sale_pv_no_bat"
                     else:
                         _h_mode_str = "sale_pv"
@@ -1128,7 +1154,7 @@ class StrategyEngine:
                 
                 # v11.9.480: Trace power for debugging
                 if abs(cmd_p) > 0.001 or abs(total_net_kw) > 0.1:
-                    _LOGGER.debug(f"[Sim] H:{h_abs} mode:{_h_mode_str} cmd:{cmd_p:.3f} net:{total_net_kw:.3f} floor:{b_min_soc:.1f}")
+                    _LOGGER.debug(f"[SimTrace] H:{h_abs:02d} M:{_h_mode_str[:4]} PV:{_solar_charge:.2f} L:{expected_cons_kw:.2f} Cmd:{cmd_p:.2f} Net:{total_net_kw:.3f} SOC:{simulated_soc:.1f}%")
 
                 # v11.9.482: Export Logic integration
                 if _mode_cfg.export_pv_to_grid and not _mode_cfg.charge_from_pv:

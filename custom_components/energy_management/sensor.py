@@ -3595,55 +3595,7 @@ class InverterOperationModeSensor(SensorEntity):
             mode = "buy"
             reason = "Активна стратегия ПОКУПКИ"
         
-        elif batt_soc <= min_soc:
-            # v11.6.567 - Priority 2: Emergency SOC management (Survival First)
-            if has_surplus:
-                if cur_price is not None and cur_price < price_stop_sell:
-                    mode = "stop_sale"
-                    reason = f"Добор солнца без экспорта (Цена {cur_price or 0.0:.2f} < {price_stop_sell})"
-                else:
-                    mode = "sale_pv"
-                    reason = f"Добор солнца в АКБ (limit: {min_soc}%)"
-            else:
-                mode = "bat_emergency"
-                reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
-
-        elif is_waiting_for_neg:
-            # v11.6.567 - Priority 3: Wait for negative price
-            # We ONLY wait if there's actually something to wait for (solar presence or daytime)
-            # v11.9.108/v11.9.109: Added 500W hysteresis for wait mode to avoid toggling
-            # Drop to sale_pv ONLY if house has significant deficit (load > gen + 0.5kW)
-            has_significant_deficit = bool(avg_load > (avg_gen + 0.5))
-            
-            can_sell_pv = False
-            if cur_price is not None and cur_price >= price_sell_only_pv and has_surplus:
-                if is_before_limit_hour and cur_price > 0:
-                    can_sell_pv = True
-            
-            if can_sell_pv:
-                mode = "sale_pv_no_bat"
-                reason = f"Продажа только солнца: Цена ({cur_price:.2f}) >= Порога ({price_sell_only_pv:.2f}) (Ожидаем отриц. цену)"
-            elif not has_significant_deficit:
-                mode = "no_pv_sale_no_bat"
-                neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
-                reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
-            else:
-                # v11.6.567/v11.9.109: Fallback to sale_pv if house needs significant power
-                mode = "sale_pv"
-                reason = "Ожидание отриц. цен: Нагрузка > генерации на 500Вт (sale_pv)"
-
-        # v11.9.106: Global Price Floor (TS 4.1 Priority 3)
-        # Moved above AI and Morning logic to ensure it works even without peaks.
-        elif cur_price is not None and cur_price < price_stop_sell:
-            mode = "stop_sale"
-            reason = f"Продажа заблокирована: Цена ({cur_price:.2f}) < Порога ({price_stop_sell:.2f})"
-
-        elif is_selling_active:
-            # Active AI / Arbitrage strategy
-            mode = "sale_pv_bat"
-            reason = "Активна стратегия ПРОДАЖИ (AI)"
-            
-        # v11.9.106: Day/Morning analysis works even without surplus or peaks to provide Gatekeeper protection visibility.
+        # v11.9.635: Morning Mode Priority (Maximize profit when prices are high)
         elif cur_price is not None and cur_price >= price_sell_only_pv:
             # SAFE MORNING MODE (User's 4 conditions)
             # 1. Price >= Threshold
@@ -3734,6 +3686,56 @@ class InverterOperationModeSensor(SensorEntity):
                          reason = f"Ожидание солнца: тек. генерация ({avg_gen:.2f}) < тек. потребления ({avg_load:.2f})"
                 else:
                     reason = "Цена выше порога, но условия продажи PV+АКБ не соблюдены"
+        
+        elif batt_soc <= min_soc:
+            # v11.6.567 - Priority 2: Emergency SOC management (Survival First)
+            if has_surplus:
+                if cur_price is not None and cur_price < price_stop_sell:
+                    mode = "stop_sale"
+                    reason = f"Добор солнца без экспорта (Цена {cur_price or 0.0:.2f} < {price_stop_sell})"
+                else:
+                    mode = "sale_pv"
+                    reason = f"Добор солнца в АКБ (limit: {min_soc}%)"
+            else:
+                mode = "bat_emergency"
+                reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
+
+        elif is_waiting_for_neg:
+            # v11.6.567 - Priority 3: Wait for negative price
+            # We ONLY wait if there's actually something to wait for (solar presence or daytime)
+            # v11.9.108/v11.9.109: Added 500W hysteresis for wait mode to avoid toggling
+            # Drop to sale_pv ONLY if house has significant deficit (load > gen + 0.5kW)
+            has_significant_deficit = bool(avg_load > (avg_gen + 0.5))
+            
+            can_sell_pv = False
+            if cur_price is not None and cur_price >= price_sell_only_pv and has_surplus:
+                if is_before_limit_hour and cur_price > 0:
+                    can_sell_pv = True
+            
+            if can_sell_pv:
+                mode = "sale_pv_no_bat"
+                reason = f"Продажа только солнца: Цена ({cur_price:.2f}) >= Порога ({price_sell_only_pv:.2f}) (Ожидаем отриц. цену)"
+            elif not has_significant_deficit:
+                mode = "no_pv_sale_no_bat"
+                neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
+                reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место в АКБ"
+            else:
+                # v11.6.567/v11.9.109: Fallback to sale_pv if house needs significant power
+                mode = "sale_pv"
+                reason = "Ожидание отриц. цен: Нагрузка > генерации на 500Вт (sale_pv)"
+
+        # v11.9.106: Global Price Floor (TS 4.1 Priority 3)
+        # Moved above AI and Morning logic to ensure it works even without peaks.
+        elif cur_price is not None and cur_price < price_stop_sell:
+            mode = "stop_sale"
+            reason = f"Продажа заблокирована: Цена ({cur_price:.2f}) < Порога ({price_stop_sell:.2f})"
+
+        elif is_selling_active:
+            # Active AI / Arbitrage strategy
+            mode = "sale_pv_bat"
+            reason = "Активна стратегия ПРОДАЖИ (AI)"
+            
+        # v11.9.106: Day/Morning analysis works even without surplus or peaks to provide Gatekeeper protection visibility.
             
         elif cur_price is None:
             # v11.6.65: Handle missing future prices gracefully

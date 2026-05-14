@@ -1,3 +1,5 @@
+# Energy management strategy buy - v11.9.660
+# Version change trace v11.9.660: Synchronized release with removed discovery loop.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -8,7 +10,6 @@ if TYPE_CHECKING:
     from .sensor import EnergyProfileManager
 
 from .const import (
-    CONF_BATTERY_COST, 
     CONF_BATTERY_RATED_CYCLES,
     CONF_MIN_SOC_BAT,
     CONF_ACTIVE_SENSOR,
@@ -427,6 +428,10 @@ class StrategyBuy(StrategyEngine):
                     p_charge = min(max_p, max_p * cc_cv, p_needed)
                     charge_commands[h] = round_f(p_charge, 3)
                     accum_kwh_dc += (p_charge * h_factor * eff)
+                
+                # v11.9.645: Emergency Plan Trace
+                _plan_details = [f"{h%24:02d}h:{p:.2f}kW" for h, p in charge_commands.items() if p > 0]
+                man.log_to_file(f"[Strategy Buy Plan] Reason: {res.get('charge_reason')} | Target: {target_soc}% | Plan: {', '.join(_plan_details)}")
                 
                 # v11.9.574: TS compliance (Negative prices block PV charging - section 152)
                 if res.get("charge_reason") == "Отрицательная цена":

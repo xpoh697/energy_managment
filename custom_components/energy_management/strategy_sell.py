@@ -1,3 +1,5 @@
+# Energy management strategy sell - v11.9.665
+# Version change trace v11.9.665: Softened budget convergence and fixed empty deficit_detail.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
