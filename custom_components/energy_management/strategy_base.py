@@ -1,5 +1,5 @@
 import logging
-# Version change trace v11.9.670: Refined gatekeeper floor and fixed budget collapse regression.
+# Version change trace v11.9.685: Sunset-to-Sunset window and solar-aware survival floors.
 # Version change trace v11.9.650: Unified logic for grid bypass and SimTrace integration.
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -146,14 +146,23 @@ class StrategyEngine:
         prof_cons = dict(man.get_predicted_profile("consumption_base"))
         
         house_kwh_needed = 0.0
+        potential_solar_gain = 0.0
+        
         for h_abs in range(start_h_abs, end_h_abs):
             h_rel = str(h_abs % 24)
             l_val = float(normalize_float(prof_cons.get(h_rel, 0.4)))
             g_val = float(normalize_float(prof_gen.get(h_rel, 0.0)))
-            house_kwh_needed += max(0.0, l_val - g_val)
+            
+            # v11.9.685: Solar during the day covers the load and fills the battery for the night.
+            house_kwh_needed += l_val
+            potential_solar_gain += g_val
+            
+        # The actual deficit is what's left after solar is used.
+        # Solar gain is capped at battery capacity (we can't save more than the tank size).
+        net_house_kwh = max(0.0, house_kwh_needed - min(potential_solar_gain, b_cap))
             
         # 2. Convert kWh to SOC pct (considering efficiency)
-        house_soc_pct = (house_kwh_needed / eff / b_cap * 100.0) if b_cap > 0 else 0
+        house_soc_pct = (net_house_kwh / eff / b_cap * 100.0) if b_cap > 0 else 0
         return round_f(min_soc + house_soc_pct, 1)
 
     def get_gatekeeper_floor(self, h_abs: int, end_h_abs: int) -> float:
@@ -161,20 +170,18 @@ class StrategyEngine:
         h_rel = h_abs % 24
         min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
         
-        # v11.9.665: Unified Gatekeeper logic - Turbo Mode (4-10 AM) vs Safe Mode
+        # v11.9.685: Simplified Gatekeeper logic. 
+        # Simulation handles house load, so floor is the target mark (User Limit or Survival).
         if 4 <= h_rel < 10:
-            # Turbo Mode: MinSOC + 2% (Strict emergency reserve only)
+            # Turbo Mode: MinSOC + 2%
             return round_f(min_soc + 2.0, 1)
         else:
-            # Safe Mode: Survival (Base Load until Morning) + Minimal Buffer
-            # v11.9.665: Reduced redundant buffering. Buffer is now capped 
-            # to avoid compounding with high house loads.
+            # Safe Mode: Higher of User Limit or Survival (with Solar)
+            user_limit = float(self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
             soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 5.0))
             survival = self.get_survival_floor(h_abs, end_h_abs)
-            
-            # If survival already accounts for house load, we only add buffer 
-            # if the survival floor is close to min_soc.
-            return round_f(survival + max(1.0, soc_buffer * 0.5), 1)
+            target_mark = max(user_limit, min_soc + soc_buffer)
+            return round_f(max(target_mark, survival), 1)
 
     # --- REFACTOR v6.2 MODULAR HELPERS ---
 

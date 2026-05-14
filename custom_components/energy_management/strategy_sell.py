@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.670
-# Version change trace v11.9.670: Fixed target_price and refined deficit window.
+# Energy management strategy sell - v11.9.685
+# Version change trace v11.9.685: Sunset-to-Sunset window and extensive debug diagnostics.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -487,12 +487,18 @@ class StrategySell(StrategyEngine):
                             
                             deficit_detail.append(f"{h_cmd}h: req {p_req:.2f}, real {p_real_bat:.2f} [M:{h_mode} Net:{h_net:.2f}]{reason}")
                     
-                    # v11.9.670: Limit deficit check to start from the FIRST sell hour.
-                    # Deficits occurring BEFORE we start selling are "natural" and cannot 
-                    # be solved by reducing the sell budget.
+                    # v11.9.685: Limit deficit check to the NEXT REAL SUNSET.
+                    # We use the manager's detection logic to find when the sun actually sets.
                     max_soc_deficit_kwh = 0.0
+                    h_rel_now = cur_hour % 24
+                    sunset_h = man.get_sunset_hour() or (morning_h + 12)
+                    
+                    # Calculate absolute hour of next sunset
+                    hours_to_sunset = (sunset_h - h_rel_now) if h_rel_now < sunset_h else (24 + sunset_h - h_rel_now)
+                    next_sunset_abs = cur_hour + hours_to_sunset
+                    
                     first_sell_h = min(target_hours) if target_hours else cur_hour
-                    sell_window_end = (max(target_hours) + 3) if target_hours else cur_hour
+                    sell_window_end = min(next_sunset_abs, (max(target_hours) + 3) if target_hours else cur_hour)
                     
                     for h_abs in range(first_sell_h, sell_window_end + 1):
                         if h_abs > cur_hour + 47: break
@@ -504,8 +510,10 @@ class StrategySell(StrategyEngine):
                             deficit_h = (floor_h - soc_h) * b_cap / 100.0
                             if deficit_h > max_soc_deficit_kwh:
                                 max_soc_deficit_kwh = deficit_h
-                                # Record specific hour for diagnostics
+                                # Record diagnostics
                                 _sell_debug["deficit_hour"] = h_abs
+                                _sell_debug["deficit_floor"] = floor_h
+                                _sell_debug["deficit_soc"] = soc_h
                     
                     # v11.9.665: Convergence Check & Ceasefire Rule
                     # If target_budget is already zero and we still see a deficit, 
@@ -548,12 +556,17 @@ class StrategySell(StrategyEngine):
             # sell commands to push SOC below the gatekeeper floor.
             # sell_commands from the convergence loop are already floor-verified.
 
-            # v11.9.255: Update diagnostics
+            # v11.9.685: Expanded diagnostics
             _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
             _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
+            _sell_debug["max_soc_deficit"] = round_f(max_soc_deficit_kwh, 3)
             _sell_debug["deficit_detail"] = deficit_detail
             _sell_debug["commands"] = {f"{h}h": round_f(p, 3) for h, p in sell_commands.items() if p > 0}
+            _sell_debug["target_floors"] = {f"{h%24:02d}h": round_f(floors_sliding.get(h, 0.0), 1) for h in target_hours}
+            _sell_debug["active_safety_floor"] = round_f(active_safety_floor, 1)
+            _sell_debug["gatekeeper_cur_h"] = round_f(gatekeeper, 1)
             _sell_debug["max_batt_p"] = round_f(max_batt_p, 2)
+            _sell_debug["sunset_abs"] = next_sunset_abs if 'next_sunset_abs' in locals() else 0
             
             # Final Pass: Use the best sim_log we found
 
