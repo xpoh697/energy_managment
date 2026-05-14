@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.665
-# Version change trace v11.9.665: Softened budget convergence and fixed empty deficit_detail.
+# Energy management strategy sell - v11.9.670
+# Version change trace v11.9.670: Fixed target_price and refined deficit window.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -270,8 +270,8 @@ class StrategySell(StrategyEngine):
                 # v11.9.332: DO NOT return early. We must proceed to simulation to get morning SOC projection.
                 # return res 
 
-            # v11.8.521: UI Bugfix - Target price should be the maximum of all candidates, not just the first hour.
-            target_price = max([all_sell_prices.get(th, 0.0) for th in target_hours], default=0.0) if target_hours else 0.0
+            # v11.9.670: Moved target_price calculation below cycle filtering to ensure accuracy.
+            target_price = 0.0
 
             # --- TS 6.1 Sunrise Guard & Budget Grouping ---
             # Initial contiguity grouping
@@ -385,6 +385,9 @@ class StrategySell(StrategyEngine):
                 
                 first_c_id = min(cycle_map.keys())
                 target_hours = cycle_map[first_c_id]
+                
+                # v11.9.670: Recalculate target_price for the CURRENT cycle
+                target_price = max([all_sell_prices.get(th, 0.0) for th in target_hours], default=0.0)
             
             # Sort by Price (Primary) and Hour (Secondary). 
             # If prices are equal, prioritize the LATER hour to protect SOC for earlier peaks
@@ -484,21 +487,25 @@ class StrategySell(StrategyEngine):
                             
                             deficit_detail.append(f"{h_cmd}h: req {p_req:.2f}, real {p_real_bat:.2f} [M:{h_mode} Net:{h_net:.2f}]{reason}")
                     
-                    # v11.9.566: Limit deficit check to sell window + 3h buffer ONLY.
-                    # Natural overnight house consumption causing SOC drops FAR from sell window
-                    # is Buy strategy's responsibility, not Sell's. Checking the full 48h range
-                    # causes the sell budget to be cut incorrectly.
+                    # v11.9.670: Limit deficit check to start from the FIRST sell hour.
+                    # Deficits occurring BEFORE we start selling are "natural" and cannot 
+                    # be solved by reducing the sell budget.
                     max_soc_deficit_kwh = 0.0
+                    first_sell_h = min(target_hours) if target_hours else cur_hour
                     sell_window_end = (max(target_hours) + 3) if target_hours else cur_hour
-                    for h_abs in sim_range:
-                        if h_abs > sell_window_end:
-                            break
+                    
+                    for h_abs in range(first_sell_h, sell_window_end + 1):
+                        if h_abs > cur_hour + 47: break
                         h_key = f"{h_abs%24:02d}:59" + (" (Завтра)" if h_abs >= 24 else (" (Через день)" if h_abs >= 48 else ""))
-                        soc_h = trial_log.get(h_key, {}).get("soc", 100.0)
+                        sim_st = trial_log.get(h_key, {})
+                        soc_h = sim_st.get("soc", 100.0)
                         floor_h = floors_sliding.get(h_abs, emergency_soc + 2.0)
                         if soc_h < floor_h - 0.1:
                             deficit_h = (floor_h - soc_h) * b_cap / 100.0
-                            max_soc_deficit_kwh = max(max_soc_deficit_kwh, deficit_h)
+                            if deficit_h > max_soc_deficit_kwh:
+                                max_soc_deficit_kwh = deficit_h
+                                # Record specific hour for diagnostics
+                                _sell_debug["deficit_hour"] = h_abs
                     
                     # v11.9.665: Convergence Check & Ceasefire Rule
                     # If target_budget is already zero and we still see a deficit, 
