@@ -212,7 +212,7 @@ class StrategyBuy(StrategyEngine):
             
             survival_targets = {} # {hour: target_soc}
 
-            for _ in range(12):
+            for _loop_i in range(12):
                 added = False
                 # v11.9.473: Use 48h horizon for planning to match UI simulation
                 sim_range = list(range(cur_hour, cur_hour + 48))
@@ -244,23 +244,41 @@ class StrategyBuy(StrategyEngine):
                     if first_violation_h is not None and first_critical_h is not None:
                         break
                 
+                if _loop_i == 0 and first_violation_h is not None:
+                    res["survival_violation_hour"] = first_violation_h
+
                 if first_violation_h is not None:
                     # We need to plan. Where?
                     # Hour X is the critical deadline.
                     hour_X = first_critical_h if first_critical_h is not None else morning_h_abs
                     
-                    if cheapest_global <= hour_X:
-                        # Case A: Cheapest hour is safe to reach. Use it!
+                    # v11.9.622: Find the latest manual discharge before hour_X to ensure we charge AFTER the drop
+                    latest_manual_discharge_h = -1
+                    for offset in range(max(0, hour_X - cur_hour)):
+                        h_abs = cur_hour + offset
+                        h_dt = (now + timedelta(hours=offset)).replace(minute=0, second=0, microsecond=0)
+                        h_ts_key = h_dt.strftime("%Y-%m-%d %H:00")
+                        manual_m = man.hourly_manual_overrides.get(h_ts_key)
+                        if manual_m and manual_m.get("mode") == "sale_pv_bat":
+                            latest_manual_discharge_h = max(latest_manual_discharge_h, h_abs)
+
+                    if cheapest_global <= hour_X and cheapest_global > latest_manual_discharge_h:
+                        # Case A: Cheapest hour is safe to reach, and occurs AFTER any manual dump. Use it!
                         target_h = cheapest_global
                         target_type = "Gatekeeper"
                     else:
-                        # Case B: We will hit critical SOC before cheapest hour. Need a Bridge.
-                        candidates_bridge = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= hour_X]
+                        # Case B: We will hit critical SOC before cheapest hour, OR cheapest hour is ruined by a manual dump.
+                        candidates_bridge = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= hour_X and sh > latest_manual_discharge_h]
+                        
+                        if not candidates_bridge:
+                            # Fallback if manual sale is right at hour_X
+                            candidates_bridge = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= hour_X]
+                            
                         if candidates_bridge:
                             target_h = min(candidates_bridge, key=lambda x: all_buy_prices[x])
-                            target_type = "Bridge"
+                            target_type = "Bridge" if cheapest_global > hour_X else "Gatekeeper"
                         else:
-                            # No hours before critical? Use the cheapest overall as fallback
+                            # Total fallback
                             target_h = cheapest_global
                             target_type = "Gatekeeper"
 
