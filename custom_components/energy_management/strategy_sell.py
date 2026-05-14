@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.693
-# Version change trace v11.9.693: Clean status_text for UI + Detailed limit_reason in attributes.
+# Energy management strategy sell - v11.9.694
+# Version change trace v11.9.694: Fix NameError (restored cur_cmd, is_natural_deficit, is_sunrise_block).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -624,9 +624,14 @@ class StrategySell(StrategyEngine):
             sorted_h = sorted(sell_commands.keys())
             active_h = [h for h, p in sell_commands.items() if p > 0.05]
             
-            # v11.9.693: Separate clean status from detailed reason
+            # v11.9.693/694: Separate clean status from detailed reason
             status_text = "Нет ценового окна"
             limit_reason = "Нет ценового окна"
+            
+            # Restore missing variables (v11.9.694 Fix)
+            cur_cmd = sell_commands.get(cur_hour, 0.0)
+            is_natural_deficit = _sell_debug.get("natural_deficit_detected", False)
+            is_sunrise_block = _sell_debug.get("sunrise_safety_block", False)
             
             # Find next planned hour for hint
             next_h = min([h for h, p in sell_commands.items() if p > 0.05 and h > cur_hour], default=None)
