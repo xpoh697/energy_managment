@@ -73,7 +73,7 @@ class StrategyBuy(StrategyEngine):
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.501",
+            "strategy_version": "v11.9.625",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -401,11 +401,12 @@ class StrategyBuy(StrategyEngine):
                 # 2. Fill energy budget based on price attractiveness
                 accum_kwh_dc = 0.0
                 for h in sorted_by_price:
-                    # v11.9.603: Strict Solar Guard.
+                    # v11.9.625: Strict Solar Guard.
                     # For this specific hour 'h', check if solar will fill the battery 
                     # at ANY point between 'h' and sunset.
+                    # v11.9.625: Disabled for Survival mode.
                     h_future_until_sunset = [sh for sh in _sim_h_disp if sh >= h and sh <= sunset_abs]
-                    if h_future_until_sunset:
+                    if h_future_until_sunset and res.get("charge_reason") != "Выживание":
                         peak_after_h = max([self._get_soc_from_log(_log_sun, get_h_log_key(sh), 0.0) for sh in h_future_until_sunset])
                         if peak_after_h >= 95.0 and all_buy_prices.get(h, 0) > 0:
                             charge_commands[h] = 0.0
@@ -433,7 +434,7 @@ class StrategyBuy(StrategyEngine):
                 
                 # Check if allocator actually planned anything
                 actual_planned = sum(charge_commands.values())
-                if actual_planned <= 0.05 and needed_kwh_dc > 0.1:
+                if actual_planned <= 0.05 and needed_kwh_dc > 0.1 and res.get("charge_reason") != "Выживание":
                     # v11.9.604: We needed energy, but skipped all windows because solar will fill later
                     decision_str = "Скип (Солнце наполнит)"
                     res["charge_reason"] = "Скип (Солнце)"
