@@ -3,90 +3,36 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : ˜roda, 13 maja 2026 02:10:23
+  Started : czwartek, 14 maja 2026 23:57:08
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
     Files : *.*
 	    
-  Options : *.* /NDL /TEE /S /DCOPY:DA /COPY:DAT /NP /XO /MT:8 /R:3 /W:5 
-
-------------------------------------------------------------------------------
-
-	    Newer     		    6775	g:\systemair\energy_mamagment\custom_components\energy_management\const.py
-	    Newer     		     404	g:\systemair\energy_mamagment\custom_components\energy_management\manifest.json
-	    Newer     		   25918	g:\systemair\energy_mamagment\custom_components\energy_management\strategy_buy.py
-
-------------------------------------------------------------------------------
-
-               Total    Copied   Skipped  Mismatch    FAILED    Extras
-    Dirs :         5         5         5         0         0         1
-   Files :        23         3        20         0         0         0
-   Bytes :    1.39 m    32.3 k    1.35 m         0         0         0
-   Times :   0:00:00   0:00:00                       0:00:00   0:00:00
-
-
-   Speed :             542ÿ573 Bytes/sec.
-   Speed :              31,046 MegaBytes/min.
-   Ended : ˜roda, 13 maja 2026 02:10:23
-
-
--------------------------------------------------------------------------------
-   ROBOCOPY     ::     Robust File Copy for Windows                              
--------------------------------------------------------------------------------
-
-  Started : czwartek, 14 maja 2026 19:42:43
-   Source : g:\systemair\energy_mamagment\custom_components\energy_management\
-     Dest : \\192.168.100.5\config\custom_components\energy_management\
-
-    Files : *.*
-	    
- Exc Dirs : __pycache__
-	    
-  Options : *.* /V /S /E /DCOPY:DA /COPY:DAT /XO /R:1000000 /W:30 
+  Options : *.* /S /E /DCOPY:DA /COPY:DAT /XO /R:1000000 /W:30 
 
 ------------------------------------------------------------------------------
 
 	                  17	g:\systemair\energy_mamagment\custom_components\energy_management\
-	  *named dir      -1	\\192.168.100.5\config\custom_components\energy_management\__pycache__\
-	      modified		    6839	const.py
-	          same		    9360	binary_sensor.py
-	          same		   18311	config_flow.py
-	          same		     418	manifest.json
-	          same		    4098	number.py
-	          same		  237881	sensor.py
-	          same		    4313	services.yaml
-	          same		    1152	strategy.py
-	          same		   18021	strategy_dp.py
-	          same		   45057	strategy_sell.py
-	          same		   10503	strings.json
-	          same		    1820	switch.py
-	          same		    1527	utils.py
-	          same		    9174	__init__.py
-	    Newer     		   13271	DEBATE.md100%  
-	    Newer     		  236139	strategy_base.py100%  
-	    Newer     		   35460	strategy_buy.py100%  
+	*EXTRA Dir        -1	\\192.168.100.5\config\custom_components\energy_management\__pycache__\
+	    Newer     		    6839	const.py100%  
+	    Newer     		     418	manifest.json100%  
+	    Newer     		   46590	strategy_sell.py100%  
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
-	          same		  391765	icon.png
-	          same		  391765	logo.png
 	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\scratch\
-	          same		    3833	append_debate_budget.py
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
-	      modified		   18909	ru.json
-	          same		    9636	en.json
 	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\www\
-	          same		   28748	energy-management-card.js
 
 ------------------------------------------------------------------------------
 
                Total    Copied   Skipped  Mismatch    FAILED    Extras
     Dirs :         5         0         5         0         0         1
    Files :        23         3        20         0         0         0
-   Bytes :    1.42 m   278.1 k    1.15 m         0         0         0
+   Bytes :    1.42 m    52.5 k    1.36 m         0         0         0
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :           1ÿ431ÿ507 Bytes/sec.
-   Speed :              81,912 MegaBytes/min.
-   Ended : czwartek, 14 maja 2026 19:42:43
+   Speed :             252ÿ802 Bytes/sec.
+   Speed :              14,465 MegaBytes/min.
+   Ended : czwartek, 14 maja 2026 23:57:08
 
