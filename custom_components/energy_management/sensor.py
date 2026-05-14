@@ -3173,21 +3173,36 @@ class InverterOperationModeSensor(SensorEntity):
                     _LOGGER.error(f"[Real-time Sync Check] SOC: {f_batt_soc}%, Target: {f_target_soc}%, Below: {is_below}")
                         
                     if is_below:
-                        p_val = float(max_batt_p)
+                        eff = self.manager.get_sensor_float("input_number.efficiency_factor") or 0.98
+                        b_cap = self.manager.get_sensor_float("input_number.battery_capacity_kwh") or 10.0
+                        time_fraction = max(0.01, (60.0 - now.minute) / 60.0)
+                        
+                        is_new_anchor = False
+                        if self.manager._manual_anchor_target_soc != f_target_soc:
+                            is_new_anchor = True
+                        if self.manager._manual_anchor_power is None or self.manager._manual_anchor_power == 0.0:
+                            is_new_anchor = True
+                            
+                        if is_new_anchor:
+                            delta_soc = max(0.0, f_target_soc - f_batt_soc)
+                            delta_kwh = (delta_soc / 100.0) * float(b_cap)
+                            p_calc = (delta_kwh / float(time_fraction)) / max(0.1, float(eff))
+                            self.manager._manual_anchor_power = min(float(max_batt_p), round_f(p_calc, 2))
+                            
+                        p_val = self.manager._manual_anchor_power
                         v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
                         c_amps_fixed = round_f((p_val * 1000.0) / max(10.0, v_val), 2)
                         
                         # Sync variables for attributes
                         t_soc = f_target_soc
-                        man._manual_anchor_power = p_val
-                        man._manual_anchor_amps = c_amps_fixed
-                        man._manual_anchor_target_soc = t_soc
+                        self.manager._manual_anchor_amps = c_amps_fixed
+                        self.manager._manual_anchor_target_soc = t_soc
                         _LOGGER.error(f"[Real-time Sync Result] Power: {p_val}kW, Amps: {c_amps_fixed}A")
                     else:
                         p_val = 0.0
                         c_amps_fixed = 0.0
-                        man._manual_anchor_power = 0.0
-                        man._manual_anchor_amps = 0.0
+                        self.manager._manual_anchor_power = 0.0
+                        self.manager._manual_anchor_amps = 0.0
                         _LOGGER.error(f"[Real-time Sync Result] Comparison failed. Target reached. Power: 0")
             elif mode == "no_pv_sale_no_bat":
                 p_val = 0.0
@@ -3213,19 +3228,34 @@ class InverterOperationModeSensor(SensorEntity):
                     t_soc = max(15.0, t_soc) # Absolute 15% floor for manual
                     
                     if float(batt_soc) > (t_soc + 0.2):
-                        p_val = float(max_batt_p)
+                        eff = self.manager.get_sensor_float("input_number.efficiency_factor") or 0.98
+                        b_cap = self.manager.get_sensor_float("input_number.battery_capacity_kwh") or 10.0
+                        hours_left = max(0.01, (60.0 - now.minute) / 60.0)
+                        
+                        is_new_anchor = False
+                        if self.manager._manual_anchor_target_soc != t_soc:
+                            is_new_anchor = True
+                        if self.manager._manual_anchor_power is None or self.manager._manual_anchor_power == 0.0:
+                            is_new_anchor = True
+                            
+                        if is_new_anchor:
+                            delta_soc = max(0.0, float(batt_soc) - float(t_soc))
+                            delta_kwh = (delta_soc / 100.0) * float(b_cap)
+                            req_p = (delta_kwh / float(hours_left)) * max(0.8, eff)
+                            self.manager._manual_anchor_power = min(float(max_batt_p), round_f(req_p, 2))
+                            
+                        p_val = self.manager._manual_anchor_power
                         v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
                         c_amps_fixed = round_f((p_val * 1000.0) / max(10.0, v_val), 2)
                         
-                        man._manual_anchor_power = p_val
-                        man._manual_anchor_amps = c_amps_fixed
-                        man._manual_anchor_target_soc = t_soc
+                        self.manager._manual_anchor_amps = c_amps_fixed
+                        self.manager._manual_anchor_target_soc = t_soc
                         _LOGGER.info(f"[Manual Discharge] Power: {p_val}kW, Amps: {c_amps_fixed}A for Target: {t_soc}%")
                     else:
                         p_val = 0.0
                         c_amps_fixed = 0.0
-                        man._manual_anchor_power = 0.0
-                        man._manual_anchor_amps = 0.0
+                        self.manager._manual_anchor_power = 0.0
+                        self.manager._manual_anchor_amps = 0.0
             else:
                 p_val = 0.0
                 t_soc = float(round_f(batt_soc, 1))
