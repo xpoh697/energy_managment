@@ -722,7 +722,7 @@ class StrategySell(StrategyEngine):
                     res["power_decision"] = f"Лимит: {overall_limit}"
             else:
                 res["power_decision"] = "Ожидание пика"
-                if overall_limit != "Цена":
+                if overall_limit not in ["Цена", "Ожидание пика"]:
                     res["power_decision"] += f" ({overall_limit})"
             
             # Restore old sell_debug structure
