@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.686
-# Version change trace v11.9.686: Saturation-aware allocator to fix convergence issues.
+# Energy management strategy sell - v11.9.687
+# Version change trace v11.9.687: Removed h_power_caps from distribution to fix priority distortion.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -444,9 +444,9 @@ class StrategySell(StrategyEngine):
                         if h == cur_hour:
                             duration = max(0.01, 1.0 - (now.minute / 60.0))
                         
-                        # v11.9.686: Apply dynamic saturation cap from previous iterations
-                        p_cap = h_power_caps.get(h, max_batt_p)
-                        p_export = min(p_cap, rem_budget / duration)
+                        # v11.9.687: Restore strict price priority. 
+                        # Do NOT cap the distribution here, or Jackals will steal the budget.
+                        p_export = min(max_batt_p, rem_budget / duration)
                         
                         sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
                         rem_budget -= p_export * duration
@@ -542,22 +542,20 @@ class StrategySell(StrategyEngine):
                     target_morning = floors_sliding.get(next_sunrise_abs, emergency_soc + 2.0)
                     soc_err = soc_morning_sim - target_morning
 
-                    # v11.9.665: Priority-Based Refinement with Damping (v11.9.665)
-                    # Use 0.8x damping for first 10 attempts to avoid oscillations.
+                    # v11.9.687: Priority-Based Refinement with Damping
                     damping = 0.8 if attempt < 10 else 1.0
                     
                     if total_deficit_kwh > 0.15:
-                        # Priority 1: Physical impossibility (Inverter limit/SOC lock)
+                        # Priority 1: Physical impossibility (saturation)
                         target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * damping)
                     elif max_soc_deficit_kwh > 0.05:
-                        # Priority 2: Correct SOC deficit seen at any hour
+                        # Priority 2: SOC deficit in the window
                         target_budget_ac = max(0.0, target_budget_ac - max_soc_deficit_kwh * damping)
                     elif soc_err > 0.1:
-                        # Priority 3: Increase budget if we have surplus at sunrise
+                        # Priority 3: Surplus at sunrise
                         target_budget_ac += (soc_err * b_cap / 100.0) * 0.4
                     else:
-                        # Convergence!
-                        break
+                        break # Converged
             else:
                 # v11.9.332: No sell windows found. Run natural flow simulation.
                 _, sim_log, _ = self.run_soc_simulation(
