@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.694
-# Version change trace v11.9.694: Fix NameError (restored cur_cmd, is_natural_deficit, is_sunrise_block).
+# Energy management strategy sell - v11.9.696
+# Version change trace v11.9.696: Synchronized with UI anchor date.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta

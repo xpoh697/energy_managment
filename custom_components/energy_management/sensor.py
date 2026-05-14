@@ -3361,6 +3361,10 @@ class InverterOperationModeSensor(SensorEntity):
                 self._last_logged_params = curr_params
                 self._last_logged_hour = now.hour
 
+            # v11.9.696: Synchronize version and current date with frontend
+            attrs["strategy_version"] = VERSION
+            attrs["server_today"] = now.strftime("%Y-%m-%d")
+
             return attrs
         except Exception as e:
             _LOGGER.error("Error in InverterOperationModeSensor extra_state_attributes: %s", e)

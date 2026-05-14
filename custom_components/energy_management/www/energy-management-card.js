@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v11.9.695 ",
+  "%c ENERGY MANAGEMENT %c v11.9.696 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -352,7 +352,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.695</div>
+        <div id="v-tag" class="version-tag">v11.9.696</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -548,9 +548,14 @@ class EnergyManagementCard extends HTMLElement {
     const container = this.shadowRoot.getElementById('timeline-container');
     if (!container) return;
 
+    const entityId = this._config.entity || 'sensor.energy_management';
+    const stateObj = this._hass.states[entityId];
+    const attrs = (stateObj && stateObj.attributes) ? stateObj.attributes : {};
+    const serverToday = attrs.server_today;
+
     const now = new Date();
-    // v11.9.695: Use local date instead of UTC to avoid timezone shift at midnight
-    const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    // v11.9.696: Trust server's definition of 'Today' to avoid timezone desync
+    const todayStr = serverToday || (now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0'));
 
     const currentHour = now.getHours();
     const sortedKeys = Object.keys(data).sort();
