@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v11.9.417 ",
+  "%c ENERGY MANAGEMENT %c v11.9.695 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -352,7 +352,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.411</div>
+        <div id="v-tag" class="version-tag">v11.9.695</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -549,7 +549,8 @@ class EnergyManagementCard extends HTMLElement {
     if (!container) return;
 
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    // v11.9.695: Use local date instead of UTC to avoid timezone shift at midnight
+    const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
 
     const currentHour = now.getHours();
     const sortedKeys = Object.keys(data).sort();
