@@ -48,6 +48,10 @@ class StrategyEngine:
         self._strategy_cache = {}
         self._calculating_strategy = False
 
+    def clear_cache(self):
+        """Forcefully clears the strategy calculation cache."""
+        self._strategy_cache = {}
+
     @staticmethod
     def get_cc_cv_ratio(soc):
         """Strict CC/CV ratio based on user-provided table (v6.11).

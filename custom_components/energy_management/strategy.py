@@ -16,6 +16,12 @@ class StrategyEngine(StrategyEngineBase):
         # Instantiate specialized engines once to preserve their internal caches
         self._buy_engine = StrategyBuy(manager)
         self._sell_engine = StrategySell(manager)
+
+    def clear_cache(self):
+        """Clears cache for all specialized engines."""
+        super().clear_cache()
+        self._buy_engine.clear_cache()
+        self._sell_engine.clear_cache()
     
     def get_market_strategy(self, mode="buy"):
         """Delegates calculation to the appropriate specialized strategy class."""

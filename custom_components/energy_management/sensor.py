@@ -755,7 +755,7 @@ class EnergyProfileManager:
             self.manual_mode_overrides[now_h] = mode
             self._last_override_hour = now_h
             _LOGGER.warning("[Manual Override] Forced mode: %s for hour %s:00", mode, now_h)
-        self._notify_update()
+        self._notify_update(force_strategy_recalc=True)
 
     async def async_set_hourly_override(self, timestamp: str, mode: str, soc_limit: float):
         """Set a manual override for a specific hour (modal window)."""
@@ -787,7 +787,7 @@ class EnergyProfileManager:
         # Persistent storage
         self.data["hourly_manual_overrides"] = self.hourly_manual_overrides
         await self.store.async_save(self.data)
-        self._notify_update()
+        self._notify_update(force_strategy_recalc=True)
 
     async def async_stop(self):
         """Cleanup all listeners and tasks."""
@@ -1221,8 +1221,8 @@ class EnergyProfileManager:
 
         if entity_id in self.all_price_sensors:
             self._update_prices_from_sensor(entity_id, new_state)
-            # v11.9.560: Force immediate recalculation when prices update (blocks loop for ~1s, but fast update)
-            self._notify_update()
+            # v11.9.560: Force immediate recalculation when prices update
+            self._notify_update(force_strategy_recalc=True)
             return
 
         # Handle power sensors (trigger re-calculation of current power and balance)
@@ -1235,7 +1235,7 @@ class EnergyProfileManager:
         if isinstance(self.forecast_today_sensor, list) and entity_id in self.forecast_today_sensor: is_f = True
         if isinstance(self.forecast_tomorrow_sensor, list) and entity_id in self.forecast_tomorrow_sensor: is_f = True
         if is_f:
-            self._notify_update()
+            self._notify_update(force_strategy_recalc=True)
             return
 
         # Handle energy sensors
@@ -1573,7 +1573,9 @@ class EnergyProfileManager:
     def register_listener(self, update_cb):
         self.update_listeners.append(update_cb)
 
-    def _notify_update(self):
+    def _notify_update(self, force_strategy_recalc=False):
+        if force_strategy_recalc:
+            self.strategy_engine.clear_cache()
         for cb in self.update_listeners:
             cb()
 
@@ -1581,7 +1583,7 @@ class EnergyProfileManager:
         self.settings[key] = value
         self.data["settings"] = self.settings
         await self.async_save()
-        self._notify_update()
+        self._notify_update(force_strategy_recalc=True)
 
     def get_managed_load_stats(self, s_id):
         """Returns (expected_kw, remaining_kwh, is_cyclic, is_running). Single source of truth for Strategy."""
