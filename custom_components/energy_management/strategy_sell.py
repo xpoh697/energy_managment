@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.692
-# Version change trace v11.9.692: Detailed power_decision (Why/By What) + Duplication fix.
+# Energy management strategy sell - v11.9.693
+# Version change trace v11.9.693: Clean status_text for UI + Detailed limit_reason in attributes.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -624,36 +624,44 @@ class StrategySell(StrategyEngine):
             sorted_h = sorted(sell_commands.keys())
             active_h = [h for h, p in sell_commands.items() if p > 0.05]
             
-            # Initial reason based on current hour command
-            cur_cmd = sell_commands.get(cur_hour, 0.0)
-            is_natural_deficit = _sell_debug.get("natural_deficit_detected", False)
-            is_sunrise_block = _sell_debug.get("sunrise_safety_block", False)
+            # v11.9.693: Separate clean status from detailed reason
+            status_text = "Нет ценового окна"
+            limit_reason = "Нет ценового окна"
             
             # Find next planned hour for hint
             next_h = min([h for h, p in sell_commands.items() if p > 0.05 and h > cur_hour], default=None)
             h_hint = f" (Зарезервировано для {next_h%24:02d}:00)" if next_h is not None else ""
 
             if cur_cmd > 0.05:
-                # v11.9.692: Detect if AI or Inverter is the limit
                 if cur_cmd >= max_batt_p - 0.1:
+                    status_text = "Лимит: Инвертор"
                     limit_reason = "Лимит: Инвертор (5.0 кВт)"
                 elif target_budget_ac < initial_budget_ac - 0.1:
+                    status_text = "Ограничено бюджетом"
                     limit_reason = "Ограничено бюджетом (Защита SOC)"
                 else:
+                    status_text = "Активная продажа"
                     limit_reason = "Активная продажа (Приоритет: Цена)"
             elif is_sunrise_block:
+                status_text = "Заблокировано (Защита)"
                 limit_reason = f"Заблокировано (Sunrise Guard: SOC < {round_f(sunrise_floor, 1)}%)"
             elif b_soc < active_safety_floor - 0.1:
+                status_text = "Заблокировано (Защита)"
                 limit_reason = f"Заблокировано (SOC {round_f(b_soc, 1)}% < Порога {round_f(active_safety_floor, 1)}%)"
             elif is_natural_deficit:
+                status_text = "Ожидание (Защита)"
                 limit_reason = "Ожидание (Защита АКБ: Естественный дефицит)"
             elif cur_hour in target_hours:
+                status_text = "Ожидание пика"
                 limit_reason = f"Ожидание пика{h_hint}"
             elif target_hours:
+                status_text = "Ожидание пика"
                 limit_reason = "Ожидание пика"
             elif available_sell_dc <= 0.05:
+                status_text = "Недостаточно заряда"
                 limit_reason = "Недостаточно заряда"
             else:
+                status_text = "Нет ценового окна"
                 limit_reason = "Нет ценового окна"
             
             for h in sorted_h:
@@ -801,8 +809,9 @@ class StrategySell(StrategyEngine):
             
             # v11.9.581: Removed legacy assignment that was overwriting the new detailed report below
             
-            # v11.9.692: Streamlined power_decision logic (No more double text)
-            res["power_decision"] = limit_reason
+            # v11.9.693: Clean status for UI, detailed reason in attributes
+            res["power_decision"] = status_text
+            _sell_debug["limit_reason"] = limit_reason
             
             # Restore old sell_debug structure
             f_today = round_f(float(man.get_forecast_value(man.forecast_today_sensor) or 0.0), 1)

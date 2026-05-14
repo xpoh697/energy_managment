@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : pi¥tek, 15 maja 2026 00:36:14
+  Started : pi¥tek, 15 maja 2026 00:44:21
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -14,9 +14,10 @@
 ------------------------------------------------------------------------------
 
 	                  17	g:\systemair\energy_mamagment\custom_components\energy_management\
+	*EXTRA Dir        -1	\\192.168.100.5\config\custom_components\energy_management\__pycache__\
 	    Newer     		    6839	const.py100%  
 	    Newer     		     418	manifest.json100%  
-	    Newer     		  235674	sensor.py100%  
+	    Newer     		   49610	strategy_sell.py100%  
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
 	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\scratch\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
@@ -25,13 +26,13 @@
 ------------------------------------------------------------------------------
 
                Total    Copied   Skipped  Mismatch    FAILED    Extras
-    Dirs :         5         0         5         0         0         0
+    Dirs :         5         0         5         0         0         1
    Files :        23         3        20         0         0         0
-   Bytes :    1.42 m   237.2 k    1.18 m         0         0         0
+   Bytes :    1.42 m    55.5 k    1.36 m         0         0         0
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :           1ÿ190ÿ838 Bytes/sec.
-   Speed :              68,140 MegaBytes/min.
-   Ended : pi¥tek, 15 maja 2026 00:36:15
+   Speed :             294ÿ647 Bytes/sec.
+   Speed :              16,860 MegaBytes/min.
+   Ended : pi¥tek, 15 maja 2026 00:44:21
 
