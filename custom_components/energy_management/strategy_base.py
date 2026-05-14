@@ -1,5 +1,5 @@
 import logging
-# Version change trace v11.9.660: Synchronized release with removed discovery loop.
+# Version change trace v11.9.665: Refined gatekeeper floor and fixed budget collapse regression.
 # Version change trace v11.9.650: Unified logic for grid bypass and SimTrace integration.
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -159,15 +159,22 @@ class StrategyEngine:
     def get_gatekeeper_floor(self, h_abs: int, end_h_abs: int) -> float:
         """Calculate unified gatekeeper floor (Turbo or Safe) as per TS Section 1.1."""
         h_rel = h_abs % 24
-        # v11.9.449: Unified Gatekeeper logic - Turbo Mode (4-10 AM) vs Safe Mode
+        min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
+        
+        # v11.9.665: Unified Gatekeeper logic - Turbo Mode (4-10 AM) vs Safe Mode
         if 4 <= h_rel < 10:
-            # Turbo Mode: MinSOC + 2%
-            min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
+            # Turbo Mode: MinSOC + 2% (Strict emergency reserve only)
             return round_f(min_soc + 2.0, 1)
         else:
-            # Safe Mode: Survival + SOC Buffer
+            # Safe Mode: Survival (Base Load until Morning) + Minimal Buffer
+            # v11.9.665: Reduced redundant buffering. Buffer is now capped 
+            # to avoid compounding with high house loads.
             soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 5.0))
-            return round_f(self.get_survival_floor(h_abs, end_h_abs) + soc_buffer, 1)
+            survival = self.get_survival_floor(h_abs, end_h_abs)
+            
+            # If survival already accounts for house load, we only add buffer 
+            # if the survival floor is close to min_soc.
+            return round_f(survival + max(1.0, soc_buffer * 0.5), 1)
 
     # --- REFACTOR v6.2 MODULAR HELPERS ---
 

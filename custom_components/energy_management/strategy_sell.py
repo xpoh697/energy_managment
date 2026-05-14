@@ -497,31 +497,37 @@ class StrategySell(StrategyEngine):
                         soc_h = trial_log.get(h_key, {}).get("soc", 100.0)
                         floor_h = floors_sliding.get(h_abs, emergency_soc + 2.0)
                         if soc_h < floor_h - 0.1:
-                            max_soc_deficit_kwh = max(max_soc_deficit_kwh, (floor_h - soc_h) * b_cap / 100.0)
+                            deficit_h = (floor_h - soc_h) * b_cap / 100.0
+                            max_soc_deficit_kwh = max(max_soc_deficit_kwh, deficit_h)
                     
+                    # v11.9.665: Convergence Check & Ceasefire Rule
+                    # If target_budget is already zero and we still see a deficit, 
+                    # it's a natural house-load issue. STOP zeroing.
+                    if target_budget_ac < 0.05 and (total_deficit_kwh > 0 or max_soc_deficit_kwh > 0):
+                        _sell_debug["natural_deficit_detected"] = True
+                        break
+
                     # v11.9.541: Convergence check based on morning SOC at sunrise
                     sunrise_key = f"{next_sunrise_abs%24:02d}:59" + (" (Завтра)" if next_sunrise_abs >= 24 else "")
                     soc_morning_sim = trial_log.get(sunrise_key, {}).get("soc", 0.0)
                     target_morning = floors_sliding.get(next_sunrise_abs, emergency_soc + 2.0)
                     soc_err = soc_morning_sim - target_morning
 
-                    # v11.9.542: Priority-Based Refinement
+                    # v11.9.665: Priority-Based Refinement with Damping (v11.9.665)
+                    # Use 0.8x damping for first 10 attempts to avoid oscillations.
+                    damping = 0.8 if attempt < 10 else 1.0
+                    
                     if total_deficit_kwh > 0.15:
-                        # Priority 1: Physical impossibility
-                        target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * 0.6)
+                        # Priority 1: Physical impossibility (Inverter limit/SOC lock)
+                        target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * damping)
                     elif max_soc_deficit_kwh > 0.05:
                         # Priority 2: Correct SOC deficit seen at any hour
-                        # v11.9.565: Use 1.0x multiplier (was 1.1) to prevent over-correction
-                        target_budget_ac = max(0.0, target_budget_ac - max_soc_deficit_kwh * 1.0)
+                        target_budget_ac = max(0.0, target_budget_ac - max_soc_deficit_kwh * damping)
                     elif soc_err > 0.1:
                         # Priority 3: Increase budget if we have surplus at sunrise
                         target_budget_ac += (soc_err * b_cap / 100.0) * 0.4
                     else:
                         # Convergence!
-                        _sell_debug["final_budget"] = round_f(target_budget_ac, 2)
-                        _sell_debug["total_deficit"] = round_f(total_deficit_kwh, 3)
-                        _sell_debug["deficit_detail"] = deficit_detail
-                        _sell_debug["max_soc_deficit"] = round_f(max_soc_deficit_kwh, 3)
                         break
             else:
                 # v11.9.332: No sell windows found. Run natural flow simulation.
