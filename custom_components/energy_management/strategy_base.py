@@ -1060,8 +1060,10 @@ class StrategyEngine:
                 _h_dt = (now + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
                 _h_ts_key = _h_dt.strftime("%Y-%m-%d %H:00")
                 _manual_m = man.hourly_manual_overrides.get(_h_ts_key)
+                _manual_soc = None
                 if _manual_m:
                     _h_mode_name = _manual_m.get("mode")
+                    _manual_soc = _manual_m.get("soc_limit")
                     # v11.9.539: Inject manual power commands into simulation
                     if _h_mode_name == "buy":
                         cmd_p = max_batt_p
@@ -1135,8 +1137,17 @@ class StrategyEngine:
                 # v11.9.545: Resolve Trade Floor early for logging
                 h_idx_int = int(h_abs)
                 h_floor_trade = b_min_soc
+                h_ceiling_trade = 100.0
                 if dynamic_floors and h_idx_int in dynamic_floors:
                     h_floor_trade = float(dynamic_floors[h_idx_int])
+
+                # v11.9.601: Manual SOC limit overrides trade floors (respecting hardware Min SOC)
+                if _manual_soc is not None:
+                    _m_soc_f = float(_manual_soc)
+                    if _h_mode_name == "buy":
+                        h_ceiling_trade = min(100.0, _m_soc_f)
+                    else:
+                        h_floor_trade = max(b_min_soc, _m_soc_f)
 
                 if total_net_kw > 0.001: 
                     # v11.1.62 - bat_emergency recovery
@@ -1145,7 +1156,7 @@ class StrategyEngine:
                     
                     old_soc = simulated_soc
                     if b_cap_f > 0.1:
-                        simulated_soc = float(min(100.0, simulated_soc + (actual_charge_kw * step_duration / b_cap_f * 100.0)))
+                        simulated_soc = float(min(h_ceiling_trade, simulated_soc + (actual_charge_kw * step_duration / b_cap_f * 100.0)))
                     
                     # v11.7.133: Record actual AC power stored (after all losses/limits)
                     sim_p_bat = -actual_charge_kw / max(0.1, eff_coeff) # - is charge in UI view
@@ -1174,10 +1185,11 @@ class StrategyEngine:
                         p_house_dc = max(0.0, actual_discharge_kw - p_sale_dc)
                         
                         # 4. Sequential Discharge Simulation
-                        # Phase A: House Load (Limit = Hardware b_min_soc)
-                        # v11.9.467: House load ALWAYS has priority and ignores Trade Floor
+                        # Phase A: House Load (Limit = Hardware b_min_soc OR manual limit)
+                        # v11.9.601: If manual override is active, stop at h_floor_trade
+                        _h_floor_for_house = h_floor_trade if _manual_m else b_min_soc
                         house_drop_req = (p_house_dc * step_duration / b_cap_f * 100.0)
-                        house_drop_act = min(house_drop_req, max(0.0, simulated_soc - b_min_soc))
+                        house_drop_act = min(house_drop_req, max(0.0, simulated_soc - _h_floor_for_house))
                         simulated_soc = float(simulated_soc - house_drop_act)
                         
                         # Phase B: Sale/Trade (Limit = Trade Floor)
