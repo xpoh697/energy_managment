@@ -160,8 +160,12 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     """Register the Lovelace card with a cache-busting version query string."""
     www_path = Path(__file__).parent / "www"
     
-    # Register the static view for serving the JS file
-    hass.http.register_view(CardStaticView(www_path))
+    # Register the static path using Home Assistant's native method
+    hass.http.register_static_path(
+        f"/api/{DOMAIN}/static",
+        str(www_path),
+        cache_headers=False
+    )
     
     card_url = f"/api/{DOMAIN}/static/energy-management-card.js?v={VERSION}"
 
@@ -216,38 +220,4 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bo
 
     return True
 
-class CardStaticView(HomeAssistantView):
-    """View to serve static card files with cache control."""
-    url = f"/api/{DOMAIN}/static/{{filename}}"
-    name = f"api:{DOMAIN}:static"
-    requires_auth = False
 
-    def __init__(self, www_path: Path) -> None:
-        self._www_path = www_path
-
-    async def get(self, request, filename: str):
-        """Handle GET request for static files."""
-        if filename != "energy-management-card.js":
-            return web.Response(status=404)
-
-        file_path = self._www_path / filename
-        if not file_path.exists():
-            return web.Response(status=404)
-
-        try:
-            def read_file():
-                return file_path.read_text(encoding="utf-8")
-
-            hass = request.app["hass"]
-            content = await hass.async_add_executor_job(read_file)
-            return web.Response(
-                text=content,
-                content_type="application/javascript",
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                    "Expires": "0"
-                },
-            )
-        except Exception:
-            return web.Response(status=500)
