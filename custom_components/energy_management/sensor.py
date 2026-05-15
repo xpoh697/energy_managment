@@ -3645,7 +3645,10 @@ class InverterOperationModeSensor(SensorEntity):
 
             _need_charge_for_morning = bool(is_low_for_morning)
             _need_charge_for_peak = bool((is_preparing_for_peak or is_profitable_to_save) and not hit_full_before)
-            _block_sale_pv_no_bat = _need_charge_for_morning or _need_charge_for_peak
+            
+            # v11.9.702: If we are going to hit 100% today anyway (hit_full_before), 
+            # don't block solar-only export. The surplus is guaranteed.
+            _block_sale_pv_no_bat = (_need_charge_for_morning or _need_charge_for_peak) and not hit_full_before
 
             if is_before_limit_hour and has_surplus and not _block_sale_pv_no_bat and cur_price > 0:
                 mode = "sale_pv_no_bat"
