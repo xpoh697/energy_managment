@@ -132,56 +132,66 @@ class StrategyEngine:
         # v11.9.205: Hardcoded to 0.98 per user request to stabilize simulations
         return 0.98
 
-    def get_survival_floor(self, start_h_abs: int, end_h_abs: int) -> float:
-        """Calculate required SOC floor to survive home consumption between two points (Raw, No Buffer)."""
+    def get_survival_floor(self, start_h_abs: int, end_h_abs: int, target_at_end: float = None) -> float:
+        """
+        v11.9.718: Proper Reverse Bridging calculation.
+        Calculates the SOC needed at 'start_h_abs' to reach 'end_h_abs' 
+        while having 'target_at_end' remaining.
+        
+        Logic: Steps backwards from end to start.
+        """
         man: Any = self.manager
         _, b_cap, _ = man.get_battery_state()
         b_cap = float(b_cap or 10.0)
         eff = float(self.get_efficiency_coefficient() or 0.95)
-        
         min_soc = float(man.get_setting(CONF_MIN_SOC_BAT, 10.0))
         
-        # 1. Integrate house net load (Consumption - Generation)
+        # If no target specified, we want to reach min_soc
+        req_soc = target_at_end if target_at_end is not None else min_soc
+        
         prof_gen = dict(man.get_predicted_profile("generation"))
         prof_cons = dict(man.get_predicted_profile("consumption_base"))
         
-        house_kwh_needed = 0.0
-        potential_solar_gain = 0.0
-        
-        for h_abs in range(start_h_abs, end_h_abs):
+        # Walk backwards from future to now
+        for h_abs in range(end_h_abs - 1, start_h_abs - 1, -1):
             h_rel = str(h_abs % 24)
             l_val = float(normalize_float(prof_cons.get(h_rel, 0.4)))
             g_val = float(normalize_float(prof_gen.get(h_rel, 0.0)))
             
-            # v11.9.685: Solar during the day covers the load and fills the battery for the night.
-            house_kwh_needed += l_val
-            potential_solar_gain += g_val
+            # net_h_kwh = (Load - Gen) / Eff
+            net_h_kwh = (l_val - g_val) / eff
             
-        # The actual deficit is what's left after solar is used.
-        # Solar gain is capped at battery capacity (we can't save more than the tank size).
-        net_house_kwh = max(0.0, house_kwh_needed - min(potential_solar_gain, b_cap))
+            # Convert to SOC pct
+            h_soc_pct = (net_h_kwh / b_cap * 100.0) if b_cap > 0 else 0
             
-        # 2. Convert kWh to SOC pct (considering efficiency)
-        house_soc_pct = (net_house_kwh / eff / b_cap * 100.0) if b_cap > 0 else 0
-        return round_f(min_soc + house_soc_pct, 1)
+            # New required SOC before this hour
+            req_soc += h_soc_pct
+            
+            # SOC cannot fall below min_soc at any point
+            req_soc = max(min_soc, req_soc)
+            
+        return round_f(req_soc, 1)
 
     def get_gatekeeper_floor(self, h_abs: int, end_h_abs: int) -> float:
         """Calculate unified gatekeeper floor (Turbo or Safe) as per TS Section 1.1."""
         h_rel = h_abs % 24
         min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
         
-        # v11.9.685: Simplified Gatekeeper logic. 
-        # Simulation handles house load, so floor is the target mark (User Limit or Survival).
         if 4 <= h_rel < 10:
             # Turbo Mode: MinSOC + 2%
             return round_f(min_soc + 2.0, 1)
         else:
-            # Safe Mode: Higher of User Limit or Survival (with Solar)
+            # Safe Mode: max(User Limit, Survival to Sunrise with Buffer)
             user_limit = float(self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
             soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 5.0))
-            survival = self.get_survival_floor(h_abs, end_h_abs)
-            target_mark = max(user_limit, min_soc + soc_buffer)
-            return round_f(max(target_mark, survival), 1)
+            
+            # Target at sunrise
+            t_morning = max(user_limit, min_soc + soc_buffer)
+            
+            # survival calculation from now until end of night/sunrise
+            floor = self.get_survival_floor(h_abs, end_h_abs, target_at_end=t_morning)
+            
+            return floor
 
     # --- REFACTOR v6.2 MODULAR HELPERS ---
 
@@ -1024,6 +1034,13 @@ class StrategyEngine:
                 if pv_curtail_hours is not None and int(h_abs) in pv_curtail_hours:
                     expected_gen_kw = 0.0
     
+                # v11.9.715: Strategic Hourly Forecast Override (Solcast/Smart Load)
+                # If a specific hourly forecast is available, it overrides all historical distribution logic.
+                hourly_gen_map = man.get_forecast_hourly("generation")
+                if hourly_gen_map and int(h_abs) in hourly_gen_map:
+                    expected_gen_kw = float(hourly_gen_map[int(h_abs)])
+
+
                 # 3. Expected consumption (v7.9.4 - Base profile)
                 p_cons = prof_cons_tom if is_tom else prof_cons_today
                 
@@ -2568,8 +2585,8 @@ class StrategyEngine:
                     
                     # Replacement Cost Logic: 
                     # If we sell now, and tomorrow morning we have EXCESS solar (more than house needs), 
-                    # then the \"cost\" of that energy is 0 (it would have been sold anyway).
-                    # But if tomorrow we will be short on solar, then selling now means we lose \"free\" energy.
+                    # then the "cost" of that energy is 0 (it would have been sold anyway).
+                    # But if tomorrow we will be short on solar, then selling now means we lose "free" energy.
                     tomorrow_solar_total = f_tom
                     
                     # 1. First safety check: Base consumption tomorrow (essential needs only)

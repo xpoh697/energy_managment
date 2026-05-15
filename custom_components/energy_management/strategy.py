@@ -28,4 +28,7 @@ class StrategyEngine(StrategyEngineBase):
         if mode == "sell":
             return self._sell_engine.get_market_strategy(mode)
         else:
-            return self._buy_engine.get_market_strategy(mode)
+            # v11.9.714: Always fetch sell strategy first to account for planned sales in Buy simulation
+            # (Buy is now aware of Sell's intentions)
+            sell_res = self._sell_engine.get_market_strategy("sell")
+            return self._buy_engine.get_market_strategy(mode, sell_commands=sell_res.get("raw_commands", {}))

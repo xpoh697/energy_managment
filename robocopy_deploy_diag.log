@@ -3,7 +3,7 @@
    ROBOCOPY     ::     Robust File Copy for Windows                              
 -------------------------------------------------------------------------------
 
-  Started : pi¥tek, 15 maja 2026 10:35:14
+  Started : pi¥tek, 15 maja 2026 13:51:35
    Source : g:\systemair\energy_mamagment\custom_components\energy_management\
      Dest : \\192.168.100.5\config\custom_components\energy_management\
 
@@ -14,10 +14,7 @@
 ------------------------------------------------------------------------------
 
 	                  17	g:\systemair\energy_mamagment\custom_components\energy_management\
-	*EXTRA Dir        -1	\\192.168.100.5\config\custom_components\energy_management\__pycache__\
-	    Newer     		    6839	const.py100%  
-	    Newer     		     418	manifest.json100%  
-	    Newer     		  236479	strategy_base.py100%  
+	    Newer     		  236890	strategy_base.py100%  
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\brand\
 	                   1	g:\systemair\energy_mamagment\custom_components\energy_management\scratch\
 	                   2	g:\systemair\energy_mamagment\custom_components\energy_management\translations\
@@ -26,13 +23,13 @@
 ------------------------------------------------------------------------------
 
                Total    Copied   Skipped  Mismatch    FAILED    Extras
-    Dirs :         5         0         5         0         0         1
-   Files :        23         3        20         0         0         0
-   Bytes :    1.42 m   238.0 k    1.19 m         0         0         0
+    Dirs :         5         0         5         0         0         0
+   Files :        23         1        22         0         0         0
+   Bytes :    1.43 m   231.3 k    1.20 m         0         0         0
    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
 
 
-   Speed :             994ÿ840 Bytes/sec.
-   Speed :              56,925 MegaBytes/min.
-   Ended : pi¥tek, 15 maja 2026 10:35:14
+   Speed :           2ÿ722ÿ873 Bytes/sec.
+   Speed :             155,804 MegaBytes/min.
+   Ended : pi¥tek, 15 maja 2026 13:51:35
 

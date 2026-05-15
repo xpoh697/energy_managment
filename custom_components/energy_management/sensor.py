@@ -2185,6 +2185,52 @@ class EnergyProfileManager:
         energy = cap * (soc / 100.0) if cap > 0 else 0.0
         return float(soc), float(cap), energy
 
+    def get_forecast_hourly(self, ptype="generation") -> Dict[int, float]:
+        """Retrieve hourly forecast map {abs_hour: kw} for the next 48h (Solcast/Templates)."""
+        res = {}
+        now = self.now
+        
+        sensors = []
+        if ptype == "generation":
+            sensors = getattr(self, "forecast_today_hourly_sensor", [])
+        
+        if not sensors:
+            return res
+            
+        for s_id in sensors:
+            state = self.hass.states.get(s_id)
+            if not state: continue
+            
+            # v11.9.715: Support for Solcast-style 'forecast' attribute
+            forecast_list = state.attributes.get("forecast") or state.attributes.get("hourly")
+            if not forecast_list or not isinstance(forecast_list, list):
+                continue
+                
+            for item in forecast_list:
+                try:
+                    # Item can be {datetime: ..., pv_estimate: ...} or {dt: ..., value: ...}
+                    dt_str = item.get("period_start") or item.get("datetime") or item.get("dt")
+                    if not dt_str: continue
+                    
+                    dt_p = dt_util.parse_datetime(str(dt_str))
+                    if not dt_p: continue
+                    
+                    # Normalize to local time for hour matching
+                    dt_local = dt_util.as_local(dt_p)
+                    
+                    # Calculate absolute hour offset from now
+                    # (Used as key in simulation loop)
+                    delta = dt_local.replace(minute=0, second=0, microsecond=0) - now.replace(minute=0, second=0, microsecond=0)
+                    h_abs = now.hour + int(delta.total_seconds() / 3600)
+                    
+                    if 0 <= h_abs < 72: # 3-day horizon
+                        val = float(item.get("pv_estimate") or item.get("value") or item.get("gen_kw") or 0.0)
+                        # Sum up if multiple sensors provide data for the same hour
+                        res[h_abs] = res.get(h_abs, 0.0) + val
+                except (ValueError, TypeError, Exception):
+                    continue
+        return res
+
     def get_forecast_value(self, sensor_list):
         """Sum forecast values from a list of sensor entity IDs. Returns None if no data."""
         if not sensor_list:

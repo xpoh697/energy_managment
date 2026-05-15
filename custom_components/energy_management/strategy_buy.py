@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.701
-# Version change trace v11.9.701: Target SOC always Gatekeeper + 5%. Conditional trigger (Standard vs Turbo).
+# Energy management strategy buy - v11.9.719
+# Version change trace v11.9.719: Refactored window selection to anchor AFTER manual sales (TS 4.2.1.2).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -38,7 +38,7 @@ from .strategy_base import StrategyEngine
 class StrategyBuy(StrategyEngine):
     """Specialized engine for BUY-mode energy management strategies."""
     
-    def get_market_strategy(self, mode="buy"):
+    def get_market_strategy(self, mode="buy", sell_commands=None):
         """Standardized Buying Strategy v11.9.180+"""
         def group_h(hours):
             if not hours: return ""
@@ -74,7 +74,7 @@ class StrategyBuy(StrategyEngine):
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.699",
+            "strategy_version": VERSION,
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -219,12 +219,22 @@ class StrategyBuy(StrategyEngine):
                 sim_range = list(range(cur_hour, cur_hour + 48))
                 sim_cmds = {h: max_p for h in survival_hours}
                 
+                # v11.9.714: Inject planned sell commands into survival simulation
+                if sell_commands:
+                    for h_str, p in sell_commands.items():
+                        try:
+                            h_int = int(h_str)
+                            if h_int not in sim_cmds:
+                                sim_cmds[h_int] = -abs(float(p)) # Discharge power as negative
+                        except (ValueError, TypeError):
+                            continue
+                
                 # v11.9.527: Merge current real-time activity into survival sim commands
                 _p_raw_s = float(man.get_sensor_float(man.battery_power_sensor) or 0.0)
                 if _p_raw_s < -0.05:
                     sim_cmds[cur_hour] = abs(_p_raw_s)
                 
-                _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds, house_profile_override="consumption_base")
+                _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds, allow_discharge=True, house_profile_override="consumption_base")
                 
                 first_violation_h = None
                 first_critical_h = None
@@ -238,13 +248,13 @@ class StrategyBuy(StrategyEngine):
                     h_gatekeeper = self.get_gatekeeper_floor(h_step, morning_h_abs)
                     
                     if 4 <= h_rel < 10:
-                        # Morning Turbo Window: Use soft trigger (Gatekeeper - 0.5)
+                        # Morning Turbo Window: Trigger slightly below Gatekeeper
                         h_survival = h_gatekeeper - 0.5
                         h_critical = h_gatekeeper 
                     else:
-                        # Standard Night/Day: Use old MinSOC + 5% logic
-                        h_survival = min_soc + 5.0
-                        h_critical = min_soc + 2.0
+                        # Standard Night/Day (TS 4.2.1): Detect deep violation, plan by deadline
+                        h_survival = max(h_gatekeeper - 5.0, min_soc + 1.0)
+                        h_critical = min_soc + 5.0 # Deadline
                     
                     if first_violation_h is None and soc_h < h_survival:
                         first_violation_h = h_step
@@ -253,47 +263,62 @@ class StrategyBuy(StrategyEngine):
                     if first_violation_h is not None and first_critical_h is not None:
                         break
                 
+                # v11.9.711: Capture debug samples from the first simulation pass
+                if _loop_i == 0:
+                    res["buy_debug"]["sim_keys_sample"] = [f"'{k}'" for k in list(log.keys())[:3]]
+                    res["buy_debug"]["morning_lookup_key"] = f"'{get_h_log_key(morning_h_abs)}'"
+                    # v11.9.712: Expanded samples
+                    tom_h = cur_hour + 24
+                    res["buy_debug"]["tomorrow_lookup_key"] = f"'{get_h_log_key(tom_h)}'"
+                    res["buy_debug"]["tomorrow_sim_key"] = next((f"'{k}'" for k in log.keys() if "Завтра" in k), "Not found")
+                    res["buy_debug"]["sim_log_24h"] = {k: v["soc"] for k, v in list(log.items())[:24]}
+                    
+                    # v11.9.713: Manual Override Keys Diagnostic
+                    res["buy_debug"]["diag_override_keys"] = list(man.hourly_manual_overrides.keys())
+                    res["buy_debug"]["diag_ts_key_sample"] = (now + timedelta(hours=9)).strftime("%Y-%m-%d %H:00")
+                
                 if _loop_i == 0 and first_violation_h is not None:
                     res["survival_violation_hour"] = first_violation_h
 
                 if first_violation_h is not None:
-                    # We need to plan. Where?
-                    # Hour X is the critical deadline.
-                    hour_X = first_critical_h if first_critical_h is not None else morning_h_abs
-                    
-                    # v11.9.622: Find the latest manual discharge before hour_X to ensure we charge AFTER the drop
-                    latest_manual_discharge_h = -1
-                    for offset in range(max(0, hour_X - cur_hour)):
+                    # v11.9.719: Find the anchor (latest manual discharge) before the violation
+                    anchor_h = cur_hour - 1
+                    for offset in range(max(0, first_violation_h - cur_hour)):
                         h_abs = cur_hour + offset
                         h_dt = (now + timedelta(hours=offset)).replace(minute=0, second=0, microsecond=0)
                         h_ts_key = h_dt.strftime("%Y-%m-%d %H:00")
                         manual_m = man.hourly_manual_overrides.get(h_ts_key)
                         if manual_m and manual_m.get("mode") == "sale_pv_bat":
-                            latest_manual_discharge_h = max(latest_manual_discharge_h, h_abs)
+                            anchor_h = max(anchor_h, h_abs)
 
-                    if cheapest_global <= hour_X and cheapest_global > latest_manual_discharge_h:
-                        # Case A: Cheapest hour is safe to reach, and occurs AFTER any manual dump. Use it!
+                    # Get candidates strictly AFTER the anchor
+                    candidates_after = [h for h in all_buy_prices.keys() if h > anchor_h and h < morning_h_abs and h not in survival_hours]
+                    
+                    if not candidates_after:
+                        # Emergency Fallback: If no slots after sale, pick absolute cheapest global
                         target_h = cheapest_global
                         target_type = "Gatekeeper"
                     else:
-                        # Case B: We will hit critical SOC before cheapest hour, OR cheapest hour is ruined by a manual dump.
-                        candidates_bridge = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= hour_X and sh > latest_manual_discharge_h]
-                        
-                        if not candidates_bridge:
-                            # Fallback if manual sale is right at hour_X
-                            candidates_bridge = [sh for sh in all_buy_prices.keys() if sh not in survival_hours and sh <= hour_X]
-                            
-                        if candidates_bridge:
-                            target_h = min(candidates_bridge, key=lambda x: all_buy_prices[x])
-                            target_type = "Bridge" if cheapest_global > hour_X else "Gatekeeper"
-                        else:
-                            # Total fallback
-                            target_h = cheapest_global
+                        best_after = min(candidates_after, key=lambda h: all_buy_prices[h])
+                        if best_after <= hour_X:
+                            # Case A: Best slot after sale is before deadline
+                            target_h = best_after
                             target_type = "Gatekeeper"
+                        else:
+                            # Case B: Best slot is past deadline. Bridge needed after sale but before deadline.
+                            bridge_candidates = [h for h in candidates_after if h <= hour_X]
+                            if bridge_candidates:
+                                target_h = min(bridge_candidates, key=lambda h: all_buy_prices[h])
+                                target_type = "Bridge"
+                            else:
+                                # No bridge possible after sale. Take first available hour after sale.
+                                target_h = min(candidates_after)
+                                target_type = "Bridge"
 
-                        # v11.9.701: Final Target Calculation (Always Gatekeeper + 5)
-                        survival_targets[target_h] = self.get_gatekeeper_floor(target_h, morning_h_abs) + 5.0
-                        added = True
+                    # v11.9.719: Save target and update iteration flag (OUTSIDE B/A blocks)
+                    survival_targets[target_h] = self.get_gatekeeper_floor(target_h, morning_h_abs) + 5.0
+                    survival_hours.add(target_h)
+                    added = True
                 if not added: break
             
             target_hours = sorted(list(survival_hours))
@@ -469,7 +494,7 @@ class StrategyBuy(StrategyEngine):
                 _LOGGER.debug(f"[Strategy Buy] FINAL Simulation Keys: {list(charge_commands.keys())} | Vals: {list(charge_commands.values())}")
             
             # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
-            soc_end, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=False, b_min_soc=min_soc, dynamic_floors=d_floors)
+            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=False, b_min_soc=min_soc, dynamic_floors=d_floors)
 
             # v11.9.500: Return corrected simulation results. 
             # sensor.py (v11.9.498+) will handle tile synchronization.
@@ -589,7 +614,14 @@ class StrategyBuy(StrategyEngine):
                 "survival_floor": res.get("survival_floor", 0.0),
                 "target_hours": target_hours,
                 "candidates": candidates,
-                "commands": {f"{h}h": p for h, p in charge_commands.items() if p > 0}
+                "commands": {f"{h}h": p for h, p in charge_commands.items() if p > 0},
+                "diag_sim_keys": res["buy_debug"].get("sim_keys_sample"),
+                "diag_lookup": res["buy_debug"].get("morning_lookup_key"),
+                "diag_tom_lookup": res["buy_debug"].get("tomorrow_lookup_key"),
+                "diag_tom_sim": res["buy_debug"].get("tomorrow_sim_key"),
+                "diag_log_24h": res["buy_debug"].get("sim_log_24h"),
+                "diag_override_keys": res["buy_debug"].get("diag_override_keys"),
+                "diag_ts_key_sample": res["buy_debug"].get("diag_ts_key_sample")
             }
 
             txt = "Ожидание окна"
