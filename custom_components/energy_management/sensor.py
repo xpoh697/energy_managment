@@ -3106,8 +3106,8 @@ class InverterOperationModeSensor(SensorEntity):
                     elif s_data and s_data.get("req_p", 0.0) > 0.01:
                         f_sim_data = s_data
                     else:
-                        # Fallback to simple priority if no active commands
-                        f_sim_data = b_data or s_data
+                        # Fallback to Sell strategy for Normal/Discharge hours as it tracks arbitrage/peaks better.
+                        f_sim_data = s_data or b_data
                     
                     p_soc = batt_soc
                     sim_gen = 0.0
@@ -3160,9 +3160,6 @@ class InverterOperationModeSensor(SensorEntity):
                         sim_load = float(f_sim_data.get("load_kw", 0.5))
                         net_p = float(cmd_p) + sim_gen - sim_load
                         
-                        if (is_tom and h == 2) or h == now.hour:
-                            _LOGGER.error(f"[UI Sync Diagnostic] Hour {h} (Tom:{is_tom}): Key:\"{f_h_key}\" | Mode:{f_mode} | SimSOC:{f_sim_data.get('soc')} | AvailableKeys: {list(buy_sim_log.keys())[:5]}...")
-                        
                         if "soc" in f_sim_data:
                             p_soc = float(f_sim_data["soc"])
                         else:
@@ -3170,9 +3167,6 @@ class InverterOperationModeSensor(SensorEntity):
                             p_soc = min(100.0, max(min_soc, float(p_soc) + (float(net_p) / float(b_cap) * 100.0)))
                     else:
                         net_p = float(cmd_p) - 0.3
-                        if (is_tom and h == 2):
-                             _LOGGER.error(f"[UI Sync Diagnostic MISS] Hour {h} (Tom:{is_tom}): Key:\"{f_h_key}\" NOT FOUND in buy_sim_log (size {len(buy_sim_log)})")
-                        
                         if net_p > 0: net_p *= eff
                         p_soc = min(100.0, max(min_soc, float(p_soc) + (float(net_p) / float(b_cap) * 100.0)))
                     
