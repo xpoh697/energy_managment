@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.699
-# Version change trace v11.9.699: Synchronized survival logic release.
+# Energy management strategy sell - v11.9.700
+# Version change trace v11.9.700: Strict conditional survival logic release.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta

@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.699
-# Version change trace v11.9.699: Conditional survival threshold (Turbo window vs Standard night).
+# Energy management strategy buy - v11.9.700
+# Version change trace v11.9.700: Strict conditional survival (Turbo window vs Old MinSOC+5 calculation).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -233,18 +233,17 @@ class StrategyBuy(StrategyEngine):
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
                     
-                    # v11.9.699: Conditional Survival Logic (TS 1.2 vs 4.2.1.1)
+                    # v11.9.700: Strict Conditional Survival Logic (User Override)
                     h_rel = h_step % 24
                     if 4 <= h_rel < 10:
-                        # Morning Turbo Window: Panic only if below Turbo limit (Gatekeeper)
+                        # Morning Turbo Window: Use soft trigger to avoid Morning Sale conflict
                         h_gatekeeper = self.get_gatekeeper_floor(h_step, morning_h_abs)
                         h_survival = h_gatekeeper - 0.5
                         h_critical = h_gatekeeper - 1.0
                     else:
-                        # Standard Night/Day: Use old 5% safety buffer logic (TS 4.2.1.1)
-                        h_survival_raw = self.get_survival_floor(h_step, morning_h_abs)
-                        h_survival = h_survival_raw + 5.0
-                        h_critical = h_survival_raw + 3.0
+                        # Standard Night/Day: Use old MinSOC + 5% logic
+                        h_survival = min_soc + 5.0
+                        h_critical = min_soc + 3.0
                     
                     if first_violation_h is None and soc_h < h_survival:
                         first_violation_h = h_step
@@ -291,16 +290,13 @@ class StrategyBuy(StrategyEngine):
                             target_h = cheapest_global
                             target_type = "Gatekeeper"
 
-                        # v11.9.699: Conditional Target Calculation
+                        # v11.9.700: Strict Target Calculation
                         h_rel_t = target_h % 24
                         if 4 <= h_rel_t < 10:
-                            survival_targets[target_h] = self.get_gatekeeper_floor(target_h, morning_h_abs) + 2.0
+                            survival_targets[target_h] = self.get_gatekeeper_floor(target_h, morning_h_abs) + 5.0
                         else:
-                            # v11.9.438: Target is survival_floor + 5% for standard hysteresis
-                            if target_type == "Bridge":
-                                survival_targets[target_h] = self.get_survival_floor(cheapest_global, morning_h_abs) + 5.0
-                            else:
-                                survival_targets[target_h] = self.get_survival_floor(target_h + 1, morning_h_abs) + 5.0
+                            # v11.9.700: Standard night target is min_soc + 10 (old logic)
+                            survival_targets[target_h] = min_soc + 10.0
                         added = True
                 if not added: break
             
@@ -317,11 +313,11 @@ class StrategyBuy(StrategyEngine):
                 survival_target = current_survival_target
             else:
                 last_h = max(target_hours) if target_hours else cur_hour
-                # v11.9.699: Conditional Global Fallback Target
+                # v11.9.700: Strict Global Fallback Target
                 if 4 <= (last_h % 24) < 10:
-                    survival_target = self.get_gatekeeper_floor(last_h, morning_h_abs) + 2.0
+                    survival_target = self.get_gatekeeper_floor(last_h, morning_h_abs) + 5.0
                 else:
-                    survival_target = self.get_survival_floor(last_h + 1, morning_h_abs) + 5.0
+                    survival_target = min_soc + 10.0
             
             _buy_debug["survival_floor"] = round_f(self.get_survival_floor(cur_hour, morning_h_abs), 1)
             _buy_debug["gatekeeper_floor"] = round_f(self.get_gatekeeper_floor(cur_hour, morning_h_abs), 1)
