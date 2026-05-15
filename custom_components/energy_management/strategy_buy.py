@@ -586,15 +586,15 @@ class StrategyBuy(StrategyEngine):
                 self._last_strat_log = strat_log
             
             planned_results = {}
-            for h in sorted(charge_commands.keys()):
-                p = charge_commands[h]
-                if p <= 0.05: continue
-                h_fmt = f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")
-                h_soc = self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc)
-                planned_results[h_fmt] = {
-                    "power": round_f(p, 3),
-                    "soc": round_f(h_soc, 1)
-                }
+            for h, p in charge_commands.items():
+                if p > 0.05:
+                    h_fmt = f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")
+                    # v11.9.746: Take SOC from the FINAL sim_log, not the search loop log.
+                    h_soc = self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc)
+                    planned_results[h_fmt] = {
+                        "power": round_f(p, 3),
+                        "soc": round_f(h_soc, 1)
+                    }
             res["planned_power_per_h"] = planned_results
             res["target_soc"] = round_f(target_soc, 1)
             res["active_hours"] = [int(h) for h, v in charge_commands.items() if v > 0.05 or all_buy_prices.get(int(h), 1.0) <= 0.0]
