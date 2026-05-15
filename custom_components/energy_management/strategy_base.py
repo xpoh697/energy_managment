@@ -1139,11 +1139,7 @@ class StrategyEngine:
                     _h_mode_str = current_mode
                 
                 if _h_mode_str is None:
-                    # v11.9.635: Use sell price correctly
-                    if _h_sell_price >= price_sell_only_pv and real_h < sale_pv_no_bat_max_hour and expected_gen_kw > 0.05:
-                        _h_mode_str = "sale_pv_no_bat"
-                    else:
-                        _h_mode_str = "sale_pv"
+                    _h_mode_str = "sale_pv"
                 
                 # Safety fallback for specific mode names like 'sale_pv' -> 'sale_pv_bat'
                 if _h_mode_str == "sale_pv": _h_mode_str = "sale_pv"
