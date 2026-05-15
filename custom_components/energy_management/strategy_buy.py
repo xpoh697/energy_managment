@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.727
-# Version change trace v11.9.727: Code cleanup - removed redundant variables (only deadline_h remains).
+# Energy management strategy buy - v11.9.728
+# Version change trace v11.9.728: Fixed AttributeError (get_sunrise_hour).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -272,7 +272,7 @@ class StrategyBuy(StrategyEngine):
                 if deadline_h is not None:
                     # Hour X is the critical deadline.
                     hour_X = deadline_h
-                    morning_h_abs = self.get_sunrise_hour() + (24 if cur_hour >= 4 else 0)
+                    morning_h_abs = (man.get_sunrise_hour() or 8) + (24 if cur_hour >= 4 else 0)
                     
                     # v11.9.622: Search for USER anchors (Manual Sell)
                     anchor_h = cur_hour - 1
