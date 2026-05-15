@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.741
-# Version change trace v11.9.741: Added diagnostic logs for sim integrity.
+# Energy management strategy buy - v11.9.743
+# Version change trace v11.9.743: Fix 'log' key mismatch (Dictionary vs String) for sensor.py.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -517,6 +517,9 @@ class StrategyBuy(StrategyEngine):
                     _lk = get_h_log_key(h)
                     _s_val = self._get_soc_from_log(sim_log, _lk, -1.0)
                     man.log_to_file(f"[Strategy Buy Diagnostic] Hour {h} ({_lk}): Cmd {p}kW -> Result SOC: {_s_val}%")
+            
+            # v11.9.742: Critical - use HH:00 keys to match sensor.py expectations perfectly.
+            res["soc_simulation"] = {f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else ""): self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc) for h in sim_range}
             res["charge_commands_debug"] = charge_commands
             
             # 3b. Survival-only simulation for debug (to see what 'Survival Bridge' sees)
@@ -541,7 +544,8 @@ class StrategyBuy(StrategyEngine):
                     for h, v in log_dict.items() if isinstance(h, str) and ":" in h and "Завтра" not in h
                 ])
             # v11.9.739: Ensure debug log uses the final simulation (sim_log) which includes charges.
-            res["buy_debug"]["sim_log_24h"] = {k: v["soc"] for k, v in list(sim_log.items())[:36]}
+            # v11.9.742: Ensure debug log also uses predictable UI keys
+            res["buy_debug"]["sim_log_24h"] = {f"{int(str(k).split(':')[0]):02d}:00" + (" (Завтра)" if "Завтра" in k else ""): v["soc"] for k, v in list(sim_log.items())[:36]}
             res["projected_soc"] = round_f(self._get_soc_from_log(sim_log, get_h_log_key(cur_hour), b_soc), 1)
             
             log_str_base = fmt_log(sim_log_base)
