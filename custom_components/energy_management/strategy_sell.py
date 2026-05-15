@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.701
-# Version change trace v11.9.701: Final survival logic release.
+# Energy management strategy sell - v11.9.703
+# Version change trace v11.9.703: Dynamic sale_pv_no_bat window (Latest Charge Start simulation).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -798,11 +798,40 @@ class StrategySell(StrategyEngine):
             first_sell_h = min(active_h) if active_h else cur_hour
             last_sell_h = max(active_h) if active_h else cur_hour
             
+            # v11.9.703: Dynamic "Latest Charge Start" Calculation
+            # We find the latest hour when we can still reach 100% SOC (and morning target)
+            latest_charge_start = cur_hour
+            sunset_h_abs = cur_hour + ((man.get_sunset_hour() or 18) - (cur_hour % 24) + 24) % 24
+            target_100 = 99.5
+            target_morn = floors_sliding.get(morning_h_abs, emergency_soc + 2.0)
+            
+            # Mini-sim check: what if we block PV charging until hour H?
+            for h_limit in range(cur_hour, min(cur_hour + 14, sunset_h_abs)):
+                # Block PV charging from cur_hour to h_limit
+                overrides = {h: "sale_pv_no_bat" for h in range(cur_hour, h_limit + 1)}
+                _, chk_log, _ = self.run_soc_simulation(
+                    b_soc, sim_range, now, commands={}, 
+                    mode_overrides=overrides, b_min_soc=emergency_soc,
+                    ignore_blended=True, house_profile_override="consumption_base"
+                )
+                
+                # Check 1: Do we hit 100% by sunset?
+                hit_100 = any(v.get("soc", 0.0) >= target_100 for h_key, v in chk_log.items() if ":" in h_key and "Завтра" not in h_key)
+                # Check 2: Do we survive until tomorrow's morning target?
+                morn_key = f"{morning_h_abs%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
+                soc_m = self._get_soc_from_log(chk_log, morn_key, 0.0)
+                
+                if hit_100 and soc_m >= target_morn - 0.1:
+                    latest_charge_start = h_limit + 1 # We can safely sell until h_limit
+                else:
+                    break
+
             res["sell_simulation"] = {
                 "projected_soc_at_sale_start_pct": round_f(_get_soc_val(sim_log, first_sell_h - 1), 1),
                 "projected_soc_after_sale_pct": round_f(_get_soc_val(sim_log, last_sell_h), 1),
                 "projected_soc_morning_pct": round_f(_get_soc_val(sim_log, morning_h_abs), 1),
                 "hit_full_before": hit_full_before if 'hit_full_before' in locals() else False,
+                "latest_charge_start": latest_charge_start,
                 "log": sim_log
             }
             res["raw_commands"] = sell_commands
@@ -853,6 +882,7 @@ class StrategySell(StrategyEngine):
             
             res["sell_simulation"] = {
                 "hit_full_before": hit_full_before,
+                "latest_charge_start": latest_charge_start if 'latest_charge_start' in locals() else cur_hour,
                 "projected_soc_at_sale_start_pct": round_f(self._get_soc_from_log(sim_log, f"{(first_sell_h-1)%24:02d}:59" + (" (Завтра)" if (first_sell_h-1) >= 24 else ""), b_soc), 1),
                 "projected_soc_after_sale_pct": round_f(self._get_soc_from_log(sim_log, f"{last_sell_h%24:02d}:59" + (" (Завтра)" if last_sell_h >= 24 else ""), b_soc), 1),
                 # v11.9.145: Use morning_h_abs - 1 to see SOC at the START of sunrise hour (before generation)

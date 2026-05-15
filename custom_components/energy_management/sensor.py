@@ -3625,6 +3625,7 @@ class InverterOperationModeSensor(SensorEntity):
             hys = 0.5 if mode == "sale_pv_no_bat" else 0.0
             is_low_for_morning = bool(morning_soc_proj < (target_morning + hys))
             hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
+            latest_charge_start = (sell_strategy.get("sell_simulation") or {}).get("latest_charge_start", sim_h)
             
             is_profitable_to_save = False
             if peak_start_abs is not None:
@@ -3646,9 +3647,9 @@ class InverterOperationModeSensor(SensorEntity):
             _need_charge_for_morning = bool(is_low_for_morning)
             _need_charge_for_peak = bool((is_preparing_for_peak or is_profitable_to_save) and not hit_full_before)
             
-            # v11.9.702: If we are going to hit 100% today anyway (hit_full_before), 
-            # don't block solar-only export. The surplus is guaranteed.
-            _block_sale_pv_no_bat = (_need_charge_for_morning or _need_charge_for_peak) and not hit_full_before
+            # v11.9.703: Dynamic Sale PV window. 
+            # We block ONLY if we have passed the "Latest Charge Start" hour.
+            _block_sale_pv_no_bat = bool(sim_h >= latest_charge_start)
 
             if is_before_limit_hour and has_surplus and not _block_sale_pv_no_bat and cur_price > 0:
                 mode = "sale_pv_no_bat"
