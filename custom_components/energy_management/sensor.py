@@ -3145,23 +3145,18 @@ class InverterOperationModeSensor(SensorEntity):
                         elif manual_mode in ["stop_sale", "sale_pv_no_bat"]:
                             cmd_p = 0.0
 
-                    # Simplified simulation step for UI (v11.9.498)
+                    # v11.9.745: Force-sync with strategy simulation logs.
                     eff = float(man.get_efficiency_coefficient())
-                    net_p = float(cmd_p) - 0.3 # Assume 300W base load if no better data
-                    if f_sim_data and isinstance(f_sim_data, dict):
-                        sim_gen = float(f_sim_data.get("gen_kw", 0.0))
-                        sim_load = float(f_sim_data.get("load_kw", 0.5))
-                        p_soc = float(f_sim_data.get("soc", batt_soc))
-                        net_p = float(cmd_p) + sim_gen - sim_load
-                    # v11.9.538: Update SOC ONLY for future hours to prevent poisoning from past today
-                    # If f_sim_data has 'soc', trust it as final result for the hour (prevents double-counting)
-                    if is_tom or h >= now.hour:
-                        if f_sim_data and isinstance(f_sim_data, dict) and "soc" in f_sim_data:
-                            p_soc = float(f_sim_data["soc"])
-                        else:
-                            if net_p > 0: net_p *= eff
-                            p_soc = min(100.0, max(min_soc, float(p_soc) + (float(net_p) / float(b_cap) * 100.0)))
-                        batt_soc = float(p_soc)
+                    net_p = float(cmd_p) - 0.3 # Assume 300W base load
+                    
+                    if f_sim_data and isinstance(f_sim_data, dict) and "soc" in f_sim_data:
+                        p_soc = float(f_sim_data["soc"])
+                    else:
+                        # Fallback ONLY if no simulation data exists at all
+                        if net_p > 0: net_p *= eff
+                        p_soc = min(100.0, max(min_soc, float(p_soc) + (float(net_p) / float(b_cap) * 100.0)))
+                    
+                    batt_soc = float(p_soc)
 
                     # Mode logic: Pass extracted forecasts to correctly trigger Morning Mode and other logic
                     f_mode, _, _, _ = self._get_mode_at(
