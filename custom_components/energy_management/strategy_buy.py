@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.720
-# Version change trace v11.9.720: Fixed NameError (missing hour_X) in selection block.
+# Energy management strategy buy - v11.9.722
+# Version change trace v11.9.722: Separated Survival floor (no buffer) from Gatekeeper floor (with buffer). Fixed anchor range.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -243,17 +243,20 @@ class StrategyBuy(StrategyEngine):
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
                     
+                    # v11.9.722: Survival Trigger is now based on pure survival_floor (No Buffer)
+                    h_survival_floor = self.get_survival_floor(h_step, morning_h_abs)
+                    h_gatekeeper = self.get_gatekeeper_floor(h_step, morning_h_abs)
+                    
                     # v11.9.701: Final Survival Logic (Standard Night vs Turbo Morning)
                     h_rel = h_step % 24
-                    h_gatekeeper = self.get_gatekeeper_floor(h_step, morning_h_abs)
                     
                     if 4 <= h_rel < 10:
                         # Morning Turbo Window: Trigger slightly below Gatekeeper
                         h_survival = h_gatekeeper - 0.5
                         h_critical = h_gatekeeper 
                     else:
-                        # Standard Night/Day (TS 4.2.1): Detect deep violation, plan by deadline
-                        h_survival = max(h_gatekeeper - 5.0, min_soc + 1.0)
+                        # Standard Night/Day (TS 4.2.1): Detect deep violation against survival_floor
+                        h_survival = max(h_survival_floor - 5.0, min_soc + 1.0)
                         h_critical = min_soc + 5.0 # Deadline
                     
                     if first_violation_h is None and soc_h < h_survival:
@@ -284,9 +287,8 @@ class StrategyBuy(StrategyEngine):
                     # Hour X is the critical deadline.
                     hour_X = first_critical_h if first_critical_h is not None else morning_h_abs
 
-                    # v11.9.719: Find the anchor (latest manual discharge) before the violation
-                    anchor_h = cur_hour - 1
-                    for offset in range(max(0, first_violation_h - cur_hour)):
+                    # v11.9.722: Include violation hour itself in anchor scan (+1)
+                    for offset in range(max(0, first_violation_h - cur_hour + 1)):
                         h_abs = cur_hour + offset
                         h_dt = (now + timedelta(hours=offset)).replace(minute=0, second=0, microsecond=0)
                         h_ts_key = h_dt.strftime("%Y-%m-%d %H:00")
