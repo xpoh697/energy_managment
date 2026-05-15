@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.737
-# Version change trace v11.9.737: Fixed NameError (sim_log -> log).
+# Energy management strategy buy - v11.9.739
+# Version change trace v11.9.739: Use sim_log for final results to show charge rise in UI.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -263,7 +263,6 @@ class StrategyBuy(StrategyEngine):
                     tom_h = cur_hour + 24
                     res["buy_debug"]["tomorrow_lookup_key"] = f"'{get_h_log_key(tom_h)}'"
                     res["buy_debug"]["tomorrow_sim_key"] = next((f"'{k}'" for k in log.keys() if "Завтра" in k), "Not found")
-                    res["buy_debug"]["sim_log_24h"] = {k: v["soc"] for k, v in list(log.items())[:24]}
                     
                     # v11.9.713: Manual Override Keys Diagnostic
                     res["buy_debug"]["manual_override_keys"] = list(man.hourly_manual_overrides.keys())
@@ -531,8 +530,11 @@ class StrategyBuy(StrategyEngine):
                     f"{int(str(h).split(':')[0]):02d}: {v['soc']:.0f}% (G:{v.get('gen_kw',0.0):.1f}|C:{v.get('cons_kw',0.0):.1f}|N:{v.get('p_bat',0.0):.1f})" 
                     for h, v in log_dict.items() if isinstance(h, str) and ":" in h and "Завтра" not in h
                 ])
-
-            log_str_base = fmt_log(_log_sun)
+            # v11.9.739: Ensure debug log uses the final simulation (sim_log) which includes charges.
+            res["buy_debug"]["sim_log_24h"] = {k: v["soc"] for k, v in list(sim_log.items())[:36]}
+            res["projected_soc"] = round_f(self._get_soc_from_log(sim_log, get_h_log_key(cur_hour), b_soc), 1)
+            
+            log_str_base = fmt_log(sim_log_base)
             log_str_final = fmt_log(sim_log)
 
             res["buy_simulation"] = {
