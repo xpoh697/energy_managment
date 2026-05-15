@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.696
-# Version change trace v11.9.696: Synchronized with UI anchor date.
+# Energy management strategy sell - v11.9.699
+# Version change trace v11.9.699: Synchronized survival logic release.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta

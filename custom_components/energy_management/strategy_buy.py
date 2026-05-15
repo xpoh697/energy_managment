@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.697
-# Version change trace v11.9.697: Reduced survival trigger buffer (5% -> 2%) to avoid Morning Sale conflict.
+# Energy management strategy buy - v11.9.699
+# Version change trace v11.9.699: Conditional survival threshold (Turbo window vs Standard night).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -74,7 +74,7 @@ class StrategyBuy(StrategyEngine):
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
         res = {
-            "strategy_version": "v11.9.627",
+            "strategy_version": "v11.9.699",
             "state": "standard",
             "mode": mode,
             "active_hours": [],
@@ -233,15 +233,22 @@ class StrategyBuy(StrategyEngine):
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
                     
-                    # v11.9.697: Standardized logic - Trigger on (Survival Raw + 2.0%)
-                    # Reduced from 5.0% to avoid conflict with Morning Sale targets (15%).
-                    h_survival_raw = self.get_survival_floor(h_step, morning_h_abs)
-                    h_survival = h_survival_raw + 2.0
-                    h_critical = h_survival_raw + 1.0
+                    # v11.9.699: Conditional Survival Logic (TS 1.2 vs 4.2.1.1)
+                    h_rel = h_step % 24
+                    if 4 <= h_rel < 10:
+                        # Morning Turbo Window: Panic only if below Turbo limit (Gatekeeper)
+                        h_gatekeeper = self.get_gatekeeper_floor(h_step, morning_h_abs)
+                        h_survival = h_gatekeeper - 0.5
+                        h_critical = h_gatekeeper - 1.0
+                    else:
+                        # Standard Night/Day: Use old 5% safety buffer logic (TS 4.2.1.1)
+                        h_survival_raw = self.get_survival_floor(h_step, morning_h_abs)
+                        h_survival = h_survival_raw + 5.0
+                        h_critical = h_survival_raw + 3.0
                     
-                    if first_violation_h is None and soc_h < h_survival - 0.1:
+                    if first_violation_h is None and soc_h < h_survival:
                         first_violation_h = h_step
-                    if first_critical_h is None and soc_h < h_critical - 0.1:
+                    if first_critical_h is None and soc_h < h_critical:
                         first_critical_h = h_step
                     if first_violation_h is not None and first_critical_h is not None:
                         break
@@ -284,14 +291,16 @@ class StrategyBuy(StrategyEngine):
                             target_h = cheapest_global
                             target_type = "Gatekeeper"
 
-                    if target_h not in survival_hours:
-                        survival_hours.add(target_h)
-                        # v11.9.438: Target is now survival_floor + 5% for better economy
-                        if target_type == "Bridge":
-                            # For bridge, we target the floor at the time of the cheapest_global hour
-                            survival_targets[target_h] = self.get_survival_floor(cheapest_global, morning_h_abs) + 5.0
+                        # v11.9.699: Conditional Target Calculation
+                        h_rel_t = target_h % 24
+                        if 4 <= h_rel_t < 10:
+                            survival_targets[target_h] = self.get_gatekeeper_floor(target_h, morning_h_abs) + 2.0
                         else:
-                            survival_targets[target_h] = self.get_survival_floor(target_h + 1, morning_h_abs) + 5.0
+                            # v11.9.438: Target is survival_floor + 5% for standard hysteresis
+                            if target_type == "Bridge":
+                                survival_targets[target_h] = self.get_survival_floor(cheapest_global, morning_h_abs) + 5.0
+                            else:
+                                survival_targets[target_h] = self.get_survival_floor(target_h + 1, morning_h_abs) + 5.0
                         added = True
                 if not added: break
             
@@ -308,8 +317,11 @@ class StrategyBuy(StrategyEngine):
                 survival_target = current_survival_target
             else:
                 last_h = max(target_hours) if target_hours else cur_hour
-                # v11.9.438: Global fallback target is also survival_floor + 5%
-                survival_target = self.get_survival_floor(last_h + 1, morning_h_abs) + 5.0
+                # v11.9.699: Conditional Global Fallback Target
+                if 4 <= (last_h % 24) < 10:
+                    survival_target = self.get_gatekeeper_floor(last_h, morning_h_abs) + 2.0
+                else:
+                    survival_target = self.get_survival_floor(last_h + 1, morning_h_abs) + 5.0
             
             _buy_debug["survival_floor"] = round_f(self.get_survival_floor(cur_hour, morning_h_abs), 1)
             _buy_debug["gatekeeper_floor"] = round_f(self.get_gatekeeper_floor(cur_hour, morning_h_abs), 1)
