@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.728
-# Version change trace v11.9.728: Fixed AttributeError (get_sunrise_hour).
+# Energy management strategy buy - v11.9.729
+# Version change trace v11.9.729: Finalized diagnostic sync (Deadline terminology and debug merge).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -574,8 +574,8 @@ class StrategyBuy(StrategyEngine):
                 res["can_wait_for_negative"] = True
             
             # v11.9.421: Expanded Survival Debug
-            v_hour = res.get("survival_violation_hour")
-            v_text = f"Пробой в {v_hour%24:02d}:00" if v_hour is not None else "Без пробоев"
+            v_hour = res.get("deadline_hour")
+            v_text = f"Дедлайн в {v_hour%24:02d}:00" if v_hour is not None else "Без дедлайнов"
 
             if res["state"] == "active":
                 res["state"] = "active"
@@ -592,7 +592,7 @@ class StrategyBuy(StrategyEngine):
             future_buy = {hb: pb for hb, pb in all_buy_prices.items() if hb > cur_hour}
             _best_b = min(future_buy.values()) if future_buy else 0.0
 
-            res["buy_debug"] = {
+            res["buy_debug"].update({
                 "summary": f"{_neg_tag} | Цена: {cur_p_f:.2f} | Цель: {target_soc:.1f}%".strip(" | "),
                 "current_price": cur_p_f,
                 "target_soc": round_f(target_soc, 1),
@@ -605,8 +605,8 @@ class StrategyBuy(StrategyEngine):
                 "arbitrage_gain": round_f(_gain, 3),
                 "negative_prices_upcoming": bool(negative_hours),
                 "charge_reason": res.get("charge_reason", "Нет"),
-                "gatekeeper_floor": res.get("gatekeeper_floor", 0.0),
-                "survival_floor": res.get("survival_floor", 0.0),
+                "gatekeeper_floor": round_f(res.get("gatekeeper_floor", 0.0), 1),
+                "survival_floor": round_f(res.get("survival_floor", 0.0), 1),
                 "target_hours": target_hours,
                 "candidates": candidates,
                 "commands": {f"{h}h": p for h, p in charge_commands.items() if p > 0},
@@ -617,7 +617,10 @@ class StrategyBuy(StrategyEngine):
                 "diag_log_24h": res["buy_debug"].get("sim_log_24h"),
                 "diag_override_keys": res["buy_debug"].get("diag_override_keys"),
                 "diag_ts_key_sample": res["buy_debug"].get("diag_ts_key_sample")
-            }
+            })
+            
+            # v11.9.729: Inject loose debug items
+            res["buy_debug"].update(_buy_debug)
 
             txt = "Ожидание окна"
             reason = res.get("charge_reason", "")
