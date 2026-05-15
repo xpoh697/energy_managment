@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.729
-# Version change trace v11.9.729: Finalized diagnostic sync (Deadline terminology and debug merge).
+# Energy management strategy buy - v11.9.730
+# Version change trace v11.9.730: Cleaned up debug duplicates (removed diag_* prefixes).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -586,12 +586,11 @@ class StrategyBuy(StrategyEngine):
                 _neg_tag = "Ожидание отрицательных цен"
             
             future_sell = {hs: ps for hs, ps in all_sell_prices.items() if hs > cur_hour}
-            _best_s = max(future_sell.values()) if future_sell else 0.0
             _gain = float(_best_s * eff - cur_p_f - deg_cost) if _best_s > 0 else 0.0
             _is_arb = bool(_gain >= threshold)
             future_buy = {hb: pb for hb, pb in all_buy_prices.items() if hb > cur_hour}
             _best_b = min(future_buy.values()) if future_buy else 0.0
-
+            # v11.9.730: Consolidated debug output (removed diag_* duplicates)
             res["buy_debug"].update({
                 "summary": f"{_neg_tag} | Цена: {cur_p_f:.2f} | Цель: {target_soc:.1f}%".strip(" | "),
                 "current_price": cur_p_f,
@@ -610,16 +609,9 @@ class StrategyBuy(StrategyEngine):
                 "target_hours": target_hours,
                 "candidates": candidates,
                 "commands": {f"{h}h": p for h, p in charge_commands.items() if p > 0},
-                "diag_sim_keys": res["buy_debug"].get("sim_keys_sample"),
-                "diag_lookup": res["buy_debug"].get("morning_lookup_key"),
-                "diag_tom_lookup": res["buy_debug"].get("tomorrow_lookup_key"),
-                "diag_tom_sim": res["buy_debug"].get("tomorrow_sim_key"),
-                "diag_log_24h": res["buy_debug"].get("sim_log_24h"),
-                "diag_override_keys": res["buy_debug"].get("diag_override_keys"),
-                "diag_ts_key_sample": res["buy_debug"].get("diag_ts_key_sample")
             })
             
-            # v11.9.729: Inject loose debug items
+            # v11.9.729: Inject simulation samples and anchors from loop
             res["buy_debug"].update(_buy_debug)
 
             txt = "Ожидание окна"
