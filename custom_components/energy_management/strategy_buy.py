@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.722
-# Version change trace v11.9.722: Separated Survival floor (no buffer) from Gatekeeper floor (with buffer). Fixed anchor range.
+# Energy management strategy buy - v11.9.725
+# Version change trace v11.9.725: Returned Gatekeeper floor to debug output. Unified trigger active.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -243,27 +243,15 @@ class StrategyBuy(StrategyEngine):
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
                     
-                    # v11.9.722: Survival Trigger is now based on pure survival_floor (No Buffer)
-                    h_survival_floor = self.get_survival_floor(h_step, morning_h_abs)
-                    h_gatekeeper = self.get_gatekeeper_floor(h_step, morning_h_abs)
+                    # v11.9.724: Unified Trigger Logic (Deadline ONLY)
+                    # We only care if simulation predicts hitting MinSOC + 5.0% (18%)
+                    h_deadline = min_soc + 5.0
                     
-                    # v11.9.701: Final Survival Logic (Standard Night vs Turbo Morning)
-                    h_rel = h_step % 24
+                    if first_violation_h is None and soc_h < h_deadline:
+                        first_violation_h = h_step # Trigger
+                        first_critical_h = h_step  # Deadline
                     
-                    if 4 <= h_rel < 10:
-                        # Morning Turbo Window: Trigger slightly below Gatekeeper
-                        h_survival = h_gatekeeper - 0.5
-                        h_critical = h_gatekeeper 
-                    else:
-                        # Standard Night/Day (TS 4.2.1): Detect deep violation against survival_floor
-                        h_survival = max(h_survival_floor - 5.0, min_soc + 1.0)
-                        h_critical = min_soc + 5.0 # Deadline
-                    
-                    if first_violation_h is None and soc_h < h_survival:
-                        first_violation_h = h_step
-                    if first_critical_h is None and soc_h < h_critical:
-                        first_critical_h = h_step
-                    if first_violation_h is not None and first_critical_h is not None:
+                    if first_violation_h is not None:
                         break
                 
                 # v11.9.711: Capture debug samples from the first simulation pass
@@ -339,11 +327,12 @@ class StrategyBuy(StrategyEngine):
                 survival_target = current_survival_target
             else:
                 last_h = max(target_hours) if target_hours else cur_hour
-                # v11.9.701: Final Global Fallback Target (Always Gatekeeper + 5)
-                survival_target = self.get_gatekeeper_floor(last_h, morning_h_abs) + 5.0
+                # v11.9.723: Target is always Survival_Floor + 5.0% (TS 4.2.1.3)
+                survival_target = self.get_survival_floor(last_h, morning_h_abs) + 5.0
             
             _buy_debug["survival_floor"] = round_f(self.get_survival_floor(cur_hour, morning_h_abs), 1)
             _buy_debug["gatekeeper_floor"] = round_f(self.get_gatekeeper_floor(cur_hour, morning_h_abs), 1)
+            _buy_debug["deadline_level"] = round_f(min_soc + 5.0, 1)
             _buy_debug["cheapest_global"] = f"{cheapest_global%24:02d}:00"
             _buy_debug["survival_targets"] = {f"{h%24:02d}h": round_f(t, 1) for h, t in survival_targets.items()}
 
