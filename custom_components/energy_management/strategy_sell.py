@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.704
-# Version change trace v11.9.704: Adaptive target SOC for latest_charge_start (Peak vs Gatekeeper survival).
+# Energy management strategy sell - v11.9.707
+# Version change trace v11.9.707: Check for peak SOC achievement during the day instead of sunset snapshot.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -819,9 +819,15 @@ class StrategySell(StrategyEngine):
                     ignore_blended=True, house_profile_override="consumption_base"
                 )
                 
-                # Check 1: Do we hit our target by sunset?
-                soc_s = self._get_soc_from_log(chk_log, sunset_key, 0.0)
-                hit_target = soc_s >= (target_at_sunset - 0.5)
+                # v11.9.707: Check if we hit the target.
+                # If we need 100% for peak, we check if we reach it AT ANY POINT during the day.
+                if has_future_peak:
+                    max_soc = max([v.get("soc", 0.0) for k_v, v in chk_log.items() if ":" in k_v and "Завтра" not in k_v])
+                    hit_target = max_soc >= 99.4
+                else:
+                    # No peak: only survival matters at sunset.
+                    soc_s = self._get_soc_from_log(chk_log, sunset_key, 0.0)
+                    hit_target = soc_s >= (target_at_sunset - 0.5)
                 
                 # Check 2: Do we survive until tomorrow's morning target?
                 morn_key = f"{morning_h_abs%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
