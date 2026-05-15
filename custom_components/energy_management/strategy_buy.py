@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.731
-# Version change trace v11.9.731: Fixed NameError (_best_s).
+# Energy management strategy buy - v11.9.733
+# Version change trace v11.9.733: Fixed survival target (use get_survival_floor instead of gatekeeper).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -266,8 +266,8 @@ class StrategyBuy(StrategyEngine):
                     res["buy_debug"]["sim_log_24h"] = {k: v["soc"] for k, v in list(log.items())[:24]}
                     
                     # v11.9.713: Manual Override Keys Diagnostic
-                    res["buy_debug"]["diag_override_keys"] = list(man.hourly_manual_overrides.keys())
-                    res["buy_debug"]["diag_ts_key_sample"] = (now + timedelta(hours=9)).strftime("%Y-%m-%d %H:00")
+                    res["buy_debug"]["manual_override_keys"] = list(man.hourly_manual_overrides.keys())
+                    res["buy_debug"]["timestamp_sample"] = (now + timedelta(hours=9)).strftime("%Y-%m-%d %H:00")
                 
                 if deadline_h is not None:
                     # Hour X is the critical deadline.
@@ -310,7 +310,8 @@ class StrategyBuy(StrategyEngine):
                                 target_type = "Bridge"
 
                     # v11.9.719: Save target and update iteration flag (OUTSIDE B/A blocks)
-                    survival_targets[target_h] = self.get_gatekeeper_floor(target_h, morning_h_abs) + 5.0
+                    # v11.9.733: Use Survival_Floor + 5% (TS 4.2.1.3)
+                    survival_targets[target_h] = self.get_survival_floor(target_h, morning_h_abs) + 5.0
                     survival_hours.add(target_h)
                     added = True
                 if not added: break
@@ -399,6 +400,9 @@ class StrategyBuy(StrategyEngine):
                 soc_at_start_plan = self._get_soc_from_log(_log_sun, get_h_log_key(planning_h), b_soc)
                 cur_p = all_buy_prices.get(cur_hour, 99.0)
 
+                # v11.9.732: Calculate minimum predicted SOC dip for survival deficit calculation
+                min_predicted_soc = min([self._get_soc_from_log(_log_sun, get_h_log_key(h), 100.0) for h in _sim_h_disp])
+                
                 # v11.9.623: Survival Priority. Never skip survival due to future solar.
                 if cur_p > 0 and is_solar_enough and res.get("charge_reason") != "Выживание":
                     needed_kwh_dc = 0.0
@@ -408,6 +412,12 @@ class StrategyBuy(StrategyEngine):
                 elif res.get("charge_reason") == "Отрицательная цена":
                     needed_kwh_dc = max(0.0, (target_soc - soc_at_start_plan) * b_cap / 100.0)
                     decision_str = f"Зарядка (Минус {cur_p:.2f})"
+                elif res.get("charge_reason") == "Выживание":
+                    # v11.9.732: Use minimum predicted dip to calculate required survival energy
+                    needed_kwh_dc = max(0.0, (target_soc - min_predicted_soc) * b_cap / 100.0)
+                    decision_str = f"Зарядка (Выживание)"
+                    if cur_hour not in target_hours:
+                        decision_str = "Ожидание окна"
                 else:
                     needed_kwh_dc = max(0.0, (target_soc - soc_at_start_plan) * b_cap / 100.0)
                     if needed_kwh_dc > 0:
@@ -416,6 +426,9 @@ class StrategyBuy(StrategyEngine):
                             decision_str = "Ожидание окна"
                     else:
                         decision_str = "Ожидание окна"
+                
+                _buy_debug["min_predicted_soc"] = round_f(min_predicted_soc, 1)
+                _buy_debug["needed_kwh_dc_survival"] = round_f(needed_kwh_dc, 3)
 
                 # v11.9.200: Advanced Allocator (Price-Priority with progressive SOC)
                 # 1. Sort by price to fill cheapest hours first
