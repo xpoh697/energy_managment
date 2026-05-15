@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.700
-# Version change trace v11.9.700: Strict conditional survival (Turbo window vs Old MinSOC+5 calculation).
+# Energy management strategy buy - v11.9.701
+# Version change trace v11.9.701: Target SOC always Gatekeeper + 5%. Conditional trigger (Standard vs Turbo).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -233,17 +233,18 @@ class StrategyBuy(StrategyEngine):
                     h_key = get_h_log_key(h_step)
                     soc_h = self._get_soc_from_log(log, h_key, 100.0)
                     
-                    # v11.9.700: Strict Conditional Survival Logic (User Override)
+                    # v11.9.701: Final Survival Logic (Standard Night vs Turbo Morning)
                     h_rel = h_step % 24
+                    h_gatekeeper = self.get_gatekeeper_floor(h_step, morning_h_abs)
+                    
                     if 4 <= h_rel < 10:
-                        # Morning Turbo Window: Use soft trigger to avoid Morning Sale conflict
-                        h_gatekeeper = self.get_gatekeeper_floor(h_step, morning_h_abs)
+                        # Morning Turbo Window: Use soft trigger (Gatekeeper - 0.5)
                         h_survival = h_gatekeeper - 0.5
-                        h_critical = h_gatekeeper - 1.0
+                        h_critical = h_gatekeeper 
                     else:
                         # Standard Night/Day: Use old MinSOC + 5% logic
                         h_survival = min_soc + 5.0
-                        h_critical = min_soc + 3.0
+                        h_critical = min_soc + 2.0
                     
                     if first_violation_h is None and soc_h < h_survival:
                         first_violation_h = h_step
@@ -290,13 +291,8 @@ class StrategyBuy(StrategyEngine):
                             target_h = cheapest_global
                             target_type = "Gatekeeper"
 
-                        # v11.9.700: Strict Target Calculation
-                        h_rel_t = target_h % 24
-                        if 4 <= h_rel_t < 10:
-                            survival_targets[target_h] = self.get_gatekeeper_floor(target_h, morning_h_abs) + 5.0
-                        else:
-                            # v11.9.700: Standard night target is min_soc + 10 (old logic)
-                            survival_targets[target_h] = min_soc + 10.0
+                        # v11.9.701: Final Target Calculation (Always Gatekeeper + 5)
+                        survival_targets[target_h] = self.get_gatekeeper_floor(target_h, morning_h_abs) + 5.0
                         added = True
                 if not added: break
             
@@ -313,11 +309,8 @@ class StrategyBuy(StrategyEngine):
                 survival_target = current_survival_target
             else:
                 last_h = max(target_hours) if target_hours else cur_hour
-                # v11.9.700: Strict Global Fallback Target
-                if 4 <= (last_h % 24) < 10:
-                    survival_target = self.get_gatekeeper_floor(last_h, morning_h_abs) + 5.0
-                else:
-                    survival_target = min_soc + 10.0
+                # v11.9.701: Final Global Fallback Target (Always Gatekeeper + 5)
+                survival_target = self.get_gatekeeper_floor(last_h, morning_h_abs) + 5.0
             
             _buy_debug["survival_floor"] = round_f(self.get_survival_floor(cur_hour, morning_h_abs), 1)
             _buy_debug["gatekeeper_floor"] = round_f(self.get_gatekeeper_floor(cur_hour, morning_h_abs), 1)
