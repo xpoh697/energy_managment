@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.703
-# Version change trace v11.9.703: Dynamic sale_pv_no_bat window (Latest Charge Start simulation).
+# Energy management strategy sell - v11.9.704
+# Version change trace v11.9.704: Adaptive target SOC for latest_charge_start (Peak vs Gatekeeper survival).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -798,16 +798,20 @@ class StrategySell(StrategyEngine):
             first_sell_h = min(active_h) if active_h else cur_hour
             last_sell_h = max(active_h) if active_h else cur_hour
             
-            # v11.9.703: Dynamic "Latest Charge Start" Calculation
-            # We find the latest hour when we can still reach 100% SOC (and morning target)
+            # v11.9.704: Adaptive "Latest Charge Start" Calculation
+            # If no evening peak is expected, we only need to hit Gatekeeper floor at sunset.
             latest_charge_start = cur_hour
-            sunset_h_abs = cur_hour + ((man.get_sunset_hour() or 18) - (cur_hour % 24) + 24) % 24
-            target_100 = 99.5
+            sunset_h_rel = man.get_sunset_hour() or 18
+            sunset_h_abs = cur_hour + (sunset_h_rel - (cur_hour % 24) + 24) % 24
+            sunset_key = f"{sunset_h_rel:02d}:59" + (" (Завтра)" if sunset_h_abs >= 24 else "")
+            
+            # Decision: Do we need 100% or just survival?
+            has_future_peak = any(h >= sunset_h_abs for h in target_hours)
             target_morn = floors_sliding.get(morning_h_abs, emergency_soc + 2.0)
+            target_at_sunset = 99.5 if has_future_peak else floors_sliding.get(sunset_h_abs, target_morn)
             
             # Mini-sim check: what if we block PV charging until hour H?
             for h_limit in range(cur_hour, min(cur_hour + 14, sunset_h_abs)):
-                # Block PV charging from cur_hour to h_limit
                 overrides = {h: "sale_pv_no_bat" for h in range(cur_hour, h_limit + 1)}
                 _, chk_log, _ = self.run_soc_simulation(
                     b_soc, sim_range, now, commands={}, 
@@ -815,14 +819,16 @@ class StrategySell(StrategyEngine):
                     ignore_blended=True, house_profile_override="consumption_base"
                 )
                 
-                # Check 1: Do we hit 100% by sunset?
-                hit_100 = any(v.get("soc", 0.0) >= target_100 for h_key, v in chk_log.items() if ":" in h_key and "Завтра" not in h_key)
+                # Check 1: Do we hit our target by sunset?
+                soc_s = self._get_soc_from_log(chk_log, sunset_key, 0.0)
+                hit_target = soc_s >= (target_at_sunset - 0.5)
+                
                 # Check 2: Do we survive until tomorrow's morning target?
                 morn_key = f"{morning_h_abs%24:02d}:59" + (" (Завтра)" if morning_h_abs >= 24 else "")
                 soc_m = self._get_soc_from_log(chk_log, morn_key, 0.0)
                 
-                if hit_100 and soc_m >= target_morn - 0.1:
-                    latest_charge_start = h_limit + 1 # We can safely sell until h_limit
+                if hit_target and soc_m >= target_morn - 0.1:
+                    latest_charge_start = h_limit + 1 
                 else:
                     break
 
