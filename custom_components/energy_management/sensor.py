@@ -2873,6 +2873,13 @@ class InverterOperationModeSensor(SensorEntity):
         self._mode_lock_until = None
         self._locked_mode = None
         self._last_logged_hour = None
+        # v11.9.705: Latch for inverter commands (Stability TS)
+        self._latched_power = 0.0
+        self._latched_amps = 0.0
+        self._last_latch_mode = None
+        self._last_latch_target_soc = -1.0
+        self._last_latch_manual_power = -1.0
+
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
             name=manager.entry.data.get("name", "Energy Management"),
@@ -3305,19 +3312,35 @@ class InverterOperationModeSensor(SensorEntity):
             attrs["buy_decision"] = buy_strategy.get("strategy_decision", "Нет данных")
             attrs["sell_decision"] = sell_strategy.get("strategy_decision", "Нет данных")
 
-            attrs["power"] = p_val
-            attrs["target_soc"] = t_soc
+            # v11.9.705: Strategic Latch for Stability
+            # Power and Charge Amps change ONLY when strategic context changes:
+            # 1. Inverter Mode change
+            # 2. Target SOC change (> 0.05% difference)
+            # 3. Manual Power limit change
+            manual_p = float(self.manager._manual_anchor_power or 0.0)
+            latch_broken = (
+                mode != self._last_latch_mode or 
+                abs(t_soc - self._last_latch_target_soc) > 0.05 or
+                abs(manual_p - self._last_latch_manual_power) > 0.01
+            )
             
-            # v11.1.38: Always show charge_amps if voltage sensor is available (0 if not charging)
-            if self.manager.battery_voltage_sensor:
+            if latch_broken:
+                self._latched_power = p_val
+                v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor) or 52.0
                 if c_amps_fixed is not None:
-                    attrs["charge_amps"] = c_amps_fixed
+                    self._latched_amps = c_amps_fixed
+                elif v_val > 0.1 and p_val > 0.001:
+                    self._latched_amps = round_f((p_val * 1000.0) / v_val, 2)
                 else:
-                    v_val = self.manager.get_sensor_float(self.manager.battery_voltage_sensor)
-                    if v_val and v_val > 0.1 and p_val > 0:
-                        attrs["charge_amps"] = round_f((p_val * 1000.0) / v_val, 2)
-                    else:
-                        attrs["charge_amps"] = 0.0
+                    self._latched_amps = 0.0
+                
+                self._last_latch_mode = mode
+                self._last_latch_target_soc = t_soc
+                self._last_latch_manual_power = manual_p
+
+            attrs["power"] = self._latched_power
+            attrs["target_soc"] = t_soc
+            attrs["charge_amps"] = self._latched_amps
             
             attrs["is_preparing_for_peak"] = (peak_start_abs is not None)
             attrs["next_peak_start_hour"] = self.manager.strategy_engine._format_h(peak_start_abs)
