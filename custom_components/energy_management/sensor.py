@@ -3691,11 +3691,8 @@ class InverterOperationModeSensor(SensorEntity):
                     elif is_profitable_to_save:
                          reason = "Сохранение заряда: Пик выгоднее текущей цены"
                     else: reason = "Экономия заряда: Дефицит до рассвета"
-                elif not is_before_limit_hour: reason = f"Цена ({cur_price or 0.0:.2f}) >= Порога ост. продажи ({price_stop_sell or 0.0:.2f})"
-                elif not has_surplus:
-                    if is_forecast: reason = "По прогнозу нет излишков солнца (генерация < потребления)"
-                    else: reason = f"Ожидание солнца: тек. генерация ({avg_gen:.2f}) < тек. потребления ({avg_load:.2f})"
-                else: reason = "Цена выше порога, но условия продажи PV+АКБ не соблюдены"
+                elif _block_sale_pv_no_bat: reason = f"Окно продажи PV закрыто: Начало плановой зарядки (лимит {latest_charge_start}:00)"
+                else: reason = "Стандартная работа (ожидание излишков или команды AI)"
         
         # Priority 5: Wait for negative price
         elif is_waiting_for_neg:
