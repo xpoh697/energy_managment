@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.719
-# Version change trace v11.9.719: Refactored window selection to anchor AFTER manual sales (TS 4.2.1.2).
+# Energy management strategy buy - v11.9.720
+# Version change trace v11.9.720: Fixed NameError (missing hour_X) in selection block.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -281,6 +281,9 @@ class StrategyBuy(StrategyEngine):
                     res["survival_violation_hour"] = first_violation_h
 
                 if first_violation_h is not None:
+                    # Hour X is the critical deadline.
+                    hour_X = first_critical_h if first_critical_h is not None else morning_h_abs
+
                     # v11.9.719: Find the anchor (latest manual discharge) before the violation
                     anchor_h = cur_hour - 1
                     for offset in range(max(0, first_violation_h - cur_hour)):
