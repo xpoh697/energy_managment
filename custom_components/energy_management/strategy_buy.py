@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.730
-# Version change trace v11.9.730: Cleaned up debug duplicates (removed diag_* prefixes).
+# Energy management strategy buy - v11.9.731
+# Version change trace v11.9.731: Fixed NameError (_best_s).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -586,6 +586,7 @@ class StrategyBuy(StrategyEngine):
                 _neg_tag = "Ожидание отрицательных цен"
             
             future_sell = {hs: ps for hs, ps in all_sell_prices.items() if hs > cur_hour}
+            _best_s = max(future_sell.values()) if future_sell else 0.0
             _gain = float(_best_s * eff - cur_p_f - deg_cost) if _best_s > 0 else 0.0
             _is_arb = bool(_gain >= threshold)
             future_buy = {hb: pb for hb, pb in all_buy_prices.items() if hb > cur_hour}
