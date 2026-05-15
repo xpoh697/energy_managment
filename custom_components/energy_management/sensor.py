@@ -3145,14 +3145,28 @@ class InverterOperationModeSensor(SensorEntity):
                         elif manual_mode in ["stop_sale", "sale_pv_no_bat"]:
                             cmd_p = 0.0
 
-                    # v11.9.745: Force-sync with strategy simulation logs.
+                    # v11.9.747: Force-sync with strategy simulation logs.
                     eff = float(man.get_efficiency_coefficient())
-                    net_p = float(cmd_p) - 0.3 # Assume 300W base load
                     
-                    if f_sim_data and isinstance(f_sim_data, dict) and "soc" in f_sim_data:
-                        p_soc = float(f_sim_data["soc"])
+                    # Extract rich data from sim_log if available
+                    if f_sim_data and isinstance(f_sim_data, dict):
+                        sim_gen = float(f_sim_data.get("gen_kw", 0.0))
+                        sim_load = float(f_sim_data.get("load_kw", 0.5))
+                        net_p = float(cmd_p) + sim_gen - sim_load
+                        
+                        if (is_tom and h == 2) or h == now.hour:
+                            _LOGGER.error(f"[UI Sync Diagnostic] Hour {h} (Tom:{is_tom}): Key:\"{f_h_key}\" | Mode:{f_mode} | SimSOC:{f_sim_data.get('soc')} | AvailableKeys: {list(buy_sim_log.keys())[:5]}...")
+                        
+                        if "soc" in f_sim_data:
+                            p_soc = float(f_sim_data["soc"])
+                        else:
+                            if net_p > 0: net_p *= eff
+                            p_soc = min(100.0, max(min_soc, float(p_soc) + (float(net_p) / float(b_cap) * 100.0)))
                     else:
-                        # Fallback ONLY if no simulation data exists at all
+                        net_p = float(cmd_p) - 0.3
+                        if (is_tom and h == 2):
+                             _LOGGER.error(f"[UI Sync Diagnostic MISS] Hour {h} (Tom:{is_tom}): Key:\"{f_h_key}\" NOT FOUND in buy_sim_log (size {len(buy_sim_log)})")
+                        
                         if net_p > 0: net_p *= eff
                         p_soc = min(100.0, max(min_soc, float(p_soc) + (float(net_p) / float(b_cap) * 100.0)))
                     
