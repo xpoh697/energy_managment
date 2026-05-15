@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.726
-# Version change trace v11.9.726: Updated terminology in debug status (Deadline vs Violation).
+# Energy management strategy buy - v11.9.727
+# Version change trace v11.9.727: Code cleanup - removed redundant variables (only deadline_h remains).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -236,8 +236,7 @@ class StrategyBuy(StrategyEngine):
                 
                 _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds, allow_discharge=True, house_profile_override="consumption_base")
                 
-                first_violation_h = None
-                first_critical_h = None
+                deadline_h = None
                 
                 for h_step in sim_range:
                     h_key = get_h_log_key(h_step)
@@ -245,15 +244,17 @@ class StrategyBuy(StrategyEngine):
                     
                     # v11.9.724: Unified Trigger Logic (Deadline ONLY)
                     # We only care if simulation predicts hitting MinSOC + 5.0% (18%)
-                    h_deadline = min_soc + 5.0
+                    limit = min_soc + 5.0
                     
-                    if first_violation_h is None and soc_h < h_deadline:
-                        first_violation_h = h_step # Trigger
-                        first_critical_h = h_step  # Deadline
-                    
-                    if first_violation_h is not None:
+                    if deadline_h is None and soc_h < limit:
+                        deadline_h = h_step 
                         break
                 
+                # v11.9.711: Capture debug samples from the first simulation pass
+                if _loop_i == 0 and deadline_h is not None:
+                    res["deadline_hour"] = deadline_h
+                    res["survival_status"] = f"Дедлайн в {deadline_h%24:02d}:00"
+       
                 # v11.9.711: Capture debug samples from the first simulation pass
                 if _loop_i == 0:
                     res["buy_debug"]["sim_keys_sample"] = [f"'{k}'" for k in list(log.keys())[:3]]
@@ -268,16 +269,15 @@ class StrategyBuy(StrategyEngine):
                     res["buy_debug"]["diag_override_keys"] = list(man.hourly_manual_overrides.keys())
                     res["buy_debug"]["diag_ts_key_sample"] = (now + timedelta(hours=9)).strftime("%Y-%m-%d %H:00")
                 
-                if _loop_i == 0 and first_violation_h is not None:
-                    res["survival_violation_hour"] = first_violation_h
-                    res["survival_status"] = f"Дедлайн в {first_violation_h%24:02d}:00"
-
-                if first_violation_h is not None:
+                if deadline_h is not None:
                     # Hour X is the critical deadline.
-                    hour_X = first_critical_h if first_critical_h is not None else morning_h_abs
-
+                    hour_X = deadline_h
+                    morning_h_abs = self.get_sunrise_hour() + (24 if cur_hour >= 4 else 0)
+                    
+                    # v11.9.622: Search for USER anchors (Manual Sell)
+                    anchor_h = cur_hour - 1
                     # v11.9.722: Include violation hour itself in anchor scan (+1)
-                    for offset in range(max(0, first_violation_h - cur_hour + 1)):
+                    for offset in range(max(0, deadline_h - cur_hour + 1)):
                         h_abs = cur_hour + offset
                         h_dt = (now + timedelta(hours=offset)).replace(minute=0, second=0, microsecond=0)
                         h_ts_key = h_dt.strftime("%Y-%m-%d %H:00")
