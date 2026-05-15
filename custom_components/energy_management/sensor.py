@@ -3094,14 +3094,20 @@ class InverterOperationModeSensor(SensorEntity):
                     # v11.9.446: Get projected data (SOC, gen, load) from simulation logs FIRST 
                     # to use them for accurate mode resolution in the card view.
                     f_h_key = f_dt.strftime("%H:59") + (" (Завтра)" if is_tom else "")
-                    # v11.9.744: Smart sim_log selection. Prioritize the log matching the hour mode.
-                    # This prevents Sell strategy from poisoning the Buy strategy's forecast in the UI.
-                    if "buy" in f_mode:
-                        f_sim_data = buy_sim_log.get(f_h_key) or sell_sim_log.get(f_h_key)
-                    elif "sale_pv_bat" in f_mode or "sell" in f_mode:
-                        f_sim_data = sell_sim_log.get(f_h_key) or buy_sim_log.get(f_h_key)
+                    # v11.9.748: Intelligent Log Selection. 
+                    # Inspect both logs and prioritize the one that has an ACTIVE command (req_p).
+                    # This prevents the "Natural Discharge" log from Sell strategy from poisoning 
+                    # the "Active Charge" log from Buy strategy.
+                    s_data = sell_sim_log.get(f_h_key)
+                    b_data = buy_sim_log.get(f_h_key)
+                    
+                    if b_data and b_data.get("req_p", 0.0) > 0.01:
+                        f_sim_data = b_data
+                    elif s_data and s_data.get("req_p", 0.0) > 0.01:
+                        f_sim_data = s_data
                     else:
-                        f_sim_data = sell_sim_log.get(f_h_key) or buy_sim_log.get(f_h_key)
+                        # Fallback to simple priority if no active commands
+                        f_sim_data = b_data or s_data
                     
                     p_soc = batt_soc
                     sim_gen = 0.0
