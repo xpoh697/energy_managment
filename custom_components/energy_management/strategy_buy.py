@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.740
-# Version change trace v11.9.740: Inject mode_overrides to fix SOC growth physics in sim.
+# Energy management strategy buy - v11.9.741
+# Version change trace v11.9.741: Added diagnostic logs for sim integrity.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -501,16 +501,22 @@ class StrategyBuy(StrategyEngine):
             if charge_commands:
                 _LOGGER.debug(f"[Strategy Buy] FINAL Simulation Keys: {list(charge_commands.keys())} | Vals: {list(charge_commands.values())}")
             
+            # v11.9.741: Diagnostic - trace charge_commands before sim
+            _charge_trace = [f"{h}:{p}kW" for h, p in charge_commands.items() if p > 0.05]
+            man.log_to_file(f"[Strategy Buy Diagnostic] Final Commands: {', '.join(_charge_trace)}")
+            
             # v11.9.740: Inject mode_overrides to ensure simulator knows we are in 'buy' mode
-            # (which bypasses house load from battery to grid).
             m_overrides = {h: "buy" for h, p in charge_commands.items() if p > 0.05}
             
             # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
             _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=False, b_min_soc=min_soc, dynamic_floors=d_floors, mode_overrides=m_overrides)
 
-            # v11.9.500: Return corrected simulation results. 
-            # sensor.py (v11.9.498+) will handle tile synchronization.
-            res["soc_simulation"] = {get_h_log_key(h): self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc) for h in sim_range}
+            # v11.9.741: Diagnostic - trace sim result for charging hours
+            for h, p in charge_commands.items():
+                if p > 0.05:
+                    _lk = get_h_log_key(h)
+                    _s_val = self._get_soc_from_log(sim_log, _lk, -1.0)
+                    man.log_to_file(f"[Strategy Buy Diagnostic] Hour {h} ({_lk}): Cmd {p}kW -> Result SOC: {_s_val}%")
             res["charge_commands_debug"] = charge_commands
             
             # 3b. Survival-only simulation for debug (to see what 'Survival Bridge' sees)
