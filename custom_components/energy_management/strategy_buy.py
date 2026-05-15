@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.725
-# Version change trace v11.9.725: Returned Gatekeeper floor to debug output. Unified trigger active.
+# Energy management strategy buy - v11.9.726
+# Version change trace v11.9.726: Updated terminology in debug status (Deadline vs Violation).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -270,6 +270,7 @@ class StrategyBuy(StrategyEngine):
                 
                 if _loop_i == 0 and first_violation_h is not None:
                     res["survival_violation_hour"] = first_violation_h
+                    res["survival_status"] = f"Дедлайн в {first_violation_h%24:02d}:00"
 
                 if first_violation_h is not None:
                     # Hour X is the critical deadline.
