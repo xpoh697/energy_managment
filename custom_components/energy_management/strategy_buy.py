@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.735
-# Version change trace v11.9.735: Replace _log_sun with sim_log.
+# Energy management strategy buy - v11.9.737
+# Version change trace v11.9.737: Fixed NameError (sim_log -> log).
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -397,12 +397,12 @@ class StrategyBuy(StrategyEngine):
             else:
                 # We have candidate hours. Decide if we actually need to buy.
                 planning_h = min(target_hours)
-                soc_at_start_plan = self._get_soc_from_log(sim_log, get_h_log_key(planning_h), b_soc)
+                soc_at_start_plan = self._get_soc_from_log(log, get_h_log_key(planning_h), b_soc)
                 cur_p = all_buy_prices.get(cur_hour, 99.0)
 
-                # v11.9.734: Use the main simulation log (which is most accurate) to find the dip
-                # instead of a separate solar-optimistic simulation.
-                min_predicted_soc = min([self._get_soc_from_log(sim_log, get_h_log_key(h), 100.0) for h in _sim_h_disp])
+                # v11.9.737: Use the main simulation log (log) to find the dip
+                # (Replaced NameError sim_log with log)
+                min_predicted_soc = min([self._get_soc_from_log(log, get_h_log_key(h), 100.0) for h in _sim_h_disp])
                 
                 # v11.9.623: Survival Priority. Never skip survival due to future solar.
                 if cur_p > 0 and is_solar_enough and res.get("charge_reason") != "Выживание":

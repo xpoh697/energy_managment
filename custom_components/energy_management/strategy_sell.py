@@ -1,5 +1,5 @@
-# Energy management strategy sell - v11.9.707
-# Version change trace v11.9.707: Check for peak SOC achievement during the day instead of sunset snapshot.
+# Energy management strategy sell - v11.9.736
+# Version change trace v11.9.736: Include manual overrides in UI plan.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
