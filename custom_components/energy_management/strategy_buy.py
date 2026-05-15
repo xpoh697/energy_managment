@@ -1,5 +1,5 @@
-# Energy management strategy buy - v11.9.739
-# Version change trace v11.9.739: Use sim_log for final results to show charge rise in UI.
+# Energy management strategy buy - v11.9.740
+# Version change trace v11.9.740: Inject mode_overrides to fix SOC growth physics in sim.
 import logging
 _LOGGER = logging.getLogger(__name__)
 from datetime import datetime, timedelta
@@ -501,8 +501,12 @@ class StrategyBuy(StrategyEngine):
             if charge_commands:
                 _LOGGER.debug(f"[Strategy Buy] FINAL Simulation Keys: {list(charge_commands.keys())} | Vals: {list(charge_commands.values())}")
             
+            # v11.9.740: Inject mode_overrides to ensure simulator knows we are in 'buy' mode
+            # (which bypasses house load from battery to grid).
+            m_overrides = {h: "buy" for h, p in charge_commands.items() if p > 0.05}
+            
             # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
-            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=False, b_min_soc=min_soc, dynamic_floors=d_floors)
+            _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=False, b_min_soc=min_soc, dynamic_floors=d_floors, mode_overrides=m_overrides)
 
             # v11.9.500: Return corrected simulation results. 
             # sensor.py (v11.9.498+) will handle tile synchronization.
@@ -510,7 +514,7 @@ class StrategyBuy(StrategyEngine):
             res["charge_commands_debug"] = charge_commands
             
             # 3b. Survival-only simulation for debug (to see what 'Survival Bridge' sees)
-            _, sim_log_base, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc, house_profile_override="consumption_base", dynamic_floors=d_floors)
+            _, sim_log_base, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=True, b_min_soc=min_soc, house_profile_override="consumption_base", dynamic_floors=d_floors, mode_overrides=m_overrides)
             
             # v11.9.427: Use the last hour OF CHARGING for soc_end, to match Planned Power display
             last_charge_h = max([h for h, p in charge_commands.items() if p > 0.05], default=cur_hour)
