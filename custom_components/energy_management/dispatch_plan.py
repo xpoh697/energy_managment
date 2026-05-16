@@ -111,7 +111,8 @@ class EnergyLogicEngine:
         batt_soc: float, 
         manager: Any, 
         is_forecast: bool = False,
-        abs_hour: Optional[int] = None
+        abs_hour: Optional[int] = None,
+        profiles: Optional[Dict[str, Any]] = None
     ) -> tuple:
         """
         Calculates the inverter mode for a given timestamp and SOC.
@@ -178,8 +179,13 @@ class EnergyLogicEngine:
             avg_gen = float(getattr(manager, "avg_gen_5m_kw", 0.0) or 0.0)
         else:
             h_rel_str = str(sim_h)
-            prof_gen = manager.get_predicted_profile("generation")
-            prof_cons = manager.get_predicted_profile("consumption_total")
+            if profiles:
+                prof_gen = profiles.get("gen", {})
+                prof_cons = profiles.get("cons", {})
+            else:
+                prof_gen = manager.get_predicted_profile("generation")
+                prof_cons = manager.get_predicted_profile("consumption_total")
+                
             avg_gen = float(prof_gen.get(h_rel_str, 0.0) or 0.0)
             avg_load = float(prof_cons.get(h_rel_str, 0.5) or 0.5)
 
@@ -189,11 +195,7 @@ class EnergyLogicEngine:
         # 5. Negative Price Waiting Logic
         neg_h = buy_strategy.get("first_negative_hour")
         can_wait = buy_strategy.get("can_wait_for_negative", False)
-        is_gen_night = False
-        try:
-            prof_gen_avg = manager.get_average_profile("generation", manager.custom_period, "all")
-            is_gen_night = float(prof_gen_avg.get(str(sim_h), 0.0)) < 0.01
-        except: pass
+        is_gen_night = avg_gen < 0.01
         is_waiting_for_neg = bool(can_wait and neg_h is not None and not is_gen_night)
 
         # 6. Peak Preparation Logic

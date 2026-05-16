@@ -904,6 +904,8 @@ class EnergyProfileManager:
             prof_cons = self.get_predicted_profile("consumption_total")
             prof_cons_base = self.get_predicted_profile("consumption_base")
             
+            shared_profiles = {"gen": prof_gen, "cons": prof_cons, "cons_base": prof_cons_base}
+            
             self.log_to_file(f"DIAG: Forecast Sensors. Hourly: {self.forecast_today_hourly_sensor}, Today: {self.forecast_today_sensor}")
             self.log_to_file(f"DIAG: Gen Profile Sample (10h-16h): {[prof_gen.get(str(h), 0.0) for h in range(10, 17)]}")
             
@@ -933,7 +935,8 @@ class EnergyProfileManager:
                     batt_soc=sim_soc,
                     manager=self,
                     is_forecast=(h_abs > 0),
-                    abs_hour=(now.hour + h_abs)
+                    abs_hour=(now.hour + h_abs),
+                    profiles=shared_profiles
                 )
                 
                 slot.mode = mode
