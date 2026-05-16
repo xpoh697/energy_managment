@@ -252,3 +252,19 @@ Here are 3 points of QA/SRE critique:
 
 ### Conclusion
 We will implement the global helper `getSocInfo`, change the Normal mode icon to `'mdi:solar-power-variant'`, update the timeline CSS and HTML structure to place the battery badge in the top-left corner, and rewrite the point-update mechanism to fully support this color-coded telemetry. We will deploy this under version `v12.0.73`.
+
+## [2026-05-17 00:46] Task: Fine-Tuning Spacing in Timeline Hour Cards
+
+### Archi
+I propose raising the battery SOC badge higher and pushing all other central card elements lower to make the layout feel perfectly balanced, spacious, and premium:
+1. Shift `.h-soc-top-left` absolute positioning to `top: 2px; left: 4px;` (raising it by 3px and shifting it 2px left).
+2. Add a `margin-top: 5px;` to `.h-icon` (the top icon inside the card) to push the entire group of centered elements (Icon, Time, Prices, Mode) down, creating a beautiful margin between them and the top-left SOC badge.
+
+### Skeptic
+Here are 3 points of visual/QA critique:
+1. **Overlap Prevention**: Pushing the main solar panel/battery icon down by 5px and pulling the SOC badge up by 3px creates a clear 8px buffer between them, completely eliminating the visual overlap.
+2. **Symmetry**: The new coordinates align the badge perfectly with the rounded corner of the card.
+3. **No Layout Breaks**: Using simple margins and absolute top coordinate changes is completely safe and won't cause any flex layout breakage in standard Lovelace views.
+
+### Conclusion
+We will adjust the coordinates of the absolute SOC badge to `top: 2px; left: 4px;` and add `margin-top: 5px;` to `.h-icon` in the CSS styles inside `energy-management-card.js`, deploying under version `v12.0.74`.
