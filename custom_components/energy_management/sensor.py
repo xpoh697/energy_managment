@@ -2607,9 +2607,9 @@ class EnergyProfileManager:
         """Calculate scaling coefficient."""
         return self.strategy_engine.get_gen_forecast_coefficient(forecast_value, prof_gen, hour_start, hour_end)
 
-    def get_market_strategy(self, mode="buy"):
+    def get_market_strategy(self, mode="buy", allow_recalc=True):
         """Complex market strategy solver."""
-        res = self.strategy_engine.get_market_strategy(mode)
+        res = self.strategy_engine.get_market_strategy(mode, allow_recalc=allow_recalc)
         
         # v11.3.2: Capture Power/SOC/Amps anchor at the start of the hour or mode entry
         now = dt_util.now()
@@ -3032,8 +3032,8 @@ class BatteryEndOfDaySOCSensor(SensorEntity):
                 sim_hours = list(range(now.hour, sunrise_hour))
 
         # 1. Get active strategy constraints to merge into simulation
-        buy_strat = self.manager.strategy_engine.get_market_strategy("buy") or {}
-        sell_strat = self.manager.strategy_engine.get_market_strategy("sell") or {}
+        buy_strat = self.manager.strategy_engine.get_market_strategy("buy", allow_recalc=False) or {}
+        sell_strat = self.manager.strategy_engine.get_market_strategy("sell", allow_recalc=False) or {}
         
         charge_commands = buy_strat.get("charge_commands", {})
         planned_sell = sell_strat.get("planned_sell", {})
@@ -3386,8 +3386,8 @@ class InverterOperationModeSensor(SensorEntity):
         cur_price = self.manager.get_price("sell", today_str, sim_h)
 
         # Strategy results
-        sell_strategy = self.manager.get_market_strategy("sell") or {}
-        buy_strategy = self.manager.get_market_strategy("buy") or {}
+        sell_strategy = self.manager.get_market_strategy("sell", allow_recalc=False) or {}
+        buy_strategy = self.manager.get_market_strategy("buy", allow_recalc=False) or {}
         
         # When forecasting, we use absolute hours to match strategy indices (v11.4.20)
         if is_forecast:
@@ -3918,13 +3918,13 @@ class MarketStrategySensor(SensorEntity):
 
     @property
     def native_value(self):
-        res = self.manager.get_market_strategy(self.mode)
+        res = self.manager.get_market_strategy(self.mode, allow_recalc=False)
         # v11.9.429: Prioritize descriptive text for the main dashboard
         return res.get("power_decision", res.get("state", "idle"))
 
     @property
     def extra_state_attributes(self):
-        res = self.manager.get_market_strategy(self.mode)
+        res = self.manager.get_market_strategy(self.mode, allow_recalc=False)
         _LOGGER.debug("[UI Debug] Strategy %s res keys: %s", self.mode, list(res.keys()))
         if "limit_used" in res:
             _LOGGER.debug("[UI Debug] Strategy %s limit_used: %s", self.mode, res["limit_used"])

@@ -1324,7 +1324,7 @@ class StrategyEngine:
 
         return float(simulated_soc), history_log, float(overflow_kwh)
 
-    def get_market_strategy(self, mode="buy"):
+    def get_market_strategy(self, mode="buy", allow_recalc=True):
         now = dt_util.now()
         man: Any = self.manager
         
@@ -1332,6 +1332,17 @@ class StrategyEngine:
         cached = self._strategy_cache.get(cache_key)
         if cached and (now - cached["time"]).total_seconds() < 30 and cached["time"].hour == now.hour:
             return cached["res"]
+
+        if not allow_recalc:
+            return {
+                "state": "idle", 
+                "reason": "Ожидание инициализации", 
+                "active_hours": [],
+                "target_soc": 0.0,
+                "recommended_power_kw": 0.0,
+                "arbitrage_decision": "Ожидание",
+                "strategy_decision": "Ожидание"
+            }
 
         # v11.6.532: Full initialization restoration
         _b_soc_s, _b_cap_s, _ = man.get_battery_state()
