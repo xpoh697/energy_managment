@@ -1,5 +1,5 @@
 DOMAIN = "energy_management"
-VERSION = "v12.0.21"
+VERSION = "v12.0.23"
 
 VERSION_CODE = 1200000
 

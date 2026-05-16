@@ -928,7 +928,7 @@ class EnergyProfileManager:
                 
                 # 4. Layered Decision Logic (Logic Engine)
                 # Use sim_soc to make decisions for future hours
-                mode, reason, is_buy, is_sell = EnergyLogicEngine.get_mode_at(
+                mode, reason, is_buy, is_sell, t_soc = EnergyLogicEngine.get_mode_at(
                     dt_now=dt_h,
                     batt_soc=sim_soc,
                     manager=self,
@@ -938,6 +938,7 @@ class EnergyProfileManager:
                 
                 slot.mode = mode
                 slot.reason = reason
+                slot.target_soc = t_soc
                 
                 # 5. Extract specific power/soc from strategies
                 # Manual Override Sync for Slot 0

@@ -127,7 +127,15 @@ class EnergyLogicEngine:
         ts_key = dt_now.strftime("%Y-%m-%d %H:00")
         h_override = manager.hourly_manual_overrides.get(ts_key)
         if h_override:
-            return h_override["mode"], f"Manual Override ({ts_key})", h_override.get("mode") == "buy", h_override.get("mode") == "sale_pv_bat"
+            return h_override["mode"], f"Manual Override ({ts_key})", h_override.get("mode") == "buy", h_override.get("mode") == "sale_pv_bat", float(h_override.get("soc_limit", 100.0))
+
+        # 0.1 Check for Legacy Manual Overrides (Buttons) - Only for today
+        if today_str == now_wall.strftime("%Y-%m-%d"):
+            legacy_override = manager.manual_mode_overrides.get(sim_h)
+            if legacy_override:
+                # Legacy buttons always target 100% for buy, or min_soc for others
+                l_target = 100.0 if legacy_override == "buy" else 10.0
+                return legacy_override, f"Legacy Manual Override ({sim_h}:00)", legacy_override == "buy", legacy_override == "sale_pv_bat", l_target
 
         # 1. Fetch Strategies
         sell_strategy = manager.get_market_strategy("sell") or {}
@@ -211,42 +219,47 @@ class EnergyLogicEngine:
             if (peak_p - deg_cost) > p_sell_val and batt_soc < 90.0:
                 is_profitable_to_save = True
         
-        is_energy_low_for_evening = bool((is_low_for_morning or is_profitable_to_save) and not hit_full_before)
-
         # =====================================================================
         # STATE MACHINE LADDER (V1 Parity)
         # =====================================================================
         mode = "sale_pv"
         reason = "Стандартная работа"
+        target_soc = 100.0
 
         # P1: Emergency
         if batt_soc < min_soc:
             mode = "bat_emergency"
             reason = "Критический заряд АКБ"
+            target_soc = 100.0
         
         # P2: Negative Buy
         elif is_neg_buy:
             mode = "buy"
             reason = "Отрицательная цена"
+            target_soc = 100.0
         
         # P3: AI Buy
         elif is_buying_active:
             mode = "buy"
             reason = buy_strategy.get("charge_reason", "Активна стратегия ПОКУПКИ")
+            target_soc = float(buy_strategy.get("target_soc", 100.0))
             
         # P4: AI Sell (Elevated Priority in v11.9.691)
         elif is_selling_active:
             mode = "sale_pv_bat"
             reason = sell_strategy.get("strategy_decision", "Активна стратегия ПРОДАЖИ (AI)")
-
+            target_soc = min_soc
+            
         # P5: Morning Mode / Solar Heuristics
         elif cur_price is not None and cur_price >= price_sell_only_pv:
             _block_sale_pv_no_bat = bool(sim_h >= latest_charge_start)
             if is_before_limit_hour and has_surplus and not _block_sale_pv_no_bat and cur_price > 0:
                 mode = "sale_pv_no_bat"
                 reason = f"Продажа только солнца: Цена ({p_sell_val:.2f}) >= Порога ({price_sell_only_pv:.2f}), утро"
+                target_soc = min_soc
             else:
                 mode = "sale_pv"
+                target_soc = min_soc
                 if is_low_for_morning: reason = f"Защита Gatekeeper: Рассвет {morning_soc_proj:.1f}% < {target_morning:.1f}%"
                 elif is_profitable_to_save: reason = "Сохранение заряда: Пик выгоднее текущей цены"
                 elif _block_sale_pv_no_bat: reason = f"Окно продажи PV закрыто (лимит {latest_charge_start}:00)"
