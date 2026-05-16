@@ -232,7 +232,7 @@ class EnergyManagementCard extends HTMLElement {
           border-radius: 50%;
           padding: 2px;
         }
-        .h-icon { --mdc-icon-size: 18px; margin-bottom: 1px; }
+        .h-icon { --mdc-icon-size: 18px; margin-top: 5px; margin-bottom: 1px; }
         .h-time { font-size: 0.85rem; font-weight: 900; color: white; line-height: 1; }
         .h-prices { display: flex; gap: 4px; margin: 2px 0; }
         .price-buy { font-size: 0.6rem; font-weight: 800; color: #90caf9; }
@@ -240,8 +240,8 @@ class EnergyManagementCard extends HTMLElement {
         .h-mode { font-size: 0.55rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.02em; }
         .h-soc-top-left {
           position: absolute;
-          top: 5px;
-          left: 6px;
+          top: 2px;
+          left: 4px;
           display: flex;
           align-items: center;
           gap: 1.5px;
@@ -520,7 +520,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.0.73</div>
+        <div id="v-tag" class="version-tag">v12.0.74</div>
       </ha-card>
     `;
     this._initialized = true;
