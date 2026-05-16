@@ -148,8 +148,11 @@ class EnergyLogicEngine:
 
         # 1. Base Decision (Standard Ladder)
         cur_price_sell = manager.get_price("sell", today_str, sim_h)
-        price_stop_sell = manager.get_setting("price_stop_sell", 0.0)
-        min_soc = manager.get_setting("min_soc_bat", 10.0)
+        # Handle None price gracefully
+        p_sell_val = float(cur_price_sell) if cur_price_sell is not None else 0.0
+        
+        price_stop_sell = float(manager.get_setting("price_stop_sell", 0.0) or 0.0)
+        min_soc = float(manager.get_setting("min_soc_bat", 10.0) or 10.0)
         
         # v11.9.749 Logic Tree
         mode = "sale_pv"
@@ -161,7 +164,7 @@ class EnergyLogicEngine:
         elif is_selling_active:
             mode = "sale_pv_bat"
             reason = sell_strategy.get("strategy_decision", "Продажа")
-        elif cur_price_sell < price_stop_sell:
+        elif p_sell_val < price_stop_sell:
             mode = "no_pv_sale_no_bat"
             reason = "Ожидание отрицательных цен"
         elif batt_soc < min_soc + 2.0:
