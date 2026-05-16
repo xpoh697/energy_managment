@@ -883,12 +883,15 @@ class EnergyProfileManager:
             slots = []
             charge_cmds = {}
             sell_cmds = {}
-            mode_overrides = {}
             
             prof_gen = self.get_predicted_profile("generation")
             prof_cons = self.get_predicted_profile("consumption_total")
             prof_cons_base = self.get_predicted_profile("consumption_base")
             
+            sim_soc = batt_soc
+            eff = 0.98
+            b_cap = float(self.get_setting("battery_capacity_kwh", 10.0) or 10.0)
+
             for h_abs in range(48):
                 dt_h = (now + timedelta(hours=h_abs)).replace(minute=0, second=0, microsecond=0)
                 h_rel = str(dt_h.hour)
@@ -905,9 +908,10 @@ class EnergyProfileManager:
                 )
                 
                 # 4. Layered Decision Logic (Logic Engine)
+                # Use sim_soc to make decisions for future hours
                 mode, reason, is_buy, is_sell = EnergyLogicEngine.get_mode_at(
                     dt_now=dt_h,
-                    batt_soc=batt_soc, # Preliminary, will be updated by final simulation
+                    batt_soc=sim_soc,
                     manager=self,
                     is_forecast=(h_abs > 0),
                     abs_hour=(now.hour + h_abs)
@@ -917,15 +921,6 @@ class EnergyProfileManager:
                 slot.reason = reason
                 
                 # 5. Extract specific power/soc from strategies
-                if mode == "buy":
-                    p_buy = buy_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
-                    slot.power_ac = p_buy
-                    charge_cmds[now.hour + h_abs] = p_buy
-                elif mode == "sale_pv_bat":
-                    p_sell = sell_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
-                    slot.power_ac = p_sell
-                    sell_cmds[now.hour + h_abs] = p_sell
-                
                 # Manual Override Sync for Slot 0
                 if h_abs == 0:
                     search_prefix = now.strftime("%Y-%m-%d %H")
@@ -948,7 +943,27 @@ class EnergyProfileManager:
                     slot.target_soc = t_soc
                     slot.charge_amps = c_amps
                     if h_override: slot.is_manual = True
+                    
+                    p_actual = p_real if mode == "buy" else -p_real if mode == "sale_pv_bat" else 0.0
+                else:
+                    # Forecast Power Estimation
+                    p_est = 0.0
+                    if mode == "buy":
+                        p_est = buy_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
+                    elif mode == "sale_pv_bat":
+                        p_est = -sell_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
+                    
+                    slot.power_ac = abs(p_est)
+                    p_actual = p_est
+
+                # 6. Update sim_soc for next hour (Simplified rolling simulation)
+                # Delta kWh = Power * efficiency (if charging) or / efficiency (if discharging)
+                delta_kwh = p_actual * (eff if p_actual > 0 else (1.0/eff))
+                sim_soc = max(0.0, min(100.0, sim_soc + (delta_kwh / b_cap * 100.0)))
                 
+                if mode == "buy": charge_cmds[now.hour + h_abs] = slot.power_ac
+                elif mode == "sale_pv_bat": sell_cmds[now.hour + h_abs] = slot.power_ac
+
                 slots.append(slot)
 
             # 6. Final Global Simulation (One Pass for 48 Hours)
