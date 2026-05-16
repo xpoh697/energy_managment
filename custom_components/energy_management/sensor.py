@@ -931,7 +931,7 @@ class EnergyProfileManager:
                 )
                 
                 # 4. Layered Decision Logic (Logic Engine)
-                # Use sim_soc to make decisions for future hours
+                if h_abs == 0: self.log_to_file("DIAG: Calling get_mode_at (Hour 0)")
                 mode, reason, is_buy, is_sell, t_soc = EnergyLogicEngine.get_mode_at(
                     dt_now=dt_h,
                     batt_soc=sim_soc,
@@ -942,6 +942,7 @@ class EnergyProfileManager:
                     buy_strategy=buy_strat,
                     sell_strategy=sell_strat
                 )
+                if h_abs == 0: self.log_to_file(f"DIAG: get_mode_at (Hour 0) returned: {mode}")
                 
                 slot.mode = mode
                 slot.reason = reason
@@ -957,6 +958,7 @@ class EnergyProfileManager:
                             h_override = v
                             break
                     
+                    self.log_to_file("DIAG: Calling calculate_realtime_power")
                     p_real, t_soc, c_amps = EnergyLogicEngine.calculate_realtime_power(
                         mode=mode,
                         now=now,
@@ -966,6 +968,7 @@ class EnergyProfileManager:
                         sell_strategy=sell_strat,
                         h_override=h_override
                     )
+                    self.log_to_file(f"DIAG: calculate_realtime_power returned: {p_real}")
                     slot.power_ac = p_real
                     slot.target_soc = t_soc
                     slot.charge_amps = c_amps
