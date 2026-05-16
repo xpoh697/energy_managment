@@ -157,3 +157,22 @@ My 3 security/performance critique points:
 
 ### Conclusion
 We will update `strategy_buy.py` to compile manual overrides at the start and pass them to all four internal SOC simulations. This ensures the buy strategy correctly plans grid charging when manual overrides drain the battery.
+
+## [2026-05-17 00:30] Task: Resolve false-positive convergence in sell allocator by separating sale power from total battery power
+
+### Archi
+The allocator in `strategy_sell.py` uses `p_real_bat = sim_data.get("p_bat", 0.0)` in the convergence refinement loop to measure how much power the battery provided for sale in the simulation. However, `p_bat` represents the *total* battery discharge, which includes both the house load (`p_house_dc`) and the sale (`p_sale_dc`). When the battery is below the survival floor, the simulation correctly zeroed out the sale component, but still discharged to cover the house load. The allocator saw this house load discharge and mistakenly assumed the battery had successfully discharged for the sale! This false positive prevented the allocator from registering a deficit, causing it to leave the impossible sale active. 
+
+I propose:
+1. Calculating `sim_p_sale` (the actual sale component) separately in `run_soc_simulation`.
+2. Saving it in the history log as `"p_sale"`.
+3. Having the allocator read `"p_sale"` instead of `"p_bat"`.
+
+### Skeptic
+Here are 3 points of SRE/QA critique:
+1. **Defensive Fallback**: Using `.get("p_sale", sim_data.get("p_bat", 0.0))` guarantees that if any part of the system or older cache results lack the new `"p_sale"` key, the allocator gracefully falls back to the old total battery power behavior without throwing exceptions.
+2. **Mathematical Correctness**: Setting `sim_p_sale = (sale_drop_act / 100.0 * b_cap_f) / step_duration * sim_eff` is perfectly accurate and accounts for efficiency and capacity in the AC/DC conversions.
+3. **Sign Parity**: Since both `sim_p_bat` and `sim_p_sale` are positive when discharging, this is a clean drop-in replacement that requires no sign flips or complex scaling adjustments.
+
+### Conclusion
+We will define and calculate `sim_p_sale` inside `run_soc_simulation`'s discharge block and log it as `"p_sale"`. Then we will update the allocator convergence loop in `strategy_sell.py` to check `sim_data.get("p_sale", sim_data.get("p_bat", 0.0))` to measure actual sale discharge, completely eliminating the false-positive convergence bug and ensuring impossible sales are safely zeroed out.
