@@ -940,7 +940,8 @@ class EnergyProfileManager:
                     abs_hour=(now.hour + h_abs),
                     profiles=shared_profiles,
                     buy_strategy=buy_strat,
-                    sell_strategy=sell_strat
+                    sell_strategy=sell_strat,
+                    log_func=self.log_to_file
                 )
                 if h_abs == 0: self.log_to_file(f"DIAG: get_mode_at (Hour 0) returned: {mode}")
                 

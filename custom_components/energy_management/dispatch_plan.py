@@ -114,7 +114,8 @@ class EnergyLogicEngine:
         abs_hour: Optional[int] = None,
         profiles: Optional[Dict[str, Any]] = None,
         buy_strategy: Optional[Dict[str, Any]] = None,
-        sell_strategy: Optional[Dict[str, Any]] = None
+        sell_strategy: Optional[Dict[str, Any]] = None,
+        log_func: Optional[Any] = None
     ) -> tuple:
         """
         Calculates the inverter mode for a given timestamp and SOC.
@@ -178,6 +179,7 @@ class EnergyLogicEngine:
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
 
         # 4. Gen/Load Data (5m average for real-time, profile for forecast)
+        if log_func: log_func("LDIAG: Loading profiles")
         if not is_forecast:
             avg_load = float(getattr(manager, "avg_load_5m_kw", 0.5) or 0.5)
             avg_gen = float(getattr(manager, "avg_gen_5m_kw", 0.0) or 0.0)
@@ -197,12 +199,14 @@ class EnergyLogicEngine:
         is_before_limit_hour = bool(sim_h < sale_pv_no_bat_max_hour)
         
         # 5. Negative Price Waiting Logic
+        if log_func: log_func("LDIAG: Negative price logic")
         neg_h = buy_strategy.get("first_negative_hour")
         can_wait = buy_strategy.get("can_wait_for_negative", False)
         is_gen_night = avg_gen < 0.01
         is_waiting_for_neg = bool(can_wait and neg_h is not None and not is_gen_night)
 
         # 6. Peak Preparation Logic
+        if log_func: log_func("LDIAG: Peak preparation logic")
         peak_start_abs = sell_strategy.get("next_peak_h")
         if peak_start_abs is None:
             for h in sorted(sell_strategy.get("active_hours", [])):
@@ -228,6 +232,7 @@ class EnergyLogicEngine:
         # =====================================================================
         # STATE MACHINE LADDER (V1 Parity)
         # =====================================================================
+        if log_func: log_func("LDIAG: Entering State Machine Ladder")
         mode = "sale_pv"
         reason = "Стандартная работа"
         target_soc = 100.0
