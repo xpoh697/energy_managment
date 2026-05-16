@@ -206,6 +206,11 @@ class EnergyManagementCard extends HTMLElement {
         .price-sell { font-size: 0.6rem; font-weight: 800; color: #a5d6a7; }
         .h-mode { font-size: 0.55rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.02em; }
         .h-soc { font-size: 0.45rem; font-weight: 700; color: rgba(255,255,255,0.5); margin-top: 1px; }
+        .h-forecasts { display: flex; gap: 4px; margin-top: 2px; opacity: 0.7; }
+        .h-f-item { display: flex; align-items: center; gap: 2px; font-size: 0.55rem; font-weight: 700; }
+        .h-f-item ha-icon { --mdc-icon-size: 10px; }
+        .f-gen { color: #ffeb3b; }
+        .f-load { color: #f44336; }
 
 
         .btn {
@@ -327,8 +332,9 @@ class EnergyManagementCard extends HTMLElement {
             </div>
             <div class="modal-body">
               <div class="modal-info-grid">
-                <div class="info-row"><span>Buy:</span><b id="info-buy">-</b></div>
-                <div class="info-row"><span>Sell:</span><b id="info-sell">-</b></div>
+                <div class="info-row"><span>Buy / Sell:</span><b id="info-prices">-</b></div>
+                <div class="info-row"><span>Gen / Load:</span><b id="info-forecast">-</b></div>
+                <div class="info-row"><span>Reason:</span><small id="info-reason" style="text-align:right; opacity:0.8; font-style:italic;">-</small></div>
               </div>
               <div class="form-group">
                 <span class="form-label">Mode Override</span>
@@ -352,7 +358,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v11.9.696</div>
+        <div id="v-tag" class="version-tag">v12.0.0</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -378,10 +384,11 @@ class EnergyManagementCard extends HTMLElement {
       this._updateSocLabel(currentSocLimit);
     }
 
-    // Fill Market Info (v11.9.383)
-    const currency = this._hass.states[this._config.entity].attributes.unit_of_measurement || 'PLN';
-    this.shadowRoot.getElementById('info-buy').innerText = `${hourData.buy_price || 0} ${currency}`;
-    this.shadowRoot.getElementById('info-sell').innerText = `${hourData.sell_price || 0} ${currency}`;
+    // Fill Market Info (v12.0)
+    const currency = this._hass.states[this._config.entity].attributes.unit_of_measurement || '';
+    this.shadowRoot.getElementById('info-prices').innerText = `${hourData.buy_price || 0} / ${hourData.sell_price || 0} ${currency}`;
+    this.shadowRoot.getElementById('info-forecast').innerText = `${hourData.gen || 0} / ${hourData.load || 0} kW`;
+    this.shadowRoot.getElementById('info-reason').innerText = hourData.reason || 'Standard AI decision';
 
     this._toggleSocVisibility();
     this.shadowRoot.getElementById('modal').classList.add('open');
@@ -610,9 +617,12 @@ class EnergyManagementCard extends HTMLElement {
                 <span class="price-buy">${(hourData.buy_price || 0).toFixed(2)}</span>
                 <span class="price-sell">${(hourData.sell_price || 0).toFixed(2)}</span>
               </div>
-              <span class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</span>
+              <div class="h-forecasts">
+                <div class="h-f-item f-gen"><ha-icon icon="mdi:solar-power"></ha-icon>${(hourData.gen || 0).toFixed(1)}</div>
+                <div class="h-f-item f-load"><ha-icon icon="mdi:home-lightning-bolt"></ha-icon>${(hourData.load || 0).toFixed(1)}</div>
+              </div>
               <div style="display:flex; flex-direction:column; align-items:center;">
-                <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : ''}</span>
+                <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(1) + '%' : ''}</span>
               </div>
             </div>
           </div>
@@ -669,9 +679,15 @@ class EnergyManagementCard extends HTMLElement {
           modeLabel.style.color = modeColor;
           modeLabel.innerText = MODE_LABELS[hourData.mode] || hourData.mode;
         }
+        
+        const fGen = bar.querySelector('.f-gen');
+        const fLoad = bar.querySelector('.f-load');
+        if (fGen) fGen.innerHTML = `<ha-icon icon="mdi:solar-power"></ha-icon>${(hourData.gen || 0).toFixed(1)}`;
+        if (fLoad) fLoad.innerHTML = `<ha-icon icon="mdi:home-lightning-bolt"></ha-icon>${(hourData.load || 0).toFixed(1)}`;
+
         if (socLabel) {
           socLabel.style.color = modeColor;
-          socLabel.innerText = hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(2) + '%' : '';
+          socLabel.innerText = hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(1) + '%' : '';
         }
         if (priceContainer) {
           priceContainer.style.display = 'flex';
