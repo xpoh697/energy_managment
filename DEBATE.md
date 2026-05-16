@@ -268,3 +268,25 @@ Here are 3 points of visual/QA critique:
 
 ### Conclusion
 We will adjust the coordinates of the absolute SOC badge to `top: 2px; left: 4px;` and add `margin-top: 5px;` to `.h-icon` in the CSS styles inside `energy-management-card.js`, deploying under version `v12.0.74`.
+
+## [2026-05-17 00:50] Task: Dynamic bat_emergency Mode Prediction in Global Slots Loop
+
+### Archi
+I propose aligning the rolling simulation inside `sensor.py`'s `async_update_global_plan` loop with the high-fidelity simulator's physics. 
+Currently, the rolling loop assumes `p_actual = 0` during non-grid-command hours (like Normal or Wait modes), leaving `sim_soc` frozen. This prevents the decision logic from realizing that the battery will be drained by household load, which in turn prevents the activation of `bat_emergency` mode in the forecast slots.
+I will:
+1. Detect non-grid-command hours (when `p_actual == 0`).
+2. Calculate the net load flow (`net_flow = slot.gen_raw - slot.load_total`).
+3. Query the active `InverterModeClass` details.
+4. If there is solar surplus and the mode permits `charge_from_pv`, charge the battery (up to `battery_max_power`).
+5. If there is deficit and the mode permits `discharge_to_house`, discharge the battery to cover it.
+6. This will naturally drain `sim_soc` during evening hours, allowing the decision logic at later hours to correctly detect `sim_soc <= min_soc` and trigger the `bat_emergency` mode.
+
+### Skeptic
+Here are 3 SRE/QA points:
+1. **Safety Null-Guards**: Mode lookup using `INVERTER_MODES.get(mode)` is extremely safe and cannot crash. If missing, it defaults to ignoring the flow.
+2. **Infinite Emergency Prevention**: When `bat_emergency` is activated, its class parameters strictly specify `discharge_to_house = False`. This means the rolling simulation will stop discharging the battery as soon as it hits the emergency threshold, matching exact hardware behavior.
+3. **Bound Clipping**: Flow values must be strictly clipped to hardware-configured `battery_max_power` limits.
+
+### Conclusion
+We will implement this physically accurate rolling battery flow simulation in `sensor.py` during the global plan loop, ensuring the decision logic correctly triggers emergency states in projections. We will deploy this under version `v12.0.75`.
