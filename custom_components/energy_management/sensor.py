@@ -980,18 +980,28 @@ class EnergyProfileManager:
                 else:
                     # Forecast Power Estimation
                     p_est = 0.0
+                    t_soc_est = sim_soc
                     if mode == "buy":
                         p_est = buy_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
+                        t_soc_est = buy_strat.get("planned_power_per_h", {}).get(f"{(now.hour + h_abs)%24:02d}:00", {}).get("soc", sim_soc)
                     elif mode == "sale_pv_bat":
                         p_est = -sell_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
+                        t_soc_est = sell_strat.get("planned_power_per_h", {}).get(f"{(now.hour + h_abs)%24:02d}:00", {}).get("soc", sim_soc)
                     
                     slot.power_ac = abs(p_est)
+                    slot.target_soc = t_soc_est
+                    
+                    # Estimate Amps for forecast
+                    v_nom = self.get_sensor_float(self.battery_voltage_sensor) or 52.0
+                    slot.charge_amps = round((slot.power_ac * 1000.0) / max(10.0, v_nom), 1)
+                    
                     p_actual = p_est
 
                 # 6. Update sim_soc for next hour (Simplified rolling simulation)
                 # Delta kWh = Power * efficiency (if charging) or / efficiency (if discharging)
                 delta_kwh = p_actual * (eff if p_actual > 0 else (1.0/eff))
                 sim_soc = max(0.0, min(100.0, sim_soc + (delta_kwh / b_cap * 100.0)))
+                slot.soc_end = sim_soc
                 
                 if mode == "buy": charge_cmds[now.hour + h_abs] = slot.power_ac
                 elif mode == "sale_pv_bat": sell_cmds[now.hour + h_abs] = slot.power_ac
