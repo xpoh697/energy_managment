@@ -505,15 +505,14 @@ class StrategySell(StrategyEngine):
                         duration = 1.0
                         if h_cmd == cur_hour: duration = max(0.01, 1.0 - (now.minute / 60.0))
                         
-                        h_sim_key = f"{h_cmd%24:02d}:59" + (" (Завтра)" if h_cmd >= 24 else "")
-                        p_real_bat = trial_log.get(h_sim_key, {}).get("p_bat", 0.0)
+                        h_sim_key = h_cmd
+                        sim_data = trial_log.get(h_sim_key, {})
+                        p_real_bat = sim_data.get("p_bat", 0.0)
                         # v11.9.556: Convert AC power from simulation to DC before comparing with DC request
-                        # This prevents the allocator from seeing efficiency loss as a "deficit".
                         p_real_dc = p_real_bat / max(0.1, eff)
                         
                         if p_real_bat >= 0 and p_real_dc < p_req - 0.05:
                             # v11.9.686: Saturation detection
-                            sim_data = trial_log.get(h_sim_key, {})
                             h_soc = sim_data.get("soc", 0.0)
                             h_floor = sim_data.get("floor", 0.0)
                             
@@ -551,13 +550,12 @@ class StrategySell(StrategyEngine):
                     
                     for h_abs in range(first_sell_h, sell_window_end + 1):
                         if h_abs > cur_hour + 47: break
-                        h_key = f"{h_abs%24:02d}:59" + (" (Завтра)" if h_abs >= 24 else (" (Через день)" if h_abs >= 48 else ""))
-                        sim_st = trial_log.get(h_key, {})
+                        sim_st = trial_log.get(h_abs, {})
                         soc_h = sim_st.get("soc", 100.0)
                         floor_h = floors_sliding.get(h_abs, emergency_soc + 2.0)
                         
                         # v11.9.688: Calculate 'Added' SOC deficit relative to baseline
-                        baseline_soc_h = self._get_soc_from_log(baseline_log, h_key, b_soc)
+                        baseline_soc_h = self._get_soc_from_log(baseline_log, h_abs, b_soc)
                         
                         # Only count deficit if it's WORSE than baseline
                         if soc_h < floor_h - 0.1 and soc_h < baseline_soc_h - 0.05:
@@ -581,8 +579,7 @@ class StrategySell(StrategyEngine):
                         break
 
                     # v11.9.541: Convergence check based on morning SOC at sunrise
-                    sunrise_key = f"{next_sunrise_abs%24:02d}:59" + (" (Завтра)" if next_sunrise_abs >= 24 else "")
-                    soc_morning_sim = trial_log.get(sunrise_key, {}).get("soc", 0.0)
+                    soc_morning_sim = self._get_soc_from_log(trial_log, next_sunrise_abs, 0.0)
                     target_morning = floors_sliding.get(next_sunrise_abs, emergency_soc + 2.0)
                     soc_err = soc_morning_sim - target_morning
 
@@ -881,14 +878,7 @@ class StrategySell(StrategyEngine):
             debug_log_parts = []
             for h in range(cur_hour, cur_hour + 24): # Show full 24h
                 h_rel = h % 24
-                day_suffix = ""
-                if h >= 48:
-                    day_suffix = " (Через день)"
-                elif h >= 24:
-                    day_suffix = " (Завтра)"
-                
-                key = f"{h_rel:02d}:59{day_suffix}"
-                val = sim_log.get(key)
+                val = sim_log.get(h) # Integer lookup
                 
                 if isinstance(val, dict):
                     # v11.7.140: Show ACTUAL simulated power. 
