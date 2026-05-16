@@ -176,3 +176,21 @@ Here are 3 points of SRE/QA critique:
 
 ### Conclusion
 We will define and calculate `sim_p_sale` inside `run_soc_simulation`'s discharge block and log it as `"p_sale"`. Then we will update the allocator convergence loop in `strategy_sell.py` to check `sim_data.get("p_sale", sim_data.get("p_bat", 0.0))` to measure actual sale discharge, completely eliminating the false-positive convergence bug and ensuring impossible sales are safely zeroed out.
+
+## [2026-05-17 00:35] Task: Designing a Premium, Beautiful Hour Detail Modal HUD
+
+### Archi
+The current hourly details modal in `energy-management-card.js` is quite plain, using simple text key-value pairs (`.info-row`) with basic dark theme coloring. I propose converting this details section into a premium, state-of-the-art glassmorphic HUD panel. This will include:
+1. Color-coded Home Assistant `<ha-icon>` icons for each parameter to visually guide the user immediately.
+2. A beautiful glowing green `soc-badge` styling for the battery Forecast percentage to highlight the key forecast state.
+3. An elegant, premium callout box (`reason-box`) for the AI decision reason, utilizing an accent border-left bar and styled typography.
+4. Soft glassmorphism effects (`background: rgba(255, 255, 255, 0.03)`, `border: 1px solid rgba(255,255,255,0.08)`) with subtle inset shadows to create deep premium layers.
+
+### Skeptic
+Here are 3 SRE/Security points of critique on this proposed layout change:
+1. **Element ID Preservation**: The custom card's Javascript relies strictly on direct ID lookups (`info-prices`, `info-forecast`, `info-power`, `info-reason`, `info-forecast-soc`). If we alter these IDs, the script will crash or fail to display state data, causing card configuration errors. We must keep all IDs exactly the same.
+2. **Icon Compatibility**: Using standard, core Material Design Icons (like `mdi:swap-horizontal`, `mdi:lightning-bolt`, `mdi:flash-outline`, `mdi:battery-80`, `mdi:information-outline`) is highly reliable as they are bundled natively with Home Assistant.
+3. **Contrast and Legibility**: Monospace fonts (`Roboto Mono` / `Roboto`) can sometimes become hard to read when too thin or low-contrast. We must ensure robust font weights (600+) and proper text-transform rules to preserve excellent usability across light and dark system settings.
+
+### Conclusion
+We will implement the premium glassmorphic HUD panel redesign inside `energy-management-card.js`. We will keep all JavaScript element IDs intact to prevent breaking the logic. We will use native, high-performance Home Assistant `<ha-icon>` tags with standard MDI icons and high-contrast curated styling tokens to create a stunning user experience.
