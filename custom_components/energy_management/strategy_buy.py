@@ -69,7 +69,7 @@ class StrategyBuy(StrategyEngine):
         _b_soc_s, _b_cap_s, _ = man.get_battery_state()
         b_cap = float(_b_cap_s or 10.0)
         b_soc = float(_b_soc_s or 50.0)
-        max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
+        max_p = float(normalize_float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0)))
         deg_cost = float(self.get_battery_degradation_cost())
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
 
@@ -233,8 +233,7 @@ class StrategyBuy(StrategyEngine):
                 deadline_h = None
                 
                 for h_step in sim_range:
-                    h_key = get_h_log_key(h_step)
-                    soc_h = self._get_soc_from_log(log, h_key, 100.0)
+                    soc_h = self._get_soc_from_log(log, h_step, 100.0)
                     
                     # v11.9.724: Unified Trigger Logic (Deadline ONLY)
                     # We only care if simulation predicts hitting MinSOC + 5.0% (18%)
@@ -252,10 +251,10 @@ class StrategyBuy(StrategyEngine):
                 # v11.9.711: Capture debug samples from the first simulation pass
                 if _loop_i == 0:
                     res["buy_debug"]["sim_keys_sample"] = [f"'{k}'" for k in list(log.keys())[:3]]
-                    res["buy_debug"]["morning_lookup_key"] = f"'{get_h_log_key(morning_h_abs)}'"
+                    res["buy_debug"]["morning_lookup_key"] = morning_h_abs
                     # v11.9.712: Expanded samples
                     tom_h = cur_hour + 24
-                    res["buy_debug"]["tomorrow_lookup_key"] = f"'{get_h_log_key(tom_h)}'"
+                    res["buy_debug"]["tomorrow_lookup_key"] = tom_h
                     res["buy_debug"]["tomorrow_sim_key"] = next((f"'{k}'" for k in log.keys() if self.is_tomorrow_log_key(k)), "Not found")
                     
                     # v11.9.713: Manual Override Keys Diagnostic
@@ -372,10 +371,10 @@ class StrategyBuy(StrategyEngine):
             hours_until_sunset = [h for h in _sim_h_disp if h <= sunset_abs]
             if not hours_until_sunset: hours_until_sunset = [cur_hour]
             
-            peak_soc_before_sunset = max([self._get_soc_from_log(_log_sun, get_h_log_key(h), 0.0) for h in hours_until_sunset])
+            peak_soc_before_sunset = max([self._get_soc_from_log(_log_sun, h, 0.0) for h in hours_until_sunset])
             is_solar_enough = bool(peak_soc_before_sunset >= 95.0)
             
-            soc_at_sunset = self._get_soc_from_log(_log_sun, get_h_log_key(sunset_abs), b_soc)
+            soc_at_sunset = self._get_soc_from_log(_log_sun, sunset_abs, b_soc)
             
             charge_commands = {}
             if not target_hours:
@@ -390,7 +389,7 @@ class StrategyBuy(StrategyEngine):
             else:
                 # We have candidate hours. Decide if we actually need to buy.
                 planning_h = min(target_hours)
-                soc_at_start_plan = self._get_soc_from_log(log, get_h_log_key(planning_h), b_soc)
+                soc_at_start_plan = self._get_soc_from_log(log, planning_h, b_soc)
                 cur_p = all_buy_prices.get(cur_hour, 99.0)
 
                 # v11.9.737: Use the main simulation log (log) to find the dip

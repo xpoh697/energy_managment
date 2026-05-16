@@ -57,7 +57,7 @@ class StrategySell(StrategyEngine):
         _b_soc_s, _b_cap_s, _ = man.get_battery_state()
         b_cap = float(_b_cap_s or 10.0)
         b_soc = float(_b_soc_s or 50.0)
-        max_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0))
+        max_p = float(normalize_float(man.get_setting(CONF_BATTERY_MAX_POWER, 3.0)))
         deg_cost = float(self.get_battery_degradation_cost())
         prof_thresh = float(man.get_setting(CONF_ARBITRAGE_PROFIT_THRESHOLD, 0.5))
         target_price = 0.0
@@ -408,7 +408,7 @@ class StrategySell(StrategyEngine):
                 h_by_priority = sorted(target_hours, key=lambda h: (all_sell_prices.get(h, 0.0), -h), reverse=True)
             else:
                 h_by_priority = sorted(target_hours, key=lambda h: (all_sell_prices.get(h, 0.0), h), reverse=True)
-            max_batt_p = float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
+            max_batt_p = float(normalize_float(man.get_setting(CONF_BATTERY_MAX_POWER, 5.0)))
             # 1. Initial Budget (Initial Guess as per TS 103)
             # v11.9.225: Synchronized start floor (use floor of the first target hour)
             first_sell_h_abs = target_hours[0] if target_hours else cur_hour

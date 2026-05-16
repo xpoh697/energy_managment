@@ -1,5 +1,5 @@
 DOMAIN = "energy_management"
-VERSION = "v12.0.35"
+VERSION = "v12.0.50"
 
 VERSION_CODE = 1200001
 
@@ -22,7 +22,7 @@ CONF_PRICE_SELL_ONLY_PV = "price_sell_only_pv"
 CONF_BATTERY_MAX_POWER = "battery_max_power"
 CONF_AI_CHARGE_LIMIT = "ai_charge_limit_soc"
 CONF_AI_DISCHARGE_LIMIT = "ai_discharge_limit_soc"
-CONF_MIN_SOC_BAT = "emergency_soc_limit"
+CONF_MIN_SOC_BAT = "min_soc_bat"
 CONF_DYNAMIC_SOC_BUY = "dynamic_soc_buy"
 CONF_DYNAMIC_SOC_SELL = "dynamic_soc_sell"
 CONF_DEDUCT_SETTINGS = "deduct_settings"

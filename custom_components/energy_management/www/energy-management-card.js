@@ -335,6 +335,7 @@ class EnergyManagementCard extends HTMLElement {
                 <div class="info-row"><span>Buy / Sell:</span><b id="info-prices">-</b></div>
                 <div class="info-row"><span>Gen / Load:</span><b id="info-forecast">-</b></div>
                 <div class="info-row"><span>Power / Amps:</span><b id="info-power">-</b></div>
+                <div class="info-row"><span>Forecast:</span><b id="info-forecast-soc" style="color: #4caf50;">-</b></div>
                 <div class="info-row"><span>Reason:</span><small id="info-reason" style="text-align:right; opacity:0.8; font-style:italic;">-</small></div>
               </div>
               <div class="form-group">
@@ -391,6 +392,12 @@ class EnergyManagementCard extends HTMLElement {
     this.shadowRoot.getElementById('info-forecast').innerText = `${hourData.gen || 0} / ${hourData.load || 0} kW`;
     this.shadowRoot.getElementById('info-power').innerText = `${hourData.power || 0} kW / ${hourData.amps || 0} A`;
     this.shadowRoot.getElementById('info-reason').innerText = hourData.reason || 'Standard AI decision';
+    
+    // v12.0.38: Explicitly show Forecast vs Target
+    const forecastEl = this.shadowRoot.getElementById('info-forecast-soc');
+    if (forecastEl) {
+      forecastEl.innerText = `${hourData.soc !== undefined ? hourData.soc.toFixed(1) : '--'}%`;
+    }
 
     this._toggleSocVisibility();
     this.shadowRoot.getElementById('modal').classList.add('open');
@@ -621,7 +628,7 @@ class EnergyManagementCard extends HTMLElement {
               </div>
               <div class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</div>
               <div style="display:flex; flex-direction:column; align-items:center;">
-                <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(1) + '%' : ''}</span>
+                <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'End ' + hourData.soc.toFixed(1) + '%' : ''}</span>
               </div>
             </div>
           </div>

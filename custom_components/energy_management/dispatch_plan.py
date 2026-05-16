@@ -169,7 +169,7 @@ class EnergyLogicEngine:
             is_buying_active = buy_strategy.get("state") == "active"
 
         # 3. Settings & Prices
-        from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_MIN_SOC_BAT
+        from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_MIN_SOC_BAT, CONF_BATTERY_CAPACITY
         price_stop_sell = float(manager.get_setting(CONF_PRICE_STOP_SELL, 0.0) or 0.0)
         price_sell_only_pv = float(manager.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0) or 999.0)
         sale_pv_no_bat_max_hour = float(manager.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0) or 13.0)
@@ -181,7 +181,7 @@ class EnergyLogicEngine:
         is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
 
         # 4. Gen/Load Data (5m average for real-time, profile for forecast)
-        if log_func: log_func("LDIAG: Loading profiles")
+        # if log_func: log_func("LDIAG: Loading profiles")
         if not is_forecast:
             avg_load = float(getattr(manager, "avg_load_5m_kw", 0.5) or 0.5)
             avg_gen = float(getattr(manager, "avg_gen_5m_kw", 0.0) or 0.0)
@@ -201,14 +201,14 @@ class EnergyLogicEngine:
         is_before_limit_hour = bool(sim_h < sale_pv_no_bat_max_hour)
         
         # 5. Negative Price Waiting Logic
-        if log_func: log_func("LDIAG: Negative price logic")
+        # if log_func: log_func("LDIAG: Negative price logic")
         neg_h = buy_strategy.get("first_negative_hour")
         can_wait = buy_strategy.get("can_wait_for_negative", False)
         is_gen_night = avg_gen < 0.01
         is_waiting_for_neg = bool(can_wait and neg_h is not None and not is_gen_night)
 
         # 6. Peak Preparation Logic
-        if log_func: log_func("LDIAG: Peak preparation logic")
+        # if log_func: log_func("LDIAG: Peak preparation logic")
         peak_start_abs = sell_strategy.get("next_peak_h")
         if peak_start_abs is None:
             for h in sorted(sell_strategy.get("active_hours", [])):
@@ -234,7 +234,7 @@ class EnergyLogicEngine:
         # =====================================================================
         # STATE MACHINE LADDER (V1 Parity)
         # =====================================================================
-        if log_func: log_func("LDIAG: Entering State Machine Ladder")
+        # if log_func: log_func("LDIAG: Entering State Machine Ladder")
         mode = "sale_pv"
         reason = "Стандартная работа"
         target_soc = 100.0
@@ -326,7 +326,7 @@ class EnergyLogicEngine:
         p_val = 0.0
         t_soc = batt_soc
         c_amps_fixed = 0.0
-        max_batt_p = float(manager.get_setting("battery_max_power", 3.0))
+        max_batt_p = float(normalize_float(manager.get_setting(CONF_BATTERY_MAX_POWER, 3.0)))
         
         # v11.9.452: Manual Power Sync calculation
         if mode == "buy":
@@ -347,7 +347,7 @@ class EnergyLogicEngine:
                 f_target_soc = float(h_override.get("soc_limit", t_soc))
                 if batt_soc < (f_target_soc - 0.05):
                     eff = 0.98
-                    b_cap = float(manager.get_setting("battery_capacity_kwh", 10.0))
+                    b_cap = float(manager.get_setting(CONF_BATTERY_CAPACITY, 10.0))
                     time_fraction = max(0.01, (60.0 - now.minute) / 60.0)
                     
                     delta_soc = max(0.0, f_target_soc - batt_soc)
@@ -377,7 +377,7 @@ class EnergyLogicEngine:
                 t_soc = float(h_override.get("soc_limit", t_soc))
                 if batt_soc > (t_soc + 0.2):
                     eff = 0.98
-                    b_cap = float(manager.get_setting("battery_capacity_kwh", 10.0))
+                    b_cap = float(manager.get_setting(CONF_BATTERY_CAPACITY, 10.0))
                     time_fraction = max(0.01, (60.0 - now.minute) / 60.0)
                     delta_soc = max(0.0, batt_soc - t_soc)
                     delta_kwh = (delta_soc / 100.0) * b_cap

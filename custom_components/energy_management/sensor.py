@@ -910,9 +910,11 @@ class EnergyProfileManager:
             self.log_to_file(f"DIAG: Forecast Sensors. Hourly: {self.forecast_today_hourly_sensor}, Today: {self.forecast_today_sensor}")
             self.log_to_file(f"DIAG: Gen Profile Sample (10h-16h): {[prof_gen.get(str(h), 0.0) for h in range(10, 17)]}")
             
-            sim_soc = batt_soc
-            eff = 0.98
-            b_cap = float(self.get_setting("battery_capacity_kwh", 10.0) or 10.0)
+            b_cap = float(self.get_setting(CONF_BATTERY_CAPACITY, 0.0))
+            if b_cap <= 0.1:
+                _LOGGER.error("[ConfigError] CRITICAL: Battery Capacity is NOT SET or 0.0! Calculations STOPPED.")
+                self._attr_native_value = "Error: Missing Capacity"
+                return
 
             for h_abs in range(48):
                 if h_abs % 12 == 0:
@@ -942,7 +944,7 @@ class EnergyProfileManager:
                     profiles=shared_profiles,
                     buy_strategy=buy_strat,
                     sell_strategy=sell_strat,
-                    log_func=self.log_to_file
+                    log_func=self.log_to_file if h_abs == 0 else None
                 )
                 if h_abs == 0: self.log_to_file(f"DIAG: get_mode_at (Hour 0) returned: {mode}")
                 
@@ -2287,9 +2289,15 @@ class EnergyProfileManager:
         if key in [CONF_BATTERY_MAX_POWER, CONF_AI_DISCHARGE_LIMIT]:
             _LOGGER.debug(f"[SettingTrace] {key} = {val} (Source: {source})")
 
+        if isinstance(val, str) and "." not in val:
+            val = normalize_float(val)
+
         if isinstance(default, float):
-            try: return float(val)
-            except Exception: return default
+            try:
+                return float(val)
+            except Exception as e:
+                _LOGGER.warning(f"[ConfigError] Failed to parse setting '{key}' (Value: '{val}') as float. Using default: {default}. Error: {e}")
+                return default
         return val
 
     def get_price(self, mode, date_str, hour):
@@ -2398,12 +2406,21 @@ class EnergyProfileManager:
                 self._last_valid_soc = soc
         
         # Final fallback
-        if soc is None: soc = soc_default
+        if soc is None:
+            _LOGGER.warning(f"[ConfigError] Battery SOC sensor '{self.battery_soc_sensor}' returned None. Using fallback: {soc_default}%")
+            soc = soc_default
         
         cap = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
+        _LOGGER.warning(f"[DEBUG] Battery Capacity: Sensor='{self.battery_capacity_sensor}' -> {cap} kWh")
+        
         if cap <= 0.1:
             from .const import CONF_BATTERY_CAPACITY
-            cap = self.get_setting(CONF_BATTERY_CAPACITY, 17.0)
+            raw_setting = self.get_setting(CONF_BATTERY_CAPACITY)
+            cap = self.get_setting(CONF_BATTERY_CAPACITY, 0.0)
+            _LOGGER.warning(f"[DEBUG] Battery Capacity Fallback: RawSetting='{raw_setting}' -> {cap} kWh")
+            if cap <= 0.1:
+                 _LOGGER.error("[ConfigError] CRITICAL: Battery Capacity is NOT SET! Cannot calculate energy.")
+                 cap = 0.0
             
         energy = cap * (soc / 100.0) if cap > 0 else 0.0
         return float(soc), float(cap), energy
@@ -3173,7 +3190,7 @@ class InverterOperationModeSensor(SensorEntity):
                 
             raw_mode = slot0.mode
             batt_soc, _, _ = self.manager.get_battery_state(soc_default=100.0)
-            min_soc = float(self.manager.get_setting("min_soc_bat", 10.0))
+            min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
             
             # 2. Mode Lock Logic (Relaxed v11.9.361)
             # Only apply strict locking for critical transitions: buy <-> sale_pv_bat

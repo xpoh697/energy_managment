@@ -74,20 +74,21 @@ class DPPlanner:
             if not prices_buy or not prices_sell:
                 return {"error": "Missing price data"}
 
+            b_cap = max(0.1, b_cap) # Prevent division by zero
             available_hours = sorted([int(h) for h in prices_buy.keys()])
             max_abs_h = max(available_hours) if available_hours else cur_hour + 23
             horizon = min(48, max_abs_h - cur_hour + 1)
             
             # --- Configuration ---
-            max_p_dis = float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0))
+            max_p_dis = float(normalize_float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)))
             max_p_chg = max_p_dis 
             
             energy_step = 0.1
             energy_steps = int(round(b_cap / energy_step))
             
             cycle_cost = self._get_deg_cost(b_cap)
-            min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
-            soc_buff = float(self.manager.get_setting(CONF_SOC_BUFFER, 13.0))
+            min_soc = float(normalize_float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0)))
+            soc_buff = float(normalize_float(self.manager.get_setting(CONF_SOC_BUFFER, 13.0)))
             eff = getattr(self.manager, "last_eff_coeff", 0.96)
             
             min_end_usable = 2.3 # v11.9.40 (approx 13.5% SOC)
@@ -110,9 +111,9 @@ class DPPlanner:
             
             neg_inf = -1e9
             # v11.9.42: Arbitrage TOP hours per day
-            max_arb_h = int(self.manager.get_setting(CONF_MAX_ARBITRAGE_HOURS, 3))
-            min_dis_kwh = float(self.manager.get_setting(CONF_MIN_DISCHARGE_KWH, 0.5))
-            min_sell_p = float(self.manager.get_setting(CONF_MIN_SELL_PRICE, 0.01))
+            max_arb_h = int(normalize_float(self.manager.get_setting(CONF_MAX_ARBITRAGE_HOURS, 3)))
+            min_dis_kwh = float(normalize_float(self.manager.get_setting(CONF_MIN_DISCHARGE_KWH, 0.5)))
+            min_sell_p = float(normalize_float(self.manager.get_setting(CONF_MIN_SELL_PRICE, 0.01)))
             
             # DP Table: [hour][energy_idx] (2D Optimization)
             full_dp = [[(neg_inf, -1, ACT_IDLE, 0.0)] * (energy_steps + 1) for _ in range(horizon + 1)]
