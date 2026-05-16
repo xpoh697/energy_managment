@@ -761,6 +761,7 @@ class EnergyProfileManager:
             self._last_override_hour = now_h
             _LOGGER.warning("[Manual Override] Forced mode: %s for hour %s:00", mode, now_h)
         self._notify_update(force_strategy_recalc=True)
+        self.hass.async_create_task(self.async_update_global_plan())
 
     async def async_set_hourly_override(self, timestamp: str, mode: str, soc_limit: float):
         """Set a manual override for a specific hour (modal window)."""
@@ -793,6 +794,7 @@ class EnergyProfileManager:
         self.data["hourly_manual_overrides"] = self.hourly_manual_overrides
         await self.store.async_save(self.data)
         self._notify_update(force_strategy_recalc=True)
+        self.hass.async_create_task(self.async_update_global_plan())
 
     async def async_stop(self):
         """Cleanup all listeners and tasks."""
@@ -1018,6 +1020,7 @@ class EnergyProfileManager:
                     slot.sell_debug = sell_strat
 
             self.global_plan = DispatchPlan(slots)
+            self.log_to_file(f"DIAG: Global Plan updated. First 12h: {list(self.global_plan.to_planned_modes_24h().items())[:12]}")
             _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry (v12.0.1).")
             
         except Exception as e:
