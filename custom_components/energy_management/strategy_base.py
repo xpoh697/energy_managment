@@ -1273,31 +1273,21 @@ class StrategyEngine:
                 
 
                 # Store enriched data for the 24h forecast (v11.6.1: Unified EN keys)
-                real_h_log = h_abs % 24
-                is_tom = (h_abs >= 24)
-                # v11.7.57: Differentiate Tomorrow vs Day After Tomorrow
-                day_suffix = ""
-                if h_abs >= 48:
-                    day_suffix = " (Через день)"
-                elif h_abs >= 24:
-                    day_suffix = " (Завтра)"
-                    
-                log_key_str = f"{real_h_log:02d}:59{day_suffix}"
-                
-                # v11.7.73: Unified keys with sensor.py (gen_kw / load_kw)
-                log_key_str = f"{real_h:02d}:59" + (" (Завтра)" if is_tom else (" (Через день)" if h_abs >= 48 else ""))
-                if log_key_str not in history_log:
-                    history_log[log_key_str] = {
-                        "soc": round_f(float(simulated_soc), 1),
+                if h_abs not in history_log:
+                    history_log[int(h_abs)] = {
+                        "soc_start": round_f(float(_prev_soc_for_log), 1),
+                        "soc_end": round_f(float(simulated_soc), 1),
+                        "soc": round_f(float(simulated_soc), 1), # Legacy
                         "p_bat": round_f(float(sim_p_bat), 2),
+                        "net_p_bat": round_f(float(sim_p_bat), 2), # Unified
                         "gen_kw": round_f(float(expected_gen_kw), 2),
                         "cons_kw": round_f(float(expected_cons_kw), 2),
                         "net_kw": round_f(float(total_net_kw), 2),
                         "mode": _h_mode_str
                     }
                     if abs(cmd_p) > 0.001:
-                        history_log[log_key_str]["req_p"] = round_f(float(abs(cmd_p)), 3)
-                        history_log[log_key_str]["floor"] = round_f(float(h_floor_trade), 1)
+                        history_log[int(h_abs)]["req_p"] = round_f(float(abs(cmd_p)), 3)
+                        history_log[int(h_abs)]["floor"] = round_f(float(h_floor_trade), 1)
 
             except Exception as e:
                 _LOGGER.error(f"Simulation error at hour {h_abs}: {e}")
