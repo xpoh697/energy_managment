@@ -300,6 +300,12 @@ class EnergyManagementCard extends HTMLElement {
           font-size: 0.95rem;
           font-weight: 600;
         }
+        .color-buy { color: #ff6b6b; font-weight: 700; }
+        .color-sell { color: #66bb6a; font-weight: 700; }
+        .color-gen { color: #ffe082; font-weight: 700; }
+        .color-load { color: #ff6b6b; font-weight: 700; }
+        .divider { color: rgba(255, 255, 255, 0.25); font-weight: 300; }
+        .unit-text { color: rgba(255, 255, 255, 0.45); font-size: 0.85rem; font-weight: 400; }
         
         .soc-badge {
           background: rgba(76, 175, 80, 0.15);
@@ -403,14 +409,24 @@ class EnergyManagementCard extends HTMLElement {
                     <ha-icon icon="mdi:swap-horizontal" class="info-icon"></ha-icon>
                     <span>Buy / Sell</span>
                   </span>
-                  <b id="info-prices" class="info-value">-</b>
+                  <b class="info-value">
+                    <span id="info-buy" class="color-buy">-</span>
+                    <span class="divider"> / </span>
+                    <span id="info-sell" class="color-sell">-</span>
+                    <span id="info-currency" class="unit-text"></span>
+                  </b>
                 </div>
                 <div class="info-row">
                   <span class="info-label">
                     <ha-icon icon="mdi:lightning-bolt" class="info-icon solar-color"></ha-icon>
                     <span>Gen / Load</span>
                   </span>
-                  <b id="info-forecast" class="info-value">-</b>
+                  <b class="info-value">
+                    <span id="info-gen" class="color-gen">-</span>
+                    <span class="divider"> / </span>
+                    <span id="info-load" class="color-load">-</span>
+                    <span class="unit-text"> kW</span>
+                  </b>
                 </div>
                 <div class="info-row">
                   <span class="info-label">
@@ -422,7 +438,7 @@ class EnergyManagementCard extends HTMLElement {
                 <div class="info-row">
                   <span class="info-label">
                     <ha-icon icon="mdi:battery-80" class="info-icon battery-color"></ha-icon>
-                    <span>Forecast</span>
+                    <span>SOC Forecast</span>
                   </span>
                   <span class="soc-badge"><b id="info-forecast-soc">-</b></span>
                 </div>
@@ -453,7 +469,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.0.70</div>
+        <div id="v-tag" class="version-tag">v12.0.71</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -481,8 +497,19 @@ class EnergyManagementCard extends HTMLElement {
 
     // Fill Market Info (v12.0)
     const currency = this._hass.states[this._config.entity].attributes.unit_of_measurement || '';
-    this.shadowRoot.getElementById('info-prices').innerText = `${hourData.buy_price || 0} / ${hourData.sell_price || 0} ${currency}`;
-    this.shadowRoot.getElementById('info-forecast').innerText = `${hourData.gen || 0} / ${hourData.load || 0} kW`;
+    
+    const buyEl = this.shadowRoot.getElementById('info-buy');
+    const sellEl = this.shadowRoot.getElementById('info-sell');
+    const currEl = this.shadowRoot.getElementById('info-currency');
+    if (buyEl) buyEl.innerText = hourData.buy_price !== undefined ? hourData.buy_price : '0';
+    if (sellEl) sellEl.innerText = hourData.sell_price !== undefined ? hourData.sell_price : '0';
+    if (currEl) currEl.innerText = ` ${currency}`;
+
+    const genEl = this.shadowRoot.getElementById('info-gen');
+    const loadEl = this.shadowRoot.getElementById('info-load');
+    if (genEl) genEl.innerText = hourData.gen !== undefined ? hourData.gen : '0';
+    if (loadEl) loadEl.innerText = hourData.load !== undefined ? hourData.load : '0';
+
     this.shadowRoot.getElementById('info-power').innerText = `${hourData.power || 0} kW / ${hourData.amps || 0} A`;
     this.shadowRoot.getElementById('info-reason').innerText = hourData.reason || 'Standard AI decision';
     
