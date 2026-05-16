@@ -262,7 +262,7 @@ class StrategyBuy(StrategyEngine):
                     # v11.9.712: Expanded samples
                     tom_h = cur_hour + 24
                     res["buy_debug"]["tomorrow_lookup_key"] = f"'{get_h_log_key(tom_h)}'"
-                    res["buy_debug"]["tomorrow_sim_key"] = next((f"'{k}'" for k in log.keys() if "Завтра" in k), "Not found")
+                    res["buy_debug"]["tomorrow_sim_key"] = next((f"'{k}'" for k in log.keys() if self.is_tomorrow_log_key(k)), "Not found")
                     
                     # v11.9.713: Manual Override Keys Diagnostic
                     res["buy_debug"]["manual_override_keys"] = list(man.hourly_manual_overrides.keys())
@@ -545,7 +545,11 @@ class StrategyBuy(StrategyEngine):
                 ])
             # v11.9.739: Ensure debug log uses the final simulation (sim_log) which includes charges.
             # v11.9.742: Ensure debug log also uses predictable UI keys
-            res["buy_debug"]["sim_log_24h"] = {f"{int(str(k).split(':')[0]):02d}:00" + (" (Завтра)" if "Завтра" in k else ""): v["soc"] for k, v in list(sim_log.items())[:36]}
+            res["buy_debug"]["sim_log_24h"] = {
+                (f"{int(k):02d}:00" if isinstance(k, int) else f"{int(str(k).split(':')[0]):02d}:00") + 
+                (" (Завтра)" if self.is_tomorrow_log_key(k) else (" (Через день)" if self.is_dafter_log_key(k) else "")): v["soc"] 
+                for k, v in list(sim_log.items())[:36]
+            }
             res["projected_soc"] = round_f(self._get_soc_from_log(sim_log, get_h_log_key(cur_hour), b_soc), 1)
             
             log_str_base = fmt_log(sim_log_base)
