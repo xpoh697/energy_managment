@@ -428,7 +428,7 @@ class EnergyManagementCard extends HTMLElement {
                     <span class="unit-text"> kW</span>
                   </b>
                 </div>
-                <div class="info-row">
+                <div class="info-row" id="info-power-row">
                   <span class="info-label">
                     <ha-icon icon="mdi:flash-outline" class="info-icon power-color"></ha-icon>
                     <span>Power / Amps</span>
@@ -469,7 +469,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.0.71</div>
+        <div id="v-tag" class="version-tag">v12.0.72</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -486,6 +486,7 @@ class EnergyManagementCard extends HTMLElement {
     const currentSocLimit = hourData.soc_limit !== undefined ? hourData.soc_limit : (hourData.soc || 100);
 
     this._editingTimestamp = timestamp;
+    this._currentHourData = hourData;
     this.shadowRoot.getElementById('modal-title').innerText = timestamp;
     this.shadowRoot.getElementById('modal-mode').value = currentMode === 'ai' ? 'ai' : currentMode;
 
@@ -525,11 +526,23 @@ class EnergyManagementCard extends HTMLElement {
 
   _toggleSocVisibility() {
     const mode = this.shadowRoot.getElementById('modal-mode').value;
+    
+    let resolvedMode = mode;
+    if (mode === 'ai' && this._currentHourData) {
+      resolvedMode = this._currentHourData.mode;
+    }
+
     const socGroup = this.shadowRoot.getElementById('soc-group');
     if (socGroup) {
       // STRICT: Show ONLY for Buy and Sale_PV_BAT. Hide for AI and everything else.
       const isVisible = (mode === 'buy' || mode === 'sale_pv_bat');
       socGroup.style.display = isVisible ? 'flex' : 'none';
+    }
+
+    const powerRow = this.shadowRoot.getElementById('info-power-row');
+    if (powerRow) {
+      const showPower = (resolvedMode === 'buy' || resolvedMode === 'sale_pv_bat');
+      powerRow.style.display = showPower ? 'flex' : 'none';
     }
   }
 
