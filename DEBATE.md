@@ -214,3 +214,22 @@ Here are 3 points of SRE/QA critique:
 
 ### Conclusion
 We will split the compound price and generator strings in `energy-management-card.js` into distinct sub-spans, applying red for Buy/Load, green for Sell, and yellow for Gen. We will rename the Forecast label to "SOC Forecast" and log this debate in `DEBATE.md`, then deploy the updated code under `v12.0.71`.
+
+## [2026-05-17 00:41] Task: Dynamic Visibility for Power/Amps Row Based on Active Mode
+
+### Archi
+I propose showing the `Power / Amps` telemetry row only when the hour has an active battery flow (i.e. Charging `buy` or Discharging `sale_pv_bat`). In other states like `Normal`, `Wait`, or `Stop Sale`, the battery is inactive, so showing `0 kW / 0 A` is redundant. 
+I will:
+1. Wrap the `Power / Amps` markup in `id="info-power-row"`.
+2. Keep the current hour's data in `this._currentHourData = hourData;` inside `_openModal`.
+3. Update `_toggleSocVisibility()` to resolve the active mode (checking the select dropdown value, and if it is `'ai'`, falling back to `this._currentHourData.mode`).
+4. Set the CSS display of `info-power-row` to `flex` if the active mode is `buy` or `sale_pv_bat`, and `none` otherwise.
+
+### Skeptic
+Here are 3 points of SRE/QA critique:
+1. **Safety Null-Guards**: If `this._currentHourData` or `this._currentHourData.mode` is missing, the code could throw a `TypeError`. We must fall back safely to a default value (e.g. `'ai'` or empty string) if attributes are missing.
+2. **Smooth Layout Flow**: By toggle-hiding using `display: none` / `display: flex`, the other items in `.modal-info-grid` will collapse and slide smoothly, avoiding any broken layout gaps or white-space jumps.
+3. **Synchronization**: Since `_toggleSocVisibility()` is called both during `_openModal` and inside the `onchange` event of the dropdown selector, the row's visibility will stay perfectly in sync under both initial load and manual override edits.
+
+### Conclusion
+We will implement the dynamic visibility logic for the `Power / Amps` row inside `_toggleSocVisibility()`, using safe fallback guards. We will tag the row with `id="info-power-row"` and update the version to `v12.0.72`.
