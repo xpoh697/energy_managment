@@ -902,6 +902,9 @@ class EnergyProfileManager:
             prof_cons = self.get_predicted_profile("consumption_total")
             prof_cons_base = self.get_predicted_profile("consumption_base")
             
+            self.log_to_file(f"DIAG: Forecast Sensors. Hourly: {self.forecast_today_hourly_sensor}, Today: {self.forecast_today_sensor}")
+            self.log_to_file(f"DIAG: Gen Profile Sample (10h-16h): {[prof_gen.get(str(h), 0.0) for h in range(10, 17)]}")
+            
             sim_soc = batt_soc
             eff = 0.98
             b_cap = float(self.get_setting("battery_capacity_kwh", 10.0) or 10.0)
