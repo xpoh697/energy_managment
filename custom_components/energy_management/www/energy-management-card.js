@@ -21,7 +21,7 @@ const MODE_COLORS = {
 };
 
 const MODE_ICONS = {
-  'sale_pv': 'mdi:home-lightning-bolt',
+  'sale_pv': 'mdi:solar-power-variant',
   'sale_pv_no_bat': 'mdi:solar-power-variant',
   'sale_pv_bat': 'mdi:battery-arrow-up',
   'buy': 'mdi:battery-arrow-down',
@@ -40,6 +40,39 @@ const MODE_LABELS = {
   'bat_emergency': 'Emergency',
   'no_pv_sale_no_bat': 'Wait'
 };
+
+function getSocInfo(soc) {
+  if (soc === undefined || soc === null) {
+    return { icon: 'mdi:battery-unknown', color: 'rgba(255,255,255,0.2)', percent: '' };
+  }
+  
+  const val = parseFloat(soc);
+  let color = '#ff6b6b'; // Coral Red (Low)
+  let icon = 'mdi:battery-20';
+  
+  if (val >= 75) {
+    color = '#66bb6a'; // Fresh Green (High)
+  } else if (val >= 60) {
+    color = '#a5d6a7'; // Light Green (Medium-High)
+  } else if (val >= 40) {
+    color = '#ffe082'; // Amber Yellow (Medium)
+  } else if (val >= 25) {
+    color = '#ffb74d'; // Orange (Medium-Low)
+  }
+  
+  if (val >= 95) icon = 'mdi:battery';
+  else if (val >= 85) icon = 'mdi:battery-90';
+  else if (val >= 75) icon = 'mdi:battery-80';
+  else if (val >= 65) icon = 'mdi:battery-70';
+  else if (val >= 55) icon = 'mdi:battery-60';
+  else if (val >= 45) icon = 'mdi:battery-50';
+  else if (val >= 35) icon = 'mdi:battery-40';
+  else if (val >= 25) icon = 'mdi:battery-30';
+  else if (val >= 15) icon = 'mdi:battery-20';
+  else icon = 'mdi:battery-10';
+
+  return { icon, color, percent: val.toFixed(0) };
+}
 
 class EnergyManagementCard extends HTMLElement {
   constructor() {
@@ -205,7 +238,25 @@ class EnergyManagementCard extends HTMLElement {
         .price-buy { font-size: 0.6rem; font-weight: 800; color: #90caf9; }
         .price-sell { font-size: 0.6rem; font-weight: 800; color: #a5d6a7; }
         .h-mode { font-size: 0.55rem; font-weight: 800; text-align: center; line-height: 1; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.02em; }
-        .h-soc { font-size: 0.45rem; font-weight: 700; color: rgba(255,255,255,0.5); margin-top: 1px; }
+        .h-soc-top-left {
+          position: absolute;
+          top: 5px;
+          left: 6px;
+          display: flex;
+          align-items: center;
+          gap: 1.5px;
+          line-height: 1;
+          pointer-events: none;
+        }
+        .h-soc-top-left ha-icon {
+          --mdc-icon-size: 11px;
+          margin-bottom: 0.5px;
+        }
+        .h-soc-percent {
+          font-size: 0.55rem;
+          font-weight: 900;
+          letter-spacing: -0.02em;
+        }
         .h-forecasts { display: flex; gap: 4px; margin-top: 2px; opacity: 0.7; }
         .h-f-item { display: flex; align-items: center; gap: 2px; font-size: 0.55rem; font-weight: 700; }
         .h-f-item ha-icon { --mdc-icon-size: 10px; }
@@ -469,7 +520,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.0.72</div>
+        <div id="v-tag" class="version-tag">v12.0.73</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -749,9 +800,15 @@ class EnergyManagementCard extends HTMLElement {
         const bgColor = hexToRgba(modeColor, 0.1);
         const isManual = hourData.is_manual;
 
+        const socInfo = getSocInfo(hourData.soc);
+
         html += `
           <div class="hour-bar ${idx === 0 ? 'active' : ''} ${isManual ? 'manual-glow' : ''}" data-ts="${key}" data-mode="${hourData.mode}" id="hb-${key.replace(/[: ]/g, '-')}">
             <div class="bar-content" style="border-color: ${modeColor}; background-color: ${bgColor};">
+              <div class="h-soc-top-left" style="color: ${socInfo.color};">
+                <ha-icon icon="${socInfo.icon}"></ha-icon>
+                <span class="h-soc-percent">${socInfo.percent ? socInfo.percent + '%' : ''}</span>
+              </div>
               ${isManual ? `<ha-icon class="manual-indicator" icon="mdi:hand-back-right"></ha-icon>` : ''}
               <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
               <span class="h-time">${key.split(' ')[1]}</span>
@@ -760,9 +817,6 @@ class EnergyManagementCard extends HTMLElement {
                 <span class="price-sell">${(hourData.sell_price || 0).toFixed(2)}</span>
               </div>
               <div class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</div>
-              <div style="display:flex; flex-direction:column; align-items:center;">
-                <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'End ' + hourData.soc.toFixed(1) + '%' : ''}</span>
-              </div>
             </div>
           </div>
         `;
@@ -801,10 +855,10 @@ class EnergyManagementCard extends HTMLElement {
 
         const icon = bar.querySelector('.h-icon');
         const modeLabel = bar.querySelector('.h-mode');
-        const socLabel = bar.querySelector('.h-soc');
         const buyPrice = bar.querySelector('.price-buy');
         const sellPrice = bar.querySelector('.price-sell');
         const priceContainer = bar.querySelector('.h-prices');
+        const socContainer = bar.querySelector('.h-soc-top-left');
 
         if (content) {
           content.style.borderColor = modeColor;
@@ -818,16 +872,14 @@ class EnergyManagementCard extends HTMLElement {
           modeLabel.style.color = modeColor;
           modeLabel.innerText = MODE_LABELS[hourData.mode] || hourData.mode;
         }
-        
-        const modeEl = bar.querySelector('.h-mode');
-        if (modeEl) {
-          modeEl.style.color = modeColor;
-          modeEl.innerText = MODE_LABELS[hourData.mode] || hourData.mode;
-        }
 
-        if (socLabel) {
-          socLabel.style.color = modeColor;
-          socLabel.innerText = hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(1) + '%' : '';
+        if (socContainer) {
+          const socInfo = getSocInfo(hourData.soc);
+          socContainer.style.color = socInfo.color;
+          const socIcon = socContainer.querySelector('ha-icon');
+          if (socIcon) socIcon.icon = socInfo.icon;
+          const socPercent = socContainer.querySelector('.h-soc-percent');
+          if (socPercent) socPercent.innerText = socInfo.percent ? `${socInfo.percent}%` : '';
         }
         if (priceContainer) {
           priceContainer.style.display = 'flex';
