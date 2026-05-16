@@ -115,32 +115,30 @@ class EnergyLogicEngine:
     ) -> tuple:
         """
         Calculates the inverter mode for a given timestamp and SOC.
-        Mirror of sensor.py _get_mode_at (v11.9.749).
+        FULL PORT of sensor.py _get_mode_at (v11.9.749).
         """
-        # In HA environment, we'll pass dt_util from manager
         from homeassistant.util import dt as dt_util
         now_wall = dt_util.now()
         now_h_wall = now_wall.hour
-        
+        today_str = dt_now.strftime("%Y-%m-%d")
+        sim_h = dt_now.hour
+
         # 0. Check for HOURLY Manual Overrides
         ts_key = dt_now.strftime("%Y-%m-%d %H:00")
         h_override = manager.hourly_manual_overrides.get(ts_key)
         if h_override:
-            return h_override["mode"], f"Manual Override ({ts_key})", False, False
+            return h_override["mode"], f"Manual Override ({ts_key})", h_override.get("mode") == "buy", h_override.get("mode") == "sale_pv_bat"
 
-        today_str = dt_now.strftime("%Y-%m-%d")
-        sim_h = dt_now.hour
-        
-        # Calculate relative hour from simulation start
+        # 1. Fetch Strategies
+        sell_strategy = manager.get_market_strategy("sell") or {}
+        buy_strategy = manager.get_market_strategy("buy") or {}
+
+        # 2. Timing & Indices
         now_h_start = now_wall.replace(minute=0, second=0, microsecond=0)
         dt_h_start = dt_now.replace(minute=0, second=0, microsecond=0)
         rel_h = int((dt_h_start - now_h_start).total_seconds() // 3600)
         check_h_abs = sim_h if abs_hour is None else abs_hour
 
-        # Strategy results
-        sell_strategy = manager.get_market_strategy("sell") or {}
-        buy_strategy = manager.get_market_strategy("buy") or {}
-        
         if is_forecast:
             _now_h_for_forecast = now_h_wall
             if check_h_abs == _now_h_for_forecast:
@@ -154,32 +152,136 @@ class EnergyLogicEngine:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"
 
-        # 1. Base Decision (Standard Ladder)
-        cur_price_sell = manager.get_price("sell", today_str, sim_h)
-        # Handle None price gracefully
-        p_sell_val = float(cur_price_sell) if cur_price_sell is not None else 0.0
+        # 3. Settings & Prices
+        from .const import CONF_PRICE_STOP_SELL, CONF_PRICE_SELL_ONLY_PV, CONF_SALE_PV_NO_BAT_MAX_HOUR, CONF_MIN_SOC_BAT
+        price_stop_sell = float(manager.get_setting(CONF_PRICE_STOP_SELL, 0.0) or 0.0)
+        price_sell_only_pv = float(manager.get_setting(CONF_PRICE_SELL_ONLY_PV, 999.0) or 999.0)
+        sale_pv_no_bat_max_hour = float(manager.get_setting(CONF_SALE_PV_NO_BAT_MAX_HOUR, 13.0) or 13.0)
+        min_soc = float(manager.get_setting(CONF_MIN_SOC_BAT, 10.0) or 10.0)
         
-        price_stop_sell = float(manager.get_setting("price_stop_sell", 0.0) or 0.0)
-        min_soc = float(manager.get_setting("min_soc_bat", 10.0) or 10.0)
+        cur_price = manager.get_price("sell", today_str, sim_h)
+        p_sell_val = float(cur_price) if cur_price is not None else 0.0
+        buy_p_cur = manager.get_price("buy", today_str, sim_h)
+        is_neg_buy = bool(buy_p_cur is not None and buy_p_cur <= 0.0)
+
+        # 4. Gen/Load Data (5m average for real-time, profile for forecast)
+        if not is_forecast:
+            avg_load = float(getattr(manager, "avg_load_5m_kw", 0.5) or 0.5)
+            avg_gen = float(getattr(manager, "avg_gen_5m_kw", 0.0) or 0.0)
+        else:
+            h_rel_str = str(sim_h)
+            prof_gen = manager.get_predicted_profile("generation")
+            prof_cons = manager.get_predicted_profile("consumption_total")
+            avg_gen = float(prof_gen.get(h_rel_str, 0.0) or 0.0)
+            avg_load = float(prof_cons.get(h_rel_str, 0.5) or 0.5)
+
+        has_surplus = bool(avg_gen > (avg_load + 0.05))
+        is_before_limit_hour = bool(sim_h < sale_pv_no_bat_max_hour)
         
-        # v11.9.749 Logic Tree
+        # 5. Negative Price Waiting Logic
+        neg_h = buy_strategy.get("first_negative_hour")
+        can_wait = buy_strategy.get("can_wait_for_negative", False)
+        is_gen_night = False
+        try:
+            prof_gen_avg = manager.get_average_profile("generation", manager.custom_period, "all")
+            is_gen_night = float(prof_gen_avg.get(str(sim_h), 0.0)) < 0.01
+        except: pass
+        is_waiting_for_neg = bool(can_wait and neg_h is not None and not is_gen_night)
+
+        # 6. Peak Preparation Logic
+        peak_start_abs = sell_strategy.get("next_peak_h")
+        if peak_start_abs is None:
+            for h in sorted(sell_strategy.get("active_hours", [])):
+                if h > check_h_abs:
+                    peak_start_abs = h
+                    break
+        
+        is_preparing_for_peak = False
+        # (Heuristic from V1: projected_soc_morning_pct etc.)
+        morning_soc_proj = (sell_strategy.get("sell_simulation") or {}).get("projected_soc_morning_pct", 0.0)
+        target_morning = float(min_soc + 5.0)
+        is_low_for_morning = bool(morning_soc_proj < target_morning)
+        hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
+        latest_charge_start = (sell_strategy.get("sell_simulation") or {}).get("latest_charge_start", sim_h)
+
+        is_profitable_to_save = False
+        if peak_start_abs is not None:
+            deg_cost = float(manager.get_setting("degradation_cost", 0.15) or 0.15)
+            peak_p = manager.get_price("sell", today_str, peak_start_abs % 24) or 0.0
+            if (peak_p - deg_cost) > p_sell_val and batt_soc < 90.0:
+                is_profitable_to_save = True
+        
+        is_energy_low_for_evening = bool((is_low_for_morning or is_profitable_to_save) and not hit_full_before)
+
+        # =====================================================================
+        # STATE MACHINE LADDER (V1 Parity)
+        # =====================================================================
         mode = "sale_pv"
         reason = "Стандартная работа"
 
-        if is_buying_active:
+        # P1: Emergency
+        if batt_soc < min_soc:
+            mode = "bat_emergency"
+            reason = "Критический заряд АКБ"
+        
+        # P2: Negative Buy
+        elif is_neg_buy:
             mode = "buy"
-            reason = buy_strategy.get("charge_reason", "Покупка")
+            reason = "Отрицательная цена"
+        
+        # P3: AI Buy
+        elif is_buying_active:
+            mode = "buy"
+            reason = buy_strategy.get("charge_reason", "Активна стратегия ПОКУПКИ")
+            
+        # P4: AI Sell (Elevated Priority in v11.9.691)
         elif is_selling_active:
             mode = "sale_pv_bat"
-            reason = sell_strategy.get("strategy_decision", "Продажа")
-        elif p_sell_val < price_stop_sell:
-            mode = "no_pv_sale_no_bat"
-            reason = "Ожидание отрицательных цен"
-        elif batt_soc < min_soc + 2.0:
+            reason = sell_strategy.get("strategy_decision", "Активна стратегия ПРОДАЖИ (AI)")
+
+        # P5: Morning Mode / Solar Heuristics
+        elif cur_price is not None and cur_price >= price_sell_only_pv:
+            _block_sale_pv_no_bat = bool(sim_h >= latest_charge_start)
+            if is_before_limit_hour and has_surplus and not _block_sale_pv_no_bat and cur_price > 0:
+                mode = "sale_pv_no_bat"
+                reason = f"Продажа только солнца: Цена ({p_sell_val:.2f}) >= Порога ({price_sell_only_pv:.2f}), утро"
+            else:
+                mode = "sale_pv"
+                if is_low_for_morning: reason = f"Защита Gatekeeper: Рассвет {morning_soc_proj:.1f}% < {target_morning:.1f}%"
+                elif is_profitable_to_save: reason = "Сохранение заряда: Пик выгоднее текущей цены"
+                elif _block_sale_pv_no_bat: reason = f"Окно продажи PV закрыто (лимит {latest_charge_start}:00)"
+                else: reason = "Стандартная работа (ожидание команды AI)"
+
+        # P6: Wait for negative price
+        elif is_waiting_for_neg:
+            has_significant_deficit = bool(avg_load > (avg_gen + 0.5))
+            if cur_price is not None and cur_price >= price_sell_only_pv and has_surplus and is_before_limit_hour:
+                mode = "sale_pv_no_bat"
+                reason = "Продажа только солнца (ожидаем отрицательную цену)"
+            elif not has_significant_deficit:
+                mode = "no_pv_sale_no_bat"
+                neg_h_disp = neg_h if neg_h < 24 else f"{neg_h-24} (Завтра)"
+                reason = f"Ожидание отриц. цен ({neg_h_disp}г): Экономим место"
+            else:
+                mode = "sale_pv"
+                reason = "Ожидание отриц. цен: Высокая нагрузка (sale_pv)"
+
+        # P7: Price Floor
+        elif cur_price is not None and p_sell_val < price_stop_sell:
+            mode = "stop_sale"
+            reason = f"Продажа заблокирована: Цена ({p_sell_val:.2f}) < Порога ({price_stop_sell:.2f})"
+
+        # P8: Missing prices
+        elif cur_price is None:
             mode = "sale_pv"
-            reason = "Экономия (Low SOC)"
-            
-        return mode, reason, is_buying_active, is_selling_active
+            reason = "Нет данных о цене"
+
+        # P9: Standard
+        else:
+            mode = "sale_pv"
+            reason = f"Стандартная работа: Цена ({p_sell_val:.2f}) выше порога"
+
+        return mode, reason, mode == "buy", mode == "sale_pv_bat"
 
     @staticmethod
     def calculate_realtime_power(
