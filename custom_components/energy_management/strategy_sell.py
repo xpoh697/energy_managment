@@ -536,7 +536,7 @@ class StrategySell(StrategyEngine):
                         
                         h_sim_key = h_cmd
                         sim_data = trial_log.get(h_sim_key, {})
-                        p_real_bat = sim_data.get("p_bat", 0.0)
+                        p_real_bat = sim_data.get("p_sale", sim_data.get("p_bat", 0.0))
                         # v11.9.556: Convert AC power from simulation to DC before comparing with DC request
                         p_real_dc = p_real_bat / max(0.1, eff)
                         

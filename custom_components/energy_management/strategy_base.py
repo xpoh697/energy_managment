@@ -1219,6 +1219,7 @@ class StrategyEngine:
                     _solar_charge = 0.0
             
                 sim_eff = float(max(0.85, eff_coeff))
+                sim_p_sale = 0.0
                 
                 # v11.9.545: Resolve Trade Floor early for logging
                 h_idx_int = int(h_abs)
@@ -1282,6 +1283,8 @@ class StrategyEngine:
                         sale_drop_req = (p_sale_dc * step_duration / b_cap_f * 100.0)
                         sale_drop_act = min(sale_drop_req, max(0.0, simulated_soc - h_floor_trade))
                         simulated_soc = float(simulated_soc - sale_drop_act)
+                        
+                        sim_p_sale = (sale_drop_act / 100.0 * b_cap_f) / step_duration * sim_eff
 
                         # Actual total drop for logging
                         actual_drop_soc = house_drop_act + sale_drop_act
@@ -1308,6 +1311,7 @@ class StrategyEngine:
                         "soc_end": round_f(float(simulated_soc), 1),
                         "soc": round_f(float(simulated_soc), 1), # Legacy
                         "p_bat": round_f(float(sim_p_bat), 2),
+                        "p_sale": round_f(float(sim_p_sale), 2),
                         "net_p_bat": round_f(float(sim_p_bat), 2), # Unified
                         "gen_kw": round_f(float(expected_gen_kw), 2),
                         "cons_kw": round_f(float(expected_cons_kw), 2),
