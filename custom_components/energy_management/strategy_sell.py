@@ -337,7 +337,16 @@ class StrategySell(StrategyEngine):
             )
             
             # Detect Solar Surplus (Saturation Awareness)
-            hit_full_before = any(v.get("soc", 0.0) >= 99.0 for h, v in sim_log_base.items() if ":" in h and "Завтра" not in h)
+            hit_full_before = False
+            for h, v in sim_log_base.items():
+                # We only check today's hours (0-23 or string keys without 'Завтра')
+                is_today = False
+                if isinstance(h, int): is_today = (h < 24)
+                elif isinstance(h, str): is_today = ("Завтра" not in h and "день" not in h)
+                
+                if is_today and v.get("soc", 0.0) >= 99.0:
+                    hit_full_before = True
+                    break
             is_solar_surplus = is_solar_surplus or hit_full_before
 
             # Find projected SOC at the exact start of the sale window
