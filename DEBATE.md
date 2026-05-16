@@ -233,3 +233,22 @@ Here are 3 points of SRE/QA critique:
 
 ### Conclusion
 We will implement the dynamic visibility logic for the `Power / Amps` row inside `_toggleSocVisibility()`, using safe fallback guards. We will tag the row with `id="info-power-row"` and update the version to `v12.0.72`.
+
+## [2026-05-17 00:43] Task: Dynamic Battery SOC Badge in Timeline Grid and Normal Mode Icon
+
+### Archi
+I propose two significant visual upgrades to the hourly timeline grid cards:
+1. **Normal Icon Upgrade**: Update `MODE_ICONS['sale_pv']` to use `'mdi:solar-power-variant'` instead of `'mdi:home-lightning-bolt'`, matching the user's preference and improving clarity.
+2. **Dynamic Top-Left SOC Badge**: Move the battery SOC reading from the bottom to the top-left corner of the card. Instead of text, it will display a color-coded battery icon and percentage:
+   - Introduce a helper `getSocInfo(soc)` mapping charge levels to high-resolution battery icons (`mdi:battery-10` to `mdi:battery`) and colors (Green `>75%`, Light Green `>60%`, Amber `>40%`, Orange `>25%`, Coral Red `<25%`).
+   - Wrap the new top-left badge in `.h-soc-top-left` with clean absolute positioning.
+   - Synchronize both initial card generation and the fast point-update algorithm to dynamically bind, colorize, and update this badge.
+
+### Skeptic
+Here are 3 points of QA/SRE critique:
+1. **Visual Symmetry and Overlap**: Placing the SOC badge at `top: 4px; left: 4px;` balanced with the manual override hand indicator at `top: 4px; right: 4px;` prevents any layout overlaps. 
+2. **Missing SOC Safety**: If `hourData.soc` is missing/undefined, `getSocInfo` must fall back to a faded grey question icon without text, avoiding displaying `NaN%` or `undefined%`.
+3. **Point-Update Performance**: When updating cells, targeting `.h-soc-top-left` and updating `style.color` and child element attributes is extremely fast, ensuring that live telemetry updates do not introduce lag.
+
+### Conclusion
+We will implement the global helper `getSocInfo`, change the Normal mode icon to `'mdi:solar-power-variant'`, update the timeline CSS and HTML structure to place the battery badge in the top-left corner, and rewrite the point-update mechanism to fully support this color-coded telemetry. We will deploy this under version `v12.0.73`.
