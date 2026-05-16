@@ -27,7 +27,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Energy Profile from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # Defer Lovelace card registration to prevent startup deadlocks
+    # Register the static HTTP view immediately to prevent 404 errors during early boot
+    www_path = Path(__file__).parent / "www"
+    hass.http.register_view(CardStaticView(www_path))
+    
+    # Defer Lovelace card database resource registration to prevent startup deadlocks
     from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
     from homeassistant.core import CoreState
     
@@ -166,11 +170,6 @@ def _async_register_ws_version(hass: HomeAssistant) -> None:
 
 async def _async_register_card(hass: HomeAssistant) -> None:
     """Register the Lovelace card with a cache-busting version query string."""
-    www_path = Path(__file__).parent / "www"
-    
-    # Register the static view for serving the JS file
-    hass.http.register_view(CardStaticView(www_path))
-    
     card_url = f"/api/{DOMAIN}/static/energy-management-card.js?v={VERSION}"
 
     # Try to register as a Lovelace resource (Storage Mode)

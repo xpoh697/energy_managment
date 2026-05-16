@@ -41,3 +41,22 @@ We will implement a double-sided fix:
 1. In `sensor.py`, replace direct dict key lookups for `today_prices` and `tomorrow_prices` with defensive `.get("today_prices", {})` and `.get("tomorrow_prices", {})` calls.
 2. In `strategy_buy.py` and `strategy_sell.py`, enrich the `allow_recalc=False` fallback template dictionary to include `"today_prices": {}` and `"tomorrow_prices": {}` to keep the returned schema consistent.
 
+## [2026-05-16 23:54] Task: Fix Lovelace "Ошибка конфигурации" (404 Race Condition) during startup
+
+### Archi
+The "Ошибка конфигурации" (Configuration Error) on the custom Lovelace card is caused by a race condition. Since we deferred the entire card registration (which includes registering the HTTP static view `CardStaticView` to serve the JavaScript file) until `EVENT_HOMEASSISTANT_STARTED`, the browser tries to fetch the custom card at `/api/energy_management/static/energy-management-card.js` during early boot *before* the started event fires. This returns a **404 Not Found** error, prompting Lovelace to fail permanently with a "Configuration Error".
+
+I propose:
+1. Moving the HTTP view registration `hass.http.register_view(CardStaticView(www_path))` to execute **immediately** and **synchronously** inside `async_setup_entry`. Since creating an HTTP route is non-blocking and safe, it has zero risk of deadlocking the bootstrap sequence.
+2. Only deferring the *database resource registration* (which uses `async_load()` and accesses the Lovelace JSON store) until `EVENT_HOMEASSISTANT_STARTED`.
+
+### Skeptic
+Here are 3 points of critique on this proposed fix:
+1. **HTTP Resource Access Control**: Registering the view immediately ensures 100% availability. However, we must verify that the `CardStaticView` has no side effects and is thread-safe, as it will now process HTTP requests during early bootstrap.
+2. **Cache Poisoning Avoidance**: If the browser requested the JS during boot and cached the 404, we should ensure the cache-busting version parameter (`?v=VERSION`) is correctly supplied when Lovelace requests the resource. This is already implemented in the URL.
+3. **Robustness of Path Parsing**: Ensure that `Path(__file__).parent / "www"` is resolved absolutely to prevent relative path mismatches on different environments.
+
+### Conclusion
+We will split the Lovelace card setup into two separate phases:
+1. **Immediate Phase (HTTP Serving)**: Register `CardStaticView` synchronously at the very beginning of `async_setup_entry` to make the JS file available immediately.
+2. **Deferred Phase (DB Entry)**: Keep the Lovelace resource registration deferred to `EVENT_HOMEASSISTANT_STARTED` (or immediate task if running) to prevent database transaction deadlocks.
