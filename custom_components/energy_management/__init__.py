@@ -28,7 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     
     # v11.9.333: Register Lovelace card using the premium pattern
-    await _async_register_card(hass)
+    hass.async_create_task(_async_register_card(hass))
     
     # We delay import to avoid circular dependency
     from .sensor import EnergyProfileManager

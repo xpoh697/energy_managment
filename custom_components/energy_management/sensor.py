@@ -865,8 +865,8 @@ class EnergyProfileManager:
         """Reliable background loop for Global Plan updates."""
         self.log_to_file("DIAG: Global Plan loop started")
         
-        # Initial delay to let HA states populate
-        await asyncio.sleep(10)
+        # Initial delay to let HA states populate without blocking other setups
+        await asyncio.sleep(30)
         
         while True:
             try:
@@ -888,13 +888,19 @@ class EnergyProfileManager:
             # Force strategy refresh
             self.strategy_engine.clear_cache()
             
+            # Yield event loop before heavy state access
+            await asyncio.sleep(0)
+            
             # 1. Fetch current state
             batt_soc, batt_cap, _ = self.get_battery_state()
             batt_soc = float(batt_soc)
             
             # 2. Fetch Strategy Proposals
             buy_strat = self.get_market_strategy("buy") or {}
+            await asyncio.sleep(0.01) # Yield after heavy strategy computation
+            
             sell_strat = self.get_market_strategy("sell") or {}
+            await asyncio.sleep(0.01) # Yield after heavy strategy computation
             
             # 3. Initialize 48 Slots
             slots = []
@@ -922,6 +928,9 @@ class EnergyProfileManager:
             eff = 0.98
 
             for h_abs in range(48):
+                # Yield to HA event loop to prevent blocking during 48h loop
+                await asyncio.sleep(0.01)
+                
                 if h_abs % 12 == 0:
                     self.log_to_file(f"DIAG: Global Plan progress: {h_abs}/48")
                 dt_h = (now + timedelta(hours=h_abs)).replace(minute=0, second=0, microsecond=0)
@@ -1024,6 +1033,9 @@ class EnergyProfileManager:
             
             # v11.9.740: Pass mode_overrides to simulator
             m_overrides = { (now.hour + i): s.mode for i, s in enumerate(slots) }
+            
+            # Yield before the heaviest pure-python computation
+            await asyncio.sleep(0.01)
             
             self.log_to_file(f"DIAG: Calling Sim. Sensor: {self.battery_soc_sensor}, StartSOC: {batt_soc}, Hour: {now.hour}, Range: {sim_range[0]}-{sim_range[-1]}")
             _, sim_log, _ = self.strategy_engine.run_soc_simulation(
