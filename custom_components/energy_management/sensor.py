@@ -2364,11 +2364,14 @@ class EnergyProfileManager:
             pass
 
         st = self.hass.states.get(eid_str)
+        _LOGGER.warning(f"[SENSOR_TRACE] entity_id='{eid_str}', state='{st.state if st else 'None'}'")
+        
         if not st or st.state in ("unknown", "unavailable", "None"):
             return default
 
         try:
-            return normalize_float(st.state)
+            val = normalize_float(st.state)
+            return val
         except Exception:
             return default
 
@@ -2377,9 +2380,11 @@ class EnergyProfileManager:
         st = self.hass.states.get(self.battery_soc_sensor) if self.battery_soc_sensor else None
         soc = soc_default
         
-        # Initialize last_valid_soc if not exists
+        # Initialize last_valid_soc/cap if not exists
         if not hasattr(self, "_last_valid_soc"):
             self._last_valid_soc = None
+        if not hasattr(self, "_last_valid_cap"):
+            self._last_valid_cap = None
 
         if st:
             try:
@@ -2411,13 +2416,19 @@ class EnergyProfileManager:
             soc = soc_default
         
         cap = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
-        _LOGGER.warning(f"[DEBUG] Battery Capacity: Sensor='{self.battery_capacity_sensor}' -> {cap} kWh")
         
+        # Capacity Glitch Protection
+        if cap <= 0.1 and self._last_valid_cap is not None:
+            _LOGGER.warning(f"Battery Capacity glitch detected: {cap} kWh. Using last valid: {self._last_valid_cap} kWh")
+            cap = self._last_valid_cap
+        
+        if cap > 0.1:
+            self._last_valid_cap = cap
+            
         if cap <= 0.1:
             from .const import CONF_BATTERY_CAPACITY
             raw_setting = self.get_setting(CONF_BATTERY_CAPACITY)
             cap = self.get_setting(CONF_BATTERY_CAPACITY, 0.0)
-            _LOGGER.warning(f"[DEBUG] Battery Capacity Fallback: RawSetting='{raw_setting}' -> {cap} kWh")
             if cap <= 0.1:
                  _LOGGER.error("[ConfigError] CRITICAL: Battery Capacity is NOT SET! Cannot calculate energy.")
                  cap = 0.0
