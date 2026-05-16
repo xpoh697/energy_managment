@@ -45,7 +45,7 @@ class StrategySell(StrategyEngine):
         if not target_hours: return []
         return self._group_contiguous(target_hours)
     
-    def get_market_strategy(self, mode="sell"):
+    def get_market_strategy(self, mode="sell", allow_recalc=True):
         now = dt_util.now()
         man: Any = self.manager
         
@@ -53,6 +53,19 @@ class StrategySell(StrategyEngine):
         cached = self._strategy_cache.get(cache_key)
         if cached and (now - cached["time"]).total_seconds() < 30 and cached["time"].hour == now.hour:
             return cached["res"]
+
+        if not allow_recalc:
+            return {
+                "state": "idle", 
+                "reason": "Ожидание инициализации", 
+                "active_hours": [],
+                "target_soc": 0.0,
+                "recommended_power_kw": 0.0,
+                "arbitrage_decision": "Ожидание",
+                "strategy_decision": "Ожидание",
+                "charge_reason": "Ожидание инициализации",
+                "raw_commands": {}
+            }
 
         _b_soc_s, _b_cap_s, _ = man.get_battery_state()
         b_cap = float(_b_cap_s or 10.0)

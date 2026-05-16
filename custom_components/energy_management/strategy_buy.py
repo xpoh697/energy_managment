@@ -38,7 +38,7 @@ from .strategy_base import StrategyEngine
 class StrategyBuy(StrategyEngine):
     """Specialized engine for BUY-mode energy management strategies."""
     
-    def get_market_strategy(self, mode="buy", sell_commands=None):
+    def get_market_strategy(self, mode="buy", sell_commands=None, allow_recalc=True):
         """Standardized Buying Strategy v11.9.180+"""
         def group_h(hours):
             if not hours: return ""
@@ -65,6 +65,20 @@ class StrategyBuy(StrategyEngine):
         cached = self._strategy_cache.get(cache_key)
         if cached and (now - cached["time"]).total_seconds() < 120 and cached["time"].hour == now.hour:
             return cached["res"]
+
+        if not allow_recalc:
+            return {
+                "state": "idle", 
+                "reason": "Ожидание инициализации", 
+                "active_hours": [],
+                "target_soc": 0.0,
+                "recommended_power_kw": 0.0,
+                "arbitrage_decision": "Ожидание",
+                "strategy_decision": "Ожидание",
+                "charge_reason": "Ожидание инициализации",
+                "is_charging_now": False,
+                "raw_commands": {}
+            }
 
         _b_soc_s, _b_cap_s, _ = man.get_battery_state()
         b_cap = float(_b_cap_s or 10.0)
