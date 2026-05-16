@@ -104,12 +104,6 @@ class StrategyBuy(StrategyEngine):
         target_hours = []
         negative_hours = []
         
-        def get_h_log_key(h_abs):
-            h_rel = h_abs % 24
-            suffix = ""
-            if h_abs >= 48: suffix = " (Через день)"
-            elif h_abs >= 24: suffix = " (Завтра)"
-            return f"{h_rel:02d}:59{suffix}"
 
         user_limit = float(man.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
         charge_limit = float(man.get_setting(CONF_AI_CHARGE_LIMIT, 100.0))
@@ -400,8 +394,7 @@ class StrategyBuy(StrategyEngine):
                 cur_p = all_buy_prices.get(cur_hour, 99.0)
 
                 # v11.9.737: Use the main simulation log (log) to find the dip
-                # (Replaced NameError sim_log with log)
-                min_predicted_soc = min([self._get_soc_from_log(log, get_h_log_key(h), 100.0) for h in _sim_h_disp])
+                min_predicted_soc = min([self._get_soc_from_log(log, h, 100.0) for h in _sim_h_disp])
                 
                 # v11.9.623: Survival Priority. Never skip survival due to future solar.
                 if cur_p > 0 and is_solar_enough and res.get("charge_reason") != "Выживание":
@@ -443,7 +436,7 @@ class StrategyBuy(StrategyEngine):
                     # v11.9.625: Disabled for Survival mode.
                     h_future_until_sunset = [sh for sh in _sim_h_disp if sh >= h and sh <= sunset_abs]
                     if h_future_until_sunset and res.get("charge_reason") != "Выживание":
-                        peak_after_h = max([self._get_soc_from_log(_log_sun, get_h_log_key(sh), 0.0) for sh in h_future_until_sunset])
+                        peak_after_h = max([self._get_soc_from_log(_log_sun, sh, 0.0) for sh in h_future_until_sunset])
                         if peak_after_h >= 95.0 and all_buy_prices.get(h, 0) > 0:
                             charge_commands[h] = 0.0
                             continue
@@ -514,12 +507,11 @@ class StrategyBuy(StrategyEngine):
             # v11.9.741: Diagnostic - trace sim result for charging hours
             for h, p in charge_commands.items():
                 if p > 0.05:
-                    _lk = get_h_log_key(h)
-                    _s_val = self._get_soc_from_log(sim_log, _lk, -1.0)
-                    man.log_to_file(f"[Strategy Buy Diagnostic] Hour {h} ({_lk}): Cmd {p}kW -> Result SOC: {_s_val}%")
+                    _s_val = self._get_soc_from_log(sim_log, h, -1.0)
+                    man.log_to_file(f"[Strategy Buy Diagnostic] Hour {h}: Cmd {p}kW -> Result SOC: {_s_val}%")
             
             # v11.9.742: Critical - use HH:00 keys to match sensor.py expectations perfectly.
-            res["soc_simulation"] = {f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else ""): self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc) for h in sim_range}
+            res["soc_simulation"] = {f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else ""): self._get_soc_from_log(sim_log, h, b_soc) for h in sim_range}
             res["charge_commands_debug"] = charge_commands
             
             # 3b. Survival-only simulation for debug (to see what 'Survival Bridge' sees)
@@ -527,21 +519,21 @@ class StrategyBuy(StrategyEngine):
             
             # v11.9.427: Use the last hour OF CHARGING for soc_end, to match Planned Power display
             last_charge_h = max([h for h, p in charge_commands.items() if p > 0.05], default=cur_hour)
-            soc_end = self._get_soc_from_log(sim_log, get_h_log_key(last_charge_h), b_soc)
+            soc_end = self._get_soc_from_log(sim_log, last_charge_h, b_soc)
             
             res["gatekeeper_floor"] = self.get_gatekeeper_floor(last_charge_h + 1, morning_h_abs)
             res["survival_floor"] = self.get_survival_floor(last_charge_h + 1, morning_h_abs)
             
-            soc_morning = self._get_soc_from_log(sim_log, get_h_log_key(morning_h_abs - 1), None)
+            soc_morning = self._get_soc_from_log(sim_log, morning_h_abs - 1, None)
             if soc_morning is None:
                 soc_morning = soc_end
                 
-            soc_morning_base = self._get_soc_from_log(sim_log_base, get_h_log_key(morning_h_abs - 1), soc_morning)
+            soc_morning_base = self._get_soc_from_log(sim_log_base, morning_h_abs - 1, soc_morning)
             # v11.9.615: Ultra-Detailed Debug Log
             def fmt_log(log_dict):
                 return " | ".join([
-                    f"{int(str(h).split(':')[0]):02d}: {v['soc']:.0f}% (G:{v.get('gen_kw',0.0):.1f}|C:{v.get('cons_kw',0.0):.1f}|N:{v.get('p_bat',0.0):.1f})" 
-                    for h, v in log_dict.items() if self.is_today_log_key(h)
+                    f"{int(h)%24:02d}: {v['soc']:.0f}% (G:{v.get('gen_kw',0.0):.1f}|C:{v.get('cons_kw',0.0):.1f}|N:{v.get('p_bat',0.0):.1f})" 
+                    for h, v in log_dict.items() if isinstance(h, int) and h < 48
                 ])
             # v11.9.739: Ensure debug log uses the final simulation (sim_log) which includes charges.
             # v11.9.742: Ensure debug log also uses predictable UI keys
@@ -550,7 +542,7 @@ class StrategyBuy(StrategyEngine):
                 (" (Завтра)" if self.is_tomorrow_log_key(k) else (" (Через день)" if self.is_dafter_log_key(k) else "")): v["soc"] 
                 for k, v in list(sim_log.items())[:36]
             }
-            res["projected_soc"] = round_f(self._get_soc_from_log(sim_log, get_h_log_key(cur_hour), b_soc), 1)
+            res["projected_soc"] = round_f(self._get_soc_from_log(sim_log, cur_hour, b_soc), 1)
             
             log_str_base = fmt_log(sim_log_base)
             log_str_final = fmt_log(sim_log)
@@ -594,7 +586,7 @@ class StrategyBuy(StrategyEngine):
                 if p > 0.05:
                     h_fmt = f"{h%24:02d}:00" + (" (Завтра)" if h >= 24 else "")
                     # v11.9.746: Take SOC from the FINAL sim_log, not the search loop log.
-                    h_soc = self._get_soc_from_log(sim_log, get_h_log_key(h), b_soc)
+                    h_soc = self._get_soc_from_log(sim_log, h, b_soc)
                     planned_results[h_fmt] = {
                         "power": round_f(p, 3),
                         "soc": round_f(h_soc, 1)

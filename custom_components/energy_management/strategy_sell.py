@@ -644,35 +644,30 @@ class StrategySell(StrategyEngine):
             h_hint = f" (Зарезервировано для {next_h%24:02d}:00)" if next_h is not None else ""
 
             if cur_cmd > 0.05:
+                status_text = "Активна"
                 if cur_cmd >= max_batt_p - 0.1:
-                    status_text = "Лимит: Инвертор"
                     limit_reason = "Лимит: Инвертор (5.0 кВт)"
                 elif target_budget_ac < initial_budget_ac - 0.1:
-                    status_text = "Ограничено бюджетом"
                     limit_reason = "Ограничено бюджетом (Защита SOC)"
                 else:
-                    status_text = "Активная продажа"
                     limit_reason = "Активная продажа (Приоритет: Цена)"
             elif is_sunrise_block:
-                status_text = "Заблокировано (Защита)"
+                status_text = "Ожидает окно"
                 limit_reason = f"Заблокировано (Sunrise Guard: SOC < {round_f(sunrise_floor, 1)}%)"
             elif b_soc < active_safety_floor - 0.1:
-                status_text = "Заблокировано (Защита)"
+                status_text = "Ожидает окно"
                 limit_reason = f"Заблокировано (SOC {round_f(b_soc, 1)}% < Порога {round_f(active_safety_floor, 1)}%)"
             elif is_natural_deficit:
-                status_text = "Ожидание (Защита)"
+                status_text = "Ожидает окно"
                 limit_reason = "Ожидание (Защита АКБ: Естественный дефицит)"
-            elif cur_hour in target_hours:
-                status_text = "Ожидание пика"
-                limit_reason = f"Ожидание пика{h_hint}"
             elif target_hours:
-                status_text = "Ожидание пика"
-                limit_reason = "Ожидание пика"
+                status_text = "Ожидает окно"
+                limit_reason = f"Ожидание пика{h_hint}"
             elif available_sell_dc <= 0.05:
-                status_text = "Недостаточно заряда"
+                status_text = "Ожидает окно" # Or No windows? If SOC is low, maybe "No windows" is better? No, user said "waiting".
                 limit_reason = "Недостаточно заряда"
             else:
-                status_text = "Нет ценового окна"
+                status_text = "Нет подходящих окон"
                 limit_reason = "Нет ценового окна"
             
             for h in sorted_h:
