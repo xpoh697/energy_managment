@@ -976,7 +976,7 @@ class EnergyProfileManager:
             # v11.9.740: Pass mode_overrides to simulator
             m_overrides = { (now.hour + i): s.mode for i, s in enumerate(slots) }
             
-            _LOGGER.error(f"DIAG: Calling Sim. StartSOC: {batt_soc}, Hour: {now.hour}, Range: {sim_range[0]}-{sim_range[-1]}")
+            self.log_to_file(f"DIAG: Calling Sim. Sensor: {self.battery_soc_sensor}, StartSOC: {batt_soc}, Hour: {now.hour}, Range: {sim_range[0]}-{sim_range[-1]}")
             _, sim_log, _ = self.strategy_engine.run_soc_simulation(
                 start_soc=batt_soc,
                 sim_range=sim_range,
@@ -984,7 +984,7 @@ class EnergyProfileManager:
                 commands=all_cmds,
                 mode_overrides=m_overrides
             )
-            _LOGGER.error(f"DIAG: Sim Result. Keys: {list(sim_log.keys())[:5]}... (Total: {len(sim_log)})")
+            self.log_to_file(f"DIAG: Sim Result. Keys: {list(sim_log.keys())[:5]}... (Total: {len(sim_log)})")
             
             # 7. Map Simulation Results back to Slots
             for i, slot in enumerate(slots):
