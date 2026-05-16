@@ -1734,7 +1734,7 @@ class StrategyEngine:
                             max_s = 100.0 - start_soc
                             p_x = max(0.01, p_m)
                             req_rec = max_s * max(0.0, (p_x - p_c) / p_x)
-                            req_soc = min(95.0, start_soc + req_rec + 1.0)
+                            req_soc = min(95.0, start_soc + req_rec)
                             
                             if max_r >= req_soc:
                                 return True, f"Ок (Сим. {max_r:.1f}% >= Треб. {req_soc:.1f}%)"
