@@ -914,6 +914,8 @@ class EnergyProfileManager:
             b_cap = float(self.get_setting("battery_capacity_kwh", 10.0) or 10.0)
 
             for h_abs in range(48):
+                if h_abs % 12 == 0:
+                    self.log_to_file(f"DIAG: Global Plan progress: {h_abs}/48")
                 dt_h = (now + timedelta(hours=h_abs)).replace(minute=0, second=0, microsecond=0)
                 h_rel = str(dt_h.hour)
                 today_str = dt_h.strftime("%Y-%m-%d")
