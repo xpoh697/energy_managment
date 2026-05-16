@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import json
+from .utils import normalize_float
 
 @dataclass
 class GlobalSlot:
