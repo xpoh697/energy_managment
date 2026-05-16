@@ -1001,15 +1001,44 @@ class EnergyProfileManager:
                     
                     p_actual = p_real if mode == "buy" else -p_real if mode == "sale_pv_bat" else 0.0
                 else:
-                    # Forecast Power Estimation
+                    # Forecast Power Estimation (with Manual Override sync)
                     p_est = 0.0
                     t_soc_est = sim_soc
-                    if mode == "buy":
-                        p_est = buy_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
-                        t_soc_est = buy_strat.get("planned_power_per_h", {}).get(f"{(now.hour + h_abs)%24:02d}:00", {}).get("soc", sim_soc)
-                    elif mode == "sale_pv_bat":
-                        p_est = -sell_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
-                        t_soc_est = sell_strat.get("planned_power_per_h", {}).get(f"{(now.hour + h_abs)%24:02d}:00", {}).get("soc", sim_soc)
+                    
+                    # Extract any active manual override for this forecast hour
+                    man_override = self.hourly_manual_overrides.get(ts_key)
+                    if man_override:
+                        t_soc_est = float(man_override.get("soc_limit", sim_soc))
+                        _m_mode = man_override.get("mode")
+                        b_cap = float(self.get_setting("battery_capacity", 10.0) or 10.0)
+                        max_batt_p = float(self.get_setting("battery_max_power", 3.0) or 3.0)
+                        eff = 0.98
+                        
+                        if _m_mode == "buy":
+                            if sim_soc < (t_soc_est - 0.05):
+                                delta_soc = max(0.0, t_soc_est - sim_soc)
+                                delta_kwh = (delta_soc / 100.0) * b_cap
+                                p_calc = delta_kwh / eff  # Hourly step: time_fraction = 1.0
+                                p_est = min(max_batt_p, round(p_calc, 2))
+                            else:
+                                p_est = 0.0
+                        elif _m_mode == "sale_pv_bat":
+                            if sim_soc > (t_soc_est + 0.2):
+                                delta_soc = max(0.0, sim_soc - t_soc_est)
+                                delta_kwh = (delta_soc / 100.0) * b_cap
+                                req_p = delta_kwh * eff
+                                p_est = -min(max_batt_p, round(req_p, 2))
+                            else:
+                                p_est = 0.0
+                        elif _m_mode in ["stop_sale", "sale_pv_no_bat"]:
+                            p_est = 0.0
+                    else:
+                        if mode == "buy":
+                            p_est = buy_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
+                            t_soc_est = buy_strat.get("planned_power_per_h", {}).get(f"{(now.hour + h_abs)%24:02d}:00", {}).get("soc", sim_soc)
+                        elif mode == "sale_pv_bat":
+                            p_est = -sell_strat.get("raw_commands", {}).get(now.hour + h_abs, 0.0)
+                            t_soc_est = sell_strat.get("planned_power_per_h", {}).get(f"{(now.hour + h_abs)%24:02d}:00", {}).get("soc", sim_soc)
                     
                     slot.power_ac = abs(p_est)
                     slot.target_soc = t_soc_est
