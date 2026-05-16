@@ -3167,6 +3167,9 @@ class InverterOperationModeSensor(SensorEntity):
             if not slot0:
                 return {"status": "No active slot"}
 
+            # v11.9.750: Use real SOC for current status, simulated for projections
+            batt_soc, _, _ = self.manager.get_battery_state()
+            
             # Legacy parity attributes
             attrs = {
                 "arbitrage_decision": slot0.sell_debug.get("arbitrage_decision", "Нет данных"),
@@ -3175,7 +3178,8 @@ class InverterOperationModeSensor(SensorEntity):
                 "power": round_f(slot0.power_ac, 2),
                 "charge_amps": round_f(slot0.charge_amps, 2),
                 "target_soc": round_f(slot0.target_soc, 1),
-                "battery_soc": round_f(slot0.soc_start, 1),
+                "battery_soc": round_f(float(batt_soc), 1),
+                "projected_soc": round_f(slot0.soc_start, 1),
                 "mode_reason": slot0.reason,
                 "mode_lock_until": self._mode_lock_until.isoformat() if self._mode_lock_until else "None",
                 "planned_modes_24h": plan.to_planned_modes_24h(),
