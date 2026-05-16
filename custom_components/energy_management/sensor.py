@@ -2313,23 +2313,40 @@ class EnergyProfileManager:
             return default
 
     def get_battery_state(self, soc_default=0.0):
-        """Read battery SOC, capacity, and calculate stored energy."""
-        # v11.9.60: Robust SOC reading
+        """Read battery SOC, capacity, and calculate stored energy with glitch protection."""
         st = self.hass.states.get(self.battery_soc_sensor) if self.battery_soc_sensor else None
         soc = soc_default
+        
+        # Initialize last_valid_soc if not exists
+        if not hasattr(self, "_last_valid_soc"):
+            self._last_valid_soc = None
+
         if st:
             try:
-                soc = float(str(st.state).replace(',', '.'))
-                _LOGGER.info(f"Battery SOC read: {soc}% from {self.battery_soc_sensor} (state={st.state})")
+                raw_state = str(st.state).replace(',', '.')
+                if raw_state not in ['unavailable', 'unknown', 'none', '']:
+                    soc = float(raw_state)
+                else:
+                    soc = None
             except (ValueError, TypeError):
-                # Check attributes if state is non-numeric (e.g. 'online')
-                soc_attr = st.attributes.get("soc") or st.attributes.get("battery_level") or st.attributes.get("battery") or soc_default
-                soc = float(normalize_float(soc_attr))
-                _LOGGER.info(f"Battery SOC read from attributes: {soc}% from {self.battery_soc_sensor} (state={st.state})")
-        elif self.battery_soc_sensor:
-            _LOGGER.debug(f"Battery SOC sensor {self.battery_soc_sensor} not found in Home Assistant states.")
-        else:
-            _LOGGER.debug("Battery SOC sensor is not configured.")
+                soc = None
+            
+            if soc is None:
+                # Check attributes if state is non-numeric
+                soc_attr = st.attributes.get("soc") or st.attributes.get("battery_level") or st.attributes.get("battery")
+                if soc_attr is not None:
+                    soc = float(normalize_float(soc_attr))
+            
+            # Glitch protection: If we get 0.0 but had a much higher value recently, ignore the 0.0
+            if (soc is None or soc <= 0.0) and self._last_valid_soc is not None and self._last_valid_soc > 1.0:
+                _LOGGER.warning(f"Battery SOC glitch detected: {soc}% (last valid: {self._last_valid_soc}%). Using last valid.")
+                soc = self._last_valid_soc
+            
+            if soc is not None and soc > 0.0:
+                self._last_valid_soc = soc
+        
+        # Final fallback
+        if soc is None: soc = soc_default
         
         cap = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
         if cap <= 0.1:
