@@ -909,12 +909,17 @@ class EnergyProfileManager:
             
             self.log_to_file(f"DIAG: Forecast Sensors. Hourly: {self.forecast_today_hourly_sensor}, Today: {self.forecast_today_sensor}")
             self.log_to_file(f"DIAG: Gen Profile Sample (10h-16h): {[prof_gen.get(str(h), 0.0) for h in range(10, 17)]}")
+            # Use smart battery state (with glitch protection/memory)
+            batt_soc, b_cap, batt_energy = self.get_battery_state()
             
-            b_cap = float(self.get_setting(CONF_BATTERY_CAPACITY, 0.0))
             if b_cap <= 0.1:
                 _LOGGER.error("[ConfigError] CRITICAL: Battery Capacity is NOT SET or 0.0! Calculations STOPPED.")
                 self._attr_native_value = "Error: Missing Capacity"
+                self._attr_extra_state_attributes["Status"] = "Error: Missing Capacity"
                 return
+            
+            sim_soc = batt_soc
+            eff = 0.98
 
             for h_abs in range(48):
                 if h_abs % 12 == 0:
