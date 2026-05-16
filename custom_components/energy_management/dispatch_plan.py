@@ -112,7 +112,9 @@ class EnergyLogicEngine:
         manager: Any, 
         is_forecast: bool = False,
         abs_hour: Optional[int] = None,
-        profiles: Optional[Dict[str, Any]] = None
+        profiles: Optional[Dict[str, Any]] = None,
+        buy_strategy: Optional[Dict[str, Any]] = None,
+        sell_strategy: Optional[Dict[str, Any]] = None
     ) -> tuple:
         """
         Calculates the inverter mode for a given timestamp and SOC.
@@ -139,8 +141,10 @@ class EnergyLogicEngine:
                 return legacy_override, f"Legacy Manual Override ({sim_h}:00)", legacy_override == "buy", legacy_override == "sale_pv_bat", l_target
 
         # 1. Fetch Strategies
-        sell_strategy = manager.get_market_strategy("sell") or {}
-        buy_strategy = manager.get_market_strategy("buy") or {}
+        if not sell_strategy:
+            sell_strategy = manager.get_market_strategy("sell") or {}
+        if not buy_strategy:
+            buy_strategy = manager.get_market_strategy("buy") or {}
 
         # 2. Timing & Indices
         now_h_start = now_wall.replace(minute=0, second=0, microsecond=0)

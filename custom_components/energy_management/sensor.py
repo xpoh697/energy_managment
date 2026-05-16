@@ -936,7 +936,9 @@ class EnergyProfileManager:
                     manager=self,
                     is_forecast=(h_abs > 0),
                     abs_hour=(now.hour + h_abs),
-                    profiles=shared_profiles
+                    profiles=shared_profiles,
+                    buy_strategy=buy_strat,
+                    sell_strategy=sell_strat
                 )
                 
                 slot.mode = mode
