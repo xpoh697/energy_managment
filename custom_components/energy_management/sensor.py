@@ -972,9 +972,19 @@ class EnergyProfileManager:
             # 7. Map Simulation Results back to Slots
             for i, slot in enumerate(slots):
                 h_abs_sim = now.hour + i
-                h_rel = h_abs_sim % 24
+                sim_data = sim_log.get(h_abs_sim, {})
+                if sim_data:
+                    slot.soc_start = sim_data.get("soc_start", 0.0)
+                    slot.soc_end = sim_data.get("soc_end", 0.0)
+                    slot.net_p_bat = sim_data.get("net_p_bat", 0.0)
+                
+                # Restore Legacy Debug Parity (Especially for Slot 0)
+                if i == 0:
+                    slot.buy_debug = buy_strat
+                    slot.sell_debug = sell_strat
+
             self.global_plan = DispatchPlan(slots)
-            _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry.")
+            _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry (v12.0.1).")
             
         except Exception as e:
             _LOGGER.error("[Global Plan] Update failed: %s", e, exc_info=True)
