@@ -1020,6 +1020,17 @@ class EnergyProfileManager:
                     
                     p_actual = p_est
 
+                # v12.0.75: If no grid command is active, simulate natural battery flow from solar/load
+                if abs(p_actual) < 0.001:
+                    net_flow = slot.gen_raw - slot.load_total
+                    _h_mode_cls = INVERTER_MODES.get(mode)
+                    if _h_mode_cls:
+                        max_batt_p = float(self.get_setting("battery_max_power", 5.0) or 5.0)
+                        if net_flow > 0 and _h_mode_cls.charge_from_pv:
+                            p_actual = min(net_flow, max_batt_p)
+                        elif net_flow < 0 and _h_mode_cls.discharge_to_house:
+                            p_actual = max(net_flow, -max_batt_p)
+
                 # 6. Update sim_soc for next hour (Simplified rolling simulation)
                 # Delta kWh = Power * efficiency (if charging) or / efficiency (if discharging)
                 delta_kwh = p_actual * (eff if p_actual > 0 else (1.0/eff))
