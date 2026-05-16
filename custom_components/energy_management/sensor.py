@@ -861,11 +861,12 @@ class EnergyProfileManager:
             timedelta(minutes=1)
         )
 
-    async def async_update_global_plan(self):
+    async def async_update_global_plan(self, force_strategy_recalc=True):
         """
         Main Orchestrator for the Global Dispatch Plan (v12.0).
         Calculates all modes, powers and SOC projections for the next 48 hours.
         """
+        self.log_to_file("DIAG: async_update_global_plan started")
         try:
             now = self.now
             # Force strategy refresh
