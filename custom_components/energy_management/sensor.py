@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import time
 import json
 import os
@@ -855,12 +856,23 @@ class EnergyProfileManager:
             self.hass, self._async_periodic_save, timedelta(minutes=5)
         )
         
-        # v12.0.0: Global Plan refresh every 1 minute
-        self.hass.async_create_task(self.async_update_global_plan())
-        async_track_time_interval(
-            self.hass, lambda now: self.hass.async_create_task(self.async_update_global_plan()), 
-            timedelta(minutes=1)
-        )
+        # v12.0.0: Global Plan refresh (Dedicated background task)
+        self.hass.async_create_task(self._run_global_plan_loop())
+        
+    async def _run_global_plan_loop(self):
+        """Reliable background loop for Global Plan updates."""
+        self.log_to_file("DIAG: Global Plan loop started")
+        
+        # Initial delay to let HA states populate
+        await asyncio.sleep(10)
+        
+        while True:
+            try:
+                await self.async_update_global_plan()
+            except Exception as e:
+                self.log_to_file(f"DIAG: Global Plan loop iteration failed: {e}")
+            
+            await asyncio.sleep(60)
 
     async def async_update_global_plan(self, force_strategy_recalc=True):
         """
