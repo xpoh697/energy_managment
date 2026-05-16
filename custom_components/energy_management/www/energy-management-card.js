@@ -253,23 +253,89 @@ class EnergyManagementCard extends HTMLElement {
         .form-group { display: flex; flex-direction: column; gap: 10px; }
         .form-label { font-size: 0.8rem; font-weight: 900; color: #4dabf5; text-transform: uppercase; letter-spacing: 0.05em; }
         .modal-info-grid {
-          background: rgba(255,255,255,0.05);
-          border-radius: 12px;
-          padding: 12px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 24px;
+          padding: 20px;
           margin-bottom: 20px;
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 14px;
+          box-shadow: inset 0 1px 1px rgba(255,255,255,0.1), 0 8px 32px rgba(0,0,0,0.2);
         }
         .info-row {
           display: flex;
           justify-content: space-between;
-          font-size: 14px;
-          color: #aaa;
+          align-items: center;
+          font-size: 0.95rem;
+          color: rgba(255, 255, 255, 0.7);
+          padding-bottom: 10px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
-        .info-row b {
+        .info-row:nth-last-child(2) {
+          border-bottom: none;
+          padding-bottom: 0;
+        }
+        .info-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 0.75rem;
+          color: rgba(255, 255, 255, 0.45);
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .info-icon {
+          --mdc-icon-size: 18px;
+          color: #90caf9;
+        }
+        .info-icon.solar-color { color: #ffe082; }
+        .info-icon.power-color { color: #f48fb1; }
+        .info-icon.battery-color { color: #a5d6a7; }
+        
+        .info-value {
           color: #fff;
           font-family: 'Roboto Mono', monospace;
+          font-size: 0.95rem;
+          font-weight: 600;
+        }
+        
+        .soc-badge {
+          background: rgba(76, 175, 80, 0.15);
+          border: 1px solid rgba(76, 175, 80, 0.3);
+          padding: 4px 10px;
+          border-radius: 12px;
+          box-shadow: 0 0 10px rgba(76, 175, 80, 0.15);
+        }
+        .soc-badge b {
+          color: #81c784;
+          font-family: 'Roboto Mono', monospace;
+          font-size: 0.95rem;
+          font-weight: 700;
+        }
+        
+        .reason-box {
+          background: rgba(255, 255, 255, 0.02);
+          border-left: 3px solid #03a9f4;
+          border-radius: 6px;
+          padding: 10px 12px;
+          margin-top: 4px;
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          font-size: 0.8rem;
+          color: rgba(255, 255, 255, 0.65);
+          line-height: 1.35;
+        }
+        .reason-icon {
+          --mdc-icon-size: 16px;
+          color: #03a9f4;
+          flex-shrink: 0;
+          margin-top: 1px;
+        }
+        #info-reason {
+          font-style: italic;
         }
         
         select {
@@ -332,11 +398,38 @@ class EnergyManagementCard extends HTMLElement {
             </div>
             <div class="modal-body">
               <div class="modal-info-grid">
-                <div class="info-row"><span>Buy / Sell:</span><b id="info-prices">-</b></div>
-                <div class="info-row"><span>Gen / Load:</span><b id="info-forecast">-</b></div>
-                <div class="info-row"><span>Power / Amps:</span><b id="info-power">-</b></div>
-                <div class="info-row"><span>Forecast:</span><b id="info-forecast-soc" style="color: #4caf50;">-</b></div>
-                <div class="info-row"><span>Reason:</span><small id="info-reason" style="text-align:right; opacity:0.8; font-style:italic;">-</small></div>
+                <div class="info-row">
+                  <span class="info-label">
+                    <ha-icon icon="mdi:swap-horizontal" class="info-icon"></ha-icon>
+                    <span>Buy / Sell</span>
+                  </span>
+                  <b id="info-prices" class="info-value">-</b>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">
+                    <ha-icon icon="mdi:lightning-bolt" class="info-icon solar-color"></ha-icon>
+                    <span>Gen / Load</span>
+                  </span>
+                  <b id="info-forecast" class="info-value">-</b>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">
+                    <ha-icon icon="mdi:flash-outline" class="info-icon power-color"></ha-icon>
+                    <span>Power / Amps</span>
+                  </span>
+                  <b id="info-power" class="info-value">-</b>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">
+                    <ha-icon icon="mdi:battery-80" class="info-icon battery-color"></ha-icon>
+                    <span>Forecast</span>
+                  </span>
+                  <span class="soc-badge"><b id="info-forecast-soc">-</b></span>
+                </div>
+                <div class="reason-box">
+                  <ha-icon icon="mdi:information-outline" class="reason-icon"></ha-icon>
+                  <span id="info-reason">-</span>
+                </div>
               </div>
               <div class="form-group">
                 <span class="form-label">Mode Override</span>
@@ -360,7 +453,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.0.0</div>
+        <div id="v-tag" class="version-tag">v12.0.70</div>
       </ha-card>
     `;
     this._initialized = true;
