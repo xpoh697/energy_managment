@@ -859,7 +859,7 @@ class EnergyProfileManager:
         )
         
         # v12.0.0: Global Plan refresh (Dedicated background task)
-        self.hass.async_create_task(self._run_global_plan_loop())
+        self.entry.async_create_background_task(self.hass, self._run_global_plan_loop(), "energy_management_global_plan_loop")
         
     async def _run_global_plan_loop(self):
         """Reliable background loop for Global Plan updates."""

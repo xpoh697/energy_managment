@@ -60,3 +60,22 @@ Here are 3 points of critique on this proposed fix:
 We will split the Lovelace card setup into two separate phases:
 1. **Immediate Phase (HTTP Serving)**: Register `CardStaticView` synchronously at the very beginning of `async_setup_entry` to make the JS file available immediately.
 2. **Deferred Phase (DB Entry)**: Keep the Lovelace resource registration deferred to `EVENT_HOMEASSISTANT_STARTED` (or immediate task if running) to prevent database transaction deadlocks.
+
+## [2026-05-17 00:03] Task: Fix Persistent "Home Assistant is starting" Hang via entry.async_create_background_task
+
+### Archi
+The persistent "Home Assistant is starting..." banner and blocked startup sequence are caused by spawning the infinite background task `_run_global_plan_loop` in `sensor.py` via `self.hass.async_create_task()`. 
+Home Assistant tracks all tasks created with `hass.async_create_task()` during the setup phase of an integration or platform. Since `_run_global_plan_loop` is an infinite `while True:` loop that never returns, Home Assistant's bootstrap manager waits indefinitely for it to complete, thereby freezing the startup sequence.
+
+I propose:
+1. Refactoring the task registration on line 862 of `sensor.py` to use `self.entry.async_create_background_task(self.hass, self._run_global_plan_loop(), "energy_management_global_plan_loop")`. 
+2. This is the official and modern Home Assistant API for spawning infinite integration-scoped loops. It prevents the boot manager from blocking on the task and automatically cancels the background task when the integration is unloaded, preventing leaks.
+
+### Skeptic
+Here are 3 SRE/Security points of critique on this proposed change:
+1. **API Mismatch Risk**: Ensure that `self.entry` is fully initialized and contains the custom `async_create_background_task` method on the user's specific Home Assistant version (all modern versions starting from 2023.x do). 
+2. **Explicit Cancellation Handling**: When the config entry is unloaded or reloaded, Home Assistant will raise an `asyncio.CancelledError` inside the loop. The `while True:` block has an `except Exception as e:` catch, which correctly lets `BaseException` (and therefore `CancelledError`) propagate out to allow clean termination. This must not be broken.
+3. **Task Tracking on Reload**: Since `async_create_background_task` ties the task lifecycle directly to the `ConfigEntry`, we must verify that `async_unload_entry` or `async_stop` doesn't experience errors if the task has already been cancelled or terminated.
+
+### Conclusion
+We will consolidate the implementation by refactoring `sensor.py` line 862 to spawn the infinite plan update loop using `self.entry.async_create_background_task`. This fully removes the startup sequence blockage while ensuring robust, leak-free background task lifecycle management.
