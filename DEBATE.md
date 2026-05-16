@@ -101,3 +101,21 @@ Here are 3 SRE/Security points of critique on this proposed change:
 
 ### Conclusion
 We will update the P1 block in `dispatch_plan.py` (`EnergyLogicEngine.get_mode_at`) to perfectly mirror `sensor.py`'s emergency logic. We will use `round(batt_soc, 1) <= min_soc` and check `has_surplus` to correctly plan `bat_emergency` at night when the battery is drained, ensuring the Lovelace card accurately displays the "Emergency" state.
+
+## [2026-05-17 00:13] Task: Populating is_manual flag for future forecast hours
+
+### Archi
+The missing hand icon (`mdi:hand-back-right`) and white glow on the Lovelace card cells for manually overridden future hours are caused by `slot.is_manual` only being populated for the current hour (`h_abs == 0`). For all future slots (`h_abs > 0`), `slot.is_manual` is left at its default value `False`, even when the slot is successfully overridden.
+
+I propose:
+1. Performing a quick lookup against `self.hourly_manual_overrides` and `self.manual_mode_overrides` for every simulated hour in the loop inside `sensor.py`.
+2. Setting `slot.is_manual = True` for any slot that matches a manual override, ensuring that the custom Lovelace card gets the `is_manual: true` attribute for all hours.
+
+### Skeptic
+Here are 3 SRE/Security points of critique on this proposed change:
+1. **Clean Deletion Guard**: When a manual override is reset to AI mode, the key is deleted from `self.hourly_manual_overrides` by `async_set_hourly_override`. Thus, a simple `in` check is perfectly safe and won't produce false-positive manual flags for reset slots.
+2. **Timezone/Midnight Safety**: The `dt_h` variable is a timezone-aware datetime object. Using it for string formatting ensures we don't experience midnight desync issues between the local time and the simulation timezone when determining tomorrow's overrides.
+3. **No Overhead**: Checking `in` on Python dictionaries is an $O(1)$ operation, meaning this change introduces virtually zero CPU overhead for the 48-hour simulation.
+
+### Conclusion
+We will update `sensor.py` at line 965 to check for active overrides using the hour's specific timestamp `ts_key` and populate `slot.is_manual = True` for both current and future forecast hours. This immediately restores the hand override icon and card styling in Lovelace.

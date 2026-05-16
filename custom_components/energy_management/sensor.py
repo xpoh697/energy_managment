@@ -966,6 +966,13 @@ class EnergyProfileManager:
                 slot.reason = reason
                 slot.target_soc = t_soc
                 
+                # Check for manual overrides for UI styling
+                ts_key = dt_h.strftime("%Y-%m-%d %H:00")
+                is_manual_hour = ts_key in self.hourly_manual_overrides
+                is_legacy_manual = (dt_h.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d") and dt_h.hour in self.manual_mode_overrides)
+                if is_manual_hour or is_legacy_manual:
+                    slot.is_manual = True
+                
                 # 5. Extract specific power/soc from strategies
                 # Manual Override Sync for Slot 0
                 if h_abs == 0:
