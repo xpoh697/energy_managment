@@ -344,11 +344,24 @@ class StrategySell(StrategyEngine):
             
             # --- Stage 1: Projection & Saturation Awareness ---
             sim_range = list(range(cur_hour, cur_hour + 48))
+            
+            # Construct mode overrides from active manual overrides to ensure StrategySell simulations are aware of them
+            m_overrides = {}
+            for i, h_abs in enumerate(sim_range):
+                h_dt = (now + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
+                h_ts_key = h_dt.strftime("%Y-%m-%d %H:00")
+                manual_m = man.hourly_manual_overrides.get(h_ts_key)
+                if manual_m:
+                    m_overrides[h_abs] = manual_m.get("mode")
+                elif h_dt.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d") and h_dt.hour in man.manual_mode_overrides:
+                    m_overrides[h_abs] = man.manual_mode_overrides[h_dt.hour]
+
             _, sim_log_base, _ = self.run_soc_simulation(
                 b_soc, sim_range, now, 
                 commands={}, 
                 b_min_soc=emergency_soc, 
-                ignore_blended=True, house_profile_override="consumption_base"
+                ignore_blended=True, house_profile_override="consumption_base",
+                mode_overrides=m_overrides
             )
             
             # Detect Solar Surplus (Saturation Awareness)
@@ -509,7 +522,8 @@ class StrategySell(StrategyEngine):
                     _, trial_log, _ = self.run_soc_simulation(
                         b_soc, sim_range, now, commands=sim_commands, 
                         b_min_soc=emergency_soc, ignore_blended=True, 
-                        house_profile_override="consumption_base", dynamic_floors=floors_sliding
+                        house_profile_override="consumption_base", dynamic_floors=floors_sliding,
+                        mode_overrides=m_overrides
                     )
                     sim_log = trial_log
                     
@@ -617,7 +631,8 @@ class StrategySell(StrategyEngine):
                 _, sim_log, _ = self.run_soc_simulation(
                     b_soc, sim_range, now, commands={}, 
                     b_min_soc=emergency_soc, ignore_blended=True, 
-                    house_profile_override="consumption_base", dynamic_floors=floors_sliding
+                    house_profile_override="consumption_base", dynamic_floors=floors_sliding,
+                    mode_overrides=m_overrides
                 )
             
             # v11.9.567: Final redistribution REMOVED. It bypassed floor checks, causing
@@ -778,6 +793,10 @@ class StrategySell(StrategyEngine):
                         mode_overrides_sim[h] = "sale_pv_no_bat"
                 elif h in active_h: # Selling but maybe zero power
                      mode_overrides_sim[h] = "sale_pv_no_bat"
+
+            # Merge manual overrides so the final UI projection matches reality perfectly
+            for h_abs_override, m_name in m_overrides.items():
+                mode_overrides_sim[h_abs_override] = m_name
 
             _, sim_log_final, _ = self.run_soc_simulation(
                 b_soc, sim_range, now, 

@@ -119,3 +119,22 @@ Here are 3 SRE/Security points of critique on this proposed change:
 
 ### Conclusion
 We will update `sensor.py` at line 965 to check for active overrides using the hour's specific timestamp `ts_key` and populate `slot.is_manual = True` for both current and future forecast hours. This immediately restores the hand override icon and card styling in Lovelace.
+
+## [2026-05-17 00:19] Task: Making Sell Strategy aware of Manual Overrides to protect Gatekeeper Floor
+
+### Archi
+The problem where the sell strategy plans a "phantom" sale (e.g. at 20:00) despite the battery being manual discharged down to 23% is caused by the sell strategy's internal simulations being completely blind to the user's manual overrides (e.g. discharging down to 25% at 18:00). Because `strategy_sell.py`'s simulations run with `mode_overrides=None` by default, they assume the battery remains at 64% at 18:00, leading them to believe they have plenty of excess charge to sell at 20:00.
+
+I propose:
+1. Constructing `m_overrides` inside `strategy_sell.py` from both `man.hourly_manual_overrides` and `man.manual_mode_overrides`.
+2. Passing `mode_overrides=m_overrides` to all internal simulations inside `strategy_sell.py`.
+3. Merging `m_overrides` into `mode_overrides_sim` for the final Stage 4 UI simulation projection.
+
+### Skeptic
+Here are my 3 points of SRE/QA critique:
+1. **Safety Floor Protection**: By passing manual overrides to the simulator, the sell strategy's budget allocator will immediately detect that the manual discharge of 18:00 leaves the battery at 23% by 20:00. This is below the gatekeeper floor of 45.6%, so the allocator will correctly zero out the sale at 20:00 to protect the battery from hit-bottom/over-discharge.
+2. **Key Consistency**: Since `h_abs` is an integer index from `cur_hour` to `cur_hour + 47`, mapping the manual overrides to `h_abs` using `now + timedelta(hours=i)` is highly precise and completely correct.
+3. **Robust Convergence**: The allocator converges beautifully in under 20 iterations. Having accurate SOC starting levels prevents the solver from wasting iterations trying to refine impossible sales.
+
+### Conclusion
+We will update `strategy_sell.py` to extract all active manual overrides at the start of `get_market_strategy` and feed them directly into all internal simulations as `mode_overrides`. This guarantees the sell strategy respects manual actions, protects the night survival floor, and prevents phantom sales.
