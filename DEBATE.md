@@ -1,46 +1,22 @@
-## [2026-05-16/23:10] Задача: ТОрмозит загрузка HA. Смотри логи тут что ты накосорезил опять \\192.168.100.5\config
+# Debate: Resolving Home Assistant Startup Hang
 
-### Archi (Lead Architect)
-Привет! Я проанализировал логи и код `sensor.py`. Проблема зависания (тормозов загрузки HA) кроется в `async_update_global_plan()`. Этот метод выполняет тяжелые математические расчеты для 48 слотов Global Dispatch Plan (v12.0), вызывая стратегии `StrategyBuy`, `StrategySell`, и симуляцию `run_soc_simulation()`. Метод объявлен как `async`, но **не содержит ни одного `await` внутри тяжелого цикла**, из-за чего он работает синхронно и полностью блокирует Event Loop Home Assistant.
+## [2026-05-16 23:45] Task: Resolving HA Startup Freeze and Card Deadlock
 
-**Решение:**
-1. Добавить `await asyncio.sleep(0)` внутрь 48-часового цикла (например, на каждой итерации или каждые несколько итераций), чтобы передавать управление Event Loop-у и давать HA возможность грузиться и отвечать на запросы.
-2. Сделать то же самое перед вызовами `get_market_strategy`, так как при очищенном кэше они пересчитывают данные синхронно.
+### Archi
+The startup freeze is caused by a Lovelace resource loading deadlock. In `__init__.py`, `async_setup_entry` spawns `_async_register_card` via `hass.async_create_task`. Inside this task, we call `await resources.async_load()`. During the Home Assistant boot phase, the Lovelace dashboard is already loading its resources. Forcing a concurrent `async_load()` on the resource storage leads to a JSON store transaction lock or direct race condition, causing the task to hang indefinitely. Because Home Assistant tracks all tasks created during config entry setup, it refuses to mark the startup as complete, leaving the system in "Finishing startup..." and disabling automations.
 
-### Skeptic (Senior QA/SRE)
-Решение с `sleep(0)` в целом правильное для asyncio, но есть **3 критические проблемы**:
-1. **Тяжелые вложенные функции:** Вызовы `get_market_strategy("buy")`, `get_market_strategy("sell")` и `run_soc_simulation()` могут сами по себе занимать сотни миллисекунд. Передача управления *до* или *после* них не спасет от блокировки во время их выполнения. HA все равно выбросит warning "Timer got out of sync".
-2. **Стейт-машина HA:** Мы не можем просто отправить эти вызовы в фоновый поток (`async_add_executor_job`), так как стратегии дергают методы `self.manager.get_sensor_float()`, обращаясь к HA state machine (которая не потокобезопасна).
-3. **Бесконечный цикл с коротким сном:** В `_run_global_plan_loop` есть задержка `await asyncio.sleep(10)` при старте. Если HA загружается дольше 10 секунд (что нормально для слабых устройств), наш луп запускается и начинает жестко фризить инициализацию других компонентов.
+I propose:
+1. Deferring the card registration task until after Home Assistant has fully booted by listening to the `EVENT_HOMEASSISTANT_STARTED` event.
+2. Completely removing the redundant `await resources.async_load()` call since HA manages resource loading internally, and invoking it during bootstrap is unsafe.
 
-### Archi (Консенсус - Итерация 2)
-Принимаю критику. Чтобы сделать систему production-ready:
-1. Мы увеличим стартовую задержку в `_run_global_plan_loop` с 10 до **30 секунд** (или даже будем ждать события `EVENT_HOMEASSISTANT_STARTED`, но для простоты увеличим слип).
-2. Мы сделаем `await asyncio.sleep(0.01)` внутри главного 48-часового цикла на каждой итерации.
-3. Поскольку мы не можем переписать весь `StrategyEngine` на асинхронный лад прямо сейчас, мы добавим `await asyncio.sleep(0.01)` между ключевыми вызовами в `async_update_global_plan()` (до и после получения `buy_strat`, `sell_strat` и симуляции). Это разобьет монолитный блок расчета на 50+ мелких чанков, что приемлемо для HA Event Loop.
+### Skeptic
+Here are 3 vulnerabilities or performance/reliability issues in this proposed solution:
+1. **Reload Lifecycle Handling**: If the user reloads the integration manually or adds it *after* Home Assistant has already fully booted, the `EVENT_HOMEASSISTANT_STARTED` event will not fire. We must check `hass.state` and immediately run the card registration if the system is already in the `running` state.
+2. **Resource Mutation Safety**: Removing `resources.async_load()` is correct, but we must ensure that if the resources collection is not yet ready or returns `None`, we gracefully exit without raising an `AttributeError` or crashing `async_setup_entry`.
+3. **Infinite Tasks during Setup**: The `_run_global_plan_loop` in `sensor.py` is also spawned via `hass.async_create_task(self._run_global_plan_loop())` during sensor setup. While it yields immediately via `await asyncio.sleep(30)`, background infinite loops spawned before the bootstrap completes can sometimes be tracked as blockages. We should make sure it runs safely without blocking the startup chain.
 
-### Skeptic (Консенсус - Итерация 2)
-Согласен. Разбиение 1 большого блока в 2 секунды на 50 чанков по 40мс — классический подход в HA. Также стоит обернуть тяжелый кусок симулятора `run_soc_simulation` в `async_add_executor_job`, так как `run_soc_simulation` принимает только аргументы и не дергает стейт-машину HA внутри себя (он pure python). Но если там есть `manager.log_to_file`, то могут быть конфликты потоков. Остановимся на агрессивном добавлении `await asyncio.sleep(0.01)` для начала.
-
-### Заключение
-Для решения проблемы "тормозов загрузки HA" необходимо внести изменения в `custom_components/energy_management/sensor.py`:
-1. Увеличить стартовый таймаут запуска цикла обновления `_run_global_plan_loop` с 10 до 30 секунд.
-2. Внедрить асинхронные паузы `await asyncio.sleep(0.01)` в функции `async_update_global_plan` перед генерацией стратегий и внутри основного цикла (на каждой итерации `for h_abs in range(48):`), чтобы принудительно отдавать процессорное время Home Assistant.
-## [2026-05-16/23:25] Задача: на 10 не хотел! Вырубаю интеграцию и старт за 20 сек
-
-### Archi (Lead Architect)
-Привет! Раз система всё еще висит по 10 минут, значит проблема не в процессорном времени (которое мы разблокировали паузами sleep(0.01)), а в **Deadlock (взаимной блокировке)** или бесконечном ожидании внутри async_setup_entry. 
-Я проанализировал __init__.py и нашел классический анти-паттерн Home Assistant: в строке 31 мы делаем wait _async_register_card(hass). Эта функция лезет в модуль lovelace и делает wait resources.async_load(). Если Lovelace в этот момент еще не инициализирован или ждет загрузки других компонентов, возникает цикличное ожидание (Deadlock). Наша интеграция ждет Lovelace, а Lovelace (косвенно) ждет завершения инициализации нашей интеграции. Из-за этого HA висит по 10 минут (до срабатывания глобального таймаута).
-
-**Решение:**
-Изменить wait _async_register_card(hass) на hass.async_create_task(_async_register_card(hass)). Это запустит регистрацию карточки в фоне, не блокируя процесс загрузки самой интеграции и Home Assistant.
-
-### Skeptic (Senior QA/SRE)
-Отличная находка, Archi. Но давай проверим другие уязвимости:
-1. **Lovelace Deadlock**: Действительно, вызов async_load() у ресурсов дашборда во время старта компонента строго не рекомендуется в доках HA. Отправка в background task (фоновую задачу) — единственно верный путь.
-2. **async_load хранилища**: Мы делаем await manager.async_load(). Если файл ems_backup.json заблокирован другим процессом (например, бэкапом системы), это тоже может подвесить систему на чтении файла. Стоит ли добавить таймаут? Вероятно, Store в HA сам хэндлит таймауты, так что тут безопасно.
-3. **Первичный _async_state_changed**: В async_start() мы синхронно пробегаемся по всем сенсорам. Но так как это чисто синхронный код без I/O, он выполнится за пару миллисекунд и не даст 10 минут задержки.
-
-### Заключение
-Истинная причина 10-минутного зависания при старте — Deadlock при регистрации кастомной Lovelace карточки. 
-Необходимо в файле custom_components/energy_management/__init__.py (строка 31) убрать await и обернуть вызов в фоновую задачу.
+### Conclusion
+We will consolidate the implementation as follows:
+1. In `__init__.py`, check the current Home Assistant state. If it is `CoreState.running`, immediately schedule the card registration. If the system is still starting, register a one-shot listener for `EVENT_HOMEASSISTANT_STARTED`.
+2. In `_async_register_lovelace_resource`, remove `await resources.async_load()` entirely to avoid deadlocking the Lovelace resource JSON store.
+3. Wrap all resource access in defensive null-checks to ensure that if Lovelace is disabled or not initialized, the integration still boots flawlessly.

@@ -27,8 +27,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Energy Profile from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # v11.9.333: Register Lovelace card using the premium pattern
-    hass.async_create_task(_async_register_card(hass))
+    # Defer Lovelace card registration to prevent startup deadlocks
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+    from homeassistant.core import CoreState
+    
+    if hass.state == CoreState.running:
+        hass.async_create_task(_async_register_card(hass))
+    else:
+        async def _register_card_after_start(event):
+            await _async_register_card(hass)
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_card_after_start)
     
     # We delay import to avoid circular dependency
     from .sensor import EnergyProfileManager
@@ -187,11 +195,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bo
     if not hasattr(resources, "async_create_item") or not hasattr(resources, "async_update_item"):
         return False
 
-    try:
-        if hasattr(resources, "async_load"):
-            await resources.async_load()
-    except Exception:
-        return False
+
 
     existing = None
     try:
