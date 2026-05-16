@@ -874,6 +874,7 @@ class EnergyProfileManager:
             # 1. Fetch current state
             batt_soc, batt_cap, _ = self.get_battery_state()
             batt_soc = float(batt_soc)
+            _LOGGER.error(f"DEBUG: Global Plan Update. Sensor: {self.battery_soc_sensor}, Read SOC: {batt_soc}%")
             
             # 2. Fetch Strategy Proposals
             buy_strat = self.get_market_strategy("buy") or {}
