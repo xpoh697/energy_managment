@@ -64,6 +64,8 @@ class StrategySell(StrategyEngine):
                 "arbitrage_decision": "Ожидание",
                 "strategy_decision": "Ожидание",
                 "charge_reason": "Ожидание инициализации",
+                "today_prices": {},
+                "tomorrow_prices": {},
                 "raw_commands": {}
             }
 

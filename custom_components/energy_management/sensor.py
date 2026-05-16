@@ -3935,8 +3935,8 @@ class MarketStrategySensor(SensorEntity):
         def safe_round(val):
             return round_f(normalize_float(val), 3)
 
-        today_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["today_prices"].items(), key=lambda item: int(item[0])) if int(k) >= cur_hour}
-        tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res["tomorrow_prices"].items(), key=lambda item: int(item[0]))}
+        today_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res.get("today_prices", {}).items(), key=lambda item: int(item[0])) if int(k) >= cur_hour}
+        tom_fmt = {f"{int(k):02d}:00": safe_round(v) for k, v in sorted(res.get("tomorrow_prices", {}).items(), key=lambda item: int(item[0]))}
 
         attrs = {
             "strategy_version": VERSION,

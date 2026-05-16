@@ -77,6 +77,8 @@ class StrategyBuy(StrategyEngine):
                 "strategy_decision": "Ожидание",
                 "charge_reason": "Ожидание инициализации",
                 "is_charging_now": False,
+                "today_prices": {},
+                "tomorrow_prices": {},
                 "raw_commands": {}
             }
 
