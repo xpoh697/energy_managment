@@ -7,6 +7,14 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 import json
 from .utils import normalize_float
+from .const import (
+    CONF_BATTERY_MAX_POWER,
+    CONF_BATTERY_CAPACITY,
+    CONF_MIN_SOC_BAT,
+    CONF_PRICE_STOP_SELL,
+    CONF_PRICE_SELL_ONLY_PV,
+    CONF_SALE_PV_NO_BAT_MAX_HOUR
+)
 
 @dataclass
 class GlobalSlot:
