@@ -84,14 +84,22 @@ class DispatchPlan:
         return res
 
     def to_planned_modes_24h(self) -> Dict[str, str]:
-        """Converts plan to the legacy 'planned_modes_24h' format."""
+        """Converts plan to the legacy 'planned_modes_24h' format (preserving clean look)."""
         res = {}
         for s in self.slots[:24]:
             dt_obj = datetime.fromisoformat(s.dt_iso)
             key = dt_obj.strftime("%H:00")
+            
             # Legacy format: "mode (price): reason"
             price_tag = f" (SP: {s.price_sell:.2f})" if "sell" in s.mode or s.mode == "sale_pv" else f" (BP: {s.price_buy:.2f})"
-            res[key] = f"{s.mode}{price_tag}: \"{s.reason}\""
+            
+            # Smart Forecast Logic: Hide 'boring' reasons (v11.9.749 parity)
+            is_boring = any(s.reason.startswith(p) for p in ["Стандартная работа", "Экономия", "Значения по умолчанию"])
+            
+            if is_boring:
+                res[key] = f"{s.mode}{price_tag}"
+            else:
+                res[key] = f"{s.mode}{price_tag}: \"{s.reason}\""
         return res
 
 class EnergyLogicEngine:
