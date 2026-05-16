@@ -810,6 +810,7 @@ class EnergyProfileManager:
         self._unsub_periodic_save = None
 
     async def async_start(self):
+        self.log_to_file("DIAG: async_start called")
         # Parse prices immediately on load
         for p_sensor in self.all_price_sensors:
             state_obj = self.hass.states.get(p_sensor)
