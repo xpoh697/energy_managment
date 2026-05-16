@@ -1922,23 +1922,28 @@ class EnergyProfileManager:
         return self.strategy_engine.get_battery_degradation_cost()
 
     def log_to_file(self, message: str):
-        """Persistent logging to a dedicated file in the config directory with rotation."""
-        try:
-            log_file = self.hass.config.path("energy_management.log")
-            timestamp = dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
-            full_msg = f"{timestamp} {message}\n"
-            
-            # Rotation: Check size (max 5MB)
-            import os
-            if os.path.exists(log_file) and os.path.getsize(log_file) > 5 * 1024 * 1024:
-                old_log = log_file + ".old"
-                if os.path.exists(old_log): os.remove(old_log)
-                os.rename(log_file, old_log)
+        """Persistent logging for diagnostics (Non-blocking v12.0.27)."""
+        def _write_sync():
+            try:
+                log_file = self.hass.config.path("energy_management.log")
+                timestamp = dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
+                full_msg = f"{timestamp} {message}\n"
                 
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(full_msg)
-        except Exception as e:
-            _LOGGER.error("Failed to write to energy_management.log: %s", e)
+                # Rotation: Check size (max 5MB)
+                import os
+                if os.path.exists(log_file) and os.path.getsize(log_file) > 5 * 1024 * 1024:
+                    old_log = log_file + ".old"
+                    if os.path.exists(old_log): os.remove(old_log)
+                    os.rename(log_file, old_log)
+                    
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write(full_msg)
+            except: pass
+
+        if hasattr(self, "hass") and self.hass:
+            self.hass.async_add_executor_job(_write_sync)
+        else:
+            _write_sync()
 
     def get_expected_consumption(self):
         """Helper to get the expected consumption value for the current hour."""
