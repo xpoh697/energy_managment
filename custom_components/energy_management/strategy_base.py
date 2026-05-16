@@ -863,15 +863,26 @@ class StrategyEngine:
             h_abs = int(key)
             h_rel = h_abs % 24
             is_tom = h_abs >= 24
-            str_key = f"{h_rel:02d}:59" + (" (Завтра)" if is_tom else "")
+            is_dafter = h_abs >= 48
+            suffix = " (Завтра)" if is_tom else (" (Через день)" if is_dafter else "")
+            str_key = f"{h_rel:02d}:59{suffix}"
             val = log.get(str_key)
             
         # 3. Fallback for string keys that might be integers in the log
-        if val is None and isinstance(key, str) and key.isdigit():
-            val = log.get(int(key))
+        if val is None and isinstance(key, str):
+            if key.isdigit():
+                val = log.get(int(key))
+            elif ":" in key:
+                try:
+                    h_rel = int(key.split(":")[0])
+                    is_tom = "Завтра" in key
+                    is_dafter = "Через день" in key
+                    h_abs = h_rel + (24 if is_tom else (48 if is_dafter else 0))
+                    val = log.get(h_abs)
+                except: pass
 
         if isinstance(val, dict):
-            res = val.get("soc", default)
+            res = val.get("soc", val.get("soc_end", default))
         else:
             res = val if val is not None else default
         return float(res) if res is not None else default
