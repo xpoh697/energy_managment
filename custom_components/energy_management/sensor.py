@@ -1004,7 +1004,9 @@ class EnergyProfileManager:
             _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry (v12.0.1).")
             
         except Exception as e:
-            _LOGGER.error("[Global Plan] Update failed: %s", e, exc_info=True)
+            import traceback
+            error_details = traceback.format_exc()
+            self.log_to_file(f"[Global Plan] Update failed: {e}\n{error_details}")
 
     @callback
     def _poll_instant_power(self, now):
