@@ -831,7 +831,9 @@ class StrategySell(StrategyEngine):
                 # v11.9.707: Check if we hit the target.
                 # If we need 100% for peak, we check if we reach it AT ANY POINT during the day.
                 if has_future_peak:
-                    max_soc = max([v.get("soc", 0.0) for k_v, v in chk_log.items() if ":" in k_v and "Завтра" not in k_v])
+                    # v11.9.749: Use unified key helper
+                    today_socs = [v.get("soc", 0.0) for k_v, v in chk_log.items() if self.is_today_log_key(k_v)]
+                    max_soc = max(today_socs) if today_socs else 0.0
                     hit_target = max_soc >= 99.4
                 else:
                     # No peak: only survival matters at sunset.

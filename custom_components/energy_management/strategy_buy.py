@@ -541,7 +541,7 @@ class StrategyBuy(StrategyEngine):
             def fmt_log(log_dict):
                 return " | ".join([
                     f"{int(str(h).split(':')[0]):02d}: {v['soc']:.0f}% (G:{v.get('gen_kw',0.0):.1f}|C:{v.get('cons_kw',0.0):.1f}|N:{v.get('p_bat',0.0):.1f})" 
-                    for h, v in log_dict.items() if isinstance(h, str) and ":" in h and "Завтра" not in h
+                    for h, v in log_dict.items() if self.is_today_log_key(h)
                 ])
             # v11.9.739: Ensure debug log uses the final simulation (sim_log) which includes charges.
             # v11.9.742: Ensure debug log also uses predictable UI keys

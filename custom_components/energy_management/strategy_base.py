@@ -887,6 +887,14 @@ class StrategyEngine:
             res = val if val is not None else default
         return float(res) if res is not None else default
 
+    def is_today_log_key(self, h: Any) -> bool:
+        """Determines if a simulation log key belongs to 'Today'."""
+        if isinstance(h, int):
+            return h < 24
+        if isinstance(h, str):
+            return ":" in h and "Завтра" not in h and "день" not in h
+        return False
+
     def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None, no_solar_to_bat=False, mode_overrides=None, current_mode=None):
         """Universal SOC simulation engine."""
         if not sim_range:
