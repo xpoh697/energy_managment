@@ -79,3 +79,25 @@ Here are 3 SRE/Security points of critique on this proposed change:
 
 ### Conclusion
 We will consolidate the implementation by refactoring `sensor.py` line 862 to spawn the infinite plan update loop using `self.entry.async_create_background_task`. This fully removes the startup sequence blockage while ensuring robust, leak-free background task lifecycle management.
+
+## [2026-05-17 00:10] Task: Align Emergency Mode logic between sensor.py and dispatch_plan.py
+
+### Archi
+The mismatch between the Lovelace card display ("NORMAL" mode planned for the night hours when the battery is exactly at `min_soc` like 13.0%) and the real-time execution is caused by a logic discrepancy. 
+In `sensor.py` (real-time control), the `P1: Emergency` block uses `batt_soc <= min_soc` and sets the mode to `bat_emergency` when there is no solar surplus (`has_surplus = False`).
+However, in `dispatch_plan.py` (simulation planning), `EnergyLogicEngine.get_mode_at` uses a strict inequality `if batt_soc < min_soc:` (strictly less than). When the battery is exactly at `min_soc` (13.0%), the condition evaluates to `False`, falling through to P9 ("sale_pv", rendered as "NORMAL" on the card).
+
+I propose:
+1. Aligning `dispatch_plan.py`'s `EnergyLogicEngine.get_mode_at` to use the exact same P1 Emergency block logic as `sensor.py`.
+2. Specifically, when `round(batt_soc, 1) <= min_soc`:
+   - If `has_surplus` is `True`, plan `sale_pv` (or `stop_sale` depending on price) with `target_soc = min_soc`.
+   - If `has_surplus` is `False` (e.g., at night), plan `bat_emergency` (rendered as "Emergency" in violet on the card) with `target_soc = 100.0`.
+
+### Skeptic
+Here are 3 SRE/Security points of critique on this proposed change:
+1. **Float Comparison Precision**: Floating point variables can suffer from representation drift. We must use `round(batt_soc, 1) <= min_soc` or similar epsilon-based comparison to prevent exact equal bounds from failing under minor precision noise in the simulation loop.
+2. **Surplus Threshold Guard**: In the simulation, predicted profiles might contain low-level noise (e.g., 0.01 kW). The existing `has_surplus = bool(avg_gen > (avg_load + 0.05))` guard is robust and should be preserved in `dispatch_plan.py` to prevent twilight mode flickering.
+3. **Simulation State Parity**: Confirm that setting `target_soc = 100.0` in `bat_emergency` simulation does not trigger fake "grid charging" in the forecast. In `const.py`, `bat_emergency` has `charge_from_grid=False`, which correctly avoids fake grid charges.
+
+### Conclusion
+We will update the P1 block in `dispatch_plan.py` (`EnergyLogicEngine.get_mode_at`) to perfectly mirror `sensor.py`'s emergency logic. We will use `round(batt_soc, 1) <= min_soc` and check `has_surplus` to correctly plan `bat_emergency` at night when the battery is drained, ensuring the Lovelace card accurately displays the "Emergency" state.
