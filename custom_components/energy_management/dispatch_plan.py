@@ -305,7 +305,7 @@ class EnergyLogicEngine:
             mode = "sale_pv"
             reason = f"Стандартная работа: Цена ({p_sell_val:.2f}) выше порога"
 
-        return mode, reason, mode == "buy", mode == "sale_pv_bat"
+        return mode, reason, mode == "buy", mode == "sale_pv_bat", target_soc
 
     @staticmethod
     def calculate_realtime_power(

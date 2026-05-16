@@ -872,7 +872,8 @@ class EnergyProfileManager:
             try:
                 await self.async_update_global_plan()
             except Exception as e:
-                self.log_to_file(f"DIAG: Global Plan loop iteration failed: {e}")
+                import traceback
+                self.log_to_file(f"DIAG: Global Plan loop iteration failed: {e}\n{traceback.format_exc()}")
             
             await asyncio.sleep(60)
 
