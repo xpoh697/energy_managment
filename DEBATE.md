@@ -194,3 +194,23 @@ Here are 3 SRE/Security points of critique on this proposed layout change:
 
 ### Conclusion
 We will implement the premium glassmorphic HUD panel redesign inside `energy-management-card.js`. We will keep all JavaScript element IDs intact to prevent breaking the logic. We will use native, high-performance Home Assistant `<ha-icon>` tags with standard MDI icons and high-contrast curated styling tokens to create a stunning user experience.
+
+## [2026-05-17 00:39] Task: Colorizing HUD Modal Values and Renaming Forecast to SOC Forecast
+
+### Archi
+I propose dynamically colorizing the individual numbers in the details modal to instantly highlight cost vs profit and energy flow:
+1. Spitting the prices and forecast data into distinct spans: `#info-buy`, `#info-sell`, `#info-gen`, `#info-load`.
+2. Applying custom premium HSL color tokens:
+   - Buy price & Load consumption (Red): `#ff6b6b` (beautiful soft coral red).
+   - Sell price (Green): `#66bb6a` (rich emerald green).
+   - Gen solar power (Yellow): `#ffe082` (warm amber gold).
+3. Changing the label "Forecast" to "SOC Forecast" to clarify the battery state of charge.
+
+### Skeptic
+Here are 3 points of SRE/QA critique:
+1. **Defensive Reference Handling**: When targeting the new sub-spans in JS, we must wrap them in safe existence guards (e.g. `if (buyEl) buyEl.innerText = ...`) to prevent any unhandled Javascript errors if elements are missing during early loads.
+2. **Monospace Font Contrast**: The monospace fonts inside these spans should remain thick (`font-weight: 600`) to guarantee legibility when colored, as light red/yellow text on dark background can wash out.
+3. **Unit Isolation**: Moving units like `kW` or currency symbols out of the styled numbers into standard `unit-text` spans ensures they remain neutral-colored (`rgba(255,255,255,0.4)`), keeping the focus entirely on the numeric values.
+
+### Conclusion
+We will split the compound price and generator strings in `energy-management-card.js` into distinct sub-spans, applying red for Buy/Load, green for Sell, and yellow for Gen. We will rename the Forecast label to "SOC Forecast" and log this debate in `DEBATE.md`, then deploy the updated code under `v12.0.71`.
