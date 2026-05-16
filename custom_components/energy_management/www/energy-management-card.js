@@ -334,6 +334,7 @@ class EnergyManagementCard extends HTMLElement {
               <div class="modal-info-grid">
                 <div class="info-row"><span>Buy / Sell:</span><b id="info-prices">-</b></div>
                 <div class="info-row"><span>Gen / Load:</span><b id="info-forecast">-</b></div>
+                <div class="info-row"><span>Power / Amps:</span><b id="info-power">-</b></div>
                 <div class="info-row"><span>Reason:</span><small id="info-reason" style="text-align:right; opacity:0.8; font-style:italic;">-</small></div>
               </div>
               <div class="form-group">
@@ -388,6 +389,7 @@ class EnergyManagementCard extends HTMLElement {
     const currency = this._hass.states[this._config.entity].attributes.unit_of_measurement || '';
     this.shadowRoot.getElementById('info-prices').innerText = `${hourData.buy_price || 0} / ${hourData.sell_price || 0} ${currency}`;
     this.shadowRoot.getElementById('info-forecast').innerText = `${hourData.gen || 0} / ${hourData.load || 0} kW`;
+    this.shadowRoot.getElementById('info-power').innerText = `${hourData.power || 0} kW / ${hourData.amps || 0} A`;
     this.shadowRoot.getElementById('info-reason').innerText = hourData.reason || 'Standard AI decision';
 
     this._toggleSocVisibility();
@@ -617,10 +619,7 @@ class EnergyManagementCard extends HTMLElement {
                 <span class="price-buy">${(hourData.buy_price || 0).toFixed(2)}</span>
                 <span class="price-sell">${(hourData.sell_price || 0).toFixed(2)}</span>
               </div>
-              <div class="h-forecasts">
-                <div class="h-f-item f-gen"><ha-icon icon="mdi:solar-power"></ha-icon>${(hourData.gen || 0).toFixed(1)}</div>
-                <div class="h-f-item f-load"><ha-icon icon="mdi:home-lightning-bolt"></ha-icon>${(hourData.load || 0).toFixed(1)}</div>
-              </div>
+              <div class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</div>
               <div style="display:flex; flex-direction:column; align-items:center;">
                 <span class="h-soc" style="color:${modeColor}">${hourData.soc !== undefined ? 'SOC ' + hourData.soc.toFixed(1) + '%' : ''}</span>
               </div>
@@ -680,10 +679,11 @@ class EnergyManagementCard extends HTMLElement {
           modeLabel.innerText = MODE_LABELS[hourData.mode] || hourData.mode;
         }
         
-        const fGen = bar.querySelector('.f-gen');
-        const fLoad = bar.querySelector('.f-load');
-        if (fGen) fGen.innerHTML = `<ha-icon icon="mdi:solar-power"></ha-icon>${(hourData.gen || 0).toFixed(1)}`;
-        if (fLoad) fLoad.innerHTML = `<ha-icon icon="mdi:home-lightning-bolt"></ha-icon>${(hourData.load || 0).toFixed(1)}`;
+        const modeEl = bar.querySelector('.h-mode');
+        if (modeEl) {
+          modeEl.style.color = modeColor;
+          modeEl.innerText = MODE_LABELS[hourData.mode] || hourData.mode;
+        }
 
         if (socLabel) {
           socLabel.style.color = modeColor;

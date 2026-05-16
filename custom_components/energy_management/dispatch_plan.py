@@ -79,7 +79,9 @@ class DispatchPlan:
                 "is_manual": s.is_manual,
                 "reason": s.reason,
                 "gen": round(s.gen_raw, 2),
-                "load": round(s.load_total, 2)
+                "load": round(s.load_total, 2),
+                "power": round(s.power_ac, 2),
+                "amps": round(s.charge_amps, 1)
             }
         return res
 
