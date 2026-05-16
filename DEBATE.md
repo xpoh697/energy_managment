@@ -138,3 +138,22 @@ Here are my 3 points of SRE/QA critique:
 
 ### Conclusion
 We will update `strategy_sell.py` to extract all active manual overrides at the start of `get_market_strategy` and feed them directly into all internal simulations as `mode_overrides`. This guarantees the sell strategy respects manual actions, protects the night survival floor, and prevents phantom sales.
+
+## [2026-05-17 00:23] Task: Making Buy Strategy aware of Manual Overrides for Simulation Integrity
+
+### Archi
+Exactly as with the sell strategy, the buy strategy (`strategy_buy.py`) must also be aware of the user's manual overrides (e.g. manual discharges) inside all of its internal simulations. If the buy strategy's simulations are blind to manual overrides, it will run simulations assuming the battery is still at 64% when it has actually been manually discharged down to 25%. This would make the buy strategy believe no grid charging is needed, leaving the user with an empty battery at night and high electricity bills!
+
+I propose:
+1. Building `m_manual_overrides` at the start of `get_market_strategy` in `strategy_buy.py`.
+2. Passing it to the first survival simulation and the solar baseline simulation.
+3. Merging `m_manual_overrides` into `m_overrides` for the final buy simulations to ensure exact progression mapping.
+
+### Skeptic
+My 3 security/performance critique points:
+1. **Critical Battery Survival**: This is a direct SRE safety fix! A blind buy strategy could lead to a fully depleted battery at night during expensive periods, which completely violates the primary goal of the integration. Being aware of the manual discharge ensures the buy strategy schedules a necessary survival grid charge.
+2. **Double-Command Safeguard**: By merging manual overrides into `m_overrides`, if the user has overridden a hour to "buy", the strategy won't try to overlay a conflicting AI sell or AI buy command, maintaining absolute clean target isolation.
+3. **Flawless Convergence**: Dict lookup is extremely fast, so there's zero chance of introducing performance lag.
+
+### Conclusion
+We will update `strategy_buy.py` to compile manual overrides at the start and pass them to all four internal SOC simulations. This ensures the buy strategy correctly plans grid charging when manual overrides drain the battery.

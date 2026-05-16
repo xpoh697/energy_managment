@@ -131,6 +131,18 @@ class StrategyBuy(StrategyEngine):
             cur_hour = int(now.hour)
             today_str = now.strftime("%Y-%m-%d")
             tomorrow_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+            sim_range = list(range(cur_hour, cur_hour + 48))
+
+            # Construct mode overrides from active manual overrides
+            m_manual_overrides = {}
+            for i, h_abs in enumerate(sim_range):
+                h_dt = (now + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
+                h_ts_key = h_dt.strftime("%Y-%m-%d %H:00")
+                manual_m = man.hourly_manual_overrides.get(h_ts_key)
+                if manual_m:
+                    m_manual_overrides[h_abs] = manual_m.get("mode")
+                elif h_dt.strftime("%Y-%m-%d") == now.strftime("%Y-%m-%d") and h_dt.hour in man.manual_mode_overrides:
+                    m_manual_overrides[h_abs] = man.manual_mode_overrides[h_dt.hour]
             
             p_buy_st = dict(man.data.get("prices_buy", {}))
             today_prices = dict(p_buy_st.get(today_str, {}))
@@ -244,7 +256,11 @@ class StrategyBuy(StrategyEngine):
                 if _p_raw_s < -0.05:
                     sim_cmds[cur_hour] = abs(_p_raw_s)
                 
-                _, log, _ = self.run_soc_simulation(b_soc, sim_range, now, sim_cmds, allow_discharge=True, house_profile_override="consumption_base")
+                _, log, _ = self.run_soc_simulation(
+                    b_soc, sim_range, now, sim_cmds, 
+                    allow_discharge=True, house_profile_override="consumption_base",
+                    mode_overrides=m_manual_overrides
+                )
                 
                 deadline_h = None
                 
@@ -379,7 +395,11 @@ class StrategyBuy(StrategyEngine):
             _sim_h_disp = list(range(cur_hour, max(sunset_abs, (max(target_hours) if target_hours else cur_hour)) + 1))
             _p_raw = float(man.get_sensor_float(man.battery_power_sensor) or 0.0)
             current_cmd = {cur_hour: abs(_p_raw)} if _p_raw < -0.05 else {}
-            _, _log_sun, _ = self.run_soc_simulation(b_soc, _sim_h_disp, now, current_cmd, allow_discharge=True, no_solar_to_bat=False, house_profile_override="consumption_base")
+            _, _log_sun, _ = self.run_soc_simulation(
+                b_soc, _sim_h_disp, now, current_cmd, 
+                allow_discharge=True, no_solar_to_bat=False, house_profile_override="consumption_base",
+                mode_overrides=m_manual_overrides
+            )
             
             # v11.9.602: Peak Solar Awareness
             # If at ANY hour from now until sunset the battery reaches 95% from solar, 
@@ -515,6 +535,8 @@ class StrategyBuy(StrategyEngine):
             
             # v11.9.740: Inject mode_overrides to ensure simulator knows we are in 'buy' mode
             m_overrides = {h: "buy" for h, p in charge_commands.items() if p > 0.05}
+            for h_abs_override, m_name in m_manual_overrides.items():
+                m_overrides[h_abs_override] = m_name
             
             # 3. Final Simulation to get REAL progressive SOC levels (Chronological)
             _, sim_log, _ = self.run_soc_simulation(b_soc, sim_range, now, charge_commands, allow_discharge=True, no_solar_to_bat=False, b_min_soc=min_soc, dynamic_floors=d_floors, mode_overrides=m_overrides)
