@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v11.9.697 ",
+  "%c ENERGY MANAGEMENT %c v12.1.0 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -612,7 +612,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.0.80</div>
+        <div id="v-tag" class="version-tag">v12.1.0</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -808,7 +808,7 @@ class EnergyManagementCard extends HTMLElement {
     }
 
     const vTag = this.shadowRoot.getElementById('v-tag');
-    if (vTag) vTag.innerText = attrs.strategy_version || 'v11.9.497';
+    if (vTag) vTag.innerText = attrs.strategy_version || 'v12.1.0';
 
     const projM = this.shadowRoot.getElementById('proj-morning');
     if (projM) projM.innerText = (parseFloat(attrs.morning_soc_projected) || 0).toFixed(1) + '%';
