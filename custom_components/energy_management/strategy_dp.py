@@ -163,47 +163,62 @@ class DPPlanner:
                     cur_rev, _, _, _ = full_dp[h][si]
                     if cur_rev <= neg_inf + 100: continue
                     
-                    usable_energy = si * energy_step
+                    usable_energy = si * energy_step  # DC kWh stored in battery
                     # 1. ACT_IDLE: Baseline
                     _update(si, ACT_IDLE, 0.0, h, si, cur_rev + p_sell * pv_surplus - p_buy * pv_deficit + 1e-6)
                             
                     # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
+                    # exp_dc = DC energy drawn from battery; exp_ac = AC energy after inverter losses
                     if abs_h in top_sell_set:
-                        exp = min(usable_energy, max_p_dis)
-                        if exp >= min_dis_kwh:
-                            to_grid = max(0.0, exp + gen - cons)
-                            from_grid = max(0.0, cons - exp - gen)
-                            reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp)
-                            nsi = si - int(round(exp / energy_step))
-                            _update(nsi, ACT_DIS, exp, h, si, cur_rev + reward)
+                        exp_dc = min(usable_energy, max_p_dis)
+                        exp_ac = exp_dc * eff
+                        if exp_dc >= min_dis_kwh:
+                            to_grid = max(0.0, exp_ac + gen - cons)
+                            from_grid = max(0.0, cons - exp_ac - gen)
+                            reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp_dc)
+                            nsi = si - int(round(exp_dc / energy_step))
+                            _update(nsi, ACT_DIS, exp_ac, h, si, cur_rev + reward)
                             
-                    # 3. ACT_PV_CHARGE: Surplus to battery
+                    # 3. ACT_PV_CHARGE: Surplus PV (AC) to battery (DC)
+                    # chg_ac = AC power from PV; chg_dc = DC actually stored (after inverter losses)
                     if pv_surplus > 0.01 and si < energy_steps:
-                        chg = min(pv_surplus, (energy_steps - si) * energy_step, max_p_chg)
-                        if chg > 0.01:
-                            ci = int(round(chg / energy_step))
+                        max_storable_dc = (energy_steps - si) * energy_step
+                        chg_ac = min(pv_surplus, max_storable_dc / eff, max_p_chg)
+                        chg_dc = chg_ac * eff
+                        if chg_dc > 0.01:
+                            ci = int(round(chg_dc / energy_step))
                             if ci > 0:
-                                reward = p_sell * max(0.0, pv_surplus - chg) - p_buy * pv_deficit
-                                _update(si + ci, ACT_PV_CHARGE, chg, h, si, cur_rev + reward)
+                                reward = p_sell * max(0.0, pv_surplus - chg_ac) - p_buy * pv_deficit
+                                _update(si + ci, ACT_PV_CHARGE, chg_ac, h, si, cur_rev + reward)
 
-                    # 4. ACT_GRID_CHARGE: Buy from grid
+                    # 4. ACT_GRID_CHARGE: Buy from grid (AC) -> store in battery (DC)
+                    # Iterate over DC steps (0.5 kWh granularity for performance), pay for AC drawn
+                    # Note: grid_charge_step=0.5 reduces loop from ~66 to ~13 iterations per node
                     if si < energy_steps:
-                        max_gc = min(max_p_chg, (energy_steps - si) * energy_step)
-                        for ci in range(1, int(max_gc / energy_step) + 1):
-                            chg = ci * energy_step
-                            reward = p_sell * pv_surplus - p_buy * (chg + pv_deficit) - (cycle_cost * chg)
-                            _update(si + ci, ACT_GRID_CHARGE, chg, h, si, cur_rev + reward)
+                        grid_charge_step = 0.5  # kWh DC granularity for performance
+                        max_storable_dc = min(max_p_chg * eff, (energy_steps - si) * energy_step)
+                        ci_max = max(1, int(max_storable_dc / grid_charge_step))
+                        for ci_coarse in range(1, ci_max + 1):
+                            chg_dc = ci_coarse * grid_charge_step
+                            chg_ac = chg_dc / eff  # AC drawn from grid to achieve chg_dc storage
+                            ci = int(round(chg_dc / energy_step))
+                            if si + ci > energy_steps: break
+                            reward = p_sell * pv_surplus - p_buy * (chg_ac + pv_deficit) - (cycle_cost * chg_dc)
+                            _update(si + ci, ACT_GRID_CHARGE, chg_ac, h, si, cur_rev + reward)
 
-                    # 5. ACT_SELF_CONSUME: Battery to home
+                    # 5. ACT_SELF_CONSUME: Battery (DC) to home (AC)
+                    # sc_dc = DC drawn from battery; actual AC coverage = sc_dc * eff
                     if pv_deficit > 0.01 and si > 0:
-                        sc = min(usable_energy, pv_deficit, max_p_dis)
-                        if sc > 0.01:
-                            sci = int(round(sc / energy_step))
+                        sc_dc = min(usable_energy, pv_deficit / eff, max_p_dis)
+                        sc_ac = sc_dc * eff  # AC coverage for home
+                        if sc_dc > 0.01:
+                            sci = int(round(sc_dc / energy_step))
                             if sci > 0:
-                                rem_def = max(0.0, pv_deficit - sc)
-                                _update(si - sci, ACT_SELF_CONSUME, sc, h, si, cur_rev - p_buy * rem_def)
+                                rem_def = max(0.0, pv_deficit - sc_ac)
+                                _update(si - sci, ACT_SELF_CONSUME, sc_ac, h, si, cur_rev - p_buy * rem_def)
                             
-                    # 6. ACT_PAID_IMPORT: Negative price handling
+                    # 6. ACT_PAID_IMPORT: Negative price — let house consume from grid,
+                    # keep battery intact to save capacity for an upcoming bigger sell peak.
                     if p_buy < 0 and cons > 0.01:
                         _update(si, ACT_PAID_IMPORT, 0.0, h, si, cur_rev - p_buy * cons)
 
