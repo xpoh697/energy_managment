@@ -92,7 +92,7 @@ class DPPlanner:
             eff = getattr(self.manager, "last_eff_coeff", 0.98)  # align with strategy_base.py hardcoded 0.98
             
             # Terminal SOC floor: minimum energy at end of horizon (matches floor_idx in forward induction)
-            min_end_usable = (min_soc / 100.0) * b_cap  # kWh, dynamic from CONF_MIN_SOC_BAT + battery capacity
+            min_end_usable = ((min_soc + soc_buff) / 100.0) * b_cap  # kWh, dynamic from CONF_MIN_SOC_BAT + CONF_SOC_BUFFER + battery capacity
             
             # v11.9.48: Boiler logic completely removed from DP model.
             
@@ -129,7 +129,7 @@ class DPPlanner:
                 if nsi < 0 or nsi > energy_steps: return
                 
                 # v11.9.54: Progressive Global Floor Penalty
-                floor_idx = int(round(min_soc / 100.0 * energy_steps))
+                floor_idx = int(round((min_soc + soc_buff) / 100.0 * energy_steps))
                 if nsi < floor_idx:
                     # Penalize distance to floor to force maximum recovery speed
                     dist_kwh = (floor_idx - nsi) * energy_step
