@@ -911,10 +911,23 @@ class EnergyProfileManager:
             prof_cons = self.get_predicted_profile("consumption_total")
             prof_cons_base = self.get_predicted_profile("consumption_base")
             
+            # v12.1.0: Forecast-to-Profile Scaling in Global Plan
+            now_h = now.hour
+            f_today_val = self.get_forecast_value(self.forecast_today_sensor)
+            f_tomorrow_val = self.get_forecast_value(self.forecast_tomorrow_sensor)
+            
+            # Scale today remaining
+            hist_today_rem = sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(now_h, 24))
+            scale_today = float(f_today_val / hist_today_rem) if (f_today_val is not None and hist_today_rem > 0.1) else 1.0
+            
+            # Scale tomorrow
+            hist_tomorrow = sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(24))
+            scale_tomorrow = float(f_tomorrow_val / hist_tomorrow) if (f_tomorrow_val is not None and hist_tomorrow > 0.1) else 1.0
+            
             shared_profiles = {"gen": prof_gen, "cons": prof_cons, "cons_base": prof_cons_base}
             
             self.log_to_file(f"DIAG: Forecast Sensors. Hourly: {self.forecast_today_hourly_sensor}, Today: {self.forecast_today_sensor}")
-            self.log_to_file(f"DIAG: Gen Profile Sample (10h-16h): {[prof_gen.get(str(h), 0.0) for h in range(10, 17)]}")
+            self.log_to_file(f"DIAG: Gen Profile Sample (10h-16h) (Raw): {[prof_gen.get(str(h), 0.0) for h in range(10, 17)]}")
             # Use smart battery state (with glitch protection/memory)
             batt_soc, b_cap, batt_energy = self.get_battery_state()
             
@@ -937,12 +950,21 @@ class EnergyProfileManager:
                 h_rel = str(dt_h.hour)
                 today_str = dt_h.strftime("%Y-%m-%d")
                 
+                # Apply forecast scaling depending on the day of the slot
+                raw_gen = float(normalize_float(prof_gen.get(h_rel, 0.0)))
+                if dt_h.date() == now.date():
+                    scaled_gen = raw_gen * scale_today
+                elif dt_h.date() == (now.date() + timedelta(days=1)):
+                    scaled_gen = raw_gen * scale_tomorrow
+                else:
+                    scaled_gen = raw_gen
+
                 slot = GlobalSlot(
                     hour_abs=h_abs,
                     dt_iso=dt_h.isoformat(),
                     price_buy=self.get_price("buy", today_str, dt_h.hour) or 0.0,
                     price_sell=self.get_price("sell", today_str, dt_h.hour) or 0.0,
-                    gen_raw=float(normalize_float(prof_gen.get(h_rel, 0.0))),
+                    gen_raw=scaled_gen,
                     load_total=float(normalize_float(prof_cons.get(h_rel, 0.0))),
                     load_base=float(normalize_float(prof_cons_base.get(h_rel, 0.0)))
                 )

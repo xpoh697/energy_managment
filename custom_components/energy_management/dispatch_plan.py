@@ -173,6 +173,17 @@ class EnergyLogicEngine:
                 _active_h_sell = sell_strategy.get("active_hours", [])
                 is_selling_active = check_h_abs in _active_h_sell
                 is_buying_active = check_h_abs in buy_strategy.get("active_hours", [])
+                
+                # v12.1.0: Dynamic Safety Verification for Forecast Slots
+                # Only allow future sales if the battery is projected to be above the safety floor
+                if is_selling_active:
+                    floors_sliding = sell_strategy.get("floors_sliding", {})
+                    safety_floor = floors_sliding.get(check_h_abs)
+                    if safety_floor is None:
+                        safety_floor = float(sell_strategy.get("arbitrage_sell_debug", {}).get("active_safety_floor", 100.0))
+                    
+                    if batt_soc < (safety_floor - 0.5):
+                        is_selling_active = False
         else:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"

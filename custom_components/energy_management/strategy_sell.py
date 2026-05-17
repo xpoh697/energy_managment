@@ -330,18 +330,17 @@ class StrategySell(StrategyEngine):
             
             # v11.9.447: Use unified Gatekeeper Floor from base class to ensure consistency
             # This replaces the manual split-pool calculation which was prone to profile mismatches.
-            gatekeeper = self.get_gatekeeper_floor(cur_hour, next_sunrise_abs)
+            gatekeeper = self.get_gatekeeper_floor(cur_hour, next_sunrise_abs, h_end_pool=h_end_pool)
             
             # Recalculate house percentages for diagnostic compatibility using the same engine
-            house_after_pct = round_f(self.get_survival_floor(h_end_pool, next_sunrise_abs) - emergency_soc, 1)
-            house_during_pct = round_f(self.get_survival_floor(cur_hour, h_end_pool) - emergency_soc, 1)
+            house_after_pct = round_f(self.get_survival_floor(h_end_pool, next_sunrise_abs, ignore_solar=True) - emergency_soc, 1)
+            house_during_pct = round_f(self.get_survival_floor(cur_hour, h_end_pool, ignore_solar=True) - emergency_soc, 1)
 
             # 3. Determine Active Safety Floor for Current Hour (Limit for SALE)
             active_safety_floor = max(user_limit, gatekeeper)
             if is_turbo_win:
                 limit_reason = "Turbo (Morning)"
             else:
-                limit_reason = "Safe Mode"
                 limit_reason = "Safe Mode"
 
             available_sell_dc_pre = max(0.0, (b_soc - active_safety_floor) * b_cap / 100.0)
@@ -405,7 +404,15 @@ class StrategySell(StrategyEngine):
             for h_abs in sim_range:
                 # v11.9.449: Unified Gatekeeper Floor handles Turbo Mode internally
                 next_sr = get_next_sunrise(h_abs)
-                survival_floor = self.get_gatekeeper_floor(h_abs, next_sr)
+                
+                h_end_for_abs = h_abs
+                pool_boundary_abs = 4 if (h_abs % 24) < 4 else next_sr
+                if target_hours:
+                    for th in target_hours:
+                        if th >= h_abs and th < pool_boundary_abs:
+                            h_end_for_abs = th
+                            
+                survival_floor = self.get_gatekeeper_floor(h_abs, next_sr, h_end_pool=h_end_for_abs)
                 h_floor = max(user_limit, survival_floor)
                 
                 floors_sliding[h_abs] = h_floor 
@@ -502,6 +509,7 @@ class StrategySell(StrategyEngine):
                 # v11.9.692: Track initial budget to detect throttling
                 initial_budget_ac = float(target_budget_ac)
                 
+                prev_commands = {}
                 for attempt in range(20): # v11.9.315: Increased iterations for complex cases
                     # --- Stage 2: Distribution Loop (TS 107) ---
                     rem_budget = float(target_budget_ac)
@@ -512,12 +520,17 @@ class StrategySell(StrategyEngine):
                         if h == cur_hour:
                             duration = max(0.01, 1.0 - (now.minute / 60.0))
                         
-                        # v11.9.687: Restore strict price priority. 
-                        # Do NOT cap the distribution here, or Jackals will steal the budget.
-                        p_export = min(max_batt_p, rem_budget / duration)
+                        # Cap distribution by hour's power cap from previous feedback loop
+                        p_cap = h_power_caps.get(h, max_batt_p)
+                        p_export = min(p_cap, rem_budget / duration)
                         
                         sell_commands[h] = round_f(p_export, 3) if p_export > 0.05 else 0.0
                         rem_budget -= p_export * duration
+                    
+                    # v12.0.89: Convergence optimization - break if commands are stable
+                    if attempt > 0 and sell_commands == prev_commands:
+                        break
+                    prev_commands = dict(sell_commands)
                 
                     # 3. Simulation Check (TS 105)
                     # Important: We must pass AC commands to simulation and inverter!
@@ -554,6 +567,9 @@ class StrategySell(StrategyEngine):
                             if h_soc < h_floor + 0.1:
                                 old_cap = h_power_caps.get(h_cmd, max_batt_p)
                                 new_cap = max(0.0, p_real_dc + 0.01) # Small epsilon
+                                # Avoid epsilon creep / tiny phantom loads
+                                if new_cap < 0.05:
+                                    new_cap = 0.0
                                 if new_cap < old_cap:
                                     h_power_caps[h_cmd] = new_cap
 
@@ -888,7 +904,7 @@ class StrategySell(StrategyEngine):
                 "latest_charge_start": latest_charge_start,
                 "log": sim_log
             }
-            res["raw_commands"] = sell_commands
+            res["raw_commands"] = {h: p for h, p in sell_commands.items() if p > 0.05}
             
             v_val = 52.0
             if man.battery_voltage_sensor:
@@ -1006,7 +1022,7 @@ class StrategySell(StrategyEngine):
             arb_info = self._get_arbitrage_info(cur_hour, all_buy_prices, all_sell_prices, target_hours)
             res["arbitrage_decision"] = arb_info["arbitrage_decision"]
             res["strategy_decision"] = res.get("current_mode_text", "Ожидание")
-
+            res["floors_sliding"] = floors_sliding
             self._strategy_cache[cache_key] = {"time": now, "res": res, "start_soc": b_soc}
             return res
         finally:
