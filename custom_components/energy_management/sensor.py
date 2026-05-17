@@ -1126,7 +1126,7 @@ class EnergyProfileManager:
 
             self.global_plan = DispatchPlan(slots)
             self.log_to_file(f"DIAG: Global Plan updated. First 12h: {list(self.global_plan.to_planned_modes_24h().items())[:12]}")
-            _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry (v12.0.77).")
+            _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry (v12.0.80).")
             
         except Exception as e:
             import traceback

@@ -1156,7 +1156,29 @@ class StrategyEngine:
                     elif _h_mode_name in ["stop_sale", "sale_pv_no_bat"]:
                         cmd_p = 0.0
 
-                _h_mode_cls = INVERTER_MODES.get(_h_mode_name) if _h_mode_name else None
+                # v12.0.80: Correct order-of-operations to resolve _h_mode_str before physics.
+                # Determine Mode Config for this simulation hour first
+                _h_mode_str = _h_mode_name
+                if h_abs == now.hour and _h_mode_str is None:
+                    _h_mode_str = current_mode
+                
+                if _h_mode_str is None:
+                    _h_mode_str = "sale_pv"
+                
+                # v12.0.80: Dynamic Emergency Guard to prevent two-pass feedback loops
+                if _h_mode_str == "bat_emergency" and round(simulated_soc, 1) > b_min_soc:
+                    # High-fidelity SOC has recovered or is above min, fallback to safe normal discharge
+                    _h_mode_str = "sale_pv"
+                elif round(simulated_soc, 1) <= b_min_soc and not _manual_m and _h_mode_str != "buy":
+                    # SOC has depleted to emergency floor, dynamically engage protective bat_emergency
+                    _h_mode_str = "bat_emergency"
+                
+                # Safety fallback for specific mode names like 'sale_pv' -> 'sale_pv_bat'
+                if _h_mode_str == "sale_pv": _h_mode_str = "sale_pv"
+                
+                # Resolve class and config based on final _h_mode_str
+                _h_mode_cls = INVERTER_MODES.get(_h_mode_str)
+                _mode_cfg = _h_mode_cls if _h_mode_cls else INVERTER_MODES["sale_pv"]
 
                 # Balance = (Solar - Load) + Grid_Command
                 _expected_gen_kw_sim = 0.0 if no_solar else expected_gen_kw
@@ -1175,30 +1197,6 @@ class StrategyEngine:
                 # the house load is powered by the grid, NOT the battery.
                 if _h_mode_cls and _h_mode_cls.is_grid_bypass:
                     rem_cons = 0.0
-                
-                # v11.9.484: Determine Mode Config for this simulation hour
-                # Use current_mode ONLY for the first hour of simulation.
-                # For future hours, detect based on price/time logic.
-                # For future hours, detect based on price/time logic if no override.
-                _h_mode_str = _h_mode_name
-                if h_abs == now.hour and _h_mode_str is None:
-                    _h_mode_str = current_mode
-                
-                if _h_mode_str is None:
-                    _h_mode_str = "sale_pv"
-                
-                # v12.0.79: Dynamic Emergency Guard to prevent two-pass feedback loops
-                if _h_mode_str == "bat_emergency" and round(simulated_soc, 1) > b_min_soc:
-                    # High-fidelity SOC has recovered or is above min, fallback to safe normal discharge
-                    _h_mode_str = "sale_pv"
-                elif round(simulated_soc, 1) <= b_min_soc and not _manual_m and _h_mode_str != "buy":
-                    # SOC has depleted to emergency floor, dynamically engage protective bat_emergency
-                    _h_mode_str = "bat_emergency"
-                
-                # Safety fallback for specific mode names like 'sale_pv' -> 'sale_pv_bat'
-                if _h_mode_str == "sale_pv": _h_mode_str = "sale_pv"
-                
-                _mode_cfg = INVERTER_MODES.get(_h_mode_str, INVERTER_MODES["sale_pv"])
                 
                 # 2. Total Net Power for battery
                 # Solar charge depends on mode flag
