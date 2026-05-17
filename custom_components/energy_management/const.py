@@ -29,6 +29,13 @@ CONF_DEDUCT_SETTINGS = "deduct_settings"
 CONF_SOC_BUFFER = "soc_buffer"
 CONF_BATTERY_DISCHARGE_ENABLED = "battery_discharge_enabled"
 
+CONF_USE_DP = "use_dp"
+CONF_INVERTER_MODES_SELECT_ENTITY = "inverter_modes_select_entity"
+CONF_DP_MAP_CHARGE = "dp_map_charge"
+CONF_DP_MAP_DISCHARGE = "dp_map_discharge"
+CONF_DP_MAP_SOLAR = "dp_map_solar"
+CONF_DP_MAP_SELF_CONSUME = "dp_map_self_consume"
+CONF_DP_MAP_GRID = "dp_map_grid"
 
 CONF_POWER_LOAD_SENSORS = "power_load_sensors"
 CONF_POWER_GEN_SENSORS = "power_gen_sensors"

@@ -3317,7 +3317,7 @@ class InverterOperationModeSensor(SensorEntity):
             
             if is_critical_pair and not is_emergency and self._mode_lock_until and now < self._mode_lock_until:
                 if self._locked_mode:
-                    return self._locked_mode
+                    raw_mode = self._locked_mode
             
             # 3. Mode Change Detection
             if raw_mode != self._locked_mode:
@@ -3327,6 +3327,24 @@ class InverterOperationModeSensor(SensorEntity):
                 
             # Update manager with final mode
             self.manager.current_inverter_mode = self._locked_mode or raw_mode
+
+            # Mirror mapped value if selector entity is configured
+            inverter_select = self.manager.get_setting("inverter_modes_select_entity")
+            if inverter_select:
+                option_val = None
+                if self.manager.current_inverter_mode == "buy":
+                    option_val = self.manager.get_setting("dp_map_charge", "buy")
+                elif self.manager.current_inverter_mode == "sale_pv_bat":
+                    option_val = self.manager.get_setting("dp_map_discharge", "sale_pv_bat")
+                elif self.manager.current_inverter_mode == "sale_pv":
+                    option_val = self.manager.get_setting("dp_map_solar", "sale_pv")
+                elif self.manager.current_inverter_mode == "stop_sale":
+                    option_val = self.manager.get_setting("dp_map_self_consume", "stop_sale")
+                elif self.manager.current_inverter_mode == "no_pv_sale_no_bat":
+                    option_val = self.manager.get_setting("dp_map_grid", "no_pv_sale_no_bat")
+                if option_val:
+                    return option_val
+
             return self.manager.current_inverter_mode
         except Exception as e:
             _LOGGER.error("Error in InverterOperationModeSensor native_value: %s", e)
@@ -3361,6 +3379,9 @@ class InverterOperationModeSensor(SensorEntity):
                 "mode_lock_until": self._mode_lock_until.isoformat() if self._mode_lock_until else "None",
                 "planned_modes_24h": plan.to_planned_modes_24h(),
                 "hourly_data": plan.to_hourly_data_attr(),
+                "use_dp": self.manager.get_setting("use_dp", False),
+                "heuristic_hourly_data": getattr(self.manager, "heuristic_hourly_data", {}),
+                "dp_hourly_data": getattr(self.manager, "dp_hourly_data", {}),
                 "forecast_coefficient_blended": round_f(self.manager.last_blended_coeff, 3),
                 "plan_last_updated": plan._last_updated.isoformat(),
                 "actual_kwh_so_far": round_f(float(self.manager.data.get("temp_daily_gen", 0.0) or 0.0), 2)
@@ -4806,6 +4827,13 @@ class EnergyDPAdviceSensor(SensorEntity):
         
         self.hass.async_add_executor_job(self._update_advice_threaded, snapshot)
 
+    async def _async_on_calc_complete(self):
+        """Callback to safely store results and trigger global plan recalculation."""
+        import copy
+        self.manager.dp_advice_stable = copy.deepcopy(self._advice)
+        self.async_write_ha_state()
+        await self.manager.async_update_global_plan(force_strategy_recalc=False)
+
     def _update_advice_threaded(self, snapshot):
         """Threaded DP computation using pre-captured snapshot."""
         self._is_calculating = True
@@ -4814,9 +4842,10 @@ class EnergyDPAdviceSensor(SensorEntity):
             self._advice = res
             self._last_run_time = time.time()
             if self.hass:
-                self.hass.add_job(self.async_write_ha_state)
+                self.hass.add_job(self._async_on_calc_complete)
         except Exception as e:
             _LOGGER.error(f"DP Update error: {e}")
         finally:
             self._is_calculating = False
+
 

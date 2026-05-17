@@ -126,7 +126,9 @@ class EnergyLogicEngine:
         profiles: Optional[Dict[str, Any]] = None,
         buy_strategy: Optional[Dict[str, Any]] = None,
         sell_strategy: Optional[Dict[str, Any]] = None,
-        log_func: Optional[Any] = None
+        log_func: Optional[Any] = None,
+        avg_gen: Optional[float] = None,
+        avg_load: Optional[float] = None
     ) -> tuple:
         """
         Calculates the inverter mode for a given timestamp and SOC.
@@ -195,19 +197,24 @@ class EnergyLogicEngine:
         # 4. Gen/Load Data (5m average for real-time, profile for forecast)
         # if log_func: log_func("LDIAG: Loading profiles")
         if not is_forecast:
-            avg_load = float(getattr(manager, "avg_load_5m_kw", 0.5) or 0.5)
-            avg_gen = float(getattr(manager, "avg_gen_5m_kw", 0.0) or 0.0)
+            if avg_load is None:
+                avg_load = float(getattr(manager, "avg_load_5m_kw", 0.5) or 0.5)
+            if avg_gen is None:
+                avg_gen = float(getattr(manager, "avg_gen_5m_kw", 0.0) or 0.0)
         else:
             h_rel_str = str(sim_h)
-            if profiles:
-                prof_gen = profiles.get("gen", {})
-                prof_cons = profiles.get("cons", {})
-            else:
-                prof_gen = manager.get_predicted_profile("generation")
-                prof_cons = manager.get_predicted_profile("consumption_total")
+            if avg_gen is None or avg_load is None:
+                if profiles:
+                    prof_gen = profiles.get("gen", {})
+                    prof_cons = profiles.get("cons", {})
+                else:
+                    prof_gen = manager.get_predicted_profile("generation")
+                    prof_cons = manager.get_predicted_profile("consumption_total")
                 
-            avg_gen = float(prof_gen.get(h_rel_str, 0.0) or 0.0)
-            avg_load = float(prof_cons.get(h_rel_str, 0.5) or 0.5)
+                if avg_gen is None:
+                    avg_gen = float(prof_gen.get(h_rel_str, 0.0) or 0.0)
+                if avg_load is None:
+                    avg_load = float(prof_cons.get(h_rel_str, 0.5) or 0.5)
 
         # v12.1.0: Dynamic Safety Verification for Selling Slots
         if is_selling_active:
@@ -274,7 +281,7 @@ class EnergyLogicEngine:
         target_morning = float(min_soc + 5.0)
         is_low_for_morning = bool(morning_soc_proj < target_morning)
         hit_full_before = (sell_strategy.get("sell_simulation") or {}).get("hit_full_before", False)
-        latest_charge_start = (sell_strategy.get("sell_simulation") or {}).get("latest_charge_start", sim_h)
+        latest_charge_start = (sell_strategy.get("sell_simulation") or {}).get("latest_charge_start", check_h_abs)
 
         is_profitable_to_save = False
         if peak_start_abs is not None:
@@ -320,9 +327,8 @@ class EnergyLogicEngine:
             reason = sell_strategy.get("strategy_decision", "Активна стратегия ПРОДАЖИ (AI)")
             target_soc = min_soc
             
-        # P5: Morning Mode / Solar Heuristics
         elif cur_price is not None and cur_price >= price_sell_only_pv:
-            _block_sale_pv_no_bat = bool(sim_h >= latest_charge_start)
+            _block_sale_pv_no_bat = bool((dt_now.date() == manager.now.date()) and (check_h_abs >= latest_charge_start))
             if is_before_limit_hour and has_surplus and not _block_sale_pv_no_bat and cur_price > 0:
                 mode = "sale_pv_no_bat"
                 reason = f"Продажа только солнца: Цена ({p_sell_val:.2f}) >= Порога ({price_sell_only_pv:.2f}), утро"

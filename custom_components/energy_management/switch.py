@@ -5,7 +5,8 @@ from .const import (
     DOMAIN,
     CONF_DYNAMIC_SOC_BUY,
     CONF_DYNAMIC_SOC_SELL,
-    CONF_FORCE_MARKET_SELL
+    CONF_FORCE_MARKET_SELL,
+    CONF_USE_DP
 )
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -16,6 +17,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         EnergyProfileSwitch(manager, CONF_DYNAMIC_SOC_BUY, "Smart Charge AI", "mdi:brain", True),
         EnergyProfileSwitch(manager, CONF_DYNAMIC_SOC_SELL, "Smart Sell AI", "mdi:brain", True),
         EnergyProfileSwitch(manager, CONF_FORCE_MARKET_SELL, "Force Market Sell", "mdi:flash-red-eye", False),
+        EnergyProfileSwitch(manager, CONF_USE_DP, "Использовать DP стратегию", "mdi:brain", False),
     ]
     
     async_add_entities(entities)

@@ -78,6 +78,14 @@ class EnergyManagementCard extends HTMLElement {
   constructor() {
     super();
     this._initialized = false;
+    this._activeTab = null;
+  }
+
+  _switchTab(tab) {
+    this._activeTab = tab;
+    const container = this.shadowRoot.getElementById('timeline-container');
+    if (container) container._lastKeys = null;
+    this._updateUI();
   }
 
   set hass(hass) {
@@ -412,6 +420,78 @@ class EnergyManagementCard extends HTMLElement {
         .btn-clear { background: rgba(255,255,255,0.05); color: #ff5252; border: 1px solid rgba(255,82,82,0.2); }
         .btn:active { transform: scale(0.95); }
         .version-tag { position: absolute; bottom: 4px; right: 8px; font-size: 0.5rem; opacity: 0.3; color: var(--secondary-text); pointer-events: none; }
+
+        .tab-container {
+          display: flex;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 16px;
+          padding: 4px;
+          margin: 16px 0;
+          gap: 4px;
+          position: relative;
+          backdrop-filter: blur(10px);
+        }
+        .tab-btn {
+          flex: 1;
+          height: 40px;
+          border-radius: 12px;
+          font-size: 0.75rem;
+          font-weight: 800;
+          cursor: pointer;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          color: rgba(255,255,255,0.6);
+          border: none;
+          background: transparent;
+        }
+        .tab-btn:hover {
+          color: white;
+          background: rgba(255,255,255,0.02);
+        }
+        .tab-btn.selected {
+          color: white;
+          background: rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,0.1);
+        }
+        .tab-btn.selected.heur-tab {
+          border-color: rgba(3, 169, 244, 0.4);
+          background: rgba(3, 169, 244, 0.15);
+          color: #03a9f4;
+          box-shadow: 0 4px 15px rgba(3, 169, 244, 0.1);
+        }
+        .tab-btn.selected.dp-tab {
+          border-color: rgba(76, 175, 80, 0.4);
+          background: rgba(76, 175, 80, 0.15);
+          color: #4caf50;
+          box-shadow: 0 4px 15px rgba(76, 175, 80, 0.1);
+        }
+        .active-dot {
+          display: inline-flex;
+          align-items: center;
+          font-size: 0.55rem;
+          font-weight: 900;
+          padding: 2px 6px;
+          border-radius: 6px;
+          background: rgba(76, 175, 80, 0.1);
+          color: #4caf50;
+          animation: pulse 2s infinite;
+          letter-spacing: 0.05em;
+          border: 1px solid rgba(76, 175, 80, 0.2);
+        }
+        .active-dot.heur-active {
+          background: rgba(3, 169, 244, 0.1);
+          color: #03a9f4;
+          border-color: rgba(3, 169, 244, 0.2);
+        }
+        @keyframes pulse {
+          0% { opacity: 0.6; }
+          50% { opacity: 1; }
+          100% { opacity: 0.6; }
+        }
       </style>
       <ha-card>
         <div class="header">
@@ -440,11 +520,23 @@ class EnergyManagementCard extends HTMLElement {
           </div>
         </div>
 
-
+        <div class="tab-container">
+          <button id="tab-heuristic" class="tab-btn heur-tab" onclick="this.getRootNode().host._switchTab('heuristic')">
+            <ha-icon icon="mdi:console"></ha-icon>
+            <span>Эвристика</span>
+            <span id="badge-heur" class="active-dot heur-active" style="display:none;">● ACTIVE</span>
+          </button>
+          <button id="tab-dp" class="tab-btn dp-tab" onclick="this.getRootNode().host._switchTab('dp')">
+            <ha-icon icon="mdi:brain"></ha-icon>
+            <span>DP Оптимизатор</span>
+            <span id="badge-dp" class="active-dot" style="display:none;">● ACTIVE</span>
+          </button>
+        </div>
 
         <div id="timeline-container">
           <!-- Dynamic sections TODAY / TOMORROW will be here -->
         </div>
+
 
         <!-- Hourly Modal -->
         <div id="modal" class="modal-overlay">
@@ -532,9 +624,15 @@ class EnergyManagementCard extends HTMLElement {
   }
 
   _openModal(timestamp, currentMode) {
-    const data = this._hass.states[this._config.entity].attributes.hourly_data || {};
+    const attrs = this._hass.states[this._config.entity].attributes;
+    let data = attrs.hourly_data || {};
+    if (this._activeTab === 'heuristic') {
+      data = attrs.heuristic_hourly_data || attrs.hourly_data || {};
+    } else if (this._activeTab === 'dp') {
+      data = attrs.dp_hourly_data || attrs.hourly_data || {};
+    }
     const hourData = data[timestamp] || {};
-    const currentSocLimit = hourData.soc_limit !== undefined ? hourData.soc_limit : (hourData.soc || 100);
+    const currentSocLimit = hourData.soc_limit !== undefined ? hourData.soc_limit : (hourData.soc !== undefined ? hourData.soc : 100);
 
     this._editingTimestamp = timestamp;
     this._currentHourData = hourData;
@@ -639,7 +737,38 @@ class EnergyManagementCard extends HTMLElement {
     const attrs = stateObj.attributes;
     const soc = parseFloat(attrs.battery_soc) || 0;
     const bms = attrs.bms_status || {};
-    const hourlyData = attrs.hourly_data || {};
+    
+    // Tab switching and active indicators
+    const useDP = attrs.use_dp || false;
+    if (!this._activeTab) {
+      this._activeTab = useDP ? 'dp' : 'heuristic';
+    }
+
+    // Toggle ● ACTIVE badge visibility
+    const badgeHeur = this.shadowRoot.getElementById('badge-heur');
+    const badgeDP = this.shadowRoot.getElementById('badge-dp');
+    if (badgeHeur) badgeHeur.style.display = !useDP ? 'inline-flex' : 'none';
+    if (badgeDP) badgeDP.style.display = useDP ? 'inline-flex' : 'none';
+
+    // Highlight selected tab button
+    const tabHeur = this.shadowRoot.getElementById('tab-heuristic');
+    const tabDP = this.shadowRoot.getElementById('tab-dp');
+    if (tabHeur) {
+      if (this._activeTab === 'heuristic') tabHeur.classList.add('selected');
+      else tabHeur.classList.remove('selected');
+    }
+    if (tabDP) {
+      if (this._activeTab === 'dp') tabDP.classList.add('selected');
+      else tabDP.classList.remove('selected');
+    }
+
+    // Select target timeline data
+    let hourlyData = attrs.hourly_data || {};
+    if (this._activeTab === 'heuristic') {
+      hourlyData = attrs.heuristic_hourly_data || attrs.hourly_data || {};
+    } else if (this._activeTab === 'dp') {
+      hourlyData = attrs.dp_hourly_data || attrs.hourly_data || {};
+    }
 
     // Update Hero Badges
     const socColor = this._getBatteryColor(soc);

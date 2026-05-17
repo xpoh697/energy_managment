@@ -221,7 +221,7 @@ class DPPlanner:
                 if val > best_val:
                     best_val, best_si = val, si
 
-            plan, formatted_plan, f_table = {}, {}, {}
+            plan, plan_by_timestamp, formatted_plan, f_table = {}, {}, {}, {}
             curr_si_back = best_si
             results = []
             for h in range(horizon - 1, -1, -1):
@@ -250,6 +250,12 @@ class DPPlanner:
                 soc = int(round((si * energy_step) / b_cap * 100.0))
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)} | L:{round(cons,1)} G:{round(gen,1)}"
+                
+                # Absolute timestamp mapping for easy coordinate lookup
+                ts_dt = now + timedelta(hours=h_idx)
+                ts_key = ts_dt.strftime("%Y-%m-%d %H:00")
+                plan_by_timestamp[ts_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
+
                 f_table[str(abs_h)] = {
                     "gen": round(gen, 2),
                     "cons": round(cons, 2),
@@ -258,6 +264,7 @@ class DPPlanner:
                 }
 
             # Debug Info
+
             # Debug Info
             coeff = getattr(self.manager, "last_blended_coeff", 1.0)
             total_gen_today_raw = sum(f_gen_full.get(str(h), 0.0) for h in range(0, 24)) / (coeff if coeff > 0 else 1.0)
@@ -286,6 +293,7 @@ class DPPlanner:
 
             res_final = {
                 "plan": plan, 
+                "plan_by_timestamp": plan_by_timestamp,
                 "formatted_plan": formatted_plan,
                 "best_value": round(best_val, 2),
                 "debug": {

@@ -174,7 +174,7 @@ class StrategyEngine:
             
         return p_today, p_tom, p_type
 
-    def get_survival_floor(self, start_h_abs: int, end_h_abs: int, target_at_end: float = None) -> float:
+    def get_survival_floor(self, start_h_abs: int, end_h_abs: int, target_at_end: float = None, ignore_solar: bool = False) -> float:
         """
         v11.9.718: Proper Reverse Bridging calculation.
         Calculates the SOC needed at 'start_h_abs' to reach 'end_h_abs' 
@@ -200,7 +200,7 @@ class StrategyEngine:
         for h_abs in range(end_h_abs - 1, start_h_abs - 1, -1):
             h_rel = str(h_abs % 24)
             l_val = float(normalize_float(prof_cons.get(h_rel, 0.4)))
-            g_val = float(normalize_float(prof_gen.get(h_rel, 0.0)))
+            g_val = float(normalize_float(prof_gen.get(h_rel, 0.0))) if not ignore_solar else 0.0
             
             # net_h_kwh = (Load - Gen) / Eff
             net_h_kwh = (l_val - g_val) / eff
@@ -211,12 +211,15 @@ class StrategyEngine:
             # New required SOC before this hour
             req_soc += h_soc_pct
             
-            # SOC cannot fall below min_soc at any point
-            req_soc = max(min_soc, req_soc)
+            # v12.0.85: Strict Buffer Protection (TS 1.1)
+            # Prevent early morning solar generation from "eating" the night buffer.
+            # req_soc must never drop below the target we are bridging towards.
+            base_floor = target_at_end if target_at_end is not None else min_soc
+            req_soc = max(base_floor, req_soc)
             
         return round_f(req_soc, 1)
 
-    def get_gatekeeper_floor(self, h_abs: int, end_h_abs: int) -> float:
+    def get_gatekeeper_floor(self, h_abs: int, end_h_abs: int, h_end_pool: int = None) -> float:
         """Calculate unified gatekeeper floor (Turbo or Safe) as per TS Section 1.1."""
         h_rel = h_abs % 24
         min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
@@ -225,15 +228,22 @@ class StrategyEngine:
             # Turbo Mode: MinSOC + 2%
             return round_f(min_soc + 2.0, 1)
         else:
-            # Safe Mode: max(User Limit, Survival to Sunrise with Buffer)
+            # Safe Mode: TS 1.1 Reverse Bridging
             user_limit = float(self.manager.get_setting(CONF_AI_DISCHARGE_LIMIT, 20.0))
             soc_buffer = float(self.manager.get_setting(CONF_SOC_BUFFER, 5.0))
             
-            # Target at sunrise
-            t_morning = max(user_limit, min_soc + soc_buffer)
+            if h_end_pool is None or h_end_pool < h_abs:
+                h_end_pool = h_abs
+                
+            # 1. Survival = MinSOC + Buffer + Дом_после_продажи_до_рассвета
+            # Calculated backward from sunrise to h_end_pool. We ignore solar to strictly protect the morning buffer.
+            survival_soc = self.get_survival_floor(h_end_pool, end_h_abs, target_at_end=min_soc + soc_buffer, ignore_solar=True)
             
-            # survival calculation from now until end of night/sunrise
-            floor = self.get_survival_floor(h_abs, end_h_abs, target_at_end=t_morning)
+            # 2. T_end = max(User_Limit, Survival)
+            t_end = max(user_limit, survival_soc)
+            
+            # 3. Floor = T_end + Дом_от_сейчас_до_конца_продаж
+            floor = self.get_survival_floor(h_abs, h_end_pool, target_at_end=t_end, ignore_solar=True)
             
             return floor
 

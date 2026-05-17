@@ -48,6 +48,13 @@ from .const import (
     CONF_MIN_SELL_PRICE,
     CONF_MAX_ARBITRAGE_HOURS,
     CONF_MIN_DISCHARGE_KWH,
+    CONF_USE_DP,
+    CONF_INVERTER_MODES_SELECT_ENTITY,
+    CONF_DP_MAP_CHARGE,
+    CONF_DP_MAP_DISCHARGE,
+    CONF_DP_MAP_SOLAR,
+    CONF_DP_MAP_SELF_CONSUME,
+    CONF_DP_MAP_GRID,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -170,6 +177,8 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_boiler_settings()
             if category == "investment_settings":
                 return await self.async_step_investment_settings()
+            if category == "dp_mapping":
+                return await self.async_step_dp_mapping()
 
         return self.async_show_form(
             step_id="init",
@@ -178,6 +187,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                     selector.SelectSelectorConfig(
                         options=[
                             {"value": "main_settings", "label": "Основные настройки (Датчики, Цены, АКБ)"},
+                            {"value": "dp_mapping", "label": "Маппинг режимов инвертора (DP)"},
                             {"value": "deduct_settings_init", "label": "Управляемые нагрузки (Deduct)"},
                             {"value": "boiler_settings", "label": "Оптимизатор Бойлера"},
                             {"value": "investment_settings", "label": "Инвестиции и окупаемость"},
@@ -311,3 +321,45 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_ANOMALY_THRESHOLD, default=float(at if at is not None else 2.0)): vol.All(vol.Coerce(float), vol.Range(min=1.1, max=10.0)),
         })
         return self.async_show_form(step_id="investment_settings", data_schema=schema)
+
+    async def async_step_dp_mapping(self, user_input=None):
+        """Handle DP mode mapping settings."""
+        if user_input is not None:
+            self._user_input.update(user_input)
+            return self.async_create_entry(title="", data=self._user_input)
+
+        select_entity = self._user_input.get(CONF_INVERTER_MODES_SELECT_ENTITY)
+        options = []
+        if select_entity and self.hass:
+            state = self.hass.states.get(select_entity)
+            if state:
+                options = state.attributes.get("options", [])
+
+        schema_dict = {
+            vol.Optional(CONF_INVERTER_MODES_SELECT_ENTITY, default=select_entity or vol.UNDEFINED): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="select")
+            )
+        }
+
+        modes = [
+            (CONF_DP_MAP_CHARGE, "Зарядка (GRID_CHG / buy)", "buy"),
+            (CONF_DP_MAP_DISCHARGE, "Разрядка / Продажа (DIS / sale_pv_bat)", "sale_pv_bat"),
+            (CONF_DP_MAP_SOLAR, "Продажа излишков PV (SOL / sale_pv)", "sale_pv"),
+            (CONF_DP_MAP_SELF_CONSUME, "Собственное потребление (SELF_CON / stop_sale)", "stop_sale"),
+            (CONF_DP_MAP_GRID, "Ожидание / Сеть (GRID / no_pv_sale_no_bat)", "no_pv_sale_no_bat"),
+        ]
+
+        for key, label, default in modes:
+            curr_val = self._user_input.get(key, default)
+            if options:
+                schema_dict[vol.Required(key, default=curr_val)] = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[{"value": opt, "label": opt} for opt in options],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                )
+            else:
+                schema_dict[vol.Required(key, default=curr_val)] = selector.TextSelector()
+
+        return self.async_show_form(step_id="dp_mapping", data_schema=vol.Schema(schema_dict))
+
