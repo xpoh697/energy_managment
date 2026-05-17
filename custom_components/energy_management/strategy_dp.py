@@ -91,7 +91,8 @@ class DPPlanner:
             soc_buff = float(normalize_float(self.manager.get_setting(CONF_SOC_BUFFER, 13.0)))
             eff = getattr(self.manager, "last_eff_coeff", 0.98)  # align with strategy_base.py hardcoded 0.98
             
-            min_end_usable = 2.3 # v11.9.40 (approx 13.5% SOC)
+            # Terminal SOC floor: minimum energy at end of horizon (matches floor_idx in forward induction)
+            min_end_usable = (min_soc / 100.0) * b_cap  # kWh, dynamic from CONF_MIN_SOC_BAT + battery capacity
             
             # v11.9.48: Boiler logic completely removed from DP model.
             
