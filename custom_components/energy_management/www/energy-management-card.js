@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v12.1.0 ",
+  "%c ENERGY MANAGEMENT %c v12.1.1 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -612,7 +612,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.1.0</div>
+        <div id="v-tag" class="version-tag">v12.1.1</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -626,10 +626,10 @@ class EnergyManagementCard extends HTMLElement {
   _openModal(timestamp, currentMode) {
     const attrs = this._hass.states[this._config.entity].attributes;
     let data = attrs.hourly_data || {};
-    if (this._activeTab === 'heuristic') {
-      data = attrs.heuristic_hourly_data || attrs.hourly_data || {};
-    } else if (this._activeTab === 'dp') {
-      data = attrs.dp_hourly_data || attrs.hourly_data || {};
+    if (this._activeTab === 'heuristic' && attrs.heuristic_hourly_data && Object.keys(attrs.heuristic_hourly_data).length > 0) {
+      data = attrs.heuristic_hourly_data;
+    } else if (this._activeTab === 'dp' && attrs.dp_hourly_data && Object.keys(attrs.dp_hourly_data).length > 0) {
+      data = attrs.dp_hourly_data;
     }
     const hourData = data[timestamp] || {};
     const currentSocLimit = hourData.soc_limit !== undefined ? hourData.soc_limit : (hourData.soc !== undefined ? hourData.soc : 100);
@@ -764,10 +764,10 @@ class EnergyManagementCard extends HTMLElement {
 
     // Select target timeline data
     let hourlyData = attrs.hourly_data || {};
-    if (this._activeTab === 'heuristic') {
-      hourlyData = attrs.heuristic_hourly_data || attrs.hourly_data || {};
-    } else if (this._activeTab === 'dp') {
-      hourlyData = attrs.dp_hourly_data || attrs.hourly_data || {};
+    if (this._activeTab === 'heuristic' && attrs.heuristic_hourly_data && Object.keys(attrs.heuristic_hourly_data).length > 0) {
+      hourlyData = attrs.heuristic_hourly_data;
+    } else if (this._activeTab === 'dp' && attrs.dp_hourly_data && Object.keys(attrs.dp_hourly_data).length > 0) {
+      hourlyData = attrs.dp_hourly_data;
     }
 
     // Update Hero Badges
