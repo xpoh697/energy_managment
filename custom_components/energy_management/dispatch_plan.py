@@ -355,7 +355,10 @@ class EnergyLogicEngine:
             else:
                 p_val = buy_strategy.get("recommended_power_kw", 0.0)
                 t_soc = buy_strategy.get("target_soc", 0.0)
-            c_amps_fixed = buy_strategy.get("recommended_amps", 0.0)
+            
+            # v12.0.84: Calculate amps dynamically from the planned power rather than global limit
+            v_val = manager.get_sensor_float(manager.battery_voltage_sensor) or 52.0
+            c_amps_fixed = round((p_val * 1000.0) / max(10.0, v_val), 2)
             
             if h_override and h_override.get("mode") == "buy":
                 f_target_soc = float(h_override.get("soc_limit", t_soc))
@@ -385,7 +388,10 @@ class EnergyLogicEngine:
             else:
                 p_val = sell_strategy.get("recommended_power_kw", 0.0)
                 t_soc = sell_strategy.get("target_soc", 0.0)
-            c_amps_fixed = sell_strategy.get("recommended_amps", 0.0)
+            
+            # v12.0.84: Calculate amps dynamically from the planned power rather than global limit
+            v_val = manager.get_sensor_float(manager.battery_voltage_sensor) or 52.0
+            c_amps_fixed = round((p_val * 1000.0) / max(10.0, v_val), 2)
             
             if h_override and h_override.get("mode") == "sale_pv_bat":
                 t_soc = float(h_override.get("soc_limit", t_soc))
