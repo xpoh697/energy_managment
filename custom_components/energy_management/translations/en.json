@@ -58,6 +58,8 @@
         "description": "Select a category to configure.",
         "menu_options": {
           "main_settings": "Main Settings (Sensors, Prices, Battery)",
+          "dp_settings": "DP Strategy Settings (Limits, Selector)",
+          "dp_mapping": "Inverter Mode Mapping (DP)",
           "deduct_settings_init": "Managed Loads (Deduct)",
           "boiler_settings": "Boiler Optimizer",
           "investment_settings": "Investment & ROI Settings"
@@ -87,8 +89,19 @@
           "price_buy": "Energy Buy Price Sensor",
           "price_sell": "Energy Sell Price Sensor",
           "inverter_losses_sensor": "Inverter Losses Sensor",
-          "custom_period": "Custom ROI Period (Days)",
-          "inverter_modes_select_entity": "Inverter Mode Selector Entity (select / input_select)"
+          "custom_period": "Custom ROI Period (Days)"
+        }
+      },
+      "dp_settings": {
+        "title": "DP Strategy Settings",
+        "description": "Configure power limits, sell options, and the inverter work mode selector entity.",
+        "data": {
+          "inverter_modes_select_entity": "Inverter Mode Selector Entity (select / input_select)",
+          "battery_max_power": "Battery Max Power (kW)",
+          "min_sell_power": "Min Sell Power for Export (kW)",
+          "min_sell_price": "Min Sell Price Threshold (PLN/kWh)",
+          "max_arbitrage_hours": "Max Arbitrage Hours per Day",
+          "min_discharge_kwh": "Min Discharge per Session (kWh)"
         }
       },
       "boiler_settings": {

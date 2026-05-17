@@ -87,8 +87,7 @@
           "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
           "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)",
           "grid_power": "Real-time Grid Power (signed: + import, - export)",
-          "battery_voltage": "Battery Voltage Sensor (Volts)",
-          "inverter_modes_select_entity": "Inverter Mode Selector Entity (select / input_select)"
+          "battery_voltage": "Battery Voltage Sensor (Volts)"
         }
       },
       "deduct_settings": {
@@ -123,10 +122,18 @@
     "sensor": {
       "battery_degradation": {
         "state_attributes": {
-          "wear_cost_per_kwh_throughput": { "name": "Wear cost per kWh (throughput)" },
-          "arbitrage_profit_threshold": { "name": "Arbitrage profit threshold" },
-          "battery_investment": { "name": "Battery investment" },
-          "rated_cycles": { "name": "Rated cycles" },
+          "wear_cost_per_kwh_throughput": {
+            "name": "Wear cost per kWh (throughput)"
+          },
+          "arbitrage_profit_threshold": {
+            "name": "Arbitrage profit threshold"
+          },
+          "battery_investment": {
+            "name": "Battery investment"
+          },
+          "rated_cycles": {
+            "name": "Rated cycles"
+          },
           "note": {
             "name": "Note",
             "state": {
@@ -137,11 +144,21 @@
       },
       "payback": {
         "state_attributes": {
-          "total_investment": { "name": "Total investment" },
-          "cumulative_savings": { "name": "Cumulative savings" },
-          "remaining_amount": { "name": "Remaining amount" },
-          "average_daily_saving": { "name": "Average daily saving" },
-          "estimated_payback_days": { "name": "Estimated payback days" },
+          "total_investment": {
+            "name": "Total investment"
+          },
+          "cumulative_savings": {
+            "name": "Cumulative savings"
+          },
+          "remaining_amount": {
+            "name": "Remaining amount"
+          },
+          "average_daily_saving": {
+            "name": "Average daily saving"
+          },
+          "estimated_payback_days": {
+            "name": "Estimated payback days"
+          },
           "estimated_payback_date": {
             "name": "Estimated payback date",
             "state": {
@@ -159,10 +176,18 @@
               "anomaly_high_consumption": "Anomaly: High Consumption"
             }
           },
-          "expected_kw": { "name": "Expected load (kW)" },
-          "actual_kw": { "name": "Actual load (kW)" },
-          "threshold_multiplier": { "name": "Threshold multiplier" },
-          "anomaly_detected": { "name": "Anomaly detected" }
+          "expected_kw": {
+            "name": "Expected load (kW)"
+          },
+          "actual_kw": {
+            "name": "Actual load (kW)"
+          },
+          "threshold_multiplier": {
+            "name": "Threshold multiplier"
+          },
+          "anomaly_detected": {
+            "name": "Anomaly detected"
+          }
         }
       },
       "market_strategy": {
@@ -201,18 +226,42 @@
       }
     },
     "number": {
-      "price_buy_limit": { "name": "Buy Price Limit" },
-      "price_sell_limit": { "name": "Sell Price Limit" },
-      "price_stop_sell": { "name": "Stop Sell Threshold" },
-      "price_sell_only_pv": { "name": "Sell PV Only Limit" },
-      "price_tolerance": { "name": "Buy Price Tolerance" },
-      "price_sell_tolerance": { "name": "Sell Price Tolerance" },
-      "battery_max_power": { "name": "Battery Max Power" },
-      "ai_charge_limit_soc": { "name": "Charge Limit (Max SOC)" },
-      "ai_discharge_limit_soc": { "name": "Discharge Limit (Min SOC)" },
-      "min_soc_buy": { "name": "Minimum SOC Level" },
-      "sale_pv_no_bat_max_hour": { "name": "Max Hour for Sell PV Only" },
-      "arbitrage_profit_threshold": { "name": "Arbitrage Profit Threshold" }
+      "price_buy_limit": {
+        "name": "Buy Price Limit"
+      },
+      "price_sell_limit": {
+        "name": "Sell Price Limit"
+      },
+      "price_stop_sell": {
+        "name": "Stop Sell Threshold"
+      },
+      "price_sell_only_pv": {
+        "name": "Sell PV Only Limit"
+      },
+      "price_tolerance": {
+        "name": "Buy Price Tolerance"
+      },
+      "price_sell_tolerance": {
+        "name": "Sell Price Tolerance"
+      },
+      "battery_max_power": {
+        "name": "Battery Max Power"
+      },
+      "ai_charge_limit_soc": {
+        "name": "Charge Limit (Max SOC)"
+      },
+      "ai_discharge_limit_soc": {
+        "name": "Discharge Limit (Min SOC)"
+      },
+      "min_soc_buy": {
+        "name": "Minimum SOC Level"
+      },
+      "sale_pv_no_bat_max_hour": {
+        "name": "Max Hour for Sell PV Only"
+      },
+      "arbitrage_profit_threshold": {
+        "name": "Arbitrage Profit Threshold"
+      }
     }
   }
 }

@@ -171,6 +171,8 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             category = user_input.get("category")
             if category == "main_settings":
                 return await self.async_step_main_settings()
+            if category == "dp_settings":
+                return await self.async_step_dp_settings()
             if category == "deduct_settings_init":
                 return await self.async_step_deduct_settings_init()
             if category == "boiler_settings":
@@ -187,6 +189,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                     selector.SelectSelectorConfig(
                         options=[
                             {"value": "main_settings", "label": "Основные настройки (Датчики, Цены, АКБ)"},
+                            {"value": "dp_settings", "label": "Настройки DP стратегии"},
                             {"value": "dp_mapping", "label": "Маппинг режимов инвертора (DP)"},
                             {"value": "deduct_settings_init", "label": "Управляемые нагрузки (Deduct)"},
                             {"value": "boiler_settings", "label": "Оптимизатор Бойлера"},
@@ -226,22 +229,35 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             v = get_s(k)
             schema_dict[vol.Optional(k, default=v) if v else vol.Optional(k)] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
 
-        v_select = get_s(CONF_INVERTER_MODES_SELECT_ENTITY)
-        schema_dict[vol.Optional(CONF_INVERTER_MODES_SELECT_ENTITY, default=v_select) if v_select else vol.Optional(CONF_INVERTER_MODES_SELECT_ENTITY)] = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain=["select", "input_select"])
-        )
-
         cp = self._user_input.get(CONF_CUSTOM_PERIOD)
         schema_dict[vol.Optional(CONF_CUSTOM_PERIOD, default=int(cp if cp is not None else 14))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=365))
 
-        # v11.9.556: Strategy Limits (Consolidated for data integrity)
-        schema_dict[vol.Optional(CONF_BATTERY_MAX_POWER, default=float(self._user_input.get(CONF_BATTERY_MAX_POWER, 5.0)))] = vol.All(vol.Coerce(float), vol.Range(min=0.1, max=50.0))
-        schema_dict[vol.Optional(CONF_MIN_SELL_POWER, default=float(self._user_input.get(CONF_MIN_SELL_POWER, 0.1)))] = vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0))
-        schema_dict[vol.Optional(CONF_MIN_SELL_PRICE, default=float(self._user_input.get(CONF_MIN_SELL_PRICE, 0.01)))] = vol.All(vol.Coerce(float), vol.Range(min=0.0))
-        schema_dict[vol.Optional(CONF_MAX_ARBITRAGE_HOURS, default=int(self._user_input.get(CONF_MAX_ARBITRAGE_HOURS, 24)))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=24))
-        schema_dict[vol.Optional(CONF_MIN_DISCHARGE_KWH, default=float(self._user_input.get(CONF_MIN_DISCHARGE_KWH, 0.1)))] = vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0))
-
         return self.async_show_form(step_id="main_settings", data_schema=vol.Schema(schema_dict))
+
+    async def async_step_dp_settings(self, user_input=None):
+        """Handle settings for DP strategy."""
+        if user_input is not None:
+            self._user_input.update(user_input)
+            return self.async_create_entry(title="", data=self._user_input)
+
+        def get_s(k):
+            v = self._user_input.get(k)
+            if not v or v == "undefined": return None
+            return str(v[0]) if isinstance(v, (list, tuple)) else str(v)
+
+        v_select = get_s(CONF_INVERTER_MODES_SELECT_ENTITY)
+
+        schema_dict = {
+            vol.Optional(CONF_INVERTER_MODES_SELECT_ENTITY, default=v_select if v_select else vol.UNDEFINED): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["select", "input_select"])
+            ),
+            vol.Optional(CONF_BATTERY_MAX_POWER, default=float(self._user_input.get(CONF_BATTERY_MAX_POWER, 5.0))): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=50.0)),
+            vol.Optional(CONF_MIN_SELL_POWER, default=float(self._user_input.get(CONF_MIN_SELL_POWER, 0.1))): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
+            vol.Optional(CONF_MIN_SELL_PRICE, default=float(self._user_input.get(CONF_MIN_SELL_PRICE, 0.01))): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+            vol.Optional(CONF_MAX_ARBITRAGE_HOURS, default=int(self._user_input.get(CONF_MAX_ARBITRAGE_HOURS, 24))): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
+            vol.Optional(CONF_MIN_DISCHARGE_KWH, default=float(self._user_input.get(CONF_MIN_DISCHARGE_KWH, 0.1))): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
+        }
+        return self.async_show_form(step_id="dp_settings", data_schema=vol.Schema(schema_dict))
 
     async def async_step_deduct_settings_init(self, user_input=None):
         """Entry for deduct loads."""
