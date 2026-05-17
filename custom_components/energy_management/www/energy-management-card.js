@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v11.9.696 ",
+  "%c ENERGY MANAGEMENT %c v11.9.697 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -903,10 +903,10 @@ class EnergyManagementCard extends HTMLElement {
     };
 
     // Smart DOM Update Logic
-    // Filter out hours with NO prices (0.00 0.00) unless they are manual or current
+    // Ensure we display all hours that have a planned mode (so we don't accidentally hide zero/negative prices)
     const filteredKeys = windowKeys.filter(key => {
       const h = data[key];
-      return (h.buy_price > 0 || h.sell_price > 0 || h.is_manual);
+      return (h.mode !== undefined || h.is_manual);
     });
 
     const currentKeysStr = filteredKeys.join(',');
@@ -942,8 +942,8 @@ class EnergyManagementCard extends HTMLElement {
               <ha-icon class="h-icon" style="color:${modeColor}" icon="${MODE_ICONS[hourData.mode] || MODE_ICONS.default}"></ha-icon>
               <span class="h-time">${key.split(' ')[1]}</span>
               <div class="h-prices">
-                <span class="price-buy">${(hourData.buy_price || 0).toFixed(2)}</span>
-                <span class="price-sell">${(hourData.sell_price || 0).toFixed(2)}</span>
+                <span class="price-buy">${(hourData.buy_price ?? 0).toFixed(2)}</span>
+                <span class="price-sell">${(hourData.sell_price ?? 0).toFixed(2)}</span>
               </div>
               <div class="h-mode" style="color:${modeColor}">${MODE_LABELS[hourData.mode] || hourData.mode}</div>
             </div>
@@ -1012,8 +1012,8 @@ class EnergyManagementCard extends HTMLElement {
         }
         if (priceContainer) {
           priceContainer.style.display = 'flex';
-          if (buyPrice) buyPrice.innerText = (hourData.buy_price || 0).toFixed(2);
-          if (sellPrice) sellPrice.innerText = (hourData.sell_price || 0).toFixed(2);
+          if (buyPrice) buyPrice.innerText = (hourData.buy_price ?? 0).toFixed(2);
+          if (sellPrice) sellPrice.innerText = (hourData.sell_price ?? 0).toFixed(2);
         }
         bar.setAttribute('data-mode', hourData.mode);
       });
