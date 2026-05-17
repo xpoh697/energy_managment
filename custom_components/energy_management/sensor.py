@@ -1049,9 +1049,10 @@ class EnergyProfileManager:
                     
                     p_actual = p_est
 
-                # v12.0.75: If no grid command is active, simulate natural battery flow from solar/load
+                # v12.0.77: Use purified base load instead of load_total to prevent double counting of battery charge
                 if abs(p_actual) < 0.001:
-                    net_flow = slot.gen_raw - slot.load_total
+                    base_load = float(slot.load_base) if (slot.load_base and slot.load_base > 0.01) else float(slot.load_total)
+                    net_flow = slot.gen_raw - base_load
                     _h_mode_cls = INVERTER_MODES.get(mode)
                     if _h_mode_cls:
                         max_batt_p = float(self.get_setting("battery_max_power", 5.0) or 5.0)
@@ -1110,7 +1111,7 @@ class EnergyProfileManager:
 
             self.global_plan = DispatchPlan(slots)
             self.log_to_file(f"DIAG: Global Plan updated. First 12h: {list(self.global_plan.to_planned_modes_24h().items())[:12]}")
-            _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry (v12.0.1).")
+            _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry (v12.0.77).")
             
         except Exception as e:
             import traceback
