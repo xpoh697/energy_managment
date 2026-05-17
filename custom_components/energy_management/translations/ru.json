@@ -104,7 +104,8 @@
           "price_buy": "Тариф: Покупка из сети",
           "price_sell": "Тариф: Продажа в сеть",
           "inverter_losses_sensor": "Сенсор потерь инвертора",
-          "custom_period": "Настраиваемый период расчета (дней)"
+          "custom_period": "Настраиваемый период расчета (дней)",
+          "inverter_modes_select_entity": "Сущность выбора режимов инвертора (select / input_select)"
         }
       },
       "boiler_settings": {

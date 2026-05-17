@@ -87,7 +87,8 @@
           "grid_import_sensors": "Grid Import Energy Sensors (kWh, total)",
           "grid_export_sensors": "Grid Export Energy Sensors (kWh, total)",
           "grid_power": "Real-time Grid Power (signed: + import, - export)",
-          "battery_voltage": "Battery Voltage Sensor (Volts)"
+          "battery_voltage": "Battery Voltage Sensor (Volts)",
+          "inverter_modes_select_entity": "Inverter Mode Selector Entity (select / input_select)"
         }
       },
       "deduct_settings": {

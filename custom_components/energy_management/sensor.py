@@ -1149,6 +1149,42 @@ class EnergyProfileManager:
 
             self.global_plan = DispatchPlan(slots)
             self.log_to_file(f"DIAG: Global Plan updated. First 12h: {list(self.global_plan.to_planned_modes_24h().items())[:12]}")
+            
+            # --- Write target option to inverter select entity if configured ---
+            try:
+                slot0_mode = self.global_plan.get_slot(0).mode if self.global_plan else None
+                if slot0_mode:
+                    inverter_select = self.get_setting("inverter_modes_select_entity")
+                    if inverter_select:
+                        option_val = None
+                        if slot0_mode == "buy":
+                            option_val = self.get_setting("dp_map_charge", "buy")
+                        elif slot0_mode == "sale_pv_bat":
+                            option_val = self.get_setting("dp_map_discharge", "sale_pv_bat")
+                        elif slot0_mode == "sale_pv":
+                            option_val = self.get_setting("dp_map_solar", "sale_pv")
+                        elif slot0_mode == "stop_sale":
+                            option_val = self.get_setting("dp_map_self_consume", "stop_sale")
+                        elif slot0_mode == "no_pv_sale_no_bat":
+                            option_val = self.get_setting("dp_map_grid", "no_pv_sale_no_bat")
+                        
+                        if option_val:
+                            curr_state = self.hass.states.get(inverter_select)
+                            if curr_state is None or curr_state.state != option_val:
+                                service_domain = "input_select" if inverter_select.startswith("input_select.") else "select"
+                                self.log_to_file(f"DIAG: Mapped mode {slot0_mode} -> {option_val}. Writing to {inverter_select} via {service_domain}")
+                                await self.hass.services.async_call(
+                                    service_domain,
+                                    "select_option",
+                                    {
+                                        "entity_id": inverter_select,
+                                        "option": option_val
+                                    }
+                                )
+            except Exception as e_write:
+                _LOGGER.error("Error writing mode to inverter select entity: %s", e_write)
+                self.log_to_file(f"DIAG: Error writing mode: {e_write}")
+
             _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry (v12.0.80).")
             
         except Exception as e:

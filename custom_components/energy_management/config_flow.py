@@ -226,6 +226,11 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             v = get_s(k)
             schema_dict[vol.Optional(k, default=v) if v else vol.Optional(k)] = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
 
+        v_select = get_s(CONF_INVERTER_MODES_SELECT_ENTITY)
+        schema_dict[vol.Optional(CONF_INVERTER_MODES_SELECT_ENTITY, default=v_select) if v_select else vol.Optional(CONF_INVERTER_MODES_SELECT_ENTITY)] = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=["select", "input_select"])
+        )
+
         cp = self._user_input.get(CONF_CUSTOM_PERIOD)
         schema_dict[vol.Optional(CONF_CUSTOM_PERIOD, default=int(cp if cp is not None else 14))] = vol.All(vol.Coerce(int), vol.Range(min=1, max=365))
 
@@ -335,11 +340,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             if state:
                 options = state.attributes.get("options", [])
 
-        schema_dict = {
-            vol.Optional(CONF_INVERTER_MODES_SELECT_ENTITY, default=select_entity or vol.UNDEFINED): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="select")
-            )
-        }
+        schema_dict = {}
 
         modes = [
             (CONF_DP_MAP_CHARGE, "Зарядка (GRID_CHG / buy)", "buy"),

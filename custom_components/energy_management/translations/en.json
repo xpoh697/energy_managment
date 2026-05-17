@@ -87,7 +87,8 @@
           "price_buy": "Energy Buy Price Sensor",
           "price_sell": "Energy Sell Price Sensor",
           "inverter_losses_sensor": "Inverter Losses Sensor",
-          "custom_period": "Custom ROI Period (Days)"
+          "custom_period": "Custom ROI Period (Days)",
+          "inverter_modes_select_entity": "Inverter Mode Selector Entity (select / input_select)"
         }
       },
       "boiler_settings": {
