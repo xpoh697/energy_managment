@@ -246,17 +246,38 @@ class EnergyProfileManager:
 
     def translate_dp_mode(self, dp_mode: str) -> str:
         """Переводит внутренние коды режима DP в сущности управления HA с учетом маппинга пользователя."""
-        if dp_mode in ["GRID_CHG", "PAID_IMP"]:
-            return self.get_setting("dp_map_charge", "buy")
+        if not isinstance(dp_mode, str):
+            dp_mode = str(dp_mode) if dp_mode is not None else "IDLE"
+            
+        if dp_mode == "GRID_CHG":
+            val = self.get_setting("dp_map_grid_chg", self.get_setting("dp_map_charge", "buy"))
+        elif dp_mode == "PAID_IMP":
+            val = self.get_setting("dp_map_paid_imp", self.get_setting("dp_map_charge", "buy"))
         elif dp_mode == "DIS":
-            return self.get_setting("dp_map_discharge", "sale_pv_bat")
-        elif dp_mode in ["PV_CHG", "SOL"]:
-            return self.get_setting("dp_map_solar", "sale_pv")
+            val = self.get_setting("dp_map_dis", self.get_setting("dp_map_discharge", "sale_pv_bat"))
+        elif dp_mode == "PV_CHG":
+            val = self.get_setting("dp_map_pv_chg", self.get_setting("dp_map_solar", "sale_pv"))
+        elif dp_mode == "SOL":
+            val = self.get_setting("dp_map_sol", self.get_setting("dp_map_solar", "sale_pv"))
         elif dp_mode == "SELF_CON":
-            return self.get_setting("dp_map_self_consume", "stop_sale")
-        elif dp_mode in ["GRID", "IDLE"]:
-            return self.get_setting("dp_map_grid", "no_pv_sale_no_bat")
-        return "sale_pv"
+            val = self.get_setting("dp_map_self_con", self.get_setting("dp_map_self_consume", "sale_pv"))
+        elif dp_mode == "GRID":
+            val = self.get_setting("dp_map_grid_mode", self.get_setting("dp_map_grid", "sale_pv"))
+        elif dp_mode == "IDLE":
+            val = self.get_setting("dp_map_idle", self.get_setting("dp_map_grid", "sale_pv"))
+        else:
+            val = "sale_pv"
+            
+        # v12.1.3: Absolute safety fallback if val somehow evaluates to 0.0 or "0.0"
+        if val in [0.0, 0, "0.0", "0", "None", None, ""]:
+            if dp_mode in ["GRID_CHG", "PAID_IMP"]: val = "buy"
+            elif dp_mode == "DIS": val = "sale_pv_bat"
+            elif dp_mode in ["PV_CHG", "SOL"]: val = "sale_pv"
+            elif dp_mode == "SELF_CON": val = "stop_sale"
+            elif dp_mode in ["GRID", "IDLE"]: val = "no_pv_sale_no_bat"
+            else: val = "sale_pv"
+            
+        return str(val).strip()
 
     @property
     def is_weekend(self) -> bool:
@@ -417,6 +438,7 @@ class EnergyProfileManager:
         # Adaptive BMS Model: "SOC" -> Max Charge Power (kW)
         self.bms_learned_profile = {}
         self.current_inverter_mode = "sale_pv"
+        self.config_error = None
         # v11.9.331: Mode overrides map {abs_hour -> mode_name} for simulation engine
         self.planned_mode_overrides = {}
         self.manual_mode_overrides = {}
@@ -1221,10 +1243,12 @@ class EnergyProfileManager:
             batt_soc = float(batt_soc)
             
             if b_cap <= 0.1:
-                _LOGGER.error("[ConfigError] CRITICAL: Battery Capacity is NOT SET or 0.0! Calculations STOPPED.")
-                self._attr_native_value = "Error: Missing Capacity"
-                self._attr_extra_state_attributes["Status"] = "Error: Missing Capacity"
+                if self.config_error != "Error: Missing Capacity":
+                    _LOGGER.error("[ConfigError] CRITICAL: Battery Capacity is NOT SET or 0.0! Calculations STOPPED.")
+                self.config_error = "Error: Missing Capacity"
                 return
+
+            self.config_error = None
 
             buy_strat = self.get_market_strategy("buy") or {}
             await asyncio.sleep(0.01)
@@ -2553,8 +2577,15 @@ class EnergyProfileManager:
         if key in [CONF_BATTERY_MAX_POWER, CONF_AI_DISCHARGE_LIMIT]:
             _LOGGER.debug(f"[SettingTrace] {key} = {val} (Source: {source})")
 
-        if isinstance(val, str) and "." not in val:
-            val = normalize_float(val)
+        if isinstance(val, str):
+            val_stripped = val.strip()
+            # Fast CPU-friendly numeric string validation
+            if val_stripped and set(val_stripped) <= set("0123456789.,-"):
+                try:
+                    float(val_stripped.replace(',', '.'))
+                    val = normalize_float(val_stripped)
+                except ValueError:
+                    pass
 
         if isinstance(default, float):
             try:
@@ -2681,13 +2712,28 @@ class EnergyProfileManager:
         
         cap = self.get_sensor_float(self.battery_capacity_sensor, 0.0)
         
+        # Initialize last_valid_cap if not exists
+        if not hasattr(self, "_last_valid_cap"):
+            self._last_valid_cap = None
+
         # Capacity Glitch Protection
-        if cap <= 0.1 and self._last_valid_cap is not None:
-            _LOGGER.warning(f"Battery Capacity glitch detected: {cap} kWh. Using last valid: {self._last_valid_cap} kWh")
-            cap = self._last_valid_cap
+        if cap <= 0.1:
+            if self._last_valid_cap is not None:
+                _LOGGER.warning(f"Battery Capacity glitch detected: {cap} kWh. Using last valid: {self._last_valid_cap} kWh")
+                cap = self._last_valid_cap
+            elif "last_known_battery_capacity" in self.data:
+                cap = float(self.data["last_known_battery_capacity"])
+                self._last_valid_cap = cap
+                _LOGGER.warning(f"Battery Capacity sensor is unavailable/0.0. Restored last known from persistent storage: {cap} kWh")
         
         if cap > 0.1:
             self._last_valid_cap = cap
+            if self.data.get("last_known_battery_capacity") != cap:
+                self.data["last_known_battery_capacity"] = cap
+                try:
+                    self.hass.async_create_task(self.store.async_save(self.data))
+                except Exception as ex:
+                    _LOGGER.debug(f"Failed to auto-save battery capacity: {ex}")
             
         if cap <= 0.1:
             from .const import CONF_BATTERY_CAPACITY
@@ -2722,6 +2768,7 @@ class EnergyProfileManager:
                 continue
                 
             for item in forecast_list:
+                if not isinstance(item, dict): continue
                 try:
                     # Item can be {datetime: ..., pv_estimate: ...} or {dt: ..., value: ...}
                     dt_str = item.get("period_start") or item.get("datetime") or item.get("dt")
@@ -3454,6 +3501,9 @@ class InverterOperationModeSensor(SensorEntity):
     @property
     def native_value(self):
         try:
+            config_error = getattr(self.manager, "config_error", None)
+            if config_error:
+                return config_error
             now = dt_util.now()
             plan = self.manager.global_plan
             if not plan:
@@ -3514,6 +3564,9 @@ class InverterOperationModeSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         try:
+            config_error = getattr(self.manager, "config_error", None)
+            if config_error:
+                return {"status": config_error, "error": config_error}
             now = dt_util.now()
             plan = self.manager.global_plan
             if not plan:
