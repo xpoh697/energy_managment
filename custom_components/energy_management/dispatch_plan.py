@@ -264,7 +264,12 @@ class EnergyLogicEngine:
         elif is_buying_active:
             mode = "buy"
             reason = buy_strategy.get("charge_reason", "Активна стратегия ПОКУПКИ")
-            target_soc = float(buy_strategy.get("target_soc", 100.0))
+            
+            # v12.0.83: Target SOC must match the hourly strategy plan, not the global plan
+            global_t_soc = float(buy_strategy.get("target_soc", 100.0))
+            hour_key = f"{abs_hour%24:02d}:00"
+            hourly_plan = buy_strategy.get("planned_power_per_h", {}).get(hour_key, {})
+            target_soc = float(hourly_plan.get("soc", global_t_soc))
             
         # P4: AI Sell (Elevated Priority in v11.9.691)
         elif is_selling_active:
