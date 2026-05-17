@@ -1052,7 +1052,7 @@ class EnergyProfileManager:
                                 p_est = -min(max_batt_p, round(req_p, 2))
                             else:
                                 p_est = 0.0
-                        elif _m_mode in ["stop_sale", "sale_pv_no_bat"]:
+                        elif _m_mode in ["stop_sale", "sale_pv_no_bat", "sale_pv"]:
                             p_est = 0.0
                     else:
                         if mode == "buy":

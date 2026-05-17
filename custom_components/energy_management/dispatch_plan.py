@@ -180,9 +180,18 @@ class EnergyLogicEngine:
                     floors_sliding = sell_strategy.get("floors_sliding", {})
                     safety_floor = floors_sliding.get(check_h_abs)
                     if safety_floor is None:
-                        safety_floor = float(sell_strategy.get("arbitrage_sell_debug", {}).get("active_safety_floor", 100.0))
+                        safety_floor = floors_sliding.get(str(check_h_abs))
+                    if safety_floor is None:
+                        safety_floor = floors_sliding.get(f"{(check_h_abs % 24):02d}h") or floors_sliding.get(f"{(check_h_abs % 24)}h")
+                    
+                    if safety_floor is None:
+                        is_night = ((check_h_abs % 24) >= 20) or ((check_h_abs % 24) < 8)
+                        min_soc_sell = float(manager.get_setting("min_soc_sell", 60.0) or 60.0)
+                        safety_floor = min_soc_sell if is_night else float(sell_strategy.get("arbitrage_sell_debug", {}).get("active_safety_floor", 100.0))
                     
                     if batt_soc < (safety_floor - 0.5):
+                        if log_func:
+                            log_func(f"DIAG: Hour {check_h_abs} blocked. SOC {batt_soc:.1f}% < Floor {safety_floor:.1f}%")
                         is_selling_active = False
         else:
             is_selling_active = sell_strategy.get("state") == "active"
