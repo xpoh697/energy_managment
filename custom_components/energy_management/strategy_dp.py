@@ -177,7 +177,7 @@ class DPPlanner:
                             from_grid = max(0.0, cons - exp_ac - gen)
                             reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp_dc)
                             nsi = si - int(round(exp_dc / energy_step))
-                            _update(nsi, ACT_DIS, exp_ac, h, si, cur_rev + reward)
+                            _update(nsi, ACT_DIS, exp_dc, h, si, cur_rev + reward)  # amt=DC (inverter command)
                             
                     # 3. ACT_PV_CHARGE: Surplus PV (AC) to battery (DC)
                     # chg_ac = AC power from PV; chg_dc = DC actually stored (after inverter losses)
