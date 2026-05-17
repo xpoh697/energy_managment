@@ -1187,6 +1187,14 @@ class StrategyEngine:
                 if _h_mode_str is None:
                     _h_mode_str = "sale_pv"
                 
+                # v12.0.79: Dynamic Emergency Guard to prevent two-pass feedback loops
+                if _h_mode_str == "bat_emergency" and round(simulated_soc, 1) > b_min_soc:
+                    # High-fidelity SOC has recovered or is above min, fallback to safe normal discharge
+                    _h_mode_str = "sale_pv"
+                elif round(simulated_soc, 1) <= b_min_soc and not _manual_m and _h_mode_str != "buy":
+                    # SOC has depleted to emergency floor, dynamically engage protective bat_emergency
+                    _h_mode_str = "bat_emergency"
+                
                 # Safety fallback for specific mode names like 'sale_pv' -> 'sale_pv_bat'
                 if _h_mode_str == "sale_pv": _h_mode_str = "sale_pv"
                 
