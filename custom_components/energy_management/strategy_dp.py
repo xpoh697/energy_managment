@@ -259,10 +259,6 @@ class DPPlanner:
                 
                 mode_map = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"]
                 mode = mode_map[act]
-                if act == ACT_IDLE:
-                    if gen > cons + 0.1: mode = "SOL"
-                    elif abs(gen - cons) < 0.1: mode = "IDLE"
-                    else: mode = "GRID"
                 soc = int(round((si * energy_step) / b_cap * 100.0))
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)} | L:{round(cons,1)} G:{round(gen,1)}"
