@@ -43,6 +43,9 @@ from .const import (
     CONF_BOILER_CAPACITY,
     CONF_BOILER_TEMP_SENSOR,
     CONF_BOILER_DEADLINE,
+    CONF_BOILER_MIN_TEMP,
+    CONF_BOILER_TARGET_TEMP,
+    CONF_BOILER_MAX_TEMP,
     CONF_MIN_SELL_POWER,
     CONF_BATTERY_MAX_POWER,
     CONF_MIN_SELL_PRICE,
@@ -314,6 +317,9 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
         bc = self._user_input.get(CONF_BOILER_CAPACITY)
         bd = self._user_input.get(CONF_BOILER_DEADLINE)
         bs = self._user_input.get(CONF_BOILER_TEMP_SENSOR)
+        bmin = self._user_input.get(CONF_BOILER_MIN_TEMP)
+        btgt = self._user_input.get(CONF_BOILER_TARGET_TEMP)
+        bmax = self._user_input.get(CONF_BOILER_MAX_TEMP)
 
         schema = vol.Schema({
             vol.Optional(CONF_BOILER_ENABLE, default=self._user_input.get(CONF_BOILER_ENABLE, False)): bool,
@@ -321,6 +327,9 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_BOILER_CAPACITY, default=float(bc if bc is not None else 8.5)): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=50.0)),
             vol.Optional(CONF_BOILER_DEADLINE, default=int(bd if bd is not None else 18)): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
             vol.Optional(CONF_BOILER_TEMP_SENSOR, default=bs if bs and bs != "undefined" else vol.UNDEFINED): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
+            vol.Optional(CONF_BOILER_MIN_TEMP, default=str(bmin if bmin is not None else "20")): str,
+            vol.Optional(CONF_BOILER_TARGET_TEMP, default=str(btgt if btgt is not None else "60")): str,
+            vol.Optional(CONF_BOILER_MAX_TEMP, default=str(bmax if bmax is not None else "70")): str,
         })
         return self.async_show_form(step_id="boiler_settings", data_schema=schema)
 

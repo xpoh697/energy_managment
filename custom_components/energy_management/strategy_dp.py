@@ -55,6 +55,13 @@ class DPPlanner:
         if not data_snapshot and self._last_run and (t0 - self._last_run) < 60:
             return self._cache.get("advice", {})
 
+        def _parse_temp(val, default):
+            if not val or val == "undefined": return default
+            try:
+                return float(val)
+            except ValueError:
+                return self.manager.get_sensor_float(val, default)
+
         try:
             now = self.manager.now
             cur_hour = now.hour
@@ -109,6 +116,73 @@ class DPPlanner:
             for h in range(24):
                 f_gen_full[str(h+24)] = float(normalize_float(tomorrow_gen.get(str(h), 0.0)))
                 f_cons_full[str(h+24)] = float(normalize_float(tomorrow_cons.get(str(h), 0.0)))
+            
+            # --- Boiler Optimization Logic (v12.2.0) ---
+            boiler_enable = self.manager.get_setting(CONF_BOILER_ENABLE, False)
+            boiler_power = float(normalize_float(self.manager.get_setting(CONF_BOILER_POWER, 2.5)))
+            boiler_cap = float(normalize_float(self.manager.get_setting(CONF_BOILER_CAPACITY, 8.5)))
+            boiler_deadline = int(self.manager.get_setting(CONF_BOILER_DEADLINE, 18))
+            boiler_min_temp = _parse_temp(self.manager.get_setting(CONF_BOILER_MIN_TEMP, "20"), 20.0)
+            boiler_tgt_temp = _parse_temp(self.manager.get_setting(CONF_BOILER_TARGET_TEMP, "60"), 60.0)
+            boiler_max_temp = _parse_temp(self.manager.get_setting(CONF_BOILER_MAX_TEMP, "70"), 70.0)
+            boiler_sensor = self.manager.get_setting(CONF_BOILER_TEMP_SENSOR)
+            curr_boiler_temp = self.manager.get_sensor_float(boiler_sensor, boiler_min_temp) if boiler_sensor else boiler_min_temp
+            
+            boiler_plan_state = {}
+            if boiler_enable and boiler_cap > 0 and boiler_power > 0 and boiler_tgt_temp > boiler_min_temp:
+                # 1. Mandatory Heating
+                missing_energy = max(0.0, (boiler_tgt_temp - curr_boiler_temp) / (boiler_tgt_temp - boiler_min_temp)) * boiler_cap
+                boiler_mandatory_hours = int(math.ceil(missing_energy / boiler_power))
+                dl_abs = boiler_deadline if boiler_deadline > cur_hour else boiler_deadline + 24
+                valid_h = [h for h in range(cur_hour, min(max_abs_h + 1, dl_abs))]
+                
+                def get_h_cost(h):
+                    pb = float(normalize_float(prices_buy.get(str(h), 0.5)))
+                    ps = float(normalize_float(prices_sell.get(str(h), 0.4)))
+                    g = f_gen_full.get(str(h - cur_hour), 0.0)
+                    c = f_cons_full.get(str(h - cur_hour), 0.0)
+                    return ps if g - c >= boiler_power else pb
+                
+                mandatory_h_assigned = []
+                if boiler_mandatory_hours > 0 and valid_h:
+                    valid_h_sorted = sorted(valid_h, key=get_h_cost)
+                    mandatory_h_assigned = valid_h_sorted[:boiler_mandatory_hours]
+                
+                # 2. Opportunistic Heating (Dump Load)
+                opportunistic_h_assigned = []
+                max_dump_energy = max(0.0, (boiler_max_temp - curr_boiler_temp) / (boiler_tgt_temp - boiler_min_temp)) * boiler_cap
+                max_dump_hours = int(math.floor(max_dump_energy / boiler_power))
+                min_sell_p = float(normalize_float(self.manager.get_setting(CONF_MIN_SELL_PRICE, 0.01)))
+                
+                if max_dump_hours > len(mandatory_h_assigned):
+                    remaining_dump_hours = max_dump_hours - len(mandatory_h_assigned)
+                    for h in range(cur_hour, max_abs_h + 1):
+                        if h in mandatory_h_assigned: continue
+                        g = f_gen_full.get(str(h - cur_hour), 0.0)
+                        c = f_cons_full.get(str(h - cur_hour), 0.0)
+                        ps = float(normalize_float(prices_sell.get(str(h), 0.4)))
+                        if g - c > 0.5 and ps <= min_sell_p:
+                            opportunistic_h_assigned.append(h)
+                            if len(opportunistic_h_assigned) >= remaining_dump_hours:
+                                break
+                
+                all_boiler_hours = mandatory_h_assigned + opportunistic_h_assigned
+                
+                # Pre-allocate load
+                for h in all_boiler_hours:
+                    idx_str = str(h - cur_hour)
+                    f_cons_full[idx_str] = f_cons_full.get(idx_str, 0.0) + boiler_power
+                
+                # Temperature simulation
+                boiler_sim_temp = curr_boiler_temp
+                temp_step = (boiler_power / boiler_cap) * (boiler_tgt_temp - boiler_min_temp)
+                for h in range(cur_hour, max_abs_h + 1):
+                    if h in all_boiler_hours:
+                        boiler_sim_temp = min(boiler_max_temp, boiler_sim_temp + temp_step)
+                        boiler_plan_state[h] = f" | BOILER: ON ({round(boiler_sim_temp, 1)}°C)"
+                    else:
+                        boiler_sim_temp = max(boiler_min_temp, boiler_sim_temp - 0.5)
+                        boiler_plan_state[h] = f" | BOILER: OFF ({round(boiler_sim_temp, 1)}°C)"
             
             neg_inf = -1e9
             # v11.9.42: Arbitrage TOP hours per day
@@ -261,7 +335,8 @@ class DPPlanner:
                 mode = mode_map[act]
                 soc = int(round((si * energy_step) / b_cap * 100.0))
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
-                formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)} | L:{round(cons,1)} G:{round(gen,1)}"
+                b_str = boiler_plan_state.get(abs_h, "")
+                formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)} | L:{round(cons,1)} G:{round(gen,1)}{b_str}"
                 
                 # Absolute timestamp mapping for easy coordinate lookup
                 ts_dt = now + timedelta(hours=h_idx)
