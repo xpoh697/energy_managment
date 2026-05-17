@@ -189,7 +189,7 @@ class DPPlanner:
                             ci = int(round(chg_dc / energy_step))
                             if ci > 0:
                                 reward = p_sell * max(0.0, pv_surplus - chg_ac) - p_buy * pv_deficit
-                                _update(si + ci, ACT_PV_CHARGE, chg_ac, h, si, cur_rev + reward)
+                                _update(si + ci, ACT_PV_CHARGE, chg_dc, h, si, cur_rev + reward)  # amt=DC (BMS command)
 
                     # 4. ACT_GRID_CHARGE: Buy from grid (AC) -> store in battery (DC)
                     # Iterate over DC steps (0.5 kWh granularity for performance), pay for AC drawn
@@ -204,7 +204,7 @@ class DPPlanner:
                             ci = int(round(chg_dc / energy_step))
                             if si + ci > energy_steps: break
                             reward = p_sell * pv_surplus - p_buy * (chg_ac + pv_deficit) - (cycle_cost * chg_dc)
-                            _update(si + ci, ACT_GRID_CHARGE, chg_ac, h, si, cur_rev + reward)
+                            _update(si + ci, ACT_GRID_CHARGE, chg_dc, h, si, cur_rev + reward)  # amt=DC (BMS command)
 
                     # 5. ACT_SELF_CONSUME: Battery (DC) to home (AC)
                     # sc_dc = DC drawn from battery; actual AC coverage = sc_dc * eff
@@ -215,7 +215,7 @@ class DPPlanner:
                             sci = int(round(sc_dc / energy_step))
                             if sci > 0:
                                 rem_def = max(0.0, pv_deficit - sc_ac)
-                                _update(si - sci, ACT_SELF_CONSUME, sc_ac, h, si, cur_rev - p_buy * rem_def)
+                                _update(si - sci, ACT_SELF_CONSUME, sc_dc, h, si, cur_rev - p_buy * rem_def)  # amt=DC (BMS command)
                             
                     # 6. ACT_PAID_IMPORT: Negative price — let house consume from grid,
                     # keep battery intact to save capacity for an upcoming bigger sell peak.
