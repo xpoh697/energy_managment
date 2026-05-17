@@ -1,7 +1,7 @@
 DOMAIN = "energy_management"
-VERSION = "v12.1.1"
+VERSION = "v12.1.3"
 
-VERSION_CODE = 1201001
+VERSION_CODE = 1201003
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"
@@ -36,6 +36,16 @@ CONF_DP_MAP_DISCHARGE = "dp_map_discharge"
 CONF_DP_MAP_SOLAR = "dp_map_solar"
 CONF_DP_MAP_SELF_CONSUME = "dp_map_self_consume"
 CONF_DP_MAP_GRID = "dp_map_grid"
+
+# Individual 1:1 DP Mode Mappings
+CONF_DP_MAP_GRID_CHG = "dp_map_grid_chg"
+CONF_DP_MAP_PAID_IMP = "dp_map_paid_imp"
+CONF_DP_MAP_DIS = "dp_map_dis"
+CONF_DP_MAP_PV_CHG = "dp_map_pv_chg"
+CONF_DP_MAP_SOL = "dp_map_sol"
+CONF_DP_MAP_SELF_CON = "dp_map_self_con"
+CONF_DP_MAP_GRID_MODE = "dp_map_grid_mode"
+CONF_DP_MAP_IDLE = "dp_map_idle"
 
 CONF_POWER_LOAD_SENSORS = "power_load_sensors"
 CONF_POWER_GEN_SENSORS = "power_gen_sensors"
