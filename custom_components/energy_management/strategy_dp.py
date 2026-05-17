@@ -195,7 +195,7 @@ class DPPlanner:
                     # Iterate over DC steps (0.5 kWh granularity for performance), pay for AC drawn
                     # Note: grid_charge_step=0.5 reduces loop from ~66 to ~13 iterations per node
                     if si < energy_steps:
-                        grid_charge_step = 0.5  # kWh DC granularity for performance
+                        grid_charge_step = 0.1  # kWh DC granularity
                         max_storable_dc = min(max_p_chg * eff, (energy_steps - si) * energy_step)
                         ci_max = max(1, int(max_storable_dc / grid_charge_step))
                         for ci_coarse in range(1, ci_max + 1):
