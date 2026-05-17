@@ -174,25 +174,8 @@ class EnergyLogicEngine:
                 is_selling_active = check_h_abs in _active_h_sell
                 is_buying_active = check_h_abs in buy_strategy.get("active_hours", [])
                 
-                # v12.1.0: Dynamic Safety Verification for Forecast Slots
-                # Only allow future sales if the battery is projected to be above the safety floor
-                if is_selling_active:
-                    floors_sliding = sell_strategy.get("floors_sliding", {})
-                    safety_floor = floors_sliding.get(check_h_abs)
-                    if safety_floor is None:
-                        safety_floor = floors_sliding.get(str(check_h_abs))
-                    if safety_floor is None:
-                        safety_floor = floors_sliding.get(f"{(check_h_abs % 24):02d}h") or floors_sliding.get(f"{(check_h_abs % 24)}h")
-                    
-                    if safety_floor is None:
-                        is_night = ((check_h_abs % 24) >= 20) or ((check_h_abs % 24) < 8)
-                        min_soc_sell = float(manager.get_setting("min_soc_sell", 60.0) or 60.0)
-                        safety_floor = min_soc_sell if is_night else float(sell_strategy.get("arbitrage_sell_debug", {}).get("active_safety_floor", 100.0))
-                    
-                    if batt_soc < (safety_floor - 0.5):
-                        if log_func:
-                            log_func(f"DIAG: Hour {check_h_abs} blocked. SOC {batt_soc:.1f}% < Floor {safety_floor:.1f}%")
-                        is_selling_active = False
+                # v12.1.0: Dynamic Safety Verification for Forecast Slots moved below load/gen resolution
+                pass
         else:
             is_selling_active = sell_strategy.get("state") == "active"
             is_buying_active = buy_strategy.get("state") == "active"
@@ -225,6 +208,46 @@ class EnergyLogicEngine:
                 
             avg_gen = float(prof_gen.get(h_rel_str, 0.0) or 0.0)
             avg_load = float(prof_cons.get(h_rel_str, 0.5) or 0.5)
+
+        # v12.1.0: Dynamic Safety Verification for Selling Slots
+        if is_selling_active:
+            floors_sliding = sell_strategy.get("floors_sliding", {})
+            safety_floor = floors_sliding.get(check_h_abs)
+            if safety_floor is None:
+                safety_floor = floors_sliding.get(str(check_h_abs))
+            if safety_floor is None:
+                # Normalization for "20h" keys
+                safety_floor = floors_sliding.get(f"{(check_h_abs % 24):02d}h") or floors_sliding.get(f"{(check_h_abs % 24)}h")
+            
+            if safety_floor is None:
+                is_night = ((check_h_abs % 24) >= 20) or ((check_h_abs % 24) < 8)
+                min_soc_sell = float(manager.get_setting("min_soc_sell", 60.0) or 60.0)
+                safety_floor = min_soc_sell if is_night else float(sell_strategy.get("arbitrage_sell_debug", {}).get("active_safety_floor", 100.0))
+            
+            # High-fidelity Ending SOC Verification to prevent target-undershooting
+            b_cap = float(manager.get_setting("battery_capacity", 10.0) or 10.0)
+            eff = float(sell_strategy.get("arbitrage_sell_debug", {}).get("efficiency", 0.95) or 0.95)
+            
+            # Robust retrieve of the planned commercial power
+            p_sell_comm = sell_strategy.get("raw_commands", {}).get(check_h_abs)
+            if p_sell_comm is None:
+                p_sell_comm = sell_strategy.get("raw_commands", {}).get(str(check_h_abs), 0.0)
+            p_sell_comm = float(p_sell_comm or 0.0)
+            
+            step_duration = 1.0
+            if not is_forecast:
+                step_duration = max(0.0, min(1.0, (60.0 - dt_now.minute) / 60.0))
+            
+            p_sale_dc = p_sell_comm / eff if eff > 0.1 else p_sell_comm
+            p_house_dc = max(0.0, avg_load - avg_gen) / eff if eff > 0.1 else max(0.0, avg_load - avg_gen)
+            
+            soc_drop = ((p_sale_dc + p_house_dc) / b_cap * 100.0) * step_duration if b_cap > 0.1 else 0.0
+            projected_soc_end = batt_soc - soc_drop
+            
+            if batt_soc < (safety_floor - 0.5) or projected_soc_end < (safety_floor - 0.5):
+                if log_func:
+                    log_func(f"DIAG: Hour {check_h_abs} blocked. SOC start/end ({batt_soc:.1f}% -> {projected_soc_end:.1f}%) < Floor {safety_floor:.1f}%")
+                is_selling_active = False
 
         has_surplus = bool(avg_gen > (avg_load + 0.05))
         is_before_limit_hour = bool(sim_h < sale_pv_no_bat_max_hour)

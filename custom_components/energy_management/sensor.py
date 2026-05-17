@@ -1113,7 +1113,8 @@ class EnergyProfileManager:
                 sim_range=sim_range,
                 now=now,
                 commands=all_cmds,
-                mode_overrides=m_overrides
+                mode_overrides=m_overrides,
+                dynamic_floors=sell_strat.get("floors_sliding", {})
             )
             self.log_to_file(f"DIAG: Sim Result. Keys: {list(sim_log.keys())[:5]}... (Total: {len(sim_log)})")
             
