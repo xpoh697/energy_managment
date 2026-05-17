@@ -1103,6 +1103,21 @@ class EnergyProfileManager:
                     slot.soc_start = sim_data.get("soc_start", 0.0)
                     slot.soc_end = sim_data.get("soc_end", 0.0)
                     slot.net_p_bat = sim_data.get("net_p_bat", 0.0)
+                    
+                    # v12.0.78: Re-evaluate mode and reason based on high-fidelity simulated SOC to prevent two-pass drift
+                    new_mode, new_reason, _, _, new_t_soc = EnergyLogicEngine.get_mode_at(
+                        dt_now=datetime.fromisoformat(slot.dt_iso),
+                        batt_soc=slot.soc_start,
+                        manager=self,
+                        is_forecast=(i > 0),
+                        abs_hour=h_abs_sim,
+                        profiles=shared_profiles,
+                        buy_strategy=buy_strat,
+                        sell_strategy=sell_strat
+                    )
+                    slot.mode = new_mode
+                    slot.reason = new_reason
+                    slot.target_soc = new_t_soc
                 
                 # Restore Legacy Debug Parity (Especially for Slot 0)
                 if i == 0:
@@ -3591,16 +3606,8 @@ class InverterOperationModeSensor(SensorEntity):
         
         # Priority 1: Emergency SOC management (Survival First)
         if batt_soc <= min_soc:
-            if has_surplus:
-                if cur_price is not None and cur_price < price_stop_sell:
-                    mode = "stop_sale"
-                    reason = f"Добор солнца без экспорта (Цена {cur_price or 0.0:.2f} < {price_stop_sell})"
-                else:
-                    mode = "sale_pv"
-                    reason = f"Добор солнца в АКБ (limit: {min_soc}%)"
-            else:
-                mode = "bat_emergency"
-                reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
+            mode = "bat_emergency"
+            reason = f"Заряд ({round_f(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
 
         # Priority 2: Buying (Strictly restricted to active charging window)
         elif is_buying_active and (

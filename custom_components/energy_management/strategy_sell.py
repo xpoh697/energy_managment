@@ -615,7 +615,7 @@ class StrategySell(StrategyEngine):
                     # v11.9.687: Priority-Based Refinement with Damping
                     damping = 0.8 if attempt < 10 else 1.0
                     
-                    if total_deficit_kwh > 0.15:
+                    if total_deficit_kwh > 0.01:
                         # Priority 1: Physical impossibility (saturation)
                         target_budget_ac = max(0.0, target_budget_ac - total_deficit_kwh * damping)
                     elif max_soc_deficit_kwh > 0.05:

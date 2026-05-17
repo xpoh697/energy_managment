@@ -250,18 +250,9 @@ class EnergyLogicEngine:
 
         # P1: Emergency
         if round(batt_soc, 1) <= min_soc:
-            if has_surplus:
-                if cur_price is not None and cur_price < price_stop_sell:
-                    mode = "stop_sale"
-                    reason = f"Добор солнца без экспорта (Цена {cur_price or 0.0:.2f} < {price_stop_sell})"
-                else:
-                    mode = "sale_pv"
-                    reason = f"Добор солнца в АКБ (limit: {min_soc}%)"
-                target_soc = min_soc
-            else:
-                mode = "bat_emergency"
-                reason = f"Заряд ({round(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
-                target_soc = 100.0
+            mode = "bat_emergency"
+            reason = f"Заряд ({round(batt_soc, 1)}%) <= Минимума ({min_soc}%): Ожидание добора"
+            target_soc = 100.0
         
         # P2: Negative Buy
         elif is_neg_buy:
