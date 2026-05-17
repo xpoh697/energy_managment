@@ -49,10 +49,15 @@ class StrategySell(StrategyEngine):
         now = dt_util.now()
         man: Any = self.manager
         
+        _b_soc_s, _b_cap_s, _ = man.get_battery_state()
+        b_soc_current = float(_b_soc_s or 50.0)
+
         cache_key = f"market_strategy_{mode}"
         cached = self._strategy_cache.get(cache_key)
         if cached and (now - cached["time"]).total_seconds() < 30 and cached["time"].hour == now.hour:
-            return cached["res"]
+            cached_soc = cached.get("start_soc", b_soc_current)
+            if abs(b_soc_current - cached_soc) <= 3.0:
+                return cached["res"]
 
         if not allow_recalc:
             return {
@@ -1002,7 +1007,7 @@ class StrategySell(StrategyEngine):
             res["arbitrage_decision"] = arb_info["arbitrage_decision"]
             res["strategy_decision"] = res.get("current_mode_text", "Ожидание")
 
-            self._strategy_cache[cache_key] = {"time": now, "res": res}
+            self._strategy_cache[cache_key] = {"time": now, "res": res, "start_soc": b_soc}
             return res
         finally:
             self._calculating_strategy = old_calc

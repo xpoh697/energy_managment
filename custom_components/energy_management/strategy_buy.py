@@ -60,11 +60,17 @@ class StrategyBuy(StrategyEngine):
         now = dt_util.now()
         man: Any = self.manager
         
+        _b_soc_s, _b_cap_s, _ = man.get_battery_state()
+        b_soc_current = float(_b_soc_s or 50.0)
+
         # v11.9.180: Extended cache time for stability
+        # v12.0.82: Cache invalidation if physical SOC deviates significantly
         cache_key = f"market_strategy_{mode}"
         cached = self._strategy_cache.get(cache_key)
         if cached and (now - cached["time"]).total_seconds() < 120 and cached["time"].hour == now.hour:
-            return cached["res"]
+            cached_soc = cached.get("start_soc", b_soc_current)
+            if abs(b_soc_current - cached_soc) <= 3.0:
+                return cached["res"]
 
         if not allow_recalc:
             return {
@@ -732,7 +738,7 @@ class StrategyBuy(StrategyEngine):
             arb_info = self._get_arbitrage_info(cur_hour, all_buy_prices, all_sell_prices, sell_targets)
             res["arbitrage_decision"] = arb_info["arbitrage_decision"]
 
-            self._strategy_cache[cache_key] = {"time": now, "res": res}
+            self._strategy_cache[cache_key] = {"time": now, "res": res, "start_soc": b_soc}
             return res
         finally:
             self._calculating_strategy = old_calc
