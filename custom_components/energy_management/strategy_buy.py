@@ -233,6 +233,10 @@ class StrategyBuy(StrategyEngine):
             all_pre_sunrise = [h for h in all_buy_prices.keys() if h < morning_h_abs]
             cheapest_global = min(all_pre_sunrise, key=lambda h: all_buy_prices[h]) if all_pre_sunrise else cur_hour
             
+            # v12.0.81: Get resolved consumption profile details for UI display
+            _, _, p_used_label = self.resolve_consumption_profiles("consumption_base", 14, man.day_type)
+            _buy_debug["profile_used"] = p_used_label
+
             survival_targets = {} # {hour: target_soc}
 
             for _loop_i in range(12):
@@ -428,8 +432,11 @@ class StrategyBuy(StrategyEngine):
                 soc_at_start_plan = self._get_soc_from_log(log, planning_h, b_soc)
                 cur_p = all_buy_prices.get(cur_hour, 99.0)
 
-                # v11.9.737: Use the main simulation log (log) to find the dip
-                min_predicted_soc = min([self._get_soc_from_log(log, h, 100.0) for h in _sim_h_disp])
+                # v12.0.81: Scan all hours before morning sunrise to correctly see the nighttime dip (breach)
+                pre_sunrise_hours = [h for h in sim_range if h < morning_h_abs]
+                if not pre_sunrise_hours:
+                    pre_sunrise_hours = [cur_hour]
+                min_predicted_soc = min([self._get_soc_from_log(log, h, 100.0) for h in pre_sunrise_hours])
                 
                 # v11.9.623: Survival Priority. Never skip survival due to future solar.
                 if cur_p > 0 and is_solar_enough and res.get("charge_reason") != "Выживание":

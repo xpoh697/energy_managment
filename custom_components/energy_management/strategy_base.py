@@ -132,6 +132,48 @@ class StrategyEngine:
         # v11.9.205: Hardcoded to 0.98 per user request to stabilize simulations
         return 0.98
 
+    def resolve_consumption_profiles(self, p_type: str, eff_period: int, day_idx: int) -> Tuple[Dict[str, float], Dict[str, float], str]:
+        """
+        v12.0.81: Unified resolver for consumption profiles with a safe fallback of 0.3 kW.
+        Returns: (prof_today, prof_tomorrow, actual_profile_used)
+        """
+        man = self.manager
+        
+        def get_profile_sum(p_dict):
+            if not p_dict: return 0.0
+            try: return sum(max(0.0, float(v)) for v in p_dict.values() if v is not None)
+            except: return 0.0
+
+        # 1. Try to read requested profile (base)
+        p_today = dict(man.get_predicted_profile(p_type) or {})
+        p_tom = dict(man.get_average_profile(p_type, eff_period, day_idx) or {})
+        
+        sum_today = get_profile_sum(p_today)
+        sum_tom = get_profile_sum(p_tom)
+        
+        # 2. If base profile is empty/zero, try consumption_total
+        if p_type == "consumption_base" and sum_today < 0.5 and sum_tom < 0.5:
+            p_today = dict(man.get_predicted_profile("consumption_total") or {})
+            p_tom = dict(man.get_average_profile("consumption_total", eff_period, day_idx) or {})
+            sum_today = get_profile_sum(p_today)
+            sum_tom = get_profile_sum(p_tom)
+            if sum_today >= 0.5 or sum_tom >= 0.5:
+                _LOGGER.info("Energy Management [v12.0.81]: 'consumption_base' is empty. Falling back to 'consumption_total'.")
+                return p_today, p_tom, "consumption_total"
+
+        # 3. If BOTH profiles are empty/zero -> flat 0.3 kW fallback and log warning
+        if sum_today < 0.5 and sum_tom < 0.5:
+            _LOGGER.warning(
+                "Energy Management [v12.0.81] CRITICAL: Both '%s' (today=%.2fkWh, tom=%.2fkWh) and 'consumption_total' profiles are EMPTY or ZERO! "
+                "Forcing flat fallback load of 0.3 kW for all hours to prevent battery deep-discharge blindness. "
+                "Please check energy/consumption sensors configuration.",
+                p_type, sum_today, sum_tom
+            )
+            flat_profile = {str(h): 0.3 for h in range(24)}
+            return flat_profile, flat_profile, "fallback_0.3kw"
+            
+        return p_today, p_tom, p_type
+
     def get_survival_floor(self, start_h_abs: int, end_h_abs: int, target_at_end: float = None) -> float:
         """
         v11.9.718: Proper Reverse Bridging calculation.
@@ -149,8 +191,10 @@ class StrategyEngine:
         # If no target specified, we want to reach min_soc
         req_soc = target_at_end if target_at_end is not None else min_soc
         
-        prof_gen = dict(man.get_predicted_profile("generation"))
-        prof_cons = dict(man.get_predicted_profile("consumption_base"))
+        prof_gen = dict(man.get_predicted_profile("generation") or {})
+        
+        # v12.0.81: Use unified safe resolved profile
+        prof_cons, _, _ = self.resolve_consumption_profiles("consumption_base", 14, man.day_type)
         
         # Walk backwards from future to now
         for h_abs in range(end_h_abs - 1, start_h_abs - 1, -1):
@@ -940,10 +984,9 @@ class StrategyEngine:
 
         _LOGGER.debug(f"[SimSolar] today: {f_today:.2f} (dist: {len(dist_today) if dist_today else 0}), tom: {f_tom:.2f} (dist: {len(dist_tom) if dist_tom else 0})")
 
-        # 2. Consumption profiles (7-day Aware Total Load)
+        # 2. Consumption profiles (7-day Aware Total Load) - v12.0.81
         p_type = house_profile_override or "consumption_total"
-        prof_cons_today = dict(man.get_predicted_profile(p_type))
-        prof_cons_tom = dict(man.get_average_profile(p_type, eff_period, day_idx_tom))
+        prof_cons_today, prof_cons_tom, resolved_p_type = self.resolve_consumption_profiles(p_type, eff_period, day_idx_tom)
         
         # 3. Generation profiles (Historical Baseline)
         prof_gen_today = dict(man.get_average_profile("generation", eff_period, day_idx_today))
