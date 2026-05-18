@@ -3617,7 +3617,7 @@ class InverterOperationModeSensor(SensorEntity):
 
             # Mirror mapped value if selector entity is configured
             inverter_select = self.manager.get_setting("inverter_modes_select_entity")
-            if inverter_select:
+            if inverter_select and not use_dp:
                 option_val = None
                 if self.manager.current_inverter_mode == "buy":
                     option_val = self.manager.get_setting("dp_map_charge", "buy")
