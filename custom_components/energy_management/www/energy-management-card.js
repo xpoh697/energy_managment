@@ -624,7 +624,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.1.6</div>
+        <div id="v-tag" class="version-tag">v12.1.12</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -928,10 +928,21 @@ class EnergyManagementCard extends HTMLElement {
 
     // Smart DOM Update Logic
     // Ensure we display all hours that have a planned mode (so we don't accidentally hide zero/negative prices)
-    const filteredKeys = windowKeys.filter(key => {
+    let filteredKeys = windowKeys.filter(key => {
       const h = data[key];
       return (h.mode !== undefined || h.is_manual);
     });
+
+    // Check if tomorrow's prices are available
+    const tomorrowKeys = filteredKeys.filter(k => !k.includes(todayStr));
+    const hasTomorrowPrices = tomorrowKeys.some(key => {
+      const h = data[key];
+      return (h.buy_price && h.buy_price !== 0) || (h.sell_price && h.sell_price !== 0);
+    });
+
+    if (tomorrowKeys.length > 0 && !hasTomorrowPrices) {
+      filteredKeys = filteredKeys.filter(k => k.includes(todayStr));
+    }
 
     const currentKeysStr = filteredKeys.join(',');
     if (container._lastKeys !== currentKeysStr) {
