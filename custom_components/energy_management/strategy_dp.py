@@ -154,8 +154,8 @@ class DPPlanner:
                 def get_h_cost(h):
                     pb = float(normalize_float(prices_buy.get(str(h), 0.5)))
                     ps = float(normalize_float(prices_sell.get(str(h), 0.4)))
-                    g = f_gen_full.get(str(h - cur_hour), 0.0)
-                    c = f_cons_full.get(str(h - cur_hour), 0.0)
+                    g = f_gen_full.get(str(h), 0.0)
+                    c = f_cons_full.get(str(h), 0.0)
                     return ps if g - c >= boiler_power else pb
                 
                 mandatory_h_assigned = []
@@ -173,8 +173,8 @@ class DPPlanner:
                     remaining_dump_hours = max_dump_hours - len(mandatory_h_assigned)
                     for h in range(cur_hour, max_abs_h + 1):
                         if h in mandatory_h_assigned: continue
-                        g = f_gen_full.get(str(h - cur_hour), 0.0)
-                        c = f_cons_full.get(str(h - cur_hour), 0.0)
+                        g = f_gen_full.get(str(h), 0.0)
+                        c = f_cons_full.get(str(h), 0.0)
                         ps = float(normalize_float(prices_sell.get(str(h), 0.4)))
                         if g - c > 0.5 and ps <= min_sell_p:
                             opportunistic_h_assigned.append(h)
@@ -185,7 +185,7 @@ class DPPlanner:
                 
                 # Pre-allocate load
                 for h in all_boiler_hours:
-                    idx_str = str(h - cur_hour)
+                    idx_str = str(h)
                     f_cons_full[idx_str] = f_cons_full.get(idx_str, 0.0) + boiler_power
                 
                 # Temperature simulation
