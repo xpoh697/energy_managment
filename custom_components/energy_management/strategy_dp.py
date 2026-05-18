@@ -25,6 +25,7 @@ from .const import (
     CONF_MAX_ARBITRAGE_HOURS,
     CONF_MIN_SELL_PRICE,
     CONF_MIN_DISCHARGE_KWH,
+    CONF_DP_ENERGY_STEP,
     DOMAIN,
     VERSION
 )
@@ -97,8 +98,13 @@ class DPPlanner:
             max_p_dis = float(normalize_float(self.manager.get_setting(CONF_BATTERY_MAX_POWER, 5.0)))
             max_p_chg = max_p_dis 
             
-            energy_step = 0.1
-            energy_steps = int(round(b_cap / energy_step))
+             # v12.2.0 Expose energy_step to HA settings with Skeptic safe guards
+             energy_step = float(normalize_float(self.manager.get_setting(CONF_DP_ENERGY_STEP, 0.1)))
+             if energy_step < 0.01:
+                 energy_step = 0.01
+             elif energy_step > 2.0:
+                 energy_step = 2.0
+             energy_steps = int(round(b_cap / energy_step))
             
             cycle_cost = self._get_deg_cost(b_cap)
             min_soc = float(normalize_float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0)))

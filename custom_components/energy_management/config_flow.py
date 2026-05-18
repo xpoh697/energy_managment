@@ -53,6 +53,7 @@ from .const import (
     CONF_MIN_DISCHARGE_KWH,
     CONF_USE_DP,
     CONF_INVERTER_MODES_SELECT_ENTITY,
+    CONF_DP_ENERGY_STEP,
     CONF_DP_MAP_CHARGE,
     CONF_DP_MAP_DISCHARGE,
     CONF_DP_MAP_SOLAR,
@@ -259,6 +260,7 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_MIN_SELL_PRICE, default=float(self._user_input.get(CONF_MIN_SELL_PRICE, 0.01))): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(CONF_MAX_ARBITRAGE_HOURS, default=int(self._user_input.get(CONF_MAX_ARBITRAGE_HOURS, 24))): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
             vol.Optional(CONF_MIN_DISCHARGE_KWH, default=float(self._user_input.get(CONF_MIN_DISCHARGE_KWH, 0.1))): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
+            vol.Optional(CONF_DP_ENERGY_STEP, default=float(self._user_input.get(CONF_DP_ENERGY_STEP, 0.1))): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=1.0)),
         }
         return self.async_show_form(step_id="dp_settings", data_schema=vol.Schema(schema_dict))
 

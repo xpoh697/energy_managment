@@ -101,7 +101,8 @@
           "min_sell_power": "Min Sell Power for Export (kW)",
           "min_sell_price": "Min Sell Price Threshold (PLN/kWh)",
           "max_arbitrage_hours": "Max Arbitrage Hours per Day",
-          "min_discharge_kwh": "Min Discharge per Session (kWh)"
+          "min_discharge_kwh": "Min Discharge per Session (kWh)",
+          "dp_energy_step": "DP SOC Grid Resolution (kWh)"
         }
       },
       "boiler_settings": {

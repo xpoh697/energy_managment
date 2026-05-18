@@ -31,6 +31,7 @@ CONF_BATTERY_DISCHARGE_ENABLED = "battery_discharge_enabled"
 
 CONF_USE_DP = "use_dp"
 CONF_INVERTER_MODES_SELECT_ENTITY = "inverter_modes_select_entity"
+CONF_DP_ENERGY_STEP = "dp_energy_step"
 CONF_DP_MAP_CHARGE = "dp_map_charge"
 CONF_DP_MAP_DISCHARGE = "dp_map_discharge"
 CONF_DP_MAP_SOLAR = "dp_map_solar"
