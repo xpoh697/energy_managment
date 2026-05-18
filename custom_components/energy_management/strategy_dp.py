@@ -206,6 +206,13 @@ class DPPlanner:
                         boiler_sim_temp = max(boiler_min_temp, boiler_sim_temp - 0.5)
                         boiler_plan_state[h] = f" | BOILER: OFF ({round(boiler_sim_temp, 1)}°C)"
             
+            # v12.1.21: Define variables early to prevent UnboundLocalError in Forward Induction
+            try:
+                min_price_buy = min(float(normalize_float(v)) for v in prices_buy.values()) if prices_buy else 999.0
+            except Exception:
+                min_price_buy = 999.0
+            price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
+
             neg_inf = -1e9
             # v11.9.42: Arbitrage TOP hours per day
             max_arb_h = int(normalize_float(self.manager.get_setting(CONF_MAX_ARBITRAGE_HOURS, 3)))
@@ -367,11 +374,7 @@ class DPPlanner:
             
             results.reverse()
             
-            # Calculate minimum buy price across the entire horizon once
-            try:
-                min_price_buy = min(float(normalize_float(v)) for v in prices_buy.values()) if prices_buy else 999.0
-            except Exception:
-                min_price_buy = 999.0
+
 
             for h_idx, act, amt, prev_si, si in results:
                 abs_h = cur_hour + h_idx
@@ -400,7 +403,6 @@ class DPPlanner:
                 elif act in [ACT_SELF_CONSUME]:
                     power_kw = min(max_p_dis, power_kw)
 
-                price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
                 if act == ACT_DIS:
                     # Sale_pv_bat - всегда когда нужно продать батарею в сеть
                     mode = "sale_pv_bat"
