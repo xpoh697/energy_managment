@@ -266,13 +266,24 @@ class DPPlanner:
                 pv_surplus = max(0.0, gen_interval - cons_interval)
                 pv_deficit = max(0.0, cons_interval - gen_interval)
 
+                # v12.1.20: Check if a negative price or absolute cheapest grid-charge hour is ahead in 6 hours
+                cheap_ahead = False
+                if p_sell <= price_sell_limit:
+                    for future_h in range(abs_h + 1, min(abs_h + 7, cur_hour + horizon)):
+                        future_p_buy = float(normalize_float(prices_buy.get(str(future_h), 99.0)))
+                        if future_p_buy <= 0.01 or future_p_buy <= (min_price_buy + 0.05):
+                            cheap_ahead = True
+                            break
+
                 for si in range(energy_steps + 1):
                     cur_rev, _, _, _ = full_dp[h][si]
                     if cur_rev <= neg_inf + 100: continue
                     
                     usable_energy = si * energy_step  # DC kWh stored in battery
                     # 1. ACT_IDLE: Baseline
-                    _update(si, ACT_IDLE, 0.0, h, si, cur_rev + p_sell * pv_surplus - p_buy * pv_deficit + 1e-6)
+                    # If cheap_ahead is True, the physical inverter is in no_pv_sale_no_bat, curtailing excess solar (reward = 0.0)
+                    idle_pv_reward = 0.0 if (p_sell <= price_sell_limit and cheap_ahead) else (p_sell * pv_surplus)
+                    _update(si, ACT_IDLE, 0.0, h, si, cur_rev + idle_pv_reward - p_buy * pv_deficit + 1e-6)
                             
                     # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
                     # exp_dc = DC energy drawn from battery; exp_ac = AC energy after inverter losses
@@ -288,7 +299,8 @@ class DPPlanner:
                             
                     # 3. ACT_PV_CHARGE: Surplus PV (AC) to battery (DC)
                     # chg_ac = AC power from PV; chg_dc = DC actually stored (after inverter losses)
-                    if pv_surplus > 0.01 and si < energy_steps:
+                    # If cheap_ahead is True and p_sell is below the limit, block charging from solar (no_pv_sale_no_bat)
+                    if pv_surplus > 0.01 and si < energy_steps and not (p_sell <= price_sell_limit and cheap_ahead):
                         max_storable_dc = (energy_steps - si) * energy_step
                         chg_ac = min(pv_surplus, max_storable_dc / eff, max_p_chg * duration)
                         chg_dc = chg_ac * eff

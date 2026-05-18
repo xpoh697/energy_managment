@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v12.1.20 ",
+  "%c ENERGY MANAGEMENT %c v12.1.21 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
