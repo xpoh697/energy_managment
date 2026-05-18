@@ -5236,14 +5236,15 @@ class EnergyDPAdviceSensor(SensorEntity):
         soc, cap, _ = self.manager.get_battery_state()
 
         # 5. SOC Deadband Filter (Option C): Skip recalculation if SOC change is tiny within the same hour
-        # Bypass deadband filter if there is no successful advice yet
+        # Bypass deadband filter if there is no successful advice yet, or if more than 10 minutes (600s) have passed since last run
         if self._advice and "plan" in self._advice:
             try:
                 from datetime import datetime
                 current_hour = datetime.now().hour
                 if self._last_calc_soc is not None and self._last_calc_hour == current_hour:
-                    if abs(soc - self._last_calc_soc) < 0.5:
-                        return
+                    if abs(t_now - self._last_run_time) < 600:
+                        if abs(soc - self._last_calc_soc) < 0.5:
+                            return
             except Exception as e_deadband:
                 _LOGGER.warning("DP Advice: Error in deadband check: %s", e_deadband)
 

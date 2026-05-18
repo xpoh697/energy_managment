@@ -242,8 +242,7 @@ class DPPlanner:
                 d_prices = [(int(h_key), p) for h_key, p in prices_sell.items() if d_start <= int(h_key) < d_end and p > min_sell_p]
                 d_top = sorted(d_prices, key=lambda x: x[1], reverse=True)[:max_arb_h]
                 for h_abs, p in d_top: top_sell_set.add(h_abs)
-            
-            # --- Forward Induction (2D DP) ---
+                        # --- Forward Induction (2D DP) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
                 p_buy = float(normalize_float(prices_buy.get(str(abs_h), 0.5)))
@@ -251,10 +250,21 @@ class DPPlanner:
                 gen = float(normalize_float(f_gen_full.get(str(abs_h), 0.0)))
                 cons = float(normalize_float(f_cons_full.get(str(abs_h), 0.4)))
                 
+                # v12.1.19: Time-scaling for the first hour to handle late-hour starts accurately
+                duration = 1.0
+                if h == 0:
+                    try:
+                        duration = max(0.05, 1.0 - (now.minute / 60.0))
+                    except Exception:
+                        duration = 1.0
+
+                gen_interval = gen * duration
+                cons_interval = cons * duration
+
                 # v11.9.47: Remove boiler from BASELINE.
                 # It shouldn't 'eat' the sun in the model and force grid charging.
-                pv_surplus = max(0.0, gen - cons)
-                pv_deficit = max(0.0, cons - gen)
+                pv_surplus = max(0.0, gen_interval - cons_interval)
+                pv_deficit = max(0.0, cons_interval - gen_interval)
 
                 for si in range(energy_steps + 1):
                     cur_rev, _, _, _ = full_dp[h][si]
@@ -267,11 +277,11 @@ class DPPlanner:
                     # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
                     # exp_dc = DC energy drawn from battery; exp_ac = AC energy after inverter losses
                     if abs_h in top_sell_set:
-                        exp_dc = min(usable_energy, max_p_dis)
+                        exp_dc = min(usable_energy, max_p_dis * duration)
                         exp_ac = exp_dc * eff
-                        if exp_dc >= min_dis_kwh:
-                            to_grid = max(0.0, exp_ac + gen - cons)
-                            from_grid = max(0.0, cons - exp_ac - gen)
+                        if exp_dc >= (min_dis_kwh * duration):
+                            to_grid = max(0.0, exp_ac + gen_interval - cons_interval)
+                            from_grid = max(0.0, cons_interval - gen_interval - exp_ac)
                             reward = p_sell * to_grid - p_buy * from_grid - (cycle_cost * exp_dc)
                             nsi = si - int(round(exp_dc / energy_step))
                             _update(nsi, ACT_DIS, exp_dc, h, si, cur_rev + reward)  # amt=DC (inverter command)
@@ -280,20 +290,20 @@ class DPPlanner:
                     # chg_ac = AC power from PV; chg_dc = DC actually stored (after inverter losses)
                     if pv_surplus > 0.01 and si < energy_steps:
                         max_storable_dc = (energy_steps - si) * energy_step
-                        chg_ac = min(pv_surplus, max_storable_dc / eff, max_p_chg)
+                        chg_ac = min(pv_surplus, max_storable_dc / eff, max_p_chg * duration)
                         chg_dc = chg_ac * eff
                         if chg_dc > 0.01:
                             ci = int(round(chg_dc / energy_step))
                             if ci > 0:
                                 reward = p_sell * max(0.0, pv_surplus - chg_ac) - p_buy * pv_deficit
                                 _update(si + ci, ACT_PV_CHARGE, chg_dc, h, si, cur_rev + reward)  # amt=DC (BMS command)
-
+ 
                     # 4. ACT_GRID_CHARGE: Buy from grid (AC) -> store in battery (DC)
                     # Iterate over DC steps (0.5 kWh granularity for performance), pay for AC drawn
                     # Note: grid_charge_step=0.5 reduces loop from ~66 to ~13 iterations per node
                     if si < energy_steps:
                         grid_charge_step = 0.1  # kWh DC granularity
-                        max_storable_dc = min(max_p_chg * eff, (energy_steps - si) * energy_step)
+                        max_storable_dc = min(max_p_chg * eff * duration, (energy_steps - si) * energy_step)
                         ci_max = max(1, int(max_storable_dc / grid_charge_step))
                         for ci_coarse in range(1, ci_max + 1):
                             chg_dc = ci_coarse * grid_charge_step
@@ -302,11 +312,11 @@ class DPPlanner:
                             if si + ci > energy_steps: break
                             reward = p_sell * pv_surplus - p_buy * (chg_ac + pv_deficit) - (cycle_cost * chg_dc)
                             _update(si + ci, ACT_GRID_CHARGE, chg_dc, h, si, cur_rev + reward)  # amt=DC (BMS command)
-
+ 
                     # 5. ACT_SELF_CONSUME: Battery (DC) to home (AC)
                     # sc_dc = DC drawn from battery; actual AC coverage = sc_dc * eff
                     if pv_deficit > 0.01 and si > 0:
-                        sc_dc = min(usable_energy, pv_deficit / eff, max_p_dis)
+                        sc_dc = min(usable_energy, pv_deficit / eff, max_p_dis * duration)
                         sc_ac = sc_dc * eff  # AC coverage for home
                         if sc_dc > 0.01:
                             sci = int(round(sc_dc / energy_step))
@@ -316,8 +326,8 @@ class DPPlanner:
                             
                     # 6. ACT_PAID_IMPORT: Negative price — let house consume from grid,
                     # keep battery intact to save capacity for an upcoming bigger sell peak.
-                    if p_buy < 0 and cons > 0.01:
-                        _update(si, ACT_PAID_IMPORT, 0.0, h, si, cur_rev - p_buy * cons)
+                    if p_buy < 0 and cons_interval > 0.01:
+                        _update(si, ACT_PAID_IMPORT, 0.0, h, si, cur_rev - p_buy * cons_interval)
 
             # --- Backtrack ---
             min_future_buy = min(prices_buy.values()) if prices_buy else 0.5
@@ -361,13 +371,22 @@ class DPPlanner:
                 cons = float(normalize_float(f_cons_full.get(str(abs_h), 0.4)))
                 
                 # Precise discharge power calculation for SELL mode (v12.3.1)
+                duration = 1.0
+                if h_idx == 0:
+                    try:
+                        duration = max(0.05, 1.0 - (now.minute / 60.0))
+                    except Exception:
+                        duration = 1.0
+
+                power_kw = amt / duration if duration > 0.0 else amt
                 if act == ACT_DIS:
                     dc_energy = max(0.0, (prev_si - si) * energy_step)
-                    duration = 1.0
-                    if h_idx == 0:
-                        duration = max(0.2, 1.0 - (now.minute / 60.0))
                     safe_eff = max(0.8, min(1.0, eff))
-                    amt = min(max_p_dis, (dc_energy / duration) * safe_eff)
+                    power_kw = min(max_p_dis, (dc_energy / duration) * safe_eff)
+                elif act in [ACT_PV_CHARGE, ACT_GRID_CHARGE]:
+                    power_kw = min(max_p_chg, power_kw)
+                elif act in [ACT_SELF_CONSUME]:
+                    power_kw = min(max_p_dis, power_kw)
 
                 mode_map = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"]
                 mode = mode_map[act]
@@ -381,21 +400,21 @@ class DPPlanner:
                     price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
                     if p_sell >= price_sell_limit:
                         mode = "SOL"
-                        amt = 0.0
+                        power_kw = 0.0
 
                 # Rule: if buy price is above the minimum planning price, override SELF_CON to PV_CHG
                 if mode == "SELF_CON" and p_buy > min_price_buy:
                     mode = "PV_CHG"
 
                 soc = max(0, min(100, int(round((si * energy_step) / b_cap * 100.0))))
-                plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
+                plan[h_key] = {"mode": mode, "power_kw": round(power_kw, 2), "target_soc": soc}
                 b_str = boiler_plan_state.get(abs_h, "")
-                formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)} | L:{round(cons,1)} G:{round(gen,1)}{b_str}"
+                formatted_plan[h_key] = f"{mode} | {round(power_kw, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)} | L:{round(cons,1)} G:{round(gen,1)}{b_str}"
                 
                 # Absolute timestamp mapping for easy coordinate lookup
                 ts_dt = now + timedelta(hours=h_idx)
                 ts_key = ts_dt.strftime("%Y-%m-%d %H:00")
-                plan_by_timestamp[ts_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
+                plan_by_timestamp[ts_key] = {"mode": mode, "power_kw": round(power_kw, 2), "target_soc": soc}
 
                 f_table[str(abs_h)] = {
                     "gen": round(gen, 2),
