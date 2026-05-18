@@ -376,7 +376,7 @@ class DPPlanner:
                         mode = "SOL"
                         amt = 0.0
 
-                soc = int(round((si * energy_step) / b_cap * 100.0))
+                soc = max(0, min(100, int(round((si * energy_step) / b_cap * 100.0))))
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 b_str = boiler_plan_state.get(abs_h, "")
                 formatted_plan[h_key] = f"{mode} | {round(amt, 2)}kW | SOC: {soc}% | {round(p_buy, 2)}/{round(p_sell, 2)} | L:{round(cons,1)} G:{round(gen,1)}{b_str}"
