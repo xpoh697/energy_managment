@@ -240,14 +240,21 @@ class DPPlanner:
                 if total_rev > full_dp[t_step + 1][nsi][0]:
                     full_dp[t_step + 1][nsi] = (total_rev, si_orig, act, amt)
 
-            # v11.9.41: Top-N Arbitrage Sorting PER DAY
+            # v12.1.27: Group top discharge hours strictly by calendar days (Today vs Tomorrow)
+            # This isolates today's peak evening hours from tomorrow's high prices.
             top_sell_set = set()
-            for day in range(horizon // 24 + 1):
-                d_start = cur_hour + day * 24
-                d_end = d_start + 24
-                d_prices = [(int(h_key), p) for h_key, p in prices_sell.items() if d_start <= int(h_key) < d_end and p > min_sell_p]
-                d_top = sorted(d_prices, key=lambda x: x[1], reverse=True)[:max_arb_h]
-                for h_abs, p in d_top: top_sell_set.add(h_abs)
+            
+            # Today's remaining hours (cur_hour <= h < 24)
+            d_prices_today = [(int(h_key), p) for h_key, p in prices_sell.items() if cur_hour <= int(h_key) < 24 and p > min_sell_p]
+            d_top_today = sorted(d_prices_today, key=lambda x: x[1], reverse=True)[:max_arb_h]
+            for h_abs, p in d_top_today:
+                top_sell_set.add(h_abs)
+                
+            # Tomorrow's hours (24 <= h < 48)
+            d_prices_tomorrow = [(int(h_key), p) for h_key, p in prices_sell.items() if 24 <= int(h_key) < 48 and p > min_sell_p]
+            d_top_tomorrow = sorted(d_prices_tomorrow, key=lambda x: x[1], reverse=True)[:max_arb_h]
+            for h_abs, p in d_top_tomorrow:
+                top_sell_set.add(h_abs)
                         # --- Forward Induction (2D DP) ---
             for h in range(horizon):
                 abs_h = cur_hour + h
