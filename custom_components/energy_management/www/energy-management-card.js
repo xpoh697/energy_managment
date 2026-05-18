@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v12.1.1 ",
+  "%c ENERGY MANAGEMENT %c v12.1.6 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -612,7 +612,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.1.1</div>
+        <div id="v-tag" class="version-tag">v12.1.6</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -666,7 +666,8 @@ class EnergyManagementCard extends HTMLElement {
     // v12.0.38: Explicitly show Forecast vs Target
     const forecastEl = this.shadowRoot.getElementById('info-forecast-soc');
     if (forecastEl) {
-      forecastEl.innerText = `${hourData.soc !== undefined ? hourData.soc.toFixed(1) : '--'}%`;
+      const displaySoc = (this._activeTab === 'dp' && hourData.soc_limit !== undefined) ? hourData.soc_limit : hourData.soc;
+      forecastEl.innerText = `${displaySoc !== undefined ? displaySoc.toFixed(1) : '--'}%`;
     }
 
     this._toggleSocVisibility();
@@ -929,7 +930,8 @@ class EnergyManagementCard extends HTMLElement {
         const bgColor = hexToRgba(modeColor, 0.1);
         const isManual = hourData.is_manual;
 
-        const socInfo = getSocInfo(hourData.soc);
+        const displaySoc = (this._activeTab === 'dp' && hourData.soc_limit !== undefined) ? hourData.soc_limit : hourData.soc;
+        const socInfo = getSocInfo(displaySoc);
 
         html += `
           <div class="hour-bar ${idx === 0 ? 'active' : ''} ${isManual ? 'manual-glow' : ''}" data-ts="${key}" data-mode="${hourData.mode}" id="hb-${key.replace(/[: ]/g, '-')}">
@@ -1003,7 +1005,8 @@ class EnergyManagementCard extends HTMLElement {
         }
 
         if (socContainer) {
-          const socInfo = getSocInfo(hourData.soc);
+          const displaySoc = (this._activeTab === 'dp' && hourData.soc_limit !== undefined) ? hourData.soc_limit : hourData.soc;
+          const socInfo = getSocInfo(displaySoc);
           socContainer.style.color = socInfo.color;
           const socIcon = socContainer.querySelector('ha-icon');
           if (socIcon) socIcon.icon = socInfo.icon;

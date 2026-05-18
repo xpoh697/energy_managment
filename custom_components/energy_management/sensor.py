@@ -1242,8 +1242,8 @@ class EnergyProfileManager:
             h_abs_sim = now.hour + i
             sim_data = sim_log.get(h_abs_sim, {})
             if sim_data:
-                slot.soc_start = sim_data.get("soc_start", 0.0)
-                slot.soc_end = sim_data.get("soc_end", 0.0)
+                slot.soc_start = batt_soc if i == 0 else slots[i-1].target_soc
+                slot.soc_end = slot.target_soc
                 slot.net_p_bat = sim_data.get("net_p_bat", 0.0)
                 
         return DispatchPlan(slots)
