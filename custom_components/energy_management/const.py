@@ -1,7 +1,7 @@
 DOMAIN = "energy_management"
-VERSION = "v12.1.24"
+VERSION = "v12.1.26"
 
-VERSION_CODE = 1201024
+VERSION_CODE = 1201026
 
 CONF_CONSUMPTION_SENSORS = "consumption_sensors"
 CONF_GENERATION_SENSORS = "generation_sensors"
@@ -30,6 +30,8 @@ CONF_SOC_BUFFER = "soc_buffer"
 CONF_BATTERY_DISCHARGE_ENABLED = "battery_discharge_enabled"
 
 CONF_USE_DP = "use_dp"
+CONF_DP_MIN_SOC = "dp_min_soc"
+CONF_DP_PRICE_SELL_LIMIT = "dp_price_sell_limit"
 CONF_INVERTER_MODES_SELECT_ENTITY = "inverter_modes_select_entity"
 CONF_DP_ENERGY_STEP = "dp_energy_step"
 CONF_DP_MAP_CHARGE = "dp_map_charge"

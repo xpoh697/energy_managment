@@ -48,7 +48,6 @@ from .const import (
     CONF_BOILER_MAX_TEMP,
     CONF_MIN_SELL_POWER,
     CONF_BATTERY_MAX_POWER,
-    CONF_MIN_SELL_PRICE,
     CONF_MAX_ARBITRAGE_HOURS,
     CONF_MIN_DISCHARGE_KWH,
     CONF_USE_DP,
@@ -59,6 +58,8 @@ from .const import (
     CONF_DP_MAP_SOLAR,
     CONF_DP_MAP_SELF_CONSUME,
     CONF_DP_MAP_GRID,
+    CONF_DP_MIN_SOC,
+    CONF_DP_PRICE_SELL_LIMIT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -256,8 +257,9 @@ class EnergyManagementOptionsFlow(config_entries.OptionsFlow):
                 selector.EntitySelectorConfig(domain=["select", "input_select"])
             ),
             vol.Optional(CONF_BATTERY_MAX_POWER, default=float(self._user_input.get(CONF_BATTERY_MAX_POWER, 5.0))): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=50.0)),
+            vol.Optional(CONF_DP_MIN_SOC, default=float(self._user_input.get(CONF_DP_MIN_SOC, 10.0))): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100.0)),
+            vol.Optional(CONF_DP_PRICE_SELL_LIMIT, default=float(self._user_input.get(CONF_DP_PRICE_SELL_LIMIT, 0.3))): vol.All(vol.Coerce(float), vol.Range(min=-10.0, max=100.0)),
             vol.Optional(CONF_MIN_SELL_POWER, default=float(self._user_input.get(CONF_MIN_SELL_POWER, 0.1))): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
-            vol.Optional(CONF_MIN_SELL_PRICE, default=float(self._user_input.get(CONF_MIN_SELL_PRICE, 0.01))): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(CONF_MAX_ARBITRAGE_HOURS, default=int(self._user_input.get(CONF_MAX_ARBITRAGE_HOURS, 24))): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
             vol.Optional(CONF_MIN_DISCHARGE_KWH, default=float(self._user_input.get(CONF_MIN_DISCHARGE_KWH, 0.1))): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
             vol.Optional(CONF_DP_ENERGY_STEP, default=float(self._user_input.get(CONF_DP_ENERGY_STEP, 0.1))): vol.All(vol.Coerce(float), vol.Range(min=0.01, max=1.0)),

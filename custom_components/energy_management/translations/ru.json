@@ -115,8 +115,9 @@
         "data": {
           "inverter_modes_select_entity": "Сущность выбора режимов инвертора (select / input_select)",
           "battery_max_power": "Максимальная мощность АКБ (кВт)",
+          "dp_min_soc": "Минимальный SOC для DP (%)",
+          "dp_price_sell_limit": "Лимит цены продажи для DP",
           "min_sell_power": "Минимальная мощность экспорта для продажи АКБ (кВт)",
-          "min_sell_price": "Минимальная цена для продажи (PLN/кВт·ч)",
           "max_arbitrage_hours": "Макс. количество часов продажи в сутки",
           "min_discharge_kwh": "Минимальный разряд за сессию (кВт·ч)",
           "dp_energy_step": "Разрешение сетки SOC для DP (кВт·ч)"
@@ -162,10 +163,18 @@
     "sensor": {
       "battery_degradation": {
         "state_attributes": {
-          "wear_cost_per_kwh_throughput": { "name": "Стоимость износа за 1 кВт·ч оборота" },
-          "arbitrage_profit_threshold": { "name": "Порог выгоды арбитража" },
-          "battery_investment": { "name": "Инвестиции в АКБ" },
-          "rated_cycles": { "name": "Заявленные циклы" },
+          "wear_cost_per_kwh_throughput": {
+            "name": "Стоимость износа за 1 кВт·ч оборота"
+          },
+          "arbitrage_profit_threshold": {
+            "name": "Порог выгоды арбитража"
+          },
+          "battery_investment": {
+            "name": "Инвестиции в АКБ"
+          },
+          "rated_cycles": {
+            "name": "Заявленные циклы"
+          },
           "note": {
             "name": "Примечание",
             "state": {
@@ -176,23 +185,45 @@
       },
       "payback": {
         "state_attributes": {
-          "total_investment": { "name": "Суммарные инвестиции" },
-          "cumulative_savings": { "name": "Накопленная экономия" },
-          "remaining_amount": { "name": "Оставшаяся сумма" },
-          "average_daily_saving": { "name": "Среднесуточная экономия" },
-          "estimated_payback_days": { "name": "Осталось дней до окупаемости" },
+          "total_investment": {
+            "name": "Суммарные инвестиции"
+          },
+          "cumulative_savings": {
+            "name": "Накопленная экономия"
+          },
+          "remaining_amount": {
+            "name": "Оставшаяся сумма"
+          },
+          "average_daily_saving": {
+            "name": "Среднесуточная экономия"
+          },
+          "estimated_payback_days": {
+            "name": "Осталось дней до окупаемости"
+          },
           "estimated_payback_date": {
             "name": "Дата полной окупаемости",
             "state": {
               "never": "Никогда"
             }
           },
-          "upgrade_batt_cap_kwh": { "name": "Объем апгрейда (кВт·ч)" },
-          "upgrade_batt_cost": { "name": "Стоимость апгрейда" },
-          "upgrade_potential_benefit": { "name": "Потенциальная выгода" },
-          "upgrade_payback_years": { "name": "Окупаемость апгрейда (лет)" },
-          "upgrade_roi_annual": { "name": "ROI апгрейда (годовой)" },
-          "simulation_days": { "name": "Дней в симуляции" }
+          "upgrade_batt_cap_kwh": {
+            "name": "Объем апгрейда (кВт·ч)"
+          },
+          "upgrade_batt_cost": {
+            "name": "Стоимость апгрейда"
+          },
+          "upgrade_potential_benefit": {
+            "name": "Потенциальная выгода"
+          },
+          "upgrade_payback_years": {
+            "name": "Окупаемость апгрейда (лет)"
+          },
+          "upgrade_roi_annual": {
+            "name": "ROI апгрейда (годовой)"
+          },
+          "simulation_days": {
+            "name": "Дней в симуляции"
+          }
         }
       },
       "anomaly_detection": {
@@ -204,10 +235,18 @@
               "anomaly_high_consumption": "Аномалия: Высокое потребление"
             }
           },
-          "expected_kw": { "name": "Ожидаемая нагрузка (кВт)" },
-          "actual_kw": { "name": "Фактическая нагрузка (кВт)" },
-          "threshold_multiplier": { "name": "Множитель порога" },
-          "anomaly_detected": { "name": "Аномалия обнаружена" }
+          "expected_kw": {
+            "name": "Ожидаемая нагрузка (кВт)"
+          },
+          "actual_kw": {
+            "name": "Фактическая нагрузка (кВт)"
+          },
+          "threshold_multiplier": {
+            "name": "Множитель порога"
+          },
+          "anomaly_detected": {
+            "name": "Аномалия обнаружена"
+          }
         }
       },
       "market_strategy": {
@@ -235,28 +274,56 @@
       },
       "solar_waste": {
         "state_attributes": {
-          "current_waste_kw": { "name": "Мощность потерь сейчас (кВт)" },
-          "lost_potential_revenue": { "name": "Упущенная выгода сегодня" },
-          "recommendation": { "name": "Рекомендация" },
-          "potential_power_kw": { "name": "Возможная мощность PV (кВт)" }
+          "current_waste_kw": {
+            "name": "Мощность потерь сейчас (кВт)"
+          },
+          "lost_potential_revenue": {
+            "name": "Упущенная выгода сегодня"
+          },
+          "recommendation": {
+            "name": "Рекомендация"
+          },
+          "potential_power_kw": {
+            "name": "Возможная мощность PV (кВт)"
+          }
         }
       },
       "battery_autonomy": {
         "state_attributes": {
-          "autonomy_to_empty": { "name": "До полного разряда" },
-          "autonomy_to_reserve": { "name": "До резерва выживания" },
-          "current_load_avg_kw": { "name": "Средняя нагрузка (кВт)" },
-          "usable_energy_ac_kwh": { "name": "Доступная энергия (AC)" },
-          "reserve_soc_target": { "name": "Целевой порог резерва (%)" }
+          "autonomy_to_empty": {
+            "name": "До полного разряда"
+          },
+          "autonomy_to_reserve": {
+            "name": "До резерва выживания"
+          },
+          "current_load_avg_kw": {
+            "name": "Средняя нагрузка (кВт)"
+          },
+          "usable_energy_ac_kwh": {
+            "name": "Доступная энергия (AC)"
+          },
+          "reserve_soc_target": {
+            "name": "Целевой порог резерва (%)"
+          }
         }
       },
       "battery_end_of_day_soc": {
         "state_attributes": {
-          "target_event": { "name": "Цель прогноза" },
-          "target_hour": { "name": "Час события" },
-          "initial_soc": { "name": "Текущий SOC (%)" },
-          "expected_remaining_gen": { "name": "Прогноз прихода (кВт*ч)" },
-          "hourly_simulation": { "name": "Почасовая симуляция" }
+          "target_event": {
+            "name": "Цель прогноза"
+          },
+          "target_hour": {
+            "name": "Час события"
+          },
+          "initial_soc": {
+            "name": "Текущий SOC (%)"
+          },
+          "expected_remaining_gen": {
+            "name": "Прогноз прихода (кВт*ч)"
+          },
+          "hourly_simulation": {
+            "name": "Почасовая симуляция"
+          }
         }
       },
       "inverter_mode": {
@@ -283,19 +350,51 @@
       }
     },
     "number": {
-      "price_buy_limit": { "name": "Лимит цены покупки" },
-      "price_sell_limit": { "name": "Лимит цены продажи" },
-      "price_stop_sell": { "name": "Порог остановки продажи" },
-      "price_sell_only_pv": { "name": "Лимит продажи только PV" },
-      "price_tolerance": { "name": "Допуск цены покупки" },
-      "price_sell_tolerance": { "name": "Допуск цены продажи" },
-      "battery_max_power": { "name": "Макс. мощность АКБ" },
-      "ai_charge_limit_soc": { "name": "Лимит заряда (Max SOC)" },
-      "ai_discharge_limit_soc": { "name": "Лимит пользователя (Min SOC)" },
-      "min_soc_buy": { "name": "Минимальный уровень SOC" },
-      "sale_pv_no_bat_max_hour": { "name": "Макс. час для продажи только PV" },
-      "arbitrage_profit_threshold": { "name": "Минимальная прибыль арбитража" },
-      "soc_buffer": { "name": "Буфер SOC на утро (%)" }
+      "price_buy_limit": {
+        "name": "Лимит цены покупки"
+      },
+      "price_sell_limit": {
+        "name": "Лимит цены продажи"
+      },
+      "price_stop_sell": {
+        "name": "Порог остановки продажи"
+      },
+      "price_sell_only_pv": {
+        "name": "Лимит продажи только PV"
+      },
+      "price_tolerance": {
+        "name": "Допуск цены покупки"
+      },
+      "price_sell_tolerance": {
+        "name": "Допуск цены продажи"
+      },
+      "battery_max_power": {
+        "name": "Макс. мощность АКБ"
+      },
+      "ai_charge_limit_soc": {
+        "name": "Лимит заряда (Max SOC)"
+      },
+      "ai_discharge_limit_soc": {
+        "name": "Лимит пользователя (Min SOC)"
+      },
+      "min_soc_buy": {
+        "name": "Минимальный уровень SOC"
+      },
+      "sale_pv_no_bat_max_hour": {
+        "name": "Макс. час для продажи только PV"
+      },
+      "arbitrage_profit_threshold": {
+        "name": "Минимальная прибыль арбитража"
+      },
+      "soc_buffer": {
+        "name": "Буфер SOC на утро (%)"
+      },
+      "dp_min_soc": {
+        "name": "Минимальный SOC для DP (%)"
+      },
+      "dp_price_sell_limit": {
+        "name": "Лимит цены продажи для DP"
+      }
     }
   }
 }
