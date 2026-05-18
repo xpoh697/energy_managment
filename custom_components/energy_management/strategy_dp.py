@@ -360,11 +360,11 @@ class DPPlanner:
                     elif abs(gen - cons) < 0.1: mode = "IDLE"
                     else: mode = "GRID"
                 
-                # Rule: if there is generation and sell price is above the limit, override SELF_CON to PV_CHG
+                # Rule: if there is generation and sell price is above the limit, override SELF_CON to SOL
                 if mode == "SELF_CON" and gen > 0.01:
                     price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
                     if p_sell >= price_sell_limit:
-                        mode = "PV_CHG"
+                        mode = "SOL"
                         amt = 0.0
 
                 soc = int(round((si * energy_step) / b_cap * 100.0))
