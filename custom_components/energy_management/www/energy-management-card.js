@@ -624,7 +624,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.1.17</div>
+        <div id="v-tag" class="version-tag">v12.1.18</div>
       </ha-card>
     `;
     this._initialized = true;
@@ -910,14 +910,30 @@ class EnergyManagementCard extends HTMLElement {
     // v11.9.696: Trust server's definition of 'Today' to avoid timezone desync
     const todayStr = serverToday || (now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0'));
 
+    let tomorrowStr = '';
+    try {
+      const parts = todayStr.split('-');
+      const todayDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      const tomorrowDate = new Date(todayDate);
+      tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+      tomorrowStr = tomorrowDate.getFullYear() + '-' + String(tomorrowDate.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrowDate.getDate()).padStart(2, '0');
+    } catch (e) {
+      const tomorrowDate = new Date();
+      tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+      tomorrowStr = tomorrowDate.getFullYear() + '-' + String(tomorrowDate.getMonth() + 1).padStart(2, '0') + '-' + String(tomorrowDate.getDate()).padStart(2, '0');
+    }
+
     const currentHour = now.getHours();
     const sortedKeys = Object.keys(data).sort();
     if (sortedKeys.length === 0) return;
 
     const currentHourStr = `${todayStr} ${currentHour < 10 ? '0' + currentHour : currentHour}:00`;
 
-    // Filter to show from NOW until the end of available data (Today + Tomorrow)
-    const windowKeys = sortedKeys.filter(k => k >= currentHourStr);
+    // Filter to show from NOW until the end of Tomorrow (Today + Tomorrow only)
+    const windowKeys = sortedKeys.filter(k => {
+      if (typeof k !== 'string') return false;
+      return k >= currentHourStr && (k.includes(todayStr) || k.includes(tomorrowStr));
+    });
 
     const hexToRgba = (hex, alpha) => {
       const r = parseInt(hex.slice(1, 3), 16);
@@ -934,14 +950,14 @@ class EnergyManagementCard extends HTMLElement {
     });
 
     // Check if tomorrow's prices are available
-    const tomorrowKeys = filteredKeys.filter(k => !k.includes(todayStr));
+    const tomorrowKeys = filteredKeys.filter(k => typeof k === 'string' && k.includes(tomorrowStr));
     const hasTomorrowPrices = tomorrowKeys.some(key => {
       const h = data[key];
       return (h.buy_price && h.buy_price !== 0) || (h.sell_price && h.sell_price !== 0);
     });
 
     if (tomorrowKeys.length > 0 && !hasTomorrowPrices) {
-      filteredKeys = filteredKeys.filter(k => k.includes(todayStr));
+      filteredKeys = filteredKeys.filter(k => typeof k === 'string' && k.includes(todayStr));
     }
 
     const currentKeysStr = filteredKeys.join(',');
@@ -950,7 +966,7 @@ class EnergyManagementCard extends HTMLElement {
       let html = '';
       let currentDayLabel = '';
       filteredKeys.forEach((key, idx) => {
-        const isTomorrow = !key.includes(todayStr);
+        const isTomorrow = typeof key === 'string' && key.includes(tomorrowStr);
         const label = isTomorrow ? 'TOMORROW' : 'TODAY';
         const hourData = data[key];
 
