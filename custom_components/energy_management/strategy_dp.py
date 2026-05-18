@@ -388,23 +388,40 @@ class DPPlanner:
                 elif act in [ACT_SELF_CONSUME]:
                     power_kw = min(max_p_dis, power_kw)
 
-                mode_map = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"]
-                mode = mode_map[act]
-                if act == ACT_IDLE:
-                    if gen > cons + 0.1: mode = "SOL"
-                    elif abs(gen - cons) < 0.1: mode = "IDLE"
-                    else: mode = "GRID"
-                
-                # Rule: if there is generation and sell price is above the limit, override SELF_CON to SOL
-                if mode == "SELF_CON" and gen > 0.01:
-                    price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
-                    if p_sell >= price_sell_limit:
-                        mode = "SOL"
-                        power_kw = 0.0
-
-                # Rule: if buy price is above the minimum planning price, override SELF_CON to PV_CHG
-                if mode == "SELF_CON" and p_buy > min_price_buy:
-                    mode = "PV_CHG"
+                price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
+                if act == ACT_DIS:
+                    # Sale_pv_bat - всегда когда нужно продать батарею в сеть
+                    mode = "sale_pv_bat"
+                elif act in [ACT_GRID_CHARGE, ACT_PAID_IMPORT]:
+                    # Принудительная зарядка из сети
+                    mode = "buy"
+                else: # ACT_IDLE, ACT_PV_CHARGE, ACT_SELF_CONSUME
+                    # Check if sell price is above the limit
+                    if p_sell > price_sell_limit:
+                        # Sale_pv всегда когда цена продажи выше лимита
+                        # Но если нужно продать только солнце мимо батареи (ACT_IDLE и есть солнце):
+                        if act == ACT_IDLE and gen > 0.01:
+                            # Sale_pv_no_bat - всегда когда нужно продать только солнце пуская его в сеть мимо батареи
+                            mode = "sale_pv_no_bat"
+                        else:
+                            mode = "sale_pv"
+                    else: # p_sell <= price_sell_limit (цена продажи ниже лимита)
+                        # stop_sale - всегда когда цена продажи ниже лимита
+                        # Но если впереди минимальная цена (отрицательный/дешевый пик) и мы не разряжаем АКБ (act != ACT_SELF_CONSUME):
+                        cheap_ahead = False
+                        if act != ACT_SELF_CONSUME:
+                            # Проверяем, есть ли впереди в окне планирования дешевый час
+                            for future_h in range(abs_h + 1, min(abs_h + 7, cur_hour + horizon)):
+                                future_p_buy = float(normalize_float(prices_buy.get(str(future_h), 99.0)))
+                                if future_p_buy <= 0.01 or future_p_buy <= (min_price_buy + 0.05):
+                                    cheap_ahead = True
+                                    break
+                        
+                        if cheap_ahead:
+                            # no_pv_sale_no_bat - всегда когда впереди минимальная цена и цена продажи ниже лимита
+                            mode = "no_pv_sale_no_bat"
+                        else:
+                            mode = "stop_sale"
 
                 soc = max(0, min(100, int(round((si * energy_step) / b_cap * 100.0))))
                 plan[h_key] = {"mode": mode, "power_kw": round(power_kw, 2), "target_soc": soc}

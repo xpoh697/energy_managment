@@ -249,6 +249,9 @@ class EnergyProfileManager:
         if not isinstance(dp_mode, str):
             dp_mode = str(dp_mode) if dp_mode is not None else "IDLE"
             
+        if dp_mode in ["buy", "sale_pv", "sale_pv_bat", "sale_pv_no_bat", "stop_sale", "no_pv_sale_no_bat", "bat_emergency"]:
+            return dp_mode
+
         if dp_mode == "GRID_CHG":
             val = self.get_setting("dp_map_grid_chg", self.get_setting("dp_map_charge", "buy"))
         elif dp_mode == "PAID_IMP":
