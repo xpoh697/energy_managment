@@ -26,6 +26,7 @@ from .const import (
     CONF_MIN_SELL_PRICE,
     CONF_MIN_DISCHARGE_KWH,
     CONF_DP_ENERGY_STEP,
+    CONF_PRICE_SELL_LIMIT,
     DOMAIN,
     VERSION
 )
@@ -358,6 +359,14 @@ class DPPlanner:
                     if gen > cons + 0.1: mode = "SOL"
                     elif abs(gen - cons) < 0.1: mode = "IDLE"
                     else: mode = "GRID"
+                
+                # Rule: if there is generation and sell price is above the limit, override SELF_CON to PV_CHG
+                if mode == "SELF_CON" and gen > 0.01:
+                    price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
+                    if p_sell >= price_sell_limit:
+                        mode = "PV_CHG"
+                        amt = 0.0
+
                 soc = int(round((si * energy_step) / b_cap * 100.0))
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 b_str = boiler_plan_state.get(abs_h, "")
