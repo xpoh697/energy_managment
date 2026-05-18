@@ -3580,23 +3580,28 @@ class InverterOperationModeSensor(SensorEntity):
             batt_soc, _, _ = self.manager.get_battery_state(soc_default=100.0)
             min_soc = float(self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))
             
-            # 2. Mode Lock Logic (Relaxed v11.9.361)
-            # Only apply strict locking for critical transitions: buy <-> sale_pv_bat
-            is_emergency = (raw_mode == "bat_emergency" or batt_soc <= (min_soc - 0.5))
-            
-            is_critical_pair = (
-                (self._locked_mode == "buy" and raw_mode == "sale_pv_bat") or
-                (self._locked_mode == "sale_pv_bat" and raw_mode == "buy")
-            )
-            
-            if is_critical_pair and not is_emergency and self._mode_lock_until and now < self._mode_lock_until:
-                if self._locked_mode:
-                    raw_mode = self._locked_mode
-            
-            # 3. Mode Change Detection
-            if raw_mode != self._locked_mode:
-                # Lock for 10 minutes
-                self._mode_lock_until = now + timedelta(minutes=10)
+            use_dp = self.manager.get_setting("use_dp", False)
+            if not use_dp:
+                # 2. Mode Lock Logic (Relaxed v11.9.361)
+                # Only apply strict locking for critical transitions: buy <-> sale_pv_bat
+                is_emergency = (raw_mode == "bat_emergency" or batt_soc <= (min_soc - 0.5))
+                
+                is_critical_pair = (
+                    (self._locked_mode == "buy" and raw_mode == "sale_pv_bat") or
+                    (self._locked_mode == "sale_pv_bat" and raw_mode == "buy")
+                )
+                
+                if is_critical_pair and not is_emergency and self._mode_lock_until and now < self._mode_lock_until:
+                    if self._locked_mode:
+                        raw_mode = self._locked_mode
+                
+                # 3. Mode Change Detection
+                if raw_mode != self._locked_mode:
+                    # Lock for 10 minutes
+                    self._mode_lock_until = now + timedelta(minutes=10)
+                    self._locked_mode = raw_mode
+            else:
+                self._mode_lock_until = None
                 self._locked_mode = raw_mode
                 
             # Update manager with final mode
