@@ -4,7 +4,7 @@
  */
 
 console.info(
-  "%c ENERGY MANAGEMENT %c v12.1.22 ",
+  "%c ENERGY MANAGEMENT %c v12.1.24 ",
   "color: white; background: #007bff; font-weight: bold; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #28a745; font-weight: bold; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
@@ -45,11 +45,11 @@ function getSocInfo(soc) {
   if (soc === undefined || soc === null) {
     return { icon: 'mdi:battery-unknown', color: 'rgba(255,255,255,0.2)', percent: '' };
   }
-  
+
   const val = parseFloat(soc);
   let color = '#ff6b6b'; // Coral Red (Low)
   let icon = 'mdi:battery-20';
-  
+
   if (val >= 75) {
     color = '#66bb6a'; // Fresh Green (High)
   } else if (val >= 60) {
@@ -59,7 +59,7 @@ function getSocInfo(soc) {
   } else if (val >= 25) {
     color = '#ffb74d'; // Orange (Medium-Low)
   }
-  
+
   if (val >= 95) icon = 'mdi:battery';
   else if (val >= 85) icon = 'mdi:battery-90';
   else if (val >= 75) icon = 'mdi:battery-80';
@@ -659,7 +659,7 @@ class EnergyManagementCard extends HTMLElement {
 
     // Fill Market Info (v12.0)
     const currency = this._hass.states[this._config.entity].attributes.unit_of_measurement || '';
-    
+
     const buyEl = this.shadowRoot.getElementById('info-buy');
     const sellEl = this.shadowRoot.getElementById('info-sell');
     const currEl = this.shadowRoot.getElementById('info-currency');
@@ -685,7 +685,7 @@ class EnergyManagementCard extends HTMLElement {
 
     this.shadowRoot.getElementById('info-power').innerText = `${hourData.power || 0} kW / ${hourData.amps || 0} A`;
     this.shadowRoot.getElementById('info-reason').innerText = hourData.reason || 'Standard AI decision';
-    
+
     // v12.0.38: Explicitly show Forecast vs Target
     const forecastEl = this.shadowRoot.getElementById('info-forecast-soc');
     if (forecastEl) {
@@ -699,7 +699,7 @@ class EnergyManagementCard extends HTMLElement {
 
   _toggleSocVisibility() {
     const mode = this.shadowRoot.getElementById('modal-mode').value;
-    
+
     let resolvedMode = mode;
     if (mode === 'ai' && this._currentHourData) {
       resolvedMode = this._currentHourData.mode;
@@ -761,7 +761,7 @@ class EnergyManagementCard extends HTMLElement {
     const attrs = stateObj.attributes;
     const soc = parseFloat(attrs.battery_soc) || 0;
     const bms = attrs.bms_status || {};
-    
+
     // Tab switching and active indicators
     const useDP = attrs.use_dp || false;
     if (!this._activeTab) {
