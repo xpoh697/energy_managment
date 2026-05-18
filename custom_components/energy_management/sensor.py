@@ -1353,21 +1353,10 @@ class EnergyProfileManager:
                             option_val = self.get_setting("dp_map_grid", "no_pv_sale_no_bat")
                         
                         if option_val:
-                            curr_state = self.hass.states.get(inverter_select)
-                            if curr_state is None or curr_state.state != option_val:
-                                service_domain = "input_select" if inverter_select.startswith("input_select.") else "select"
-                                self.log_to_file(f"DIAG: Mapped mode {slot0_mode} -> {option_val}. Writing to {inverter_select} via {service_domain}")
-                                await self.hass.services.async_call(
-                                    service_domain,
-                                    "select_option",
-                                    {
-                                        "entity_id": inverter_select,
-                                        "option": option_val
-                                    }
-                                )
+                            self.log_to_file(f"DIAG: Mapped mode {slot0_mode} -> {option_val}. Writing to inverter select is DISABLED by user request.")
             except Exception as e_write:
-                _LOGGER.error("Error writing mode to inverter select entity: %s", e_write)
-                self.log_to_file(f"DIAG: Error writing mode: {e_write}")
+                _LOGGER.error("Error logging mode recommendation: %s", e_write)
+                self.log_to_file(f"DIAG: Error logging mode: {e_write}")
 
             _LOGGER.info("[Global Plan] Successfully updated 48h dispatch registry with dual-planning support.")
             
