@@ -401,6 +401,8 @@ class DPPlanner:
             total_gen_today = sum(f_gen_full.get(str(h), 0.0) for h in range(0, 24))
             total_gen_today_rem = sum(f_gen_full.get(str(h), 0.0) for h in range(cur_hour, 24))
             total_gen_tomorrow = sum(f_gen_full.get(str(h), 0.0) for h in range(24, 48))
+            total_cons_today_rem = sum(f_cons_full.get(str(h), 0.0) for h in range(cur_hour, 24))
+            total_cons_tomorrow = sum(f_cons_full.get(str(h), 0.0) for h in range(24, 48))
             
             # v11.9.68: Fix debug info - don't query HA directly from thread!
             if "calculation_debug" not in self.manager.data:
@@ -430,6 +432,10 @@ class DPPlanner:
                     "calc_time": round(time.time()-t0, 2), 
                     "horizon": horizon,
                     "b_cap": b_cap,
+                    "dp_resolution": round(energy_step, 4),
+                    "tomorrow_gen_forecast": round(total_gen_tomorrow, 2),
+                    "tomorrow_cons_forecast": round(total_cons_tomorrow, 2),
+                    "today_cons_remaining": round(total_cons_today_rem, 2),
                     "constants": dp_constants
                 }
             }
