@@ -340,11 +340,11 @@ class DPPlanner:
                 res = full_dp[h+1][curr_si_back]
                 if res[1] == -1: break
                 _, prev_si, act, amt = res
-                results.append((h, act, amt, curr_si_back))
+                results.append((h, act, amt, prev_si, curr_si_back))
                 curr_si_back = prev_si
             
             results.reverse()
-            for h_idx, act, amt, si in results:
+            for h_idx, act, amt, prev_si, si in results:
                 abs_h = cur_hour + h_idx
                 h_rel = abs_h % 24
                 h_key = f"{h_rel:02d}:00" + (" (Завтра)" if abs_h >= 24 else "")
@@ -353,6 +353,15 @@ class DPPlanner:
                 gen = float(normalize_float(f_gen_full.get(str(abs_h), 0.0)))
                 cons = float(normalize_float(f_cons_full.get(str(abs_h), 0.4)))
                 
+                # Precise discharge power calculation for SELL mode (v12.3.1)
+                if act == ACT_DIS:
+                    dc_energy = max(0.0, (prev_si - si) * energy_step)
+                    duration = 1.0
+                    if h_idx == 0:
+                        duration = max(0.2, 1.0 - (now.minute / 60.0))
+                    safe_eff = max(0.8, min(1.0, eff))
+                    amt = min(max_p_dis, (dc_energy / duration) * safe_eff)
+
                 mode_map = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"]
                 mode = mode_map[act]
                 if act == ACT_IDLE:
