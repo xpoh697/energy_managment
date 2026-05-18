@@ -1106,10 +1106,15 @@ class EnergyProfileManager:
             
             is_today = (dt_h.date() == now.date())
             if is_today:
-                raw_gen = float(normalize_float(prof_gen.get(h_rel, 0.0)))
-                scaled_gen = raw_gen * scale_today
-                load_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
-                load_base_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
+                if h_abs == 0:
+                    scaled_gen = float(normalize_float(self.avg_gen_kw))
+                    load_val = float(normalize_float(self.avg_load_kw))
+                    load_base_val = float(normalize_float(self.avg_base_load_kw))
+                else:
+                    raw_gen = float(normalize_float(prof_gen.get(h_rel, 0.0)))
+                    scaled_gen = raw_gen * scale_today
+                    load_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
+                    load_base_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
             else:
                 scaled_gen = float(normalize_float(prof_gen_tomorrow.get(h_rel, 0.0)))
                 load_val = float(normalize_float(prof_cons_tomorrow.get(h_rel, 0.0)))
@@ -1131,18 +1136,14 @@ class EnergyProfileManager:
             if adv:
                 dp_mode_raw = adv.get("mode", "IDLE")
                 # v12.3.0: Rule to replace SOL with PV_CHG if current hour load > generation
-                if h_abs == 0:
-                    load_5m = float(normalize_float(self.avg_load_kw))
-                    gen_5m = float(normalize_float(self.avg_gen_kw))
-                    if dp_mode_raw == "SOL" and load_5m > gen_5m:
+                if h_abs == 0 and dp_mode_raw == "SOL":
+                    if load_val > scaled_gen:
                         dp_mode_raw = "PV_CHG"
-                    reason = f"DP Optimizer ({dp_mode_raw}) L:{round(load_5m, 2)} G:{round(gen_5m, 2)}"
-                else:
-                    reason = f"DP Optimizer ({dp_mode_raw})"
 
                 dp_mode = self.translate_dp_mode(dp_mode_raw)
                 power = adv.get("power_kw", 0.0)
                 soc_limit = adv.get("target_soc", 10.0)
+                reason = f"DP Optimizer ({dp_mode_raw})"
             else:
                 # Startup/Error Safe Fallback
                 dp_mode_raw = "IDLE"
