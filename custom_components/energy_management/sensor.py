@@ -450,6 +450,7 @@ class EnergyProfileManager:
         self._manual_anchor_target_soc = -1.0
         self._manual_anchor_power = 0.0
         self._manual_anchor_amps = 0.0
+        self._last_logged_mode = None
 
         self.all_active_sensors = set()
         raw_deduct_2 = config_data.get(CONF_DEDUCT_SETTINGS, {})
@@ -1333,6 +1334,9 @@ class EnergyProfileManager:
             else:
                 self.global_plan = heuristic_plan
                 self.log_to_file("DIAG: Active Global Plan set to Heuristic")
+
+            # Log inverter mode change if it differs from the last logged mode
+            self.log_mode_change_to_file()
 
             # --- Write target option to inverter select entity if configured ---
             try:
@@ -2273,6 +2277,78 @@ class EnergyProfileManager:
             self.hass.async_add_executor_job(_write_sync)
         else:
             _write_sync()
+
+    def log_mode_change_to_file(self):
+        """Log inverter mode changes with all parameters to em_mode_change.log."""
+        try:
+            slot0 = self.global_plan.get_slot(0) if self.global_plan else None
+            if not slot0: return
+            
+            current_mode = slot0.mode
+            # Only log if the mode has changed from the last logged mode
+            if self._last_logged_mode == current_mode:
+                return
+                
+            self._last_logged_mode = current_mode
+            
+            soc = 0.0
+            try:
+                soc_val, _, _ = self.get_battery_state()
+                if soc_val is not None:
+                    soc = float(soc_val)
+            except: pass
+            
+            use_dp = self.get_setting("use_dp", False)
+            strategy = "DP" if use_dp else "Heuristic"
+            
+            power = round(slot0.power_ac, 2)
+            amps = round(slot0.charge_amps, 1)
+            target_soc = round(slot0.target_soc, 1)
+            gen_hour = round(slot0.gen_raw, 2)
+            load_hour = round(slot0.load_total, 2)
+            
+            avg_gen_5m = 0.0
+            try:
+                avg_gen_5m = round(self.avg_gen_5m_kw, 2)
+            except: pass
+            
+            avg_load_5m = 0.0
+            try:
+                avg_load_5m = round(self.avg_load_5m_kw, 2)
+            except: pass
+            
+            log_line = (
+                f"MODE_CHANGE: Mode -> [{current_mode}] | Strategy: {strategy} | "
+                f"Power: {power} kW | Amps: {amps} A | SOC: {soc}% | Target SOC: {target_soc}% | "
+                f"Gen Hour: {gen_hour} kWh | Load Hour: {load_hour} kWh | "
+                f"Avg Gen 5m: {avg_gen_5m} kW | Avg Load 5m: {avg_load_5m} kW | "
+                f"Reason: {slot0.reason}"
+            )
+            
+            def _write_mode_sync():
+                try:
+                    log_file = self.hass.config.path("em_mode_change.log")
+                    timestamp = dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
+                    full_msg = f"{timestamp} {log_line}\n"
+                    
+                    # Rotation: Check size (max 5MB)
+                    import os
+                    if os.path.exists(log_file) and os.path.getsize(log_file) > 5 * 1024 * 1024:
+                        old_log = log_file + ".old"
+                        if os.path.exists(old_log): os.remove(old_log)
+                        os.rename(log_file, old_log)
+                        
+                    with open(log_file, "a", encoding="utf-8") as f:
+                        f.write(full_msg)
+                except: pass
+                
+            if hasattr(self, "hass") and self.hass:
+                self.hass.async_add_executor_job(_write_mode_sync)
+            else:
+                _write_mode_sync()
+        except Exception as e:
+            _LOGGER.error("Error in log_mode_change_to_file: %s", e)
+
 
     def get_expected_consumption(self):
         """Helper to get the expected consumption value for the current hour."""
