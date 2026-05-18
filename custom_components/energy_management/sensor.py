@@ -5130,6 +5130,8 @@ class EnergyDPAdviceSensor(SensorEntity):
         self._advice = {}
         self._last_run_time = 0
         self._is_calculating = False
+        self._last_calc_soc = None
+        self._last_calc_hour = -1
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(manager.entry.entry_id))},
@@ -5171,8 +5173,32 @@ class EnergyDPAdviceSensor(SensorEntity):
         if self._is_calculating: return
         if (t_now - self._last_run_time) < 60: return
 
+        # 1. Startup Protection: If battery SOC is not yet fully available, skip calculation
+        if self.manager.battery_soc_sensor:
+            try:
+                st = self.hass.states.get(self.manager.battery_soc_sensor)
+                if not st or st.state in ["unavailable", "unknown", "none", ""]:
+                    _LOGGER.info("DP Advice: Startup protection active. Battery SOC sensor not ready yet. Skipping calculation.")
+                    return
+            except Exception as e_st:
+                _LOGGER.warning("DP Advice: Error checking SOC sensor during startup: %s", e_st)
+                return
+
         # Capture critical data in main thread where it's safe
         soc, cap, _ = self.manager.get_battery_state()
+
+        # 2. SOC Deadband Filter (Option C): Skip recalculation if SOC change is tiny within the same hour
+        # Bypass deadband filter if there is no successful advice yet
+        if self._advice and "plan" in self._advice:
+            try:
+                from datetime import datetime
+                current_hour = datetime.now().hour
+                if self._last_calc_soc is not None and self._last_calc_hour == current_hour:
+                    if abs(soc - self._last_calc_soc) < 0.5:
+                        return
+            except Exception as e_deadband:
+                _LOGGER.warning("DP Advice: Error in deadband check: %s", e_deadband)
+
         snapshot = {
             "soc": soc,
             "capacity": cap,
@@ -5196,6 +5222,13 @@ class EnergyDPAdviceSensor(SensorEntity):
             res = self.planner.get_dp_advice(snapshot)
             self._advice = res
             self._last_run_time = time.time()
+            # Store the SOC that was actually computed successfully
+            self._last_calc_soc = snapshot.get("soc")
+            try:
+                from datetime import datetime
+                self._last_calc_hour = datetime.now().hour
+            except:
+                self._last_calc_hour = -1
             if self.hass:
                 self.hass.add_job(self._async_on_calc_complete)
         except Exception as e:
@@ -5206,6 +5239,9 @@ class EnergyDPAdviceSensor(SensorEntity):
                 "debug": {"error": str(e)},
                 "plan": {}
             }
+            # Reset tracking on failure to force next run
+            self._last_calc_soc = None
+            self._last_calc_hour = -1
             if self.hass:
                 self.hass.add_job(self._async_on_calc_complete)
         finally:
