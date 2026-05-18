@@ -52,6 +52,10 @@ class GlobalSlot:
     # Debug containers (preserving existing sensor logic)
     buy_debug: Dict[str, Any] = field(default_factory=dict)
     sell_debug: Dict[str, Any] = field(default_factory=dict)
+    
+    # 5m average real-time metrics for slot 0
+    avg_gen: Optional[float] = None
+    avg_load: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns a dict representation for JSON serialization."""
@@ -92,6 +96,10 @@ class DispatchPlan:
                 "power": round(s.power_ac, 2),
                 "amps": round(s.charge_amps, 1)
             }
+            if s.avg_gen is not None:
+                res[key]["avg_gen"] = round(s.avg_gen, 2)
+            if s.avg_load is not None:
+                res[key]["avg_load"] = round(s.avg_load, 2)
         return res
 
     def to_planned_modes_24h(self) -> Dict[str, str]:

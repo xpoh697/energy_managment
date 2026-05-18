@@ -1106,15 +1106,10 @@ class EnergyProfileManager:
             
             is_today = (dt_h.date() == now.date())
             if is_today:
-                if h_abs == 0:
-                    scaled_gen = float(normalize_float(self.avg_gen_kw))
-                    load_val = float(normalize_float(self.avg_load_kw))
-                    load_base_val = float(normalize_float(self.avg_base_load_kw))
-                else:
-                    raw_gen = float(normalize_float(prof_gen.get(h_rel, 0.0)))
-                    scaled_gen = raw_gen * scale_today
-                    load_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
-                    load_base_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
+                raw_gen = float(normalize_float(prof_gen.get(h_rel, 0.0)))
+                scaled_gen = raw_gen * scale_today
+                load_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
+                load_base_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
             else:
                 scaled_gen = float(normalize_float(prof_gen_tomorrow.get(h_rel, 0.0)))
                 load_val = float(normalize_float(prof_cons_tomorrow.get(h_rel, 0.0)))
@@ -1129,6 +1124,9 @@ class EnergyProfileManager:
                 load_total=load_val,
                 load_base=load_base_val
             )
+            if h_abs == 0:
+                slot.avg_gen = float(normalize_float(self.avg_gen_kw))
+                slot.avg_load = float(normalize_float(self.avg_load_kw))
             
             ts_key = dt_h.strftime("%Y-%m-%d %H:00")
             adv = plan_by_ts.get(ts_key, {})
@@ -1137,7 +1135,7 @@ class EnergyProfileManager:
                 dp_mode_raw = adv.get("mode", "IDLE")
                 # v12.3.0: Rule to replace SOL with PV_CHG if current hour load > generation
                 if h_abs == 0 and dp_mode_raw == "SOL":
-                    if load_val > scaled_gen:
+                    if slot.avg_load > slot.avg_gen:
                         dp_mode_raw = "PV_CHG"
 
                 dp_mode = self.translate_dp_mode(dp_mode_raw)

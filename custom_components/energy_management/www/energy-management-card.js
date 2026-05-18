@@ -571,6 +571,18 @@ class EnergyManagementCard extends HTMLElement {
                     <span class="unit-text"> kW</span>
                   </b>
                 </div>
+                <div class="info-row" id="info-avg-row">
+                  <span class="info-label">
+                    <ha-icon icon="mdi:clock-outline" class="info-icon solar-color"></ha-icon>
+                    <span>Avg 5M (Gen/Load)</span>
+                  </span>
+                  <b class="info-value">
+                    <span id="info-avg-gen" class="color-gen">-</span>
+                    <span class="divider"> / </span>
+                    <span id="info-avg-load" class="color-load">-</span>
+                    <span class="unit-text"> kW</span>
+                  </b>
+                </div>
                 <div class="info-row" id="info-power-row">
                   <span class="info-label">
                     <ha-icon icon="mdi:flash-outline" class="info-icon power-color"></ha-icon>
@@ -659,6 +671,17 @@ class EnergyManagementCard extends HTMLElement {
     const loadEl = this.shadowRoot.getElementById('info-load');
     if (genEl) genEl.innerText = hourData.gen !== undefined ? hourData.gen : '0';
     if (loadEl) loadEl.innerText = hourData.load !== undefined ? hourData.load : '0';
+
+    const avgGenEl = this.shadowRoot.getElementById('info-avg-gen');
+    const avgLoadEl = this.shadowRoot.getElementById('info-avg-load');
+    const avgRow = this.shadowRoot.getElementById('info-avg-row');
+    if (hourData.avg_gen !== undefined && hourData.avg_load !== undefined) {
+      if (avgRow) avgRow.style.display = 'flex';
+      if (avgGenEl) avgGenEl.innerText = hourData.avg_gen.toFixed(2);
+      if (avgLoadEl) avgLoadEl.innerText = hourData.avg_load.toFixed(2);
+    } else {
+      if (avgRow) avgRow.style.display = 'none';
+    }
 
     this.shadowRoot.getElementById('info-power').innerText = `${hourData.power || 0} kW / ${hourData.amps || 0} A`;
     this.shadowRoot.getElementById('info-reason').innerText = hourData.reason || 'Standard AI decision';
