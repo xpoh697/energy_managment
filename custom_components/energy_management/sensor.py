@@ -2542,10 +2542,10 @@ class EnergyProfileManager:
                             val = 0.0 # No forecast left
                     else:
                         # Fallback to history
-                        avg_prof = self.get_average_profile(profile_type, self.custom_period)
+                        avg_prof = self.get_average_profile(profile_type, self.custom_period, self.day_type)
                         val = float(normalize_float(avg_prof.get(sh, 0.0)))
                 else:
-                    avg_prof = self.get_average_profile(profile_type, self.custom_period)
+                    avg_prof = self.get_average_profile(profile_type, self.custom_period, self.day_type)
                     val = float(normalize_float(avg_prof.get(sh, 0.0)))
                 
                 res[sh] = round_f(val, 3)
