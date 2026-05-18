@@ -16,6 +16,9 @@ from .const import (
     CONF_BOILER_CAPACITY,
     CONF_BOILER_TEMP_SENSOR,
     CONF_BOILER_DEADLINE,
+    CONF_BOILER_MIN_TEMP,
+    CONF_BOILER_TARGET_TEMP,
+    CONF_BOILER_MAX_TEMP,
     CONF_MIN_SELL_POWER,
     CONF_DYNAMIC_SOC_SELL,
     CONF_FORCE_MARKET_SELL,
@@ -60,7 +63,11 @@ class DPPlanner:
             try:
                 return float(val)
             except ValueError:
-                return self.manager.get_sensor_float(val, default)
+                try:
+                    res = self.manager.get_sensor_float(val, default)
+                    return default if res is None else float(res)
+                except Exception:
+                    return default
 
         try:
             now = self.manager.now
@@ -105,17 +112,18 @@ class DPPlanner:
             
             # v11.9.61: Use standard prediction profiles (consistent with working Sell strategy)
             forecast_gen = self.manager.get_predicted_profile("generation")
-            avg_cons = self.manager.get_predicted_profile("consumption_base")
-            # For tomorrow, use the same profile but shifted or average (simplified fallback)
-            tomorrow_gen = self.manager.get_average_profile("generation", 7, (now.weekday() + 1) % 7)
-            tomorrow_cons = self.manager.get_average_profile("consumption_base", 7, (now.weekday() + 1) % 7)
+            avg_cons = self.manager.get_manager_or_self().get_predicted_profile("consumption_total") if hasattr(self.manager, "get_manager_or_self") else self.manager.get_predicted_profile("consumption_total")
+            
+            # Use unique tomorrow profiles!
+            forecast_gen_tomorrow = self.manager.get_predicted_profile_tomorrow("generation")
+            avg_cons_tomorrow = self.manager.get_predicted_profile_tomorrow("consumption_total")
             
             # Populate extended horizon for DP
             f_gen_full = {str(h): float(normalize_float(forecast_gen.get(str(h), 0.0))) for h in range(24)}
             f_cons_full = {str(h): float(normalize_float(avg_cons.get(str(h), 0.0))) for h in range(24)}
             for h in range(24):
-                f_gen_full[str(h+24)] = float(normalize_float(tomorrow_gen.get(str(h), 0.0)))
-                f_cons_full[str(h+24)] = float(normalize_float(tomorrow_cons.get(str(h), 0.0)))
+                f_gen_full[str(h+24)] = float(normalize_float(forecast_gen_tomorrow.get(str(h), 0.0)))
+                f_cons_full[str(h+24)] = float(normalize_float(avg_cons_tomorrow.get(str(h), 0.0)))
             
             # --- Boiler Optimization Logic (v12.2.0) ---
             boiler_enable = self.manager.get_setting(CONF_BOILER_ENABLE, False)
@@ -125,6 +133,13 @@ class DPPlanner:
             boiler_min_temp = _parse_temp(self.manager.get_setting(CONF_BOILER_MIN_TEMP, "20"), 20.0)
             boiler_tgt_temp = _parse_temp(self.manager.get_setting(CONF_BOILER_TARGET_TEMP, "60"), 60.0)
             boiler_max_temp = _parse_temp(self.manager.get_setting(CONF_BOILER_MAX_TEMP, "70"), 70.0)
+            
+            # Skeptic safety guards against wrong user inputs
+            if boiler_tgt_temp <= boiler_min_temp:
+                boiler_tgt_temp = boiler_min_temp + 5.0
+            if boiler_max_temp <= boiler_tgt_temp:
+                boiler_max_temp = boiler_tgt_temp + 5.0
+                
             boiler_sensor = self.manager.get_setting(CONF_BOILER_TEMP_SENSOR)
             curr_boiler_temp = self.manager.get_sensor_float(boiler_sensor, boiler_min_temp) if boiler_sensor else boiler_min_temp
             
@@ -333,6 +348,10 @@ class DPPlanner:
                 
                 mode_map = ["IDLE", "DIS", "PV_CHG", "GRID_CHG", "SELF_CON", "PAID_IMP"]
                 mode = mode_map[act]
+                if act == ACT_IDLE:
+                    if gen > cons + 0.1: mode = "SOL"
+                    elif abs(gen - cons) < 0.1: mode = "IDLE"
+                    else: mode = "GRID"
                 soc = int(round((si * energy_step) / b_cap * 100.0))
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
                 b_str = boiler_plan_state.get(abs_h, "")

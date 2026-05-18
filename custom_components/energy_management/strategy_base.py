@@ -959,7 +959,7 @@ class StrategyEngine:
         if isinstance(h, str): return "день" in h
         return False
 
-    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None, no_solar_to_bat=False, mode_overrides=None, current_mode=None):
+    def run_soc_simulation(self, start_soc, sim_range, now, commands=None, b_min_soc=0.0, man=None, house_profile_override=None, no_battery_charge=False, no_battery_charge_until=None, pv_curtail_hours=None, ignore_blended=False, dynamic_floors=None, no_solar=False, allow_discharge=True, attempt=0, ignore_house_in_hours=None, no_solar_to_bat=False, mode_overrides=None, current_mode=None, dynamic_ceilings=None):
         """Universal SOC simulation engine."""
         if not sim_range:
             return float(start_soc), {}, 0.0
@@ -1286,6 +1286,8 @@ class StrategyEngine:
                 h_ceiling_trade = 100.0
                 if dynamic_floors and h_idx_int in dynamic_floors:
                     h_floor_trade = float(dynamic_floors[h_idx_int])
+                if dynamic_ceilings and h_idx_int in dynamic_ceilings:
+                    h_ceiling_trade = float(dynamic_ceilings[h_idx_int])
 
                 # v11.9.618: Simplified manual limits - max power and 15% absolute floor
                 if _manual_soc is not None:

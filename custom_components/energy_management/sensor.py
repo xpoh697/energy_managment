@@ -1079,12 +1079,16 @@ class EnergyProfileManager:
 
     async def _calculate_dp_plan(
         self, now, batt_soc, scale_today, scale_tomorrow,
-        prof_gen, prof_cons, prof_cons_base, sim_range, eff
+        prof_gen, prof_cons, prof_cons_base,
+        prof_gen_tomorrow, prof_cons_tomorrow, prof_cons_base_tomorrow,
+        sim_range, eff
     ) -> DispatchPlan:
         """Потокобезопасный асинхронный расчет DP-плана на основе кэшированных советов."""
         slots = []
         charge_cmds = {}
         sell_cmds = {}
+        dp_floors = {}
+        dp_ceilings = {}
         sim_soc = batt_soc
         
         dp_advice = getattr(self, "dp_advice_stable", {})
@@ -1100,8 +1104,16 @@ class EnergyProfileManager:
             h_rel = str(dt_h.hour)
             today_str = dt_h.strftime("%Y-%m-%d")
             
-            raw_gen = float(normalize_float(prof_gen.get(h_rel, 0.0)))
-            scaled_gen = raw_gen * scale_today if dt_h.date() == now.date() else (raw_gen * scale_tomorrow if dt_h.date() == (now.date() + timedelta(days=1)) else raw_gen)
+            is_today = (dt_h.date() == now.date())
+            if is_today:
+                raw_gen = float(normalize_float(prof_gen.get(h_rel, 0.0)))
+                scaled_gen = raw_gen * scale_today
+                load_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
+                load_base_val = float(normalize_float(prof_cons.get(h_rel, 0.0)))
+            else:
+                scaled_gen = float(normalize_float(prof_gen_tomorrow.get(h_rel, 0.0)))
+                load_val = float(normalize_float(prof_cons_tomorrow.get(h_rel, 0.0)))
+                load_base_val = float(normalize_float(prof_cons_tomorrow.get(h_rel, 0.0)))
 
             slot = GlobalSlot(
                 hour_abs=h_abs,
@@ -1109,8 +1121,8 @@ class EnergyProfileManager:
                 price_buy=self.get_price("buy", today_str, dt_h.hour) or 0.0,
                 price_sell=self.get_price("sell", today_str, dt_h.hour) or 0.0,
                 gen_raw=scaled_gen,
-                load_total=float(normalize_float(prof_cons.get(h_rel, 0.0))),
-                load_base=float(normalize_float(prof_cons_base.get(h_rel, 0.0)))
+                load_total=load_val,
+                load_base=load_base_val
             )
             
             ts_key = dt_h.strftime("%Y-%m-%d %H:00")
@@ -1201,6 +1213,13 @@ class EnergyProfileManager:
             
             if slot.mode == "buy": charge_cmds[now.hour + h_abs] = slot.power_ac
             elif slot.mode == "sale_pv_bat": sell_cmds[now.hour + h_abs] = slot.power_ac
+            
+            h_abs_sim = int(now.hour + h_abs)
+            if slot.mode == "sale_pv_bat":
+                dp_floors[h_abs_sim] = slot.target_soc
+            elif slot.mode == "buy":
+                dp_ceilings[h_abs_sim] = slot.target_soc
+
             slots.append(slot)
             
         # High-Fidelity Simulation Pass for DP
@@ -1215,7 +1234,8 @@ class EnergyProfileManager:
             now=now,
             commands=all_cmds,
             mode_overrides=m_overrides,
-            dynamic_floors={}  # DP does not use Heuristic safety floors
+            dynamic_floors=dp_floors,
+            dynamic_ceilings=dp_ceilings
         )
         
         for i, slot in enumerate(slots):
@@ -1260,6 +1280,10 @@ class EnergyProfileManager:
             prof_cons = self.get_predicted_profile("consumption_total")
             prof_cons_base = self.get_predicted_profile("consumption_base")
             
+            prof_gen_tomorrow = self.get_predicted_profile_tomorrow("generation")
+            prof_cons_tomorrow = self.get_predicted_profile_tomorrow("consumption_total")
+            prof_cons_base_tomorrow = self.get_predicted_profile_tomorrow("consumption_base")
+            
             # Forecast Scaling parameters
             now_h = now.hour
             f_today_val = self.get_forecast_value(self.forecast_today_sensor)
@@ -1268,7 +1292,8 @@ class EnergyProfileManager:
             hist_today_rem = sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(now_h, 24))
             scale_today = float(f_today_val / hist_today_rem) if (f_today_val is not None and hist_today_rem > 0.1) else 1.0
             
-            hist_tomorrow = sum(float(normalize_float(prof_gen.get(str(h), 0.0))) for h in range(24))
+            # Scale tomorrow based on the unique tomorrow generation profile!
+            hist_tomorrow = sum(float(normalize_float(prof_gen_tomorrow.get(str(h), 0.0))) for h in range(24))
             scale_tomorrow = float(f_tomorrow_val / hist_tomorrow) if (f_tomorrow_val is not None and hist_tomorrow > 0.1) else 1.0
             
             shared_profiles = {"gen": prof_gen, "cons": prof_cons, "cons_base": prof_cons_base}
@@ -1283,7 +1308,9 @@ class EnergyProfileManager:
             
             dp_plan = await self._calculate_dp_plan(
                 now, batt_soc, scale_today, scale_tomorrow,
-                prof_gen, prof_cons, prof_cons_base, sim_range, eff
+                prof_gen, prof_cons, prof_cons_base,
+                prof_gen_tomorrow, prof_cons_tomorrow, prof_cons_base_tomorrow,
+                sim_range, eff
             )
             
             # Cache the plans in EnergyProfileManager for the UI sensor attributes
@@ -2524,6 +2551,40 @@ class EnergyProfileManager:
                 res[sh] = round_f(val, 3)
         return res
 
+    def get_predicted_profile_tomorrow(self, profile_type):
+        """Returns tomorrow's 24h predicted profile (specific to tomorrow's day of week)."""
+        now = dt_util.now()
+        tomorrow = now + timedelta(days=1)
+        tom_weekday = tomorrow.weekday()  # Integer 0-6
+        tom_str = tomorrow.strftime("%Y-%m-%d")
+        res = {}
+        
+        for h in range(24):
+            sh = str(h)
+            val = 0.0
+            if profile_type == "generation":
+                dist = self.get_forecast_hourly_distribution(self.forecast_tomorrow_sensor, target_date_str=tom_str) if self.forecast_tomorrow_sensor else {}
+                if dist:
+                    smart_sum = sum(float(v) for h_str, v in dist.items())
+                    real_rem = self.get_forecast_value(self.forecast_tomorrow_sensor) or 0.0
+                    if smart_sum > 0.1 and real_rem > 0.1:
+                        scale = real_rem / smart_sum
+                        val = float(dist.get(sh, 0.0)) * scale
+                    else:
+                        # Fallback to weekday history if Solcast tomorrow total or sum is 0
+                        avg_prof = self.get_average_profile(profile_type, self.custom_period, tom_weekday)
+                        val = float(normalize_float(avg_prof.get(sh, 0.0)))
+                else:
+                    avg_prof = self.get_average_profile(profile_type, self.custom_period, tom_weekday)
+                    val = float(normalize_float(avg_prof.get(sh, 0.0)))
+            else:
+                avg_prof = self.get_average_profile(profile_type, self.custom_period, tom_weekday)
+                val = float(normalize_float(avg_prof.get(sh, 0.0)))
+                
+            res[sh] = round_f(val, 3)
+            
+        return res
+
     def get_todays_profile(self, profile_type):
         """Returns the actual hourly profile for the current day up to the current hour."""
         now = dt_util.now()
@@ -2813,6 +2874,8 @@ class EnergyProfileManager:
         """
         if not sensor_list:
             return {}
+        if isinstance(sensor_list, str):
+            sensor_list = [sensor_list]
             
         res = {str(h): 0.0 for h in range(24)}
         found_data = False
@@ -5058,7 +5121,15 @@ class EnergyDPAdviceSensor(SensorEntity):
             if self.hass:
                 self.hass.add_job(self._async_on_calc_complete)
         except Exception as e:
-            _LOGGER.error(f"DP Update error: {e}")
+            _LOGGER.exception(f"DP Update error: {e}")
+            self._advice = {
+                "best_value": 0.0,
+                "formatted_plan": {"Ошибка": f"Сбой расчета DP: {str(e)}"},
+                "debug": {"error": str(e)},
+                "plan": {}
+            }
+            if self.hass:
+                self.hass.add_job(self._async_on_calc_complete)
         finally:
             self._is_calculating = False
 
