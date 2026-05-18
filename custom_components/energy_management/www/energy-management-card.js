@@ -624,7 +624,7 @@ class EnergyManagementCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div id="v-tag" class="version-tag">v12.1.16</div>
+        <div id="v-tag" class="version-tag">v12.1.17</div>
       </ha-card>
     `;
     this._initialized = true;

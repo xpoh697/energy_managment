@@ -344,6 +344,13 @@ class DPPlanner:
                 curr_si_back = prev_si
             
             results.reverse()
+            
+            # Calculate minimum buy price across the entire horizon once
+            try:
+                min_price_buy = min(float(normalize_float(v)) for v in prices_buy.values()) if prices_buy else 999.0
+            except Exception:
+                min_price_buy = 999.0
+
             for h_idx, act, amt, prev_si, si in results:
                 abs_h = cur_hour + h_idx
                 h_rel = abs_h % 24
@@ -375,6 +382,10 @@ class DPPlanner:
                     if p_sell >= price_sell_limit:
                         mode = "SOL"
                         amt = 0.0
+
+                # Rule: if buy price is above the minimum planning price, override SELF_CON to PV_CHG
+                if mode == "SELF_CON" and p_buy > min_price_buy:
+                    mode = "PV_CHG"
 
                 soc = max(0, min(100, int(round((si * energy_step) / b_cap * 100.0))))
                 plan[h_key] = {"mode": mode, "power_kw": round(amt, 2), "target_soc": soc}
