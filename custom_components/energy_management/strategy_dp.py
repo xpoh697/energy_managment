@@ -11,6 +11,8 @@ from .const import (
     CONF_MIN_SOC_BAT,
     CONF_DP_MIN_SOC,
     CONF_DP_PRICE_SELL_LIMIT,
+    CONF_PRICE_SELL_LIMIT,
+    CONF_PRICE_SELL_ONLY_PV,
     CONF_AI_DISCHARGE_LIMIT,
     CONF_BOILER_ENABLE,
     CONF_BOILER_POWER,
@@ -107,7 +109,7 @@ class DPPlanner:
             energy_steps = int(round(b_cap / energy_step))
             
             cycle_cost = self._get_deg_cost(b_cap)
-            min_soc = float(normalize_float(self.manager.get_setting(CONF_DP_MIN_SOC, 10.0)))
+            min_soc = float(normalize_float(self.manager.get_setting(CONF_DP_MIN_SOC, self.manager.get_setting(CONF_MIN_SOC_BAT, 10.0))))
             soc_buff = 0.0
             eff = getattr(self.manager, "last_eff_coeff", 0.98)  # align with strategy_base.py hardcoded 0.98
             
@@ -210,13 +212,15 @@ class DPPlanner:
                 min_price_buy = min(float(normalize_float(v)) for v in prices_buy.values()) if prices_buy else 999.0
             except Exception:
                 min_price_buy = 999.0
-            price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_DP_PRICE_SELL_LIMIT, 0.3)))
+            price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_LIMIT, 5.0)))
+            price_sell_only_pv = float(normalize_float(self.manager.get_setting(CONF_PRICE_SELL_ONLY_PV, 0.3)))
+            dp_price_sell_limit = float(normalize_float(self.manager.get_setting(CONF_DP_PRICE_SELL_LIMIT, price_sell_limit)))
 
             neg_inf = -1e9
             # v11.9.42: Arbitrage TOP hours per day
             max_arb_h = int(normalize_float(self.manager.get_setting(CONF_MAX_ARBITRAGE_HOURS, 3)))
             min_dis_kwh = float(normalize_float(self.manager.get_setting(CONF_MIN_DISCHARGE_KWH, 0.5)))
-            min_sell_p = price_sell_limit
+            min_sell_p = dp_price_sell_limit
             
             # DP Table: [hour][energy_idx] (2D Optimization)
             full_dp = [[(neg_inf, -1, ACT_IDLE, 0.0)] * (energy_steps + 1) for _ in range(horizon + 1)]
@@ -281,7 +285,7 @@ class DPPlanner:
 
                 # v12.1.20: Check if a negative price or absolute cheapest grid-charge hour is ahead in 6 hours
                 cheap_ahead = False
-                if p_sell <= price_sell_limit:
+                if p_sell <= price_sell_only_pv:
                     for future_h in range(abs_h + 1, min(abs_h + 7, cur_hour + horizon)):
                         future_p_buy = float(normalize_float(prices_buy.get(str(future_h), 99.0)))
                         if future_p_buy <= 0.01 or future_p_buy <= (min_price_buy + 0.05):
@@ -295,7 +299,7 @@ class DPPlanner:
                     usable_energy = si * energy_step  # DC kWh stored in battery
                     # 1. ACT_IDLE: Baseline
                     # If cheap_ahead is True, the physical inverter is in no_pv_sale_no_bat, curtailing excess solar (reward = 0.0)
-                    idle_pv_reward = 0.0 if (p_sell <= price_sell_limit and cheap_ahead) else (p_sell * pv_surplus)
+                    idle_pv_reward = 0.0 if (p_sell <= price_sell_only_pv and cheap_ahead) else (p_sell * pv_surplus)
                     _update(si, ACT_IDLE, 0.0, h, si, cur_rev + idle_pv_reward - p_buy * pv_deficit + 1e-6)
                             
                     # 2. ACT_DIS: Forced discharge to grid (Arbitrage)
@@ -313,7 +317,7 @@ class DPPlanner:
                     # 3. ACT_PV_CHARGE: Surplus PV (AC) to battery (DC)
                     # chg_ac = AC power from PV; chg_dc = DC actually stored (after inverter losses)
                     # If cheap_ahead is True and p_sell is below the limit, block charging from solar (no_pv_sale_no_bat)
-                    if pv_surplus > 0.01 and si < energy_steps and not (p_sell <= price_sell_limit and cheap_ahead):
+                    if pv_surplus > 0.01 and si < energy_steps and not (p_sell <= price_sell_only_pv and cheap_ahead):
                         max_storable_dc = (energy_steps - si) * energy_step
                         chg_ac = min(pv_surplus, max_storable_dc / eff, max_p_chg * duration)
                         chg_dc = chg_ac * eff
@@ -414,13 +418,17 @@ class DPPlanner:
                         # Sale_pv_bat - всегда когда нужно продать батарею в сеть
                         mode = "sale_pv_bat"
                     else:
-                        mode = "stop_sale"
+                        # Если цена продажи ниже порога для батареи, но выше порога для солнца:
+                        if p_sell > price_sell_only_pv:
+                            mode = "sale_pv"
+                        else:
+                            mode = "stop_sale"
                 elif act in [ACT_GRID_CHARGE, ACT_PAID_IMPORT]:
                     # Принудительная зарядка из сети
                     mode = "buy"
                 else: # ACT_IDLE, ACT_PV_CHARGE, ACT_SELF_CONSUME
-                    # Check if sell price is above the limit
-                    if p_sell > price_sell_limit:
+                    # Check if sell price is above the limit for PV-only export
+                    if p_sell > price_sell_only_pv:
                         # Sale_pv всегда когда цена продажи выше лимита
                         # Но если нужно продать только солнце мимо батареи (ACT_IDLE и есть солнце):
                         if act == ACT_IDLE and gen > 0.01:
@@ -428,7 +436,7 @@ class DPPlanner:
                             mode = "sale_pv_no_bat"
                         else:
                             mode = "sale_pv"
-                    else: # p_sell <= price_sell_limit (цена продажи ниже лимита)
+                    else: # p_sell <= price_sell_only_pv (цена продажи ниже лимита солнца)
                         # stop_sale - всегда когда цена продажи ниже лимита
                         # Но если впереди минимальная цена (отрицательный/дешевый пик) и мы не разряжаем АКБ (act != ACT_SELF_CONSUME):
                         cheap_ahead = False
