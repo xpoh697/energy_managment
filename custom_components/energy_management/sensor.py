@@ -5184,10 +5184,58 @@ class EnergyDPAdviceSensor(SensorEntity):
                 _LOGGER.warning("DP Advice: Error checking SOC sensor during startup: %s", e_st)
                 return
 
+        # 2. Startup Protection: If Nord Pool Price Data is not yet parsed, skip calculation
+        try:
+            prices_buy = self.planner._get_prices("prices_buy")
+            if not prices_buy or len(prices_buy) < 12:
+                _LOGGER.info("DP Advice: Startup protection active. Nord Pool price data not ready yet. Skipping calculation.")
+                return
+        except Exception as e_pr:
+            _LOGGER.warning("DP Advice: Error checking price data during startup: %s", e_pr)
+            return
+
+        # 3. Startup Protection: If Solar Forecast sensors are not yet ready, skip calculation
+        if self.manager.forecast_today_sensor:
+            try:
+                for s in self.manager.forecast_today_sensor:
+                    if s:
+                        st = self.hass.states.get(s)
+                        if not st or st.state in ["unavailable", "unknown", "none", ""]:
+                            _LOGGER.info("DP Advice: Startup protection active. Solar forecast sensor '%s' not ready yet. Skipping calculation.", s)
+                            return
+            except Exception as e_fc:
+                _LOGGER.warning("DP Advice: Error checking forecast sensor during startup: %s", e_fc)
+                return
+
+        # 4. Startup Protection: If Load/Gen Power sensors are not yet ready, skip calculation
+        if self.manager.power_load_sensors:
+            try:
+                for s in self.manager.power_load_sensors:
+                    if s:
+                        st = self.hass.states.get(s)
+                        if not st or st.state in ["unavailable", "unknown", "none", ""]:
+                            _LOGGER.info("DP Advice: Startup protection active. Power load sensor '%s' not ready yet. Skipping calculation.", s)
+                            return
+            except Exception as e_ld:
+                _LOGGER.warning("DP Advice: Error checking power load sensor during startup: %s", e_ld)
+                return
+
+        if self.manager.power_gen_sensors:
+            try:
+                for s in self.manager.power_gen_sensors:
+                    if s:
+                        st = self.hass.states.get(s)
+                        if not st or st.state in ["unavailable", "unknown", "none", ""]:
+                            _LOGGER.info("DP Advice: Startup protection active. Power generation sensor '%s' not ready yet. Skipping calculation.", s)
+                            return
+            except Exception as e_gn:
+                _LOGGER.warning("DP Advice: Error checking power generation sensor during startup: %s", e_gn)
+                return
+
         # Capture critical data in main thread where it's safe
         soc, cap, _ = self.manager.get_battery_state()
 
-        # 2. SOC Deadband Filter (Option C): Skip recalculation if SOC change is tiny within the same hour
+        # 5. SOC Deadband Filter (Option C): Skip recalculation if SOC change is tiny within the same hour
         # Bypass deadband filter if there is no successful advice yet
         if self._advice and "plan" in self._advice:
             try:
